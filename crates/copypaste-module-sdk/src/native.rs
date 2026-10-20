@@ -126,12 +126,27 @@ pub struct NativeHostApi {
     pub release: unsafe extern "C" fn(NativeBuffer),
 }
 
+/// Optional v2 entrypoint. The v1 record and its exact layout remain unchanged.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeHostApiV2 {
+    pub api_version: u32,
+    pub struct_size: usize,
+    pub base: NativeHostApi,
+    pub subscribe:
+        unsafe extern "C" fn(*mut c_void, unsafe extern "C" fn(*mut c_void), *mut c_void) -> u64,
+    pub unsubscribe: unsafe extern "C" fn(*mut c_void, u64),
+}
+
 /// Large clipboard payloads use a separately bounded host channel; ordinary
 /// module commands retain their existing 1 MiB limit.
 pub const MAX_HOST_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone)]
-pub struct HostClient(NativeHostApi);
+pub struct HostClient {
+    api: NativeHostApi,
+    lifetime: Option<NativeHostApiV2>,
+}
 // SAFETY: the host supplies thread-safe callbacks and retains their context
 // until every module-owned worker has joined during destruction.
 unsafe impl Send for HostClient {}
@@ -147,7 +162,7 @@ impl HostClient {
         }
         // SAFETY: callback ownership is established by create_with_host.
         unsafe {
-            let reply = (self.0.request)(self.0.context, bytes.as_ptr(), bytes.len());
+            let reply = (self.api.request)(self.api.context, bytes.as_ptr(), bytes.len());
             bytes.fill(0);
             let result = if reply.buffer.data.is_null() || reply.buffer.len > MAX_HOST_BYTES {
                 Err("Invalid host response.".into())
@@ -159,8 +174,54 @@ impl HostClient {
                     Err("The sync host service is unavailable.".into())
                 }
             };
-            (self.0.release)(reply.buffer);
+            (self.api.release)(reply.buffer);
             result
+        }
+    }
+
+    /// Registers a one-shot revocation callback when supported by the host.
+    /// The callback must not unsubscribe itself. Dropping the returned handle
+    /// waits for any in-flight callback before freeing its context.
+    pub fn subscribe_revocation(
+        &self,
+        callback: impl Fn() + Send + Sync + 'static,
+    ) -> Option<HostSubscription> {
+        let api = self.lifetime?;
+        let callback: Box<Box<dyn Fn() + Send + Sync>> = Box::new(Box::new(callback));
+        let context = Box::into_raw(callback).cast();
+        // SAFETY: the callback context remains owned by the returned subscription.
+        let id = unsafe { (api.subscribe)(api.base.context, revocation_callback, context) };
+        Some(HostSubscription { api, id, context })
+    }
+}
+
+unsafe extern "C" fn revocation_callback(context: *mut c_void) {
+    if !context.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            // SAFETY: subscription retains this callback until unsubscribe returns.
+            let callback = unsafe { &*context.cast::<Box<dyn Fn() + Send + Sync>>() };
+            callback();
+        }));
+    }
+}
+
+pub struct HostSubscription {
+    api: NativeHostApiV2,
+    id: u64,
+    context: *mut c_void,
+}
+// SAFETY: the host API is thread-safe and this handle owns its callback.
+unsafe impl Send for HostSubscription {}
+impl Drop for HostSubscription {
+    fn drop(&mut self) {
+        // SAFETY: the host guarantees no callback remains after unsubscribe.
+        unsafe {
+            if self.id != 0 {
+                (self.api.unsubscribe)(self.api.base.context, self.id);
+            }
+            drop(Box::from_raw(
+                self.context.cast::<Box<dyn Fn() + Send + Sync>>(),
+            ));
         }
     }
 }
@@ -187,10 +248,181 @@ pub unsafe fn create_with_host<T: Module>(
         }
         // SAFETY: environment bytes are borrowed for this call.
         let environment = unsafe { decode(data, len) }?;
-        T::create_with_host(environment, HostClient(host))
-            .map(|module| Box::into_raw(Box::new(module)).cast())
+        T::create_with_host(
+            environment,
+            HostClient {
+                api: host,
+                lifetime: None,
+            },
+        )
+        .map(|module| Box::into_raw(Box::new(module)).cast())
     }))
     .ok()
     .and_then(Result::ok)
     .unwrap_or(std::ptr::null_mut())
+}
+
+/// # Safety
+/// The v2 record and host callbacks must remain valid until module destruction.
+pub unsafe fn create_with_host_v2<T: Module>(
+    data: *const u8,
+    len: usize,
+    host: *const NativeHostApiV2,
+) -> *mut c_void {
+    catch_unwind(AssertUnwindSafe(|| {
+        if host.is_null() {
+            return Err("The host is missing.".to_string());
+        }
+        #[repr(C)]
+        struct Header {
+            api_version: u32,
+            struct_size: usize,
+        }
+        // SAFETY: callers provide at least the v2 header, checked before reading the record.
+        let header = unsafe { &*host.cast::<Header>() };
+        if header.api_version != 2 || header.struct_size != std::mem::size_of::<NativeHostApiV2>() {
+            return Err("The host API is incompatible.".into());
+        }
+        let host = unsafe { *host };
+        if host.base.api_version != MODULE_API_VERSION
+            || host.base.struct_size != std::mem::size_of::<NativeHostApi>()
+            || host.base.context.is_null()
+        {
+            return Err("The host API is incompatible.".into());
+        }
+        let environment: ModuleEnvironment = unsafe { decode(data, len) }?;
+        T::create_with_host(
+            environment,
+            HostClient {
+                api: host.base,
+                lifetime: Some(host),
+            },
+        )
+        .map(|module| Box::into_raw(Box::new(module)).cast())
+    }))
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(std::ptr::null_mut())
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct TestModule;
+    impl Module for TestModule {
+        fn create(_: ModuleEnvironment) -> Result<Self, String> {
+            Ok(Self)
+        }
+        fn invoke(&mut self, _: ModuleInvocation) -> Result<crate::ModuleOutput, String> {
+            Ok(crate::ModuleOutput::Message {
+                message: "ok".into(),
+            })
+        }
+    }
+    unsafe extern "C" fn request(_: *mut c_void, _: *const u8, _: usize) -> NativeReply {
+        NativeReply {
+            status: 1,
+            buffer: NativeBuffer {
+                data: std::ptr::null_mut(),
+                len: 0,
+            },
+        }
+    }
+    unsafe extern "C" fn release(_: NativeBuffer) {}
+    unsafe extern "C" fn already_revoked(
+        _: *mut c_void,
+        callback: unsafe extern "C" fn(*mut c_void),
+        context: *mut c_void,
+    ) -> u64 {
+        unsafe { callback(context) };
+        0
+    }
+    static UNSUBSCRIBES: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "C" fn unsubscribe(_: *mut c_void, _: u64) {
+        UNSUBSCRIBES.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn base() -> NativeHostApi {
+        NativeHostApi {
+            api_version: MODULE_API_VERSION,
+            struct_size: std::mem::size_of::<NativeHostApi>(),
+            context: std::ptr::dangling_mut(),
+            request,
+            release,
+        }
+    }
+    #[test]
+    fn v1_remains_usable_and_v2_checks_header_before_reading_extension() {
+        let environment = serde_json::to_vec(&ModuleEnvironment {
+            package_dir: "a".into(),
+            data_dir: "b".into(),
+        })
+        .unwrap();
+        let base = base();
+        let module = unsafe {
+            create_with_host::<TestModule>(environment.as_ptr(), environment.len(), &base)
+        };
+        assert!(!module.is_null());
+        unsafe { destroy::<TestModule>(module) };
+        #[repr(C)]
+        struct Header {
+            api_version: u32,
+            struct_size: usize,
+        }
+        let truncated = Header {
+            api_version: 2,
+            struct_size: std::mem::size_of::<Header>(),
+        };
+        let module = unsafe {
+            create_with_host_v2::<TestModule>(
+                environment.as_ptr(),
+                environment.len(),
+                (&truncated as *const Header).cast(),
+            )
+        };
+        assert!(module.is_null());
+        let v2 = NativeHostApiV2 {
+            api_version: 2,
+            struct_size: std::mem::size_of::<NativeHostApiV2>(),
+            base,
+            subscribe: already_revoked,
+            unsubscribe,
+        };
+        let module = unsafe {
+            create_with_host_v2::<TestModule>(environment.as_ptr(), environment.len(), &v2)
+        };
+        assert!(!module.is_null());
+        unsafe { destroy::<TestModule>(module) };
+    }
+    #[test]
+    fn already_revoked_subscription_notifies_immediately() {
+        let api = NativeHostApiV2 {
+            api_version: 2,
+            struct_size: std::mem::size_of::<NativeHostApiV2>(),
+            base: base(),
+            subscribe: already_revoked,
+            unsubscribe,
+        };
+        let client = HostClient {
+            api: api.base,
+            lifetime: Some(api),
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handle = client
+            .subscribe_revocation({
+                let calls = Arc::clone(&calls);
+                move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        drop(handle);
+        assert_eq!(UNSUBSCRIBES.load(Ordering::SeqCst), 0);
+    }
 }

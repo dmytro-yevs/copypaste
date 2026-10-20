@@ -20,6 +20,7 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     config: CloudConfig,
     // A 401 rotates this for every later request; never hold it across an await.
     session: Mutex<SessionState>,
+    session_events: tokio::sync::watch::Sender<u64>,
     pub(super) refresh_lock: tokio::sync::Mutex<()>,
     pub(super) cadence: AdaptiveCadence,
     pub(super) push_channel: AtomicBool,
@@ -59,6 +60,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 revision: 0,
                 fenced: false,
             }),
+            session_events: tokio::sync::watch::channel(0).0,
             refresh_lock: tokio::sync::Mutex::new(()),
             cadence: AdaptiveCadence::default(),
             push_channel: AtomicBool::new(false),
@@ -104,6 +106,15 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         self.lock_session().revision
     }
 
+    /// Signals token rotation and session fencing without retaining credentials.
+    pub fn subscribe_session(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.session_events.subscribe()
+    }
+
+    pub fn session_is_fenced(&self) -> bool {
+        self.lock_session().fenced
+    }
+
     pub(super) fn refresh_snapshot(&self) -> Option<(u64, Zeroizing<String>)> {
         let state = self.lock_session();
         (!state.fenced).then(|| {
@@ -121,7 +132,13 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         if expected_revision.is_some_and(|expected| state.revision != expected) {
             return false;
         }
+        let changed = !state.fenced;
         state.fenced = true;
+        drop(state);
+        if changed {
+            self.session_events
+                .send_modify(|event| *event = event.wrapping_add(1));
+        }
         true
     }
 
@@ -150,6 +167,9 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         }
         state.session = session;
         state.revision = state.revision.wrapping_add(1);
+        drop(state);
+        self.session_events
+            .send_modify(|event| *event = event.wrapping_add(1));
         SessionRevision::Current
     }
 
@@ -184,7 +204,29 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fakes::{cloud_row, driver, item, FakeAuth, FakeRest, FakeSource};
+    use super::super::fakes::{cloud_row, driver, item, session, FakeAuth, FakeRest, FakeSource};
+    use super::SessionRevision;
+
+    #[tokio::test]
+    async fn session_events_report_rotation_and_fence_without_idle_wakeups() {
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+        let mut events = sync.subscribe_session();
+        assert!(!events.has_changed().unwrap());
+        assert!(matches!(
+            sync.install_refreshed_session(0, session("rotated")),
+            SessionRevision::Current
+        ));
+        events.changed().await.unwrap();
+        assert_eq!(sync.inspect_session(|s| s.access_token.clone()), "rotated");
+        assert!(!events.has_changed().unwrap());
+        assert!(!sync.fence_session(Some(0)));
+        assert!(!events.has_changed().unwrap());
+        assert!(sync.fence_session(None));
+        events.changed().await.unwrap();
+        assert!(sync.session_is_fenced());
+        assert!(sync.fence_session(None));
+        assert!(!events.has_changed().unwrap());
+    }
 
     #[test]
     fn the_driver_redacts_its_debug_output() {

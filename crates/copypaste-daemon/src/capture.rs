@@ -15,6 +15,7 @@
 //!   inside one.
 
 use std::borrow::Borrow;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,6 +25,25 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 pub use copypaste_core::{IngestError, Ingested};
+
+async fn wait_for_clipboard(
+    signal: Option<&crate::clipboard::ChangeSignal>,
+    retry: bool,
+    interval: Duration,
+) {
+    if let Some(signal) = signal.filter(|s| s.available.load(Ordering::Acquire)) {
+        if retry {
+            tokio::select! {
+                _ = signal.notify.notified() => {},
+                _ = tokio::time::sleep(interval) => {},
+            }
+        } else {
+            signal.notify.notified().await;
+        }
+    } else {
+        tokio::time::sleep(interval).await;
+    }
+}
 
 fn source_icon_cache() -> &'static SourceAppIconCache {
     static CACHE: std::sync::OnceLock<SourceAppIconCache> = std::sync::OnceLock::new();
@@ -120,6 +140,10 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
 
     let pending = Arc::new(Mutex::new(None));
     let mut accepted_failure: Option<anyhow::Error> = None;
+    let change_signal = state.clipboard().change_signal();
+    // The first timer checks the current clipboard, even when no event arrives
+    // after listener registration. Failed reads and pending writes keep retries.
+    let mut retry = true;
 
     let result = 'capture: loop {
         let wait = Duration::from_millis(state.settings.get().poll_interval_ms);
@@ -165,21 +189,27 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
             // `sleep` rather than a ticker: a late tick must not cause a burst
             // of catch-up ticks — the clipboard has no backlog to drain, only a
             // current value — and the wait is recomputed each time round.
-            _ = tokio::time::sleep(wait) => {
+            _ = wait_for_clipboard(change_signal.as_deref(), retry, wait) => {
                 // Bound to a local so the clipboard guard is released before
                 // the handoff below rather than held across it.
-                let changed = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some() || state.clipboard().changed();
+                let (changed, available) = {
+                    let pending = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+                    let mut clipboard = state.clipboard();
+                    (pending || clipboard.changed(), clipboard.is_available())
+                };
+                state.observe_clipboard_availability(available);
                 if !changed {
+                    retry = change_signal.is_some() && state.clipboard().retry_required();
                     continue;
                 }
 
-                let state = Arc::clone(&state);
+                let worker_state = Arc::clone(&state);
                 // The pasteboard read, the AEAD seal and the SQLite write are
                 // all blocking. Running them on a worker keeps the reactor free
                 // for the IPC server — and reaching it costs six thread wakeups,
                 // which is why an idle clipboard stops short of here.
                 let worker_pending = Arc::clone(&pending);
-                match tokio::task::spawn_blocking(move || tick_slot(&state, &worker_pending)).await {
+                match tokio::task::spawn_blocking(move || tick_slot(&worker_state, &worker_pending)).await {
                     Ok(
                         CaptureOutcome::NoCapture
                         | CaptureOutcome::Stored
@@ -213,6 +243,8 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                         }
                     }
                 }
+                retry = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+                    || (change_signal.is_some() && state.clipboard().retry_required());
             }
         }
     };
@@ -642,6 +674,40 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tokio_util::codec::{FramedRead, LinesCodec};
 
+    #[tokio::test(start_paused = true)]
+    async fn event_wakeup_retains_retry_and_failure_fallback() {
+        let signal = Arc::new(crate::clipboard::ChangeSignal {
+            notify: tokio::sync::Notify::new(),
+            available: std::sync::atomic::AtomicBool::new(true),
+        });
+        let listener = Arc::clone(&signal);
+        let idle = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), false, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(!idle.is_finished(), "an idle event source must not poll");
+        signal.notify.notify_one();
+        idle.await.unwrap();
+
+        let listener = Arc::clone(&signal);
+        let retry = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), true, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        retry.await.unwrap();
+
+        signal.available.store(false, Ordering::Release);
+        let listener = Arc::clone(&signal);
+        let fallback = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), false, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        fallback.await.unwrap();
+    }
+
     struct TestPersistGuard {
         _serial: std::sync::MutexGuard<'static, ()>,
     }
@@ -884,6 +950,11 @@ mod tests {
             }),
         );
         let endpoint = _dir.path().join("daemon.sock");
+        let cwd = std::env::current_dir().unwrap();
+        let endpoint = endpoint
+            .strip_prefix(cwd)
+            .unwrap_or(&endpoint)
+            .to_path_buf();
         let listener = crate::server::bind(&endpoint).expect("bind");
         let server = tokio::spawn(crate::server::run(
             listener,

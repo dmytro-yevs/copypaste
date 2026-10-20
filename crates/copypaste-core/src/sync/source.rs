@@ -338,7 +338,25 @@ fn store_error(e: crate::StoreError, what: &str) -> SyncError {
     SyncError::Source(MSG_STORE.to_string())
 }
 
+fn summary_from_version(version: crate::storage::Version, device_id: &str) -> ItemSummary {
+    ItemSummary {
+        item_id: version.id,
+        created_at: version.created_at,
+        deleted: version.deleted,
+        content_hash: version.content_hash,
+        origin_device_id: origin_or(&version.origin_device_id, device_id).to_string(),
+        pinned: version.pinned,
+        pin_order: version.pin_order,
+        pin_updated_at: version.pin_updated_at,
+    }
+}
+
 impl SyncSource for StoreSource {
+    fn summary_workspace(
+        &self,
+    ) -> Result<Box<dyn copypaste_p2p::sync::SummaryWorkspace>, SyncError> {
+        Ok(self.store.summary_workspace())
+    }
     fn file_chunk(&self, id: &str, sha256: &str, index: u64) -> Result<Vec<u8>, SyncError> {
         let settings = self.settings_if_sync_enabled()?;
         super::blocking(|| {
@@ -381,17 +399,22 @@ impl SyncSource for StoreSource {
                 .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
             Ok(rows
                 .into_iter()
-                .map(|version| ItemSummary {
-                    item_id: version.id,
-                    created_at: version.created_at,
-                    deleted: version.deleted,
-                    content_hash: version.content_hash,
-                    origin_device_id: origin_or(&version.origin_device_id, &self.device_id)
-                        .to_string(),
-                    pinned: version.pinned,
-                    pin_order: version.pin_order,
-                    pin_updated_at: version.pin_updated_at,
-                })
+                .map(|version| summary_from_version(version, &self.device_id))
+                .collect())
+        })
+    }
+
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        super::blocking(|| {
+            let rows = self
+                .store
+                .version_summaries(&ids)
+                .map_err(|e| store_error(e, "could not read page-local sync summaries"))?;
+            Ok(rows
+                .into_values()
+                .map(|version| summary_from_version(version, &self.device_id))
                 .collect())
         })
     }

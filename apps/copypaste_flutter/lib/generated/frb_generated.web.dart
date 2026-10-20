@@ -7,9 +7,12 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -39,6 +42,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
+  CaptureState dco_decode_box_autoadd_capture_state(dynamic raw);
 
   @protected
   ClipFileDetails dco_decode_box_autoadd_clip_file_details(dynamic raw);
@@ -74,6 +80,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeviceProfile dco_decode_box_autoadd_device_profile(dynamic raw);
+
+  @protected
+  FileProgress dco_decode_box_autoadd_file_progress(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
@@ -172,6 +181,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiscoveredDevice dco_decode_discovered_device(dynamic raw);
 
   @protected
+  FileProgress dco_decode_file_progress(dynamic raw);
+
+  @protected
   HistoryDeviceFacet dco_decode_history_device_facet(dynamic raw);
 
   @protected
@@ -230,6 +242,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
+  CaptureState? dco_decode_opt_box_autoadd_capture_state(dynamic raw);
+
+  @protected
   ClipFileDetails? dco_decode_opt_box_autoadd_clip_file_details(dynamic raw);
 
   @protected
@@ -260,6 +275,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeviceProfile? dco_decode_opt_box_autoadd_device_profile(dynamic raw);
+
+  @protected
+  FileProgress? dco_decode_opt_box_autoadd_file_progress(dynamic raw);
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -361,6 +379,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
+  CaptureState sse_decode_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipFileDetails sse_decode_box_autoadd_clip_file_details(
     SseDeserializer deserializer,
   );
@@ -410,6 +433,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeviceProfile sse_decode_box_autoadd_device_profile(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FileProgress sse_decode_box_autoadd_file_progress(
     SseDeserializer deserializer,
   );
 
@@ -520,6 +548,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiscoveredDevice sse_decode_discovered_device(SseDeserializer deserializer);
 
   @protected
+  FileProgress sse_decode_file_progress(SseDeserializer deserializer);
+
+  @protected
   HistoryDeviceFacet sse_decode_history_device_facet(
     SseDeserializer deserializer,
   );
@@ -590,6 +621,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
+  CaptureState? sse_decode_opt_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipFileDetails? sse_decode_opt_box_autoadd_clip_file_details(
     SseDeserializer deserializer,
   );
@@ -636,6 +672,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeviceProfile? sse_decode_opt_box_autoadd_device_profile(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FileProgress? sse_decode_opt_box_autoadd_file_progress(
     SseDeserializer deserializer,
   );
 
@@ -755,6 +796,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_capture_state(
+    CaptureState self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_clip_file_details(
     ClipFileDetails self,
     SseSerializer serializer,
@@ -817,6 +864,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_device_profile(
     DeviceProfile self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_file_progress(
+    FileProgress self,
     SseSerializer serializer,
   );
 
@@ -968,6 +1021,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_file_progress(FileProgress self, SseSerializer serializer);
+
+  @protected
   void sse_encode_history_device_facet(
     HistoryDeviceFacet self,
     SseSerializer serializer,
@@ -1052,6 +1108,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_capture_state(
+    CaptureState? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_clip_file_details(
     ClipFileDetails? self,
     SseSerializer serializer,
@@ -1108,6 +1170,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_device_profile(
     DeviceProfile? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_file_progress(
+    FileProgress? self,
     SseSerializer serializer,
   );
 

@@ -25,6 +25,8 @@ pub struct Store {
     pool: Pool<SqliteConnectionManager>,
     pub(super) path: Option<Arc<PathBuf>>,
     retention: Arc<Mutex<()>>,
+    pub(super) semantic_cache: Arc<Mutex<super::semantic_index::SemanticCache>>,
+    pub(super) facet_cache: Arc<Mutex<Option<super::history::FacetCache>>>,
     pub(super) reclaiming: Arc<AtomicBool>,
     pub(super) reclaim_requested: Arc<AtomicBool>,
     pub(super) incremental_reclaim: bool,
@@ -49,6 +51,11 @@ impl Store {
     /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        if let Some(parent) = path.parent() {
+            if super::summary_workspace_cleanup::cleanup(parent).is_err() {
+                tracing::warn!("could not clean abandoned sync workspaces");
+            }
+        }
         let (space_lock, exclusive) = super::space::lock_store(path)?;
         let db_key = Zeroizing::new(*db_key);
         let flags =
@@ -83,6 +90,8 @@ impl Store {
             incremental_reclaim,
             _space_lock: Some(Arc::new(space_lock)),
             retention: Arc::new(Mutex::new(())),
+            semantic_cache: Arc::new(Mutex::new(Default::default())),
+            facet_cache: Arc::new(Mutex::new(None)),
             reclaiming: Arc::new(AtomicBool::new(false)),
             reclaim_requested: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
@@ -116,6 +125,8 @@ impl Store {
             incremental_reclaim: false,
             _space_lock: None,
             retention: Arc::new(Mutex::new(())),
+            semantic_cache: Arc::new(Mutex::new(Default::default())),
+            facet_cache: Arc::new(Mutex::new(None)),
             reclaiming: Arc::new(AtomicBool::new(false)),
             reclaim_requested: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]

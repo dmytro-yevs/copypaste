@@ -141,15 +141,37 @@ class HistoryFileTransfer {
     }
 
     report(0);
+    if (_repository case final HistoryFileProgressRepository repository) {
+      final handled = await repository.saveFileWithProgress(
+        clip.id,
+        destination.path,
+        (written, total) {
+          if (total > 0) report((written / total).clamp(0, 0.99));
+        },
+      );
+      if (handled) {
+        if (isCancelled?.call() ?? false) {
+          if (await destination.exists()) await destination.delete();
+          throw const HistoryFileTransferCancelled();
+        }
+        report(1);
+        return;
+      }
+    }
+    if (isCancelled?.call() ?? false) {
+      throw const HistoryFileTransferCancelled();
+    }
     var reading = false;
     var finished = false;
     final timer = Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (reading || finished) return;
       reading = true;
       try {
-        if (total != null && total > 0 && await destination.exists()) {
-          final written = await destination.length();
-          if (!finished) report((written / total).clamp(0, 0.99));
+        if (total != null && total > 0) {
+          final stat = await destination.stat();
+          if (!finished && stat.type == FileSystemEntityType.file) {
+            report((stat.size / total).clamp(0, 0.99));
+          }
         }
       } on FileSystemException {
         // The writer may be creating or rolling back the destination.

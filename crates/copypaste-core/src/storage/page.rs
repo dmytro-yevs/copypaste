@@ -97,6 +97,12 @@ impl ItemCursor {
 
 /// One page and where to resume.
 #[derive(Debug, Clone)]
+pub struct PreviewPage {
+    pub items: Vec<super::history::HistoryPreviewRow>,
+    pub next: Option<ItemCursor>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Page {
     pub items: Vec<StoredItem>,
     /// `None` when this page reached the end of the list.
@@ -148,30 +154,52 @@ fn fetch_bounded(
     budget: usize,
     bytes: &mut usize,
     out: &mut Vec<Row>,
+    preview: &mut PreviewContext<'_>,
 ) -> Result<BoundedFetch, StoreError> {
-    let mut stmt = conn.prepare_cached(sql)?;
+    let projected = preview.keys.map(|_| {
+        sql.replace(item_columns!(), &super::history::preview_projection())
+            .replace("FROM clipboard_items ", "FROM clipboard_items ci ")
+    });
+    let mut stmt = conn.prepare_cached(projected.as_deref().unwrap_or(sql))?;
     let columns = ItemColumns::resolve(&stmt)?;
     let mut query = stmt.query(params)?;
     loop {
         let Some(row) = query.next()? else {
             return Ok(BoundedFetch::Exhausted);
         };
-        let row = (
-            row_to_item(row, &columns)?,
-            row.get::<_, Option<f64>>(columns.pin_order_index())?,
-        );
+        let item = row_to_item(row, &columns)?;
+        let pin_order = row.get::<_, Option<f64>>(columns.pin_order_index())?;
         if out.len() == limit {
             return Ok(BoundedFetch::CountReached);
         }
+        let logical_bytes = if preview.keys.is_some() {
+            usize::try_from(row.get::<_, i64>("logical_cipher_bytes")?).unwrap_or(usize::MAX)
+        } else {
+            item.content_ciphertext.len()
+        };
         let next_bytes = bytes
-            .saturating_add(row.0.content_ciphertext.len())
-            .saturating_add(row.0.payload_metadata.as_ref().map_or(0, String::len));
+            .saturating_add(logical_bytes)
+            .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
         if !out.is_empty() && next_bytes > budget {
             return Ok(BoundedFetch::BudgetReached);
         }
         *bytes = next_bytes;
-        out.push(row);
+        if let Some((item_key, preview_key)) = preview.keys {
+            let resolved =
+                super::history_preview::resolve(conn, row, &item, item_key, preview_key)?;
+            preview.items.push(resolved.preview);
+            if let Some(write) = resolved.pending {
+                preview.pending.push(write);
+            }
+        }
+        out.push((item, pin_order));
     }
+}
+
+struct PreviewContext<'a> {
+    keys: Option<(&'a crate::ItemKey, &'a crate::PreviewKey)>,
+    items: Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    pending: Vec<super::history_preview::Pending>,
 }
 
 fn cursor_of((item, pin_order): &Row) -> ItemCursor {
@@ -310,30 +338,77 @@ impl Store {
         limit: u32,
         budget: usize,
     ) -> Result<Page, StoreError> {
+        let (page, _) = self.list_from_bounded_inner(after, limit, budget, None)?;
+        Ok(page)
+    }
+
+    pub fn list_previews_bounded(
+        &self,
+        after: Option<&ItemCursor>,
+        limit: u32,
+        budget: usize,
+        item_key: &crate::ItemKey,
+        preview_key: &crate::PreviewKey,
+    ) -> Result<PreviewPage, StoreError> {
+        let (page, previews) =
+            self.list_from_bounded_inner(after, limit, budget, Some((item_key, preview_key)))?;
+        Ok(PreviewPage {
+            items: page
+                .items
+                .into_iter()
+                .zip(previews)
+                .map(|(row, preview)| super::history::HistoryPreviewRow { row, preview })
+                .collect(),
+            next: page.next,
+        })
+    }
+
+    fn list_from_bounded_inner(
+        &self,
+        after: Option<&ItemCursor>,
+        limit: u32,
+        budget: usize,
+        keys: Option<(&crate::ItemKey, &crate::PreviewKey)>,
+    ) -> Result<(Page, Vec<Option<crate::history_item::StaticHistoryPreview>>), StoreError> {
         if limit == 0 {
-            return Ok(Page {
-                items: Vec::new(),
-                next: None,
-            });
+            return Ok((
+                Page {
+                    items: Vec::new(),
+                    next: None,
+                },
+                Vec::new(),
+            ));
         }
 
-        let conn = self.conn()?;
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        let generation: String = tx.query_row(
+            "SELECT generation FROM resource_revisions WHERE singleton = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut preview = PreviewContext {
+            keys,
+            items: Vec::new(),
+            pending: Vec::new(),
+        };
         let limit = limit as usize;
         let mut rows = Vec::new();
         let mut bytes = 0;
         let in_pinned_run = after.is_none_or(|cursor| cursor.pinned);
         let result = match after {
             None => fetch_bounded(
-                &conn,
+                &tx,
                 PINNED_HEAD_SQL,
                 params![i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX)],
                 limit,
                 budget,
                 &mut bytes,
                 &mut rows,
+                &mut preview,
             )?,
             Some(cursor) if cursor.pinned => fetch_bounded(
-                &conn,
+                &tx,
                 PINNED_SEEK_SQL,
                 params![
                     cursor.pin_order,
@@ -345,9 +420,10 @@ impl Store {
                 budget,
                 &mut bytes,
                 &mut rows,
+                &mut preview,
             )?,
             Some(cursor) => fetch_bounded(
-                &conn,
+                &tx,
                 UNPINNED_SEEK_SQL,
                 params![
                     cursor.created_at,
@@ -358,19 +434,21 @@ impl Store {
                 budget,
                 &mut bytes,
                 &mut rows,
+                &mut preview,
             )?,
         };
 
         let result = if result == BoundedFetch::Exhausted && in_pinned_run {
             let remaining = limit - rows.len();
             fetch_bounded(
-                &conn,
+                &tx,
                 UNPINNED_HEAD_SQL,
                 params![i64::try_from(remaining.saturating_add(1)).unwrap_or(i64::MAX)],
                 limit,
                 budget,
                 &mut bytes,
                 &mut rows,
+                &mut preview,
             )?
         } else {
             result
@@ -384,10 +462,17 @@ impl Store {
         .then(|| rows.last())
         .flatten()
         .map(cursor_of);
-        Ok(Page {
-            items: rows.into_iter().map(|(item, _)| item).collect(),
-            next,
-        })
+        tx.commit()?;
+        if keys.is_some() {
+            super::history_preview::store_pending(&mut conn, &generation, preview.pending);
+        }
+        Ok((
+            Page {
+                items: rows.into_iter().map(|(item, _)| item).collect(),
+                next,
+            },
+            preview.items,
+        ))
     }
 
     /// The sort key of one live row, for a client resuming from an item it

@@ -152,7 +152,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(scrollable.position.pixels, pixels);
         expect(controller.bulkSelectedIds, selected);
-        await tester.drag(find.byType(ListView), const Offset(0, -170));
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, -170));
         await _frames(tester);
         expect(controller.bulkSelectedIds, selected);
         expect(tester.takeException(), isNull);
@@ -178,7 +178,7 @@ void main() {
         );
         await tester.pump(kLongPressTimeout + kPressTimeout);
         await tester.pump();
-        final viewport = tester.getRect(find.byType(ListView));
+        final viewport = tester.getRect(find.byType(CustomScrollView));
         await gesture.moveTo(
           Offset(
             viewport.center.dx,
@@ -235,7 +235,7 @@ void main() {
           await _frames(tester);
           final visible = tester
               .getRect(_clip(0))
-              .intersect(tester.getRect(find.byType(ListView)));
+              .intersect(tester.getRect(find.byType(CustomScrollView)));
           expect(visible.isEmpty, isFalse);
           await tester.tapAt(visible.center);
           await _frames(tester);
@@ -296,7 +296,7 @@ void main() {
           final scrollable = tester.state<ScrollableState>(
             find
                 .descendant(
-                  of: find.byType(ListView),
+                  of: find.byType(CustomScrollView),
                   matching: find.byType(Scrollable),
                 )
                 .first,
@@ -308,7 +308,7 @@ void main() {
               AppControlSize.touch * 3,
               scrollable: find
                   .descendant(
-                    of: find.byType(ListView),
+                    of: find.byType(CustomScrollView),
                     matching: find.byType(Scrollable),
                   )
                   .first,

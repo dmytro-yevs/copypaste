@@ -2,8 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
 use super::plan::Plan;
-use super::{SyncChannel, SyncError, SyncSource};
+use super::{SummaryWorkspace, SyncChannel, SyncError, SyncSource};
 use crate::protocol::{
     ItemSummary, SyncMessage, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
 };
@@ -12,6 +13,7 @@ pub(super) fn summary_key(summary: &ItemSummary) -> i64 {
     summary.created_at.max(summary.pin_updated_at)
 }
 
+#[cfg(test)]
 pub(super) fn watermark(
     previous: i64,
     remote: &[ItemSummary],
@@ -47,10 +49,94 @@ fn next_page<S: SyncSource>(
     Ok((items, more))
 }
 
-fn remember_page(advertised: &mut HashMap<String, ItemSummary>, items: &[ItemSummary]) {
-    for summary in items {
-        advertised.insert(summary.item_id.clone(), summary.clone());
+/// Exchange directly into a session workspace while preserving wire order.
+pub(super) async fn exchange_workspace<C: SyncChannel, S: SyncSource>(
+    chan: &mut C,
+    source: &S,
+    since_ms: i64,
+    mut workspace: Box<dyn SummaryWorkspace>,
+    initiator: bool,
+) -> Result<Box<dyn SummaryWorkspace>, SyncError> {
+    let mut after_id = None;
+    let mut cursor_ms = since_ms;
+    for _ in 0..MAX_SUMMARY_PAGES_PER_SESSION {
+        let peer_first = if initiator {
+            None
+        } else {
+            Some(receive_page(chan).await?)
+        };
+        let (items, more) = next_page(source, cursor_ms, after_id.as_deref())?;
+        if let Some(last) = items.last() {
+            cursor_ms = summary_key(last);
+            after_id = Some(last.item_id.clone());
+        }
+        let blocking = workspace.may_block(&items);
+        let (next, (result, items)) =
+            super::workspace_call(workspace, blocking, move |workspace| {
+                let result = workspace.add_advertised(&items);
+                (result, items)
+            })
+            .await?;
+        workspace = next;
+        result?;
+        chan.send(SyncMessage::Summary { items, more }).await?;
+        let (peer_items, peer_more) = match peer_first {
+            Some(page) => page,
+            None => receive_page(chan).await?,
+        };
+        // Capture local metadata before retaining this remote page. The
+        // advertised table authorizes requests only; it can omit a local row
+        // below the peer cursor even though that row must still win planning.
+        let ids: Vec<_> = peer_items.iter().map(|item| item.item_id.clone()).collect();
+        let comparison = source.local_summaries(&ids)?;
+        let blocking = workspace.may_block(&comparison);
+        let (next, result) = super::workspace_call(workspace, blocking, move |workspace| {
+            workspace.add_comparison(&comparison)
+        })
+        .await?;
+        workspace = next;
+        result?;
+        let blocking = workspace.may_block(&peer_items);
+        let (next, result) = super::workspace_call(workspace, blocking, move |workspace| {
+            workspace.add_remote(&peer_items)
+        })
+        .await?;
+        workspace = next;
+        result?;
+        if !more && !peer_more {
+            return Ok(workspace);
+        }
     }
+    Err(SyncError::TooManySummaryPages)
+}
+
+pub(super) fn workspace_watermark(
+    previous: i64,
+    workspace: &mut dyn SummaryWorkspace,
+    wanted: &HashMap<String, ItemSummary>,
+    attempted: &HashSet<String>,
+) -> Result<i64, SyncError> {
+    let mut reached = previous;
+    let mut blocked = i64::MAX;
+    let mut cursor = 0;
+    loop {
+        let page = workspace.remote_page(cursor, 256)?;
+        if page.is_empty() {
+            break;
+        }
+        for (next, summary) in page {
+            cursor = next;
+            let key = summary_key(&summary);
+            let unresolved = workspace.is_deferred(&summary.item_id)?
+                || (wanted.contains_key(&summary.item_id) && !attempted.contains(&summary.item_id));
+            if unresolved {
+                blocked = blocked.min(key);
+            } else {
+                reached = reached.max(key);
+            }
+        }
+    }
+    Ok(reached.min(blocked))
 }
 
 async fn receive_page<C: SyncChannel>(chan: &mut C) -> Result<(Vec<ItemSummary>, bool), SyncError> {
@@ -62,68 +148,6 @@ async fn receive_page<C: SyncChannel>(chan: &mut C) -> Result<(Vec<ItemSummary>,
             expected: "summary",
             got: other.kind(),
         }),
-    }
-}
-
-/// Exchanges every summary page in lock-step so neither side materializes the
-/// full local history or fills a bounded channel before reading its peer.
-pub(super) async fn exchange_initiator<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    since_ms: i64,
-) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let mut advertised = HashMap::new();
-    let mut remote = Vec::new();
-    let mut after_id: Option<String> = None;
-    let mut cursor_ms = since_ms;
-    let mut page = 0;
-    loop {
-        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
-            return Err(SyncError::TooManySummaryPages);
-        }
-        let (items, more) = next_page(source, cursor_ms, after_id.as_deref())?;
-        if let Some(last) = items.last() {
-            cursor_ms = summary_key(last);
-            after_id = Some(last.item_id.clone());
-        }
-        remember_page(&mut advertised, &items);
-        chan.send(SyncMessage::Summary { items, more }).await?;
-        let (peer_items, peer_more) = receive_page(chan).await?;
-        remote.extend(peer_items);
-        if !more && !peer_more {
-            return Ok((advertised, remote));
-        }
-        page += 1;
-    }
-}
-
-pub(super) async fn exchange_responder<C: SyncChannel, S: SyncSource>(
-    chan: &mut C,
-    source: &S,
-    since_ms: i64,
-) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let mut advertised = HashMap::new();
-    let mut remote = Vec::new();
-    let mut after_id: Option<String> = None;
-    let mut cursor_ms = since_ms;
-    let mut page = 0;
-    loop {
-        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
-            return Err(SyncError::TooManySummaryPages);
-        }
-        let (peer_items, peer_more) = receive_page(chan).await?;
-        remote.extend(peer_items);
-        let (items, more) = next_page(source, cursor_ms, after_id.as_deref())?;
-        if let Some(last) = items.last() {
-            cursor_ms = summary_key(last);
-            after_id = Some(last.item_id.clone());
-        }
-        remember_page(&mut advertised, &items);
-        chan.send(SyncMessage::Summary { items, more }).await?;
-        if !more && !peer_more {
-            return Ok((advertised, remote));
-        }
-        page += 1;
     }
 }
 
@@ -204,6 +228,7 @@ mod tests {
             inner: TestSource,
             full_loads: AtomicUsize,
             page_loads: AtomicUsize,
+            comparison_loads: AtomicUsize,
         }
 
         impl SyncSource for PagedOnly {
@@ -216,6 +241,10 @@ mod tests {
             fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
                 self.full_loads.fetch_add(1, Ordering::SeqCst);
                 self.inner.summaries(since_ms)
+            }
+            fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                self.comparison_loads.fetch_add(1, Ordering::SeqCst);
+                self.inner.local_summaries(ids)
             }
             fn summary_page(
                 &self,
@@ -238,17 +267,27 @@ mod tests {
             inner: TestSource::new("dev-a", vec![item("one", 100, "body", "dev-a")]),
             full_loads: AtomicUsize::new(0),
             page_loads: AtomicUsize::new(0),
+            comparison_loads: AtomicUsize::new(0),
         };
         let mut channel = ScriptChannel::new(vec![SyncMessage::Summary {
             items: vec![],
             more: false,
         }]);
 
-        let (advertised, remote) = exchange_initiator(&mut channel, &source, 0).await.unwrap();
+        let mut workspace = exchange_workspace(
+            &mut channel,
+            &source,
+            0,
+            source.summary_workspace().unwrap(),
+            true,
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(advertised.len(), 1);
-        assert!(remote.is_empty());
+        assert!(workspace.advertised("one").unwrap().is_some());
+        assert!(workspace.remote_page(0, 1).unwrap().is_empty());
         assert_eq!(source.full_loads.load(Ordering::SeqCst), 0);
         assert_eq!(source.page_loads.load(Ordering::SeqCst), 1);
+        assert_eq!(source.comparison_loads.load(Ordering::SeqCst), 1);
     }
 }

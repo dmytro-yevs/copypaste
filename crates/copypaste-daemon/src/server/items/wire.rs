@@ -173,6 +173,42 @@ use copypaste_core::history_item::open_item as to_wire_with;
 /// are still the user's data. `CopyPaste-00zz`: a shortened page must carry the
 /// unreadable count instead of explaining it only in logs. The
 /// count goes back on the wire so a client can say "3 items could not be read".
+pub(super) fn preview_rows(
+    state: &AppState,
+    rows: Vec<copypaste_core::HistoryPreviewRow>,
+) -> ItemPage {
+    let (rows, previews): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .map(|entry| (entry.row, entry.preview))
+        .unzip();
+    let origins = state.meta.origins_for(&rows).unwrap_or_else(|error| {
+        warn!(?error, "could not resolve origin devices for a page");
+        std::collections::HashMap::new()
+    });
+    let mut page = ItemPage {
+        items: Vec::with_capacity(rows.len()),
+        skipped_undecryptable: 0,
+        next_cursor: None,
+    };
+    for (row, preview) in rows.into_iter().zip(previews) {
+        let Some(preview) = preview else {
+            page.skipped_undecryptable += 1;
+            continue;
+        };
+        let fallback;
+        let origin = match origins.get(&row.id) {
+            Some(origin) => origin,
+            None => {
+                fallback = origin_identity(state, &row);
+                &fallback
+            }
+        };
+        page.items
+            .push(preview.into_item(&row, origin, state.meta.device_id()));
+    }
+    page
+}
+
 pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     let mut page = ItemPage {
         items: Vec::with_capacity(rows.len()),

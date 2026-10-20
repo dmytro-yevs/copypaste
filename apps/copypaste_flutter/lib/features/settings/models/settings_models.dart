@@ -6,11 +6,15 @@ class CaptureSettingsState {
   const CaptureSettingsState({
     this.syncStatus = const SyncStatus(),
     this.settingsHealth,
+    this.captureWatch = false,
+    this.captureRevision = 0,
     required this.running,
     required this.paused,
     required this.epoch,
   });
 
+  final bool captureWatch;
+  final int captureRevision;
   final bool running;
   final bool paused;
   final int epoch;

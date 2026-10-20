@@ -46,7 +46,9 @@ pub use payload::{
     ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData,
     PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
-pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
+pub use response::{
+    ConfigApplied, EventData, EventKind, FileProgress, Response, ResponseData, RuntimeEventData,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -380,6 +382,9 @@ pub enum Method {
     /// that watchers cannot consume every connection slot.
     Watch,
 
+    /// Opt in to typed runtime events, including transfer progress.
+    WatchRuntime,
+
     /// Stop the daemon.
     ///
     /// Acknowledged first and acted on second, so a client learns the request
@@ -448,6 +453,8 @@ mod tests {
         assert!(status.device_name.is_empty());
         assert!(status.listen_addr.is_none());
         assert!(!status.clipboard_available);
+        assert_eq!(status.capture_revision, 0);
+        assert!(!status.capture_watch);
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());

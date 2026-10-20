@@ -34,6 +34,7 @@ internal object ScreenshotCaptureState {
         val editor = preferences.edit().putBoolean("enabled", enabled)
         if (enabled && !preferences.getBoolean("enabled", true)) editor.putLong("since", now)
         editor.commit()
+        ScreenshotCaptureSignals.changed()
     }
 
     fun skipThrough(context: Context, now: Long = System.currentTimeMillis()) {

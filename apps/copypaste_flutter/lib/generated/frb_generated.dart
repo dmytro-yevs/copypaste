@@ -4,11 +4,14 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -2380,6 +2383,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CaptureState dco_decode_box_autoadd_capture_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_capture_state(raw);
+  }
+
+  @protected
   ClipFileDetails dco_decode_box_autoadd_clip_file_details(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_clip_file_details(raw);
@@ -2448,6 +2457,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FileProgress dco_decode_box_autoadd_file_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_file_progress(raw);
+  }
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_i_64(raw);
@@ -2491,15 +2506,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CaptureState dco_decode_capture_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return CaptureState(
-      syncStatus: dco_decode_runtime_sync_status(arr[0]),
-      running: dco_decode_bool(arr[1]),
-      paused: dco_decode_bool(arr[2]),
-      privateModeEpoch: dco_decode_u_64(arr[3]),
+      captureWatch: dco_decode_bool(arr[0]),
+      captureRevision: dco_decode_u_64(arr[1]),
+      runtimeWatch: dco_decode_bool(arr[2]),
+      syncStatus: dco_decode_runtime_sync_status(arr[3]),
+      running: dco_decode_bool(arr[4]),
+      paused: dco_decode_bool(arr[5]),
+      privateModeEpoch: dco_decode_u_64(arr[6]),
       settingsHealth: dco_decode_opt_box_autoadd_runtime_settings_health(
-        arr[4],
+        arr[7],
       ),
     );
   }
@@ -2574,7 +2592,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (arr.length != 3)
       throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return ClipImagePreview(
-      pngBase64: dco_decode_String(arr[0]),
+      pngBytes: dco_decode_list_prim_u_8_strict(arr[0]),
       width: dco_decode_u_32(arr[1]),
       height: dco_decode_u_32(arr[2]),
     );
@@ -2800,6 +2818,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FileProgress dco_decode_file_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FileProgress(
+      token: dco_decode_String(arr[0]),
+      written: dco_decode_u_64(arr[1]),
+      total: dco_decode_u_64(arr[2]),
+    );
+  }
+
+  @protected
   HistoryDeviceFacet dco_decode_history_device_facet(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2936,6 +2967,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CaptureState? dco_decode_opt_box_autoadd_capture_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_capture_state(raw);
+  }
+
+  @protected
   ClipFileDetails? dco_decode_opt_box_autoadd_clip_file_details(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_clip_file_details(raw);
@@ -2997,6 +3034,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   DeviceProfile? dco_decode_opt_box_autoadd_device_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_device_profile(raw);
+  }
+
+  @protected
+  FileProgress? dco_decode_opt_box_autoadd_file_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_file_progress(raw);
   }
 
   @protected
@@ -3100,14 +3143,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeEvent dco_decode_runtime_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return RuntimeEvent(
       syncStatus: dco_decode_opt_box_autoadd_runtime_sync_status(arr[0]),
       kind: dco_decode_String(arr[1]),
       itemCount: dco_decode_u_64(arr[2]),
       captured: dco_decode_bool(arr[3]),
       capturedItemId: dco_decode_opt_String(arr[4]),
+      progress: dco_decode_opt_box_autoadd_file_progress(arr[5]),
+      capture: dco_decode_opt_box_autoadd_capture_state(arr[6]),
+      runtimeWatch: dco_decode_bool(arr[7]),
     );
   }
 
@@ -3327,6 +3373,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CaptureState sse_decode_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_capture_state(deserializer));
+  }
+
+  @protected
   ClipFileDetails sse_decode_box_autoadd_clip_file_details(
     SseDeserializer deserializer,
   ) {
@@ -3413,6 +3467,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FileProgress sse_decode_box_autoadd_file_progress(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_file_progress(deserializer));
+  }
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_i_64(deserializer));
@@ -3457,6 +3519,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   CaptureState sse_decode_capture_state(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_captureWatch = sse_decode_bool(deserializer);
+    var var_captureRevision = sse_decode_u_64(deserializer);
+    var var_runtimeWatch = sse_decode_bool(deserializer);
     var var_syncStatus = sse_decode_runtime_sync_status(deserializer);
     var var_running = sse_decode_bool(deserializer);
     var var_paused = sse_decode_bool(deserializer);
@@ -3465,6 +3530,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     return CaptureState(
+      captureWatch: var_captureWatch,
+      captureRevision: var_captureRevision,
+      runtimeWatch: var_runtimeWatch,
       syncStatus: var_syncStatus,
       running: var_running,
       paused: var_paused,
@@ -3564,11 +3632,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   ClipImagePreview sse_decode_clip_image_preview(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_pngBase64 = sse_decode_String(deserializer);
+    var var_pngBytes = sse_decode_list_prim_u_8_strict(deserializer);
     var var_width = sse_decode_u_32(deserializer);
     var var_height = sse_decode_u_32(deserializer);
     return ClipImagePreview(
-      pngBase64: var_pngBase64,
+      pngBytes: var_pngBytes,
       width: var_width,
       height: var_height,
     );
@@ -3838,6 +3906,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FileProgress sse_decode_file_progress(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_token = sse_decode_String(deserializer);
+    var var_written = sse_decode_u_64(deserializer);
+    var var_total = sse_decode_u_64(deserializer);
+    return FileProgress(
+      token: var_token,
+      written: var_written,
+      total: var_total,
+    );
+  }
+
+  @protected
   HistoryDeviceFacet sse_decode_history_device_facet(
     SseDeserializer deserializer,
   ) {
@@ -4052,6 +4133,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CaptureState? sse_decode_opt_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_capture_state(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   ClipFileDetails? sse_decode_opt_box_autoadd_clip_file_details(
     SseDeserializer deserializer,
   ) {
@@ -4176,6 +4270,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_device_profile(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FileProgress? sse_decode_opt_box_autoadd_file_progress(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_file_progress(deserializer));
     } else {
       return null;
     }
@@ -4318,12 +4425,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_itemCount = sse_decode_u_64(deserializer);
     var var_captured = sse_decode_bool(deserializer);
     var var_capturedItemId = sse_decode_opt_String(deserializer);
+    var var_progress = sse_decode_opt_box_autoadd_file_progress(deserializer);
+    var var_capture = sse_decode_opt_box_autoadd_capture_state(deserializer);
+    var var_runtimeWatch = sse_decode_bool(deserializer);
     return RuntimeEvent(
       syncStatus: var_syncStatus,
       kind: var_kind,
       itemCount: var_itemCount,
       captured: var_captured,
       capturedItemId: var_capturedItemId,
+      progress: var_progress,
+      capture: var_capture,
+      runtimeWatch: var_runtimeWatch,
     );
   }
 
@@ -4588,6 +4701,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_capture_state(
+    CaptureState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_capture_state(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_clip_file_details(
     ClipFileDetails self,
     SseSerializer serializer,
@@ -4687,6 +4809,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_file_progress(
+    FileProgress self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_file_progress(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -4737,6 +4868,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_capture_state(CaptureState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.captureWatch, serializer);
+    sse_encode_u_64(self.captureRevision, serializer);
+    sse_encode_bool(self.runtimeWatch, serializer);
     sse_encode_runtime_sync_status(self.syncStatus, serializer);
     sse_encode_bool(self.running, serializer);
     sse_encode_bool(self.paused, serializer);
@@ -4816,7 +4950,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.pngBase64, serializer);
+    sse_encode_list_prim_u_8_strict(self.pngBytes, serializer);
     sse_encode_u_32(self.width, serializer);
     sse_encode_u_32(self.height, serializer);
   }
@@ -5017,6 +5151,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_file_progress(FileProgress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.token, serializer);
+    sse_encode_u_64(self.written, serializer);
+    sse_encode_u_64(self.total, serializer);
+  }
+
+  @protected
   void sse_encode_history_device_facet(
     HistoryDeviceFacet self,
     SseSerializer serializer,
@@ -5199,6 +5341,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_capture_state(
+    CaptureState? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_capture_state(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_clip_file_details(
     ClipFileDetails? self,
     SseSerializer serializer,
@@ -5329,6 +5484,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_file_progress(
+    FileProgress? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_file_progress(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_i_64(
     PlatformInt64? self,
     SseSerializer serializer,
@@ -5449,6 +5617,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.itemCount, serializer);
     sse_encode_bool(self.captured, serializer);
     sse_encode_opt_String(self.capturedItemId, serializer);
+    sse_encode_opt_box_autoadd_file_progress(self.progress, serializer);
+    sse_encode_opt_box_autoadd_capture_state(self.capture, serializer);
+    sse_encode_bool(self.runtimeWatch, serializer);
   }
 
   @protected

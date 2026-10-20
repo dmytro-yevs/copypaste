@@ -268,7 +268,10 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("t.sock");
+        // Keep Unix socket names short when TMPDIR is beneath the test cwd.
+        let cwd = std::env::current_dir().unwrap();
+        let socket_dir = dir.path().strip_prefix(&cwd).unwrap_or(dir.path());
+        let path = socket_dir.join("t.sock");
         let listener: Listener = tokio::net::UnixListener::bind(&path).unwrap().into();
 
         let dialled = tokio::spawn(async move {

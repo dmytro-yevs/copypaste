@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -43,12 +43,56 @@ pub struct Runtime {
     spoilers: copypaste_core::spoiler::Spoilers,
     settings: Arc<RuntimeSettings>,
     events: tokio::sync::broadcast::Sender<EventData>,
+    runtime_events: tokio::sync::broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: tokio::sync::watch::Sender<bool>,
     listener_started: AtomicBool,
-    capture_running: AtomicBool,
+    capture_running: Arc<AtomicBool>,
+    capture_revision: Arc<AtomicU64>,
     module_sync_started: AtomicBool,
     clipboard: Arc<dyn ClipboardWriter>,
     instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
+}
+
+fn capture_status_data(
+    settings: &RuntimeSettings,
+    node: &Node,
+    store: &Store,
+    device_name: &str,
+    device_id: &str,
+    capture_running: &AtomicBool,
+    capture_revision: &AtomicU64,
+) -> copypaste_ipc::StatusData {
+    let (revision, settings, running) = loop {
+        let revision = capture_revision.load(Ordering::Acquire);
+        let settings = settings.snapshot();
+        let running = capture_running.load(Ordering::Acquire);
+        if revision == capture_revision.load(Ordering::Acquire) {
+            break (revision, settings, running);
+        }
+    };
+    copypaste_ipc::StatusData {
+        runtime_watch: true,
+        capture_watch: true,
+        capture_revision: revision,
+        sync_status: node.sync_status(settings.config.sync_enabled),
+        device_details: Some(p2p_contract::local_device_details(
+            device_name,
+            node.listen_addr().as_deref(),
+        )),
+        device_name: device_name.to_owned(),
+        device_id: Some(device_id.to_owned()),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+        listen_addr: node.listen_addr(),
+        item_count: store.count().unwrap_or(0),
+        capture_running: running,
+        clipboard_available: true,
+        clipboard_backend: "android".to_owned(),
+        private_mode: settings.config.private_mode,
+        private_mode_epoch: settings.private_mode_epoch,
+        counters: Default::default(),
+        settings_health: settings.health,
+    }
 }
 
 /// Outcome for one SMS inbox row. Android advances its durable inbox cursor
@@ -229,14 +273,28 @@ impl Runtime {
             device_class,
             settings,
             events,
+            runtime_events: tokio::sync::broadcast::channel(256).0,
             shutdown,
             listener_started: AtomicBool::new(false),
-            capture_running: AtomicBool::new(false),
+            capture_running: Arc::new(AtomicBool::new(false)),
+            capture_revision: Arc::new(AtomicU64::new(0)),
             module_sync_started: AtomicBool::new(false),
             spoilers: Default::default(),
             clipboard,
             instant_clipboard,
         })
+    }
+
+    pub fn status_data(&self) -> copypaste_ipc::StatusData {
+        capture_status_data(
+            &self.settings,
+            &self.node,
+            &self.store,
+            &self.device_name,
+            &self.device_id,
+            &self.capture_running,
+            &self.capture_revision,
+        )
     }
 
     /// Dispatches the stable desktop IPC contract in-process.
@@ -270,32 +328,7 @@ impl Runtime {
                 Ok(json) => Response::ok(id, ResponseData::Modules { json }),
                 Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
             },
-            Method::Status => {
-                let settings = self.settings.snapshot();
-                Response::ok(
-                    id,
-                    ResponseData::Status(copypaste_ipc::StatusData {
-                        sync_status: self.node.sync_status(settings.config.sync_enabled),
-                        device_details: Some(p2p_contract::local_device_details(
-                            &self.device_name,
-                            self.node.listen_addr().as_deref(),
-                        )),
-                        device_name: self.device_name.clone(),
-                        device_id: Some(self.device_id.clone()),
-                        version: env!("CARGO_PKG_VERSION").to_owned(),
-                        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
-                        listen_addr: self.node.listen_addr(),
-                        item_count: self.store.count().unwrap_or(0),
-                        capture_running: self.capture_running.load(Ordering::Acquire),
-                        clipboard_available: true,
-                        clipboard_backend: "android".to_owned(),
-                        private_mode: settings.config.private_mode,
-                        private_mode_epoch: settings.private_mode_epoch,
-                        counters: Default::default(),
-                        settings_health: settings.health,
-                    }),
-                )
-            }
+            Method::Status => Response::ok(id, ResponseData::Status(self.status_data())),
             Method::List { limit, cursor } => self.list(id, limit, cursor),
             Method::Search { query, limit } => self.search(id, &query, limit),
             Method::HistoryFacets => match self.store.history_facets(
@@ -328,18 +361,20 @@ impl Runtime {
                         );
                     }
                 };
-                match self.modules.query_history(
+                match self.modules.query_history_previews(
                     &self.store,
                     &query,
                     cursor.as_ref(),
                     limit.clamp(1, 1000),
                     copypaste_ipc::MAX_CONTENT_BYTES,
                     Some(&self.device_id),
+                    &self.keyring.item_key(),
+                    &self.keyring.preview_key(),
                 ) {
                     Ok(page) => Response::ok(
                         id,
                         ResponseData::Page(
-                            self.page(page.items, page.next.map(|cursor| cursor.token())),
+                            self.preview_page(page.items, page.next.map(|cursor| cursor.token())),
                         ),
                     ),
                     Err(_) => Response::err(
@@ -354,7 +389,10 @@ impl Runtime {
                 id: item_id,
                 max_edge,
                 bounds,
-            } => self.image_preview(id, &item_id, max_edge, bounds),
+            } => {
+                let _permit = copypaste_core::image_preview::acquire_preview_source().await;
+                self.image_preview(id, &item_id, max_edge, bounds)
+            }
             Method::SourceAppIcon { id: item_id } => self.source_icon(id, &item_id),
             Method::SaveFile {
                 id: item_id,
@@ -368,9 +406,12 @@ impl Runtime {
                         .is_some()
                 });
                 if is_offer {
+                    let sender = self.runtime_events.clone();
+                    let progress_token = download_token.clone();
+                    let last_percent = std::sync::atomic::AtomicU64::new(u64::MAX);
                     match self
                         .file_downloads
-                        .save_with_token(
+                        .save_with_progress(
                             &self.store,
                             &self.keyring,
                             &self.node,
@@ -381,6 +422,32 @@ impl Runtime {
                                 destination: Path::new(&dest_path),
                                 token: download_token.as_deref(),
                             },
+                            Arc::new(move |written, total| {
+                                if progress_token.is_none() || sender.receiver_count() == 0 {
+                                    return;
+                                }
+                                let percent = if total == 0 {
+                                    100
+                                } else {
+                                    ((u128::from(written) * 100) / u128::from(total)).min(100)
+                                        as u64
+                                };
+                                if last_percent.swap(percent, std::sync::atomic::Ordering::Relaxed)
+                                    != percent
+                                {
+                                    if let Some(token) = progress_token.as_ref() {
+                                        let _ = sender.send(copypaste_ipc::RuntimeEventData {
+                                            change: None,
+                                            capture: None,
+                                            progress: Some(copypaste_ipc::FileProgress {
+                                                token: token.clone(),
+                                                written,
+                                                total,
+                                            }),
+                                        });
+                                    }
+                                }
+                            }),
                         )
                         .await
                     {
@@ -753,6 +820,24 @@ impl Runtime {
         self.events.subscribe()
     }
 
+    pub fn subscribe_runtime_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<copypaste_ipc::RuntimeEventData> {
+        self.runtime_events.subscribe()
+    }
+
+    fn note_capture_state_changed(&self) {
+        self.capture_revision.fetch_add(1, Ordering::AcqRel);
+        if self.runtime_events.receiver_count() == 0 {
+            return;
+        }
+        let _ = self.runtime_events.send(copypaste_ipc::RuntimeEventData {
+            change: None,
+            progress: None,
+            capture: Some(self.status_data()),
+        });
+    }
+
     /// Records text captured by an in-process platform host.
     ///
     /// Android owns the permission and clipboard-read mechanics. The shared
@@ -1022,7 +1107,9 @@ impl Runtime {
     }
 
     pub fn set_capture_running(&self, running: bool) {
-        self.capture_running.store(running, Ordering::Release);
+        if self.capture_running.swap(running, Ordering::AcqRel) != running {
+            self.note_capture_state_changed();
+        }
     }
 
     /// Returns a policy snapshot for status presentation, never read authority.
@@ -1098,7 +1185,13 @@ impl Runtime {
         let modules = Arc::clone(&self.modules);
         let store = self.store.clone();
         let events = self.events.clone();
+        let runtime_events = self.runtime_events.clone();
+        let capture_revision = Arc::clone(&self.capture_revision);
+        let capture_running = Arc::clone(&self.capture_running);
+        let device_name = self.device_name.clone();
+        let device_id = self.device_id.clone();
         tokio::task::spawn_blocking(move || {
+            let before = settings.snapshot();
             let applied = settings.apply_with_effects(&patch, |applied| {
                 let removed = if reconcile_retention {
                     let enforce = applied.should_enforce_retention();
@@ -1135,6 +1228,28 @@ impl Runtime {
             })?;
             if applied.sync_enabled_changed().is_some() {
                 modules.sync_enabled_changed(applied.config.sync_enabled);
+            }
+            let after = settings.snapshot();
+            if before.private_mode_epoch != after.private_mode_epoch
+                || before.health != after.health
+            {
+                capture_revision.fetch_add(1, Ordering::AcqRel);
+                if runtime_events.receiver_count() > 0 {
+                    let status = capture_status_data(
+                        &settings,
+                        &node,
+                        &store,
+                        &device_name,
+                        &device_id,
+                        &capture_running,
+                        &capture_revision,
+                    );
+                    let _ = runtime_events.send(copypaste_ipc::RuntimeEventData {
+                        change: None,
+                        progress: None,
+                        capture: Some(status),
+                    });
+                }
             }
             Ok(applied)
         })
@@ -1251,14 +1366,18 @@ impl Runtime {
                 );
             }
         };
-        match self.store.list_from_bounded(
+        match self.store.list_previews_bounded(
             cursor.as_ref(),
             limit.clamp(1, 1000),
             copypaste_ipc::MAX_CONTENT_BYTES,
+            &self.keyring.item_key(),
+            &self.keyring.preview_key(),
         ) {
             Ok(page) => Response::ok(
                 id,
-                ResponseData::Page(self.page(page.items, page.next.map(|value| value.token()))),
+                ResponseData::Page(
+                    self.preview_page(page.items, page.next.map(|value| value.token())),
+                ),
             ),
             Err(_) => Response::err(id, ErrorCode::Internal, "The history store is unavailable."),
         }
@@ -1278,6 +1397,35 @@ impl Runtime {
                 "The history query is invalid.",
             ),
         }
+    }
+
+    fn preview_page(
+        &self,
+        entries: Vec<copypaste_core::HistoryPreviewRow>,
+        next_cursor: Option<String>,
+    ) -> ItemPage {
+        let (rows, previews): (Vec<_>, Vec<_>) = entries
+            .into_iter()
+            .map(|entry| (entry.row, entry.preview))
+            .unzip();
+        let origins = self.origins_for(&rows);
+        let mut page = ItemPage {
+            items: Vec::with_capacity(rows.len()),
+            skipped_undecryptable: 0,
+            next_cursor,
+        };
+        for (row, preview) in rows.into_iter().zip(previews) {
+            if let Some(preview) = preview {
+                let origin = origins
+                    .get(&row.id)
+                    .expect("every row has an origin resolved before presentation");
+                page.items
+                    .push(preview.into_item(&row, origin, &self.device_id));
+            } else {
+                page.skipped_undecryptable += 1;
+            }
+        }
+        page
     }
 
     fn page(&self, rows: Vec<copypaste_core::StoredItem>, next_cursor: Option<String>) -> ItemPage {
@@ -1620,6 +1768,26 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
+    #[tokio::test]
+    async fn capture_watch_reports_runtime_and_private_transitions() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_runtime_events();
+        runtime.set_capture_running(true);
+        let first = events.try_recv().unwrap().capture.unwrap();
+        assert!(first.capture_running);
+        assert_eq!(first.capture_revision, 1);
+        runtime.set_capture_running(true);
+        assert!(events.try_recv().is_err());
+        let response = runtime
+            .request(1, Method::SetPrivateMode { enabled: true })
+            .await;
+        assert!(response.ok);
+        let second = events.try_recv().unwrap().capture.unwrap();
+        assert!(second.private_mode);
+        assert_eq!(second.private_mode_epoch, 1);
+        assert_eq!(second.capture_revision, 2);
+    }
+
     fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
         fixture_with(Arc::new(UnavailableClipboard))
     }
@@ -1660,9 +1828,11 @@ mod tests {
                 device_class: copypaste_p2p::DeviceProfile::current().device_class,
                 settings,
                 events,
+                runtime_events: tokio::sync::broadcast::channel(256).0,
                 shutdown,
                 listener_started: AtomicBool::new(false),
-                capture_running: AtomicBool::new(false),
+                capture_running: Arc::new(AtomicBool::new(false)),
+                capture_revision: Arc::new(AtomicU64::new(0)),
                 module_sync_started: AtomicBool::new(false),
                 spoilers: Default::default(),
                 clipboard,
@@ -2433,6 +2603,79 @@ mod tests {
         assert!(item.color_rgba.is_some());
     }
 
+    #[tokio::test]
+    async fn queued_image_preview_leaves_status_responsive_and_cancels_cleanly() {
+        use std::time::Duration;
+
+        let (runtime, _dir) = fixture();
+        let permit = copypaste_core::image_preview::acquire_preview_source().await;
+        let method = Method::ImagePreview {
+            id: "missing".into(),
+            max_edge: None,
+            bounds: None,
+        };
+        let mut preview = Box::pin(runtime.request(1, method));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut preview)
+                .await
+                .is_err()
+        );
+        let status =
+            tokio::time::timeout(Duration::from_secs(2), runtime.request(2, Method::Status))
+                .await
+                .expect("queued preview must not block status");
+        assert!(status.ok);
+        drop(preview);
+        drop(permit);
+        let permit = tokio::time::timeout(
+            Duration::from_secs(2),
+            copypaste_core::image_preview::acquire_preview_source(),
+        )
+        .await
+        .expect("cancelled preview must not consume a permit");
+        drop(permit);
+    }
+
+    #[tokio::test]
+    async fn image_preview_decodes_image_and_recovers_after_missing_item() {
+        let (runtime, _dir) = fixture();
+        let source = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let row = copypaste_core::ingest_binary_into_with_capture_context(
+            &runtime.store,
+            &runtime.keyring,
+            &source,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            1,
+            None,
+            None,
+            &runtime.settings.config(),
+        )
+        .unwrap()
+        .into_item();
+        let missing = Method::ImagePreview {
+            id: "missing".into(),
+            max_edge: None,
+            bounds: None,
+        };
+        assert!(!runtime.request(1, missing).await.ok);
+        let method = Method::ImagePreview {
+            id: row.id,
+            max_edge: None,
+            bounds: None,
+        };
+        let preview = match runtime.request(2, method).await.data {
+            Some(ResponseData::ImagePreview(preview)) => preview,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((preview.width, preview.height), (1, 1));
+        assert_eq!(
+            &STANDARD.decode(preview.png_base64).unwrap()[..8],
+            b"\x89PNG\r\n\x1a\n"
+        );
+    }
+
     #[test]
     fn selected_image_carries_original_metadata_but_list_preview_does_not() {
         let (runtime, _dir) = fixture();
@@ -2493,6 +2736,52 @@ mod tests {
         assert_ne!(file_id, &text_id);
         assert!(file_event.captured);
         assert_eq!(file_event.item_count, 2);
+    }
+
+    #[tokio::test]
+    async fn in_process_file_save_emits_token_progress() {
+        let (runtime, dir) = fixture();
+        let source = dir.path().join("original.bin");
+        let bytes = vec![3; copypaste_core::file_transfer::CHUNK_BYTES * 2 + 1];
+        std::fs::write(&source, &bytes).unwrap();
+        let row = copypaste_core::file_import::import_file(
+            &runtime.store,
+            &runtime.keyring,
+            &source,
+            "original.bin",
+            "application/octet-stream",
+            source.to_str(),
+            &runtime.settings.config(),
+        )
+        .unwrap();
+        let destination = dir.path().join("saved.bin");
+        let mut progress = runtime.subscribe_runtime_events();
+        let mut legacy = runtime.subscribe_events();
+        let result = runtime
+            .request(
+                1,
+                Method::SaveFile {
+                    id: row.id,
+                    dest_path: destination.to_string_lossy().into_owned(),
+                    download_token: Some("token".into()),
+                },
+            )
+            .await;
+        assert!(result.ok, "{:?}", result.error);
+        let mut last = 0;
+        while let Ok(event) = progress.try_recv() {
+            let event = event.progress.unwrap();
+            assert_eq!(event.token, "token");
+            assert!(event.written > last);
+            assert_eq!(event.total, bytes.len() as u64);
+            last = event.written;
+        }
+        assert_eq!(last, bytes.len() as u64);
+        assert!(matches!(
+            legacy.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(std::fs::read(destination).unwrap(), bytes);
     }
 
     #[test]

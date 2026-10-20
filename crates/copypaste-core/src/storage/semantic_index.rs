@@ -1,8 +1,10 @@
 //! Encrypted, incremental module embeddings and bounded fragment reads.
 
+use super::resource_revisions::ResourceRevisions;
 use super::{connection::write_tx, Store, StoreError};
 use rusqlite::{params, OptionalExtension};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Arc, PoisonError};
 
 const FRAGMENT_BYTES: usize = 4096;
 
@@ -15,11 +17,84 @@ pub struct SemanticWork {
     pub complete: bool,
 }
 
-/// The model identity binds continuation cursors; scores are recomputed from
-/// live, content-hash-bound records before every page, never from UI previews.
+/// The model identity binds continuation cursors. Scores come from live,
+/// content-hash-bound records and may be reused only at the same database revision.
 pub struct SemanticMatches {
     pub scope: String,
-    pub scores: Vec<(String, f64)>,
+    pub scores: Arc<[(String, f64)]>,
+}
+
+const CACHE_ENTRIES: usize = 4;
+const CACHE_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(PartialEq, Eq)]
+struct SemanticKey {
+    generation: String,
+    semantic: i64,
+    scope: String,
+    query: Vec<u32>,
+    minimum: u32,
+}
+impl SemanticKey {
+    fn new(rev: &ResourceRevisions, scope: &str, query: &[f32], minimum: f32) -> Self {
+        Self {
+            generation: rev.generation.clone(),
+            semantic: rev.semantic,
+            scope: scope.into(),
+            query: query.iter().map(|v| v.to_bits()).collect(),
+            minimum: minimum.to_bits(),
+        }
+    }
+}
+struct CacheEntry {
+    key: SemanticKey,
+    scores: Arc<[(String, f64)]>,
+    bytes: usize,
+}
+#[derive(Default)]
+pub(super) struct SemanticCache {
+    entries: VecDeque<CacheEntry>,
+    bytes: usize,
+}
+impl SemanticCache {
+    fn get(&mut self, key: &SemanticKey) -> Option<Arc<[(String, f64)]>> {
+        self.entries.retain(|entry| {
+            entry.key.generation == key.generation && entry.key.semantic == key.semantic
+        });
+        self.bytes = self.entries.iter().map(|entry| entry.bytes).sum();
+        let index = self.entries.iter().position(|entry| &entry.key == key)?;
+        let entry = self.entries.remove(index)?;
+        let scores = Arc::clone(&entry.scores);
+        self.entries.push_back(entry);
+        Some(scores)
+    }
+    fn insert(&mut self, key: SemanticKey, scores: Arc<[(String, f64)]>) {
+        let bytes = key.generation.capacity()
+            + key.scope.capacity()
+            + key.query.capacity() * 4
+            + std::mem::size_of::<CacheEntry>()
+            + scores
+                .iter()
+                .map(|(id, _)| id.capacity() + std::mem::size_of::<(String, f64)>())
+                .sum::<usize>();
+        if bytes > CACHE_BYTES {
+            return;
+        }
+        if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
+            if let Some(old) = self.entries.remove(index) {
+                self.bytes -= old.bytes;
+            }
+        }
+        while self.entries.len() >= CACHE_ENTRIES || self.bytes + bytes > CACHE_BYTES {
+            if let Some(entry) = self.entries.pop_front() {
+                self.bytes -= entry.bytes;
+            } else {
+                break;
+            }
+        }
+        self.bytes += bytes;
+        self.entries.push_back(CacheEntry { key, scores, bytes });
+    }
 }
 
 impl Store {
@@ -133,6 +208,19 @@ impl Store {
             return Err(StoreError::InvalidHistoryQuery);
         }
         let conn = self.conn()?;
+        let before = super::resource_revisions::read(&conn)?;
+        let key = SemanticKey::new(&before, scope, query, minimum);
+        if let Some(scores) = self
+            .semantic_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+        {
+            return Ok(SemanticMatches {
+                scope: scope.into(),
+                scores,
+            });
+        }
         let mut stmt = conn.prepare(
             "SELECT v.item_id, v.vector FROM module_search_vectors v \
             JOIN module_search_documents d ON d.scope = v.scope AND d.item_id = v.item_id \
@@ -167,10 +255,26 @@ impl Store {
         }
         let best = scores.values().copied().fold(f64::from(minimum), f64::max);
         scores.retain(|_, score| *score >= best - 0.10);
+        let scores: Arc<[(String, f64)]> = scores.into_iter().collect::<Vec<_>>().into();
+        let after = super::resource_revisions::read(&conn)?;
+        if before.generation == after.generation && before.semantic == after.semantic {
+            self.semantic_cache
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(key, Arc::clone(&scores));
+        }
         Ok(SemanticMatches {
             scope: scope.into(),
-            scores: scores.into_iter().collect(),
+            scores,
         })
+    }
+
+    /// Release derived query scores when the semantic service is inactive.
+    pub fn clear_semantic_cache(&self) {
+        *self
+            .semantic_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = SemanticCache::default();
     }
 
     pub fn clear_semantic_index(&self, module_id: &str) -> Result<(), StoreError> {
@@ -178,6 +282,7 @@ impl Store {
             "DELETE FROM module_search_documents WHERE module_id = ?1",
             [module_id],
         )?;
+        self.clear_semantic_cache();
         Ok(())
     }
 
@@ -265,5 +370,50 @@ mod tests {
             .scores
             .is_empty());
         assert!(s.semantic_matches("model-a", &[f32::NAN], 0.8).is_err());
+    }
+    #[test]
+    fn cache_reuses_scores_and_invalidates_on_other_connection_write() {
+        let s = store();
+        let row = s.insert(item("semantic cache", T0)).unwrap();
+        let work = s.semantic_work("model-a").unwrap().unwrap();
+        s.save_semantic_work("module-a", "model-a", &work, &[vec![1.0, 0.0]])
+            .unwrap();
+        let first = s.semantic_matches("model-a", &[1.0, 0.0], 0.8).unwrap();
+        let second = s.semantic_matches("model-a", &[1.0, 0.0], 0.8).unwrap();
+        assert!(Arc::ptr_eq(&first.scores, &second.scores));
+        let other = s.conn().unwrap();
+        other
+            .execute(
+                "UPDATE clipboard_items SET deleted = 1 WHERE id = ?1",
+                [&row.id],
+            )
+            .unwrap();
+        let after = s.semantic_matches("model-a", &[1.0, 0.0], 0.8).unwrap();
+        assert!(after.scores.is_empty());
+        assert!(!Arc::ptr_eq(&first.scores, &after.scores));
+    }
+
+    #[test]
+    fn semantic_cache_evicts_by_count_and_bytes() {
+        let mut cache = SemanticCache::default();
+        let rev = ResourceRevisions {
+            generation: "g".into(),
+            semantic: 1,
+            facets: 1,
+        };
+        for n in 0..CACHE_ENTRIES + 1 {
+            cache.insert(
+                SemanticKey::new(&rev, &n.to_string(), &[1.0], 0.8),
+                vec![("id".into(), 1.0)].into(),
+            );
+        }
+        assert_eq!(cache.entries.len(), CACHE_ENTRIES);
+        assert!(cache
+            .get(&SemanticKey::new(&rev, "0", &[1.0], 0.8))
+            .is_none());
+        let oversized: Arc<[(String, f64)]> = vec![("x".repeat(CACHE_BYTES), 1.0)].into();
+        cache.insert(SemanticKey::new(&rev, "huge", &[1.0], 0.8), oversized);
+        assert_eq!(cache.entries.len(), CACHE_ENTRIES);
+        assert!(cache.bytes <= CACHE_BYTES);
     }
 }

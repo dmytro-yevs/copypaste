@@ -160,6 +160,8 @@ impl super::Store {
             .map_err(RestoreError::Failed)?;
         let result = (|| -> rusqlite::Result<()> {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            // Previews are disposable and may have been derived from the replaced history.
+            tx.execute("DELETE FROM history_preview_cache", [])?;
             for table in RESTORED_TABLES {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
@@ -218,6 +220,7 @@ impl super::Store {
                  ON CONFLICT(device_id) DO UPDATE SET name = excluded.name",
                 [],
             )?;
+            tx.execute("UPDATE resource_revisions SET generation = lower(hex(randomblob(16))) WHERE singleton = 0", [])?;
             tx.commit()?;
             Ok(())
         })();
@@ -227,6 +230,11 @@ impl super::Store {
             .map_err(RestoreError::Failed);
         drop(conn);
         if result.is_ok() {
+            self.clear_semantic_cache();
+            *self
+                .facet_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             self.request_space_reclaim();
         }
         result
@@ -465,8 +473,15 @@ mod tests {
         let backup = dir.path().join("history.backup");
         store.backup_to(&backup).unwrap();
         store.insert(item("later row", T0 + 1)).unwrap();
+        let generation = store.resource_revisions().unwrap().generation;
+        store
+            .history_facets("local", "Laptop", copypaste_ipc::DeviceClass::Laptop)
+            .unwrap();
+        assert!(store.facet_cache.lock().unwrap().is_some());
 
         store.restore_from(&backup, &KEY).unwrap();
+        assert!(store.facet_cache.lock().unwrap().is_none());
+        assert_ne!(store.resource_revisions().unwrap().generation, generation);
         assert_eq!(store.count().unwrap(), 1);
 
         drop(store);

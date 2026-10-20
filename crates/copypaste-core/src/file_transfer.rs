@@ -468,6 +468,20 @@ pub fn save_local(
     limit: u64,
     cancelled: impl Fn() -> bool,
 ) -> Result<(), FileTransferError> {
+    save_local_with_progress(store, key, id, destination, limit, cancelled, |_, _| {})
+}
+
+/// Reports bytes only after a successful write. Completion is confirmed by the
+/// return value because validation or cancellation can still roll the file back.
+pub fn save_local_with_progress(
+    store: &Store,
+    key: &ItemKey,
+    id: &str,
+    destination: &Path,
+    limit: u64,
+    cancelled: impl Fn() -> bool,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(), FileTransferError> {
     let row = store
         .get(id)?
         .filter(|row| !row.deleted)
@@ -476,6 +490,7 @@ pub fn save_local(
     check_limit(&descriptor, limit)?;
     let mut output = Destination::create(destination)?;
     let mut hash = Sha256::new();
+    let mut written = 0u64;
     for index in 0..descriptor.size_bytes.div_ceil(CHUNK_BYTES as u64) {
         if cancelled() {
             return Err(FileTransferError::Cancelled);
@@ -483,6 +498,8 @@ pub fn save_local(
         let bytes = read_chunk(store, key, id, &descriptor.sha256, index)?;
         hash.update(&bytes);
         output.write_all(&bytes).map_err(destination_error)?;
+        written += bytes.len() as u64;
+        progress(written, descriptor.size_bytes);
     }
     if hex::encode(hash.finalize()) != descriptor.sha256 {
         return Err(FileTransferError::Integrity);
@@ -576,4 +593,64 @@ fn offer_item(
         app_name: app_name.map(str::to_owned),
         payload_metadata: Some(payload_metadata),
     })
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn local_progress_tracks_written_bytes_and_cancellation_rolls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let keyring = Arc::new(crate::Keyring::from_secret(&[43; 32]));
+        let store = Store::open_in_memory(&keyring.db_key()).unwrap();
+        let source = dir.path().join("source.bin");
+        let bytes = vec![7; CHUNK_BYTES + 7];
+        std::fs::write(&source, &bytes).unwrap();
+        let row = crate::file_import::import_file(
+            &store,
+            &keyring,
+            &source,
+            "source.bin",
+            "application/octet-stream",
+            source.to_str(),
+            &copypaste_ipc::ConfigData::default(),
+        )
+        .unwrap();
+        let destination = dir.path().join("saved.bin");
+        let mut reports = Vec::new();
+        save_local_with_progress(
+            &store,
+            &keyring.item_key(),
+            &row.id,
+            &destination,
+            u64::MAX,
+            || false,
+            |written, total| reports.push((written, total)),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+        assert_eq!(
+            reports,
+            vec![
+                (CHUNK_BYTES as u64, bytes.len() as u64),
+                (bytes.len() as u64, bytes.len() as u64)
+            ]
+        );
+
+        let cancelled_destination = dir.path().join("cancelled.bin");
+        let cancelled = std::cell::Cell::new(false);
+        let result = save_local_with_progress(
+            &store,
+            &keyring.item_key(),
+            &row.id,
+            &cancelled_destination,
+            u64::MAX,
+            || cancelled.get(),
+            |_, _| cancelled.set(true),
+        );
+        assert!(matches!(result, Err(FileTransferError::Cancelled)));
+        assert!(!cancelled_destination.exists());
+    }
 }

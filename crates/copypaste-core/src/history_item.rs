@@ -132,3 +132,86 @@ pub(crate) fn from_payload(
         truncated,
     }
 }
+
+/// The payload-derived fields of an authenticated list preview. All mutable
+/// row and device metadata is applied when the preview is presented.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StaticHistoryPreview {
+    content: String,
+    semantic_kind: Option<copypaste_ipc::SemanticKind>,
+    color_rgba: Option<u32>,
+    file_details: Option<StaticFileDetails>,
+    too_large_to_sync: bool,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StaticFileDetails {
+    filename: Option<String>,
+    mime_type: Option<String>,
+    source_reference: Option<String>,
+    size_bytes: u64,
+    file_count: u32,
+}
+
+impl StaticHistoryPreview {
+    pub(crate) fn from_open_payload(row: &StoredItem, payload: &ClipboardPayload) -> Self {
+        let origin = ItemOrigin {
+            device_id: String::new(),
+            device_name: None,
+            device_class: copypaste_ipc::DeviceClass::Unknown,
+        };
+        let item = from_payload(row, payload, &origin, "local", true);
+        Self {
+            content: item.content,
+            semantic_kind: item.semantic_kind,
+            color_rgba: item.color_rgba,
+            file_details: item.file_details.map(|details| StaticFileDetails {
+                filename: details.filename,
+                mime_type: details.mime_type,
+                source_reference: details.source_reference,
+                size_bytes: details.size_bytes,
+                file_count: details.file_count,
+            }),
+            too_large_to_sync: item.too_large_to_sync,
+            truncated: item.truncated,
+        }
+    }
+
+    /// Apply fresh row and device state to an authenticated preview.
+    pub fn into_item(self, row: &StoredItem, origin: &ItemOrigin, local_device_id: &str) -> Item {
+        let file_details = self.file_details.map(|details| FileDetails {
+            source_available: origin.device_id == local_device_id
+                && details
+                    .source_reference
+                    .as_deref()
+                    .is_some_and(source_available),
+            filename: details.filename,
+            mime_type: details.mime_type,
+            source_reference: details.source_reference,
+            size_bytes: details.size_bytes,
+            file_count: details.file_count,
+        });
+        Item {
+            privacy: row.clipboard_privacy(),
+            id: row.id.clone(),
+            content: self.content,
+            content_type: row.content_type.clone(),
+            content_class: copypaste_ipc::content_type::classify(&row.content_type),
+            semantic_kind: self.semantic_kind,
+            color_rgba: self.color_rgba,
+            created_at: row.created_at,
+            pinned: row.pinned,
+            file_details,
+            image_details: None,
+            origin_device_id: origin.device_id.clone(),
+            origin_device_name: origin.device_name.clone(),
+            origin_device_class: origin.device_class,
+            source_app_bundle_id: row.app_bundle_id.clone(),
+            source_app_name: row.app_name.clone(),
+            source_app_icon_id: row.source_icon_id.clone(),
+            too_large_to_sync: self.too_large_to_sync,
+            truncated: self.truncated,
+        }
+    }
+}

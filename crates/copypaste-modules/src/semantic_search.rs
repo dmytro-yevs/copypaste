@@ -2,7 +2,8 @@
 
 use crate::{manager::SearchConfiguration, ModuleError, ModuleManager};
 use copypaste_core::{
-    HistoryCursor, HistoryPage, HistoryQuery, SemanticMatches, Store, StoreError,
+    storage::ResourceRevisions, HistoryCursor, HistoryPage, HistoryQuery, SemanticMatches, Store,
+    StoreError,
 };
 use copypaste_module_sdk::{validate_embeddings, ModuleOutput};
 use std::{
@@ -32,6 +33,36 @@ struct QueryQueue {
     queued: VecDeque<PendingQuery>,
     active: Option<PendingQuery>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SemanticRevision {
+    generation: String,
+    semantic: i64,
+}
+
+impl From<ResourceRevisions> for SemanticRevision {
+    fn from(revision: ResourceRevisions) -> Self {
+        Self {
+            generation: revision.generation,
+            semantic: revision.semantic,
+        }
+    }
+}
+
+#[derive(Default)]
+struct WakeState {
+    background_generation: u64,
+    urgent_generation: u64,
+    observed_revision: Option<SemanticRevision>,
+}
+
+fn settled_after_no_work(
+    examined: SemanticRevision,
+    prune: Result<(), StoreError>,
+) -> Option<SemanticRevision> {
+    prune.ok().map(|()| examined)
+}
+
 const QUERY_CAPACITY: usize = 32;
 pub(crate) type ChangeCallback = Arc<dyn Fn() + Send + Sync>;
 
@@ -46,7 +77,7 @@ pub(crate) struct SemanticSearch {
     changed: ChangeCallback,
     stopped: AtomicBool,
     ready: AtomicBool,
-    wake: (Mutex<()>, Condvar),
+    wake: (Mutex<WakeState>, Condvar),
     worker: Mutex<Option<JoinHandle<()>>>,
     queries: Mutex<VecDeque<CachedQuery>>,
     pending: Mutex<QueryQueue>,
@@ -60,7 +91,14 @@ impl SemanticSearch {
             changed: Arc::clone(&binding.changed),
             stopped: AtomicBool::new(false),
             ready: AtomicBool::new(false),
-            wake: (Mutex::new(()), Condvar::new()),
+            wake: (
+                Mutex::new(WakeState {
+                    // A new service always indexes the existing durable history.
+                    background_generation: 1,
+                    ..WakeState::default()
+                }),
+                Condvar::new(),
+            ),
             worker: Mutex::new(None),
             queries: Mutex::new(VecDeque::new()),
             pending: Mutex::new(QueryQueue::default()),
@@ -79,13 +117,56 @@ impl SemanticSearch {
     }
 
     pub fn notify(&self) {
+        let mut wake = self
+            .wake
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        wake.urgent_generation = wake.urgent_generation.wrapping_add(1);
+        drop(wake);
         self.wake.1.notify_one();
+    }
+
+    /// Wake idle indexing only when durable semantic input changed. This is a
+    /// level-triggered hint; the five-second maintenance wake covers writes by
+    /// another process or Store instance.
+    pub fn history_changed(&self) {
+        let Ok(revision) = self.store.resource_revisions() else {
+            return;
+        };
+        let revision = SemanticRevision::from(revision);
+        let mut wake = self
+            .wake
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if wake.observed_revision.as_ref() == Some(&revision) {
+            return;
+        }
+        wake.observed_revision = Some(revision);
+        wake.background_generation = wake.background_generation.wrapping_add(1);
+        drop(wake);
+        self.wake.1.notify_one();
+    }
+
+    fn observe_revision(&self, revision: SemanticRevision) {
+        if let Ok(mut wake) = self.wake.0.lock() {
+            wake.observed_revision = Some(revision);
+        }
     }
 
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Release);
+        if let Ok(mut wake) = self.wake.0.lock() {
+            wake.urgent_generation = wake.urgent_generation.wrapping_add(1);
+        }
         self.wake.1.notify_all();
         self.manager.stop_inference();
+        self.store.clear_semantic_cache();
+        self.queries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
         if let Some(worker) = self
             .worker
             .lock()
@@ -131,6 +212,41 @@ impl SemanticSearch {
         budget: usize,
         device: Option<&str>,
     ) -> Result<HistoryPage, StoreError> {
+        self.query_with(query, |matches| {
+            self.store
+                .query_history_with_semantic(query, after, limit, budget, device, matches)
+        })
+    }
+
+    pub fn query_previews(
+        &self,
+        query: &HistoryQuery,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        device: Option<&str>,
+        item_key: &copypaste_core::ItemKey,
+        preview_key: &copypaste_core::PreviewKey,
+    ) -> Result<copypaste_core::HistoryPreviewPage, StoreError> {
+        self.query_with(query, |matches| {
+            self.store.query_history_previews_with_semantic(
+                query,
+                after,
+                limit,
+                budget,
+                device,
+                matches,
+                item_key,
+                preview_key,
+            )
+        })
+    }
+
+    fn query_with<T>(
+        &self,
+        query: &HistoryQuery,
+        run: impl Fn(Option<&SemanticMatches>) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
         let config = self.manager.search_configuration().ok().flatten();
         let Some(config) = config.filter(|_| {
             query
@@ -138,9 +254,7 @@ impl SemanticSearch {
                 .as_deref()
                 .is_some_and(|text| text.chars().any(char::is_alphanumeric))
         }) else {
-            return self
-                .store
-                .query_history_bounded_for_device(query, after, limit, budget, device);
+            return run(None);
         };
         let text = query
             .search
@@ -199,43 +313,49 @@ impl SemanticSearch {
             })
             .unwrap_or_else(|| SemanticMatches {
                 scope: config.scope.clone(),
-                scores: Vec::new(),
+                scores: Vec::new().into(),
             });
         // Revalidate admission after inference. Disabled modules contribute no
         // late results, while ordinary lexical search remains available.
         self.manager
-            .search_lease(&config, || {
-                Ok(self.store.query_history_with_semantic(
-                    query,
-                    after,
-                    limit,
-                    budget,
-                    device,
-                    Some(&matches),
-                ))
-            })
+            .search_lease(&config, || Ok(run(Some(&matches))))
             .unwrap_or_else(|_| {
-                self.store
-                    .query_history_bounded_for_device(query, after, limit, budget, device)
+                self.store.clear_semantic_cache();
+                run(None)
             })
     }
 
     fn index_loop(&self) {
         let mut current = String::new();
+        let mut settled_revision = None;
+        let mut handled_background = 0;
+        let mut indexing = false;
         let mut dirty = false;
-        let mut last_prune = Instant::now();
+        let mut last_maintenance = Instant::now() - Duration::from_secs(5);
         while !self.stopped.load(Ordering::Acquire) {
+            let (iteration_background, iteration_urgent) = self
+                .wake
+                .0
+                .lock()
+                .map(|wake| (wake.background_generation, wake.urgent_generation))
+                .unwrap_or((handled_background, 0));
             let config = self.manager.search_configuration().ok().flatten();
             let mut did_work = false;
             if let Some(config) = config {
-                if current != config.scope {
+                let scope_changed = current != config.scope;
+                if scope_changed {
                     self.ready.store(false, Ordering::Release);
+                    if !current.is_empty() {
+                        self.manager.stop_inference();
+                    }
                     current = config.scope.clone();
+                    settled_revision = None;
+                    indexing = true;
+                    self.store.clear_semantic_cache();
                     self.queries
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .clear();
-                    let _ = self.store.prune_semantic_index(&config.id, &config.scope);
                 }
                 let pending = {
                     let mut pending = self
@@ -283,74 +403,144 @@ impl SemanticSearch {
                         (self.changed)();
                     }
                     did_work = true;
-                } else if let Ok(Some(work)) = self.store.semantic_work(&config.scope) {
-                    let result =
-                        self.embeddings(&config, "passage", &work.text)
-                            .and_then(|vectors| {
-                                self.manager.search_lease(&config, || {
-                                    self.store
-                                        .save_semantic_work(
-                                            &config.id,
-                                            &config.scope,
-                                            &work,
-                                            &vectors,
-                                        )
-                                        .map_err(|_| ModuleError::State)
-                                })
-                            });
-                    if matches!(result, Ok(true)) {
-                        did_work = true;
-                        dirty = true;
-                        if !self.ready.swap(true, Ordering::AcqRel) {
-                            (self.changed)();
-                            dirty = false;
+                } else {
+                    let maintenance_due = last_maintenance.elapsed() >= Duration::from_secs(5);
+                    let should_check = indexing
+                        || scope_changed
+                        || iteration_background != handled_background
+                        || maintenance_due;
+                    if should_check {
+                        handled_background = iteration_background;
+                        last_maintenance = Instant::now();
+                        match self.store.resource_revisions() {
+                            Ok(revision) => {
+                                let revision = SemanticRevision::from(revision);
+                                self.observe_revision(revision.clone());
+                                let revision_changed = settled_revision.as_ref() != Some(&revision);
+                                if scope_changed || revision_changed || indexing {
+                                    match self.store.semantic_work(&config.scope) {
+                                        Ok(Some(work)) => {
+                                            let result = self
+                                                .embeddings(&config, "passage", &work.text)
+                                                .and_then(|vectors| {
+                                                    self.manager.search_lease(&config, || {
+                                                        self.store
+                                                            .save_semantic_work(
+                                                                &config.id,
+                                                                &config.scope,
+                                                                &work,
+                                                                &vectors,
+                                                            )
+                                                            .map_err(|_| ModuleError::State)
+                                                    })
+                                                });
+                                            if matches!(result, Ok(true)) {
+                                                if let Ok(revision) =
+                                                    self.store.resource_revisions()
+                                                {
+                                                    self.observe_revision(SemanticRevision::from(
+                                                        revision,
+                                                    ));
+                                                }
+                                                did_work = true;
+                                                indexing = true;
+                                                dirty = true;
+                                                if !self.ready.swap(true, Ordering::AcqRel) {
+                                                    (self.changed)();
+                                                    dirty = false;
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            // Pruning is meaningful only after a durable
+                                            // input or scope change. At rest, it would
+                                            // repeatedly wake SQLite and invalidate caches.
+                                            if let Some(settled) = settled_after_no_work(
+                                                revision,
+                                                self.store.prune_semantic_index(
+                                                    &config.id,
+                                                    &config.scope,
+                                                ),
+                                            ) {
+                                                // Settle only the revision examined before
+                                                // this no-work pass. A concurrent write (or
+                                                // the prune itself) must force another pass.
+                                                settled_revision = Some(settled);
+                                                indexing = false;
+                                                self.ready.store(true, Ordering::Release);
+                                            } else {
+                                                indexing = true;
+                                                self.ready.store(false, Ordering::Release);
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // A transient Store error is never evidence
+                                            // that indexing is complete.
+                                            indexing = true;
+                                            self.ready.store(false, Ordering::Release);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                indexing = true;
+                                self.ready.store(false, Ordering::Release);
+                            }
                         }
                     }
-                } else {
-                    // Index coverage does not depend on a resident inference
-                    // process. Empty/already indexed history requires no warm-up.
-                    self.ready.store(true, Ordering::Release);
                 }
-                if !did_work {
-                    if dirty {
-                        (self.changed)();
-                        dirty = false;
-                    }
-                    if last_prune.elapsed() >= Duration::from_secs(5) {
-                        let _ = self.store.prune_semantic_index(&config.id, &config.scope);
-                        last_prune = Instant::now();
-                    }
+                if !did_work && dirty {
+                    (self.changed)();
+                    dirty = false;
                 }
             } else {
-                self.ready.store(false, Ordering::Release);
-                current.clear();
+                if !current.is_empty() {
+                    self.ready.store(false, Ordering::Release);
+                    current.clear();
+                    settled_revision = None;
+                    indexing = false;
+                    self.manager.stop_inference();
+                    self.store.clear_semantic_cache();
+                    *self
+                        .pending
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner()) = QueryQueue::default();
+                    self.queries
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .clear();
+                }
+                // A foreground request can arrive after configuration was read.
+                // Its bounded queue must not retain obsolete text while search is
+                // disabled, even before this worker has selected a scope.
                 *self
                     .pending
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()) = QueryQueue::default();
-                self.queries
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .clear();
             }
-            // Yield admission to foreground search between bounded fragments.
-            if self
-                .pending
-                .lock()
-                .is_ok_and(|pending| !pending.queued.is_empty())
-            {
-                continue;
-            }
-            if let Ok(lock) = self.wake.0.lock() {
-                let _ = self.wake.1.wait_timeout(
-                    lock,
-                    if did_work {
-                        Duration::from_millis(15)
-                    } else {
-                        Duration::from_secs(5)
-                    },
-                );
-            }
+            self.wait_for_wake(
+                if did_work {
+                    Duration::from_millis(15)
+                } else {
+                    Duration::from_secs(5)
+                },
+                did_work,
+                iteration_background,
+                iteration_urgent,
+            );
+        }
+    }
+
+    fn wait_for_wake(&self, delay: Duration, yielded_fragment: bool, background: u64, urgent: u64) {
+        if let Ok(wake) = self.wake.0.lock() {
+            // A completed fragment reserves this small interval for UI work.
+            // Background history notifications are observed afterwards;
+            // foreground queries and shutdown may interrupt immediately.
+            let _ = self.wake.1.wait_timeout_while(wake, delay, |state| {
+                !self.stopped.load(Ordering::Acquire)
+                    && state.urgent_generation == urgent
+                    && (yielded_fragment || state.background_generation == background)
+            });
         }
     }
 }

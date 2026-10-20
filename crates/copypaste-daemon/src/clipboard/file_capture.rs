@@ -318,6 +318,8 @@ mod tests {
             assert_eq!(read(&fifo, 4), Err(FileReadError::NonRegular));
         }
         let socket = dir.path().join("socket");
+        let cwd = std::env::current_dir().unwrap();
+        let socket = socket.strip_prefix(cwd).unwrap_or(&socket).to_path_buf();
         let _socket = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         assert!(matches!(
             read(&socket, 4),

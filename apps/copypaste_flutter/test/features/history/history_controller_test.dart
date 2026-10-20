@@ -11,6 +11,58 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('HistoryController', () {
+    test('reuses immutable row snapshots until rows change', () async {
+      final repository = _HistoryRepository()
+        ..pages.addAll([
+          Future.value(
+            HistoryClipPage(items: [_clip('one')], nextCursor: 'next'),
+          ),
+          Future.value(HistoryClipPage(items: [_clip('two')])),
+          Future.value(HistoryClipPage(items: [_clip('fresh')])),
+          Future.value(HistoryClipPage(items: [_clip('reloaded')])),
+        ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      final first = controller.items;
+      expect(controller.items, same(first));
+      expect(() => first.clear(), throwsUnsupportedError);
+      await controller.loadMore();
+      final loaded = controller.items;
+      expect(loaded, isNot(same(first)));
+      expect(first.map((clip) => clip.id), ['one']);
+      expect(loaded.map((clip) => clip.id), ['one', 'two']);
+      expect(controller.items, same(loaded));
+
+      expect(await controller.togglePin(loaded.first), isTrue);
+      final pinned = controller.items;
+      expect(pinned, isNot(same(loaded)));
+      expect(loaded.first.pinned, isFalse);
+      expect(pinned.first.pinned, isTrue);
+      expect(await controller.deleteClip('two'), isTrue);
+      final deleted = controller.items;
+      expect(deleted, isNot(same(pinned)));
+      expect(pinned.map((clip) => clip.id), ['one', 'two']);
+      expect(deleted.map((clip) => clip.id), ['one']);
+
+      controller.suspend();
+      final suspended = controller.items;
+      expect(suspended, isEmpty);
+      expect(suspended, isNot(same(deleted)));
+      expect(deleted.single.id, 'one');
+      expect(controller.items, same(suspended));
+      await controller.initialize();
+      expect(controller.items.single.id, 'fresh');
+      expect(controller.items, isNot(same(suspended)));
+      expect(suspended, isEmpty);
+      final resumed = controller.items;
+      await controller.reload();
+      expect(controller.items.single.id, 'reloaded');
+      expect(resumed.single.id, 'fresh');
+      expect(controller.items, isNot(same(resumed)));
+    });
+
     test(
       'reuses identical bounded pixels without reducing preview quality',
       () async {
@@ -466,11 +518,99 @@ void main() {
       final controller = HistoryController(repository);
 
       await controller.initialize();
+      final before = controller.items;
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
       expect(controller.items.single.id, 'after');
+      expect(controller.items, isNot(same(before)));
+      expect(before.single.id, 'before');
       controller.dispose();
+    });
+
+    test('refresh retains the snapshot when all rows are unchanged', () async {
+      final repository = _HistoryRepository();
+      repository.pages.addAll([
+        Future.value(HistoryClipPage(items: [_clip('one'), _clip('two')])),
+        Future.value(HistoryClipPage(items: [_clip('one'), _clip('two')])),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final before = controller.items;
+
+      repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.items, same(before));
+    });
+
+    test('refresh retains only unchanged row objects', () async {
+      final repository = _HistoryRepository();
+      repository.pages.addAll([
+        Future.value(HistoryClipPage(items: [_clip('same'), _clip('changed')])),
+        Future.value(
+          HistoryClipPage(
+            items: [_clip('same'), _clip('changed').copyWith(pinned: true)],
+          ),
+        ),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final before = controller.items;
+
+      repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.items[0], same(before[0]));
+      expect(controller.items[1], isNot(same(before[1])));
+      expect(controller.items[1].pinned, isTrue);
+    });
+
+    test('refresh reuses unchanged rows after a reorder', () async {
+      final repository = _HistoryRepository();
+      repository.pages.addAll([
+        Future.value(HistoryClipPage(items: [_clip('one'), _clip('two')])),
+        Future.value(HistoryClipPage(items: [_clip('two'), _clip('one')])),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final before = controller.items;
+
+      repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.items[0], same(before[1]));
+      expect(controller.items[1], same(before[0]));
+      expect(controller.items, isNot(same(before)));
+    });
+
+    test('refresh replaces a row when file metadata changes', () async {
+      HistoryClip file(bool available) => HistoryClip(
+        id: 'file',
+        contentType: 'file',
+        preview: 'file',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        file: HistoryFileDetails(name: 'file', sourceAvailable: available),
+      );
+      final repository = _HistoryRepository();
+      repository.pages.addAll([
+        Future.value(HistoryClipPage(items: [file(false)])),
+        Future.value(HistoryClipPage(items: [file(true)])),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final before = controller.items.single;
+
+      repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.items.single, isNot(same(before)));
+      expect(controller.items.single.file?.sourceAvailable, isTrue);
     });
 
     test('reconnects a completed watch and refreshes missed history', () async {
@@ -814,12 +954,50 @@ void main() {
         await controller.select(file.id);
 
         expect(controller.canDownloadSelected, isTrue);
-        expect(
-          await controller.downloadSelected(),
-          HistoryFileDownloadResult.saved,
-        );
+        final pendingSave = Completer<void>();
+        final pendingPresentation = Completer<void>();
+        repository.savePending = pendingSave.future;
+        downloader.presentPending = pendingPresentation.future;
+        var broadNotifications = 0;
+        final progress = <double?>[];
+        final broadAtProgress = <int>[];
+        controller.addListener(() => broadNotifications++);
+        controller.downloadProgressChanges.addListener(() {
+          progress.add(controller.downloadProgressFor(file.id));
+          broadAtProgress.add(broadNotifications);
+        });
+        final result = controller.downloadSelected();
+        await Future<void>.delayed(Duration.zero);
+        expect(progress, [0]);
+        expect(broadNotifications, 1);
+        pendingSave.complete();
+        await Future<void>.delayed(Duration.zero);
+        expect(progress, [0, 1]);
+        expect(broadAtProgress, [1, 1]);
+        expect(broadNotifications, 1);
+        pendingPresentation.complete();
+        expect(await result, HistoryFileDownloadResult.saved);
+        expect(broadNotifications, 2);
+        expect(controller.downloadProgressFor(file.id), isNull);
         expect(repository.savedFiles, [('file', '/tmp/report.pdf')]);
         expect(downloader.presentedPaths, ['/tmp/report.pdf']);
+
+        repository.savePending = null;
+        repository.saveError = StateError('save failed');
+        expect(
+          await controller.downloadSelected(),
+          HistoryFileDownloadResult.failed,
+        );
+        expect(controller.downloadFailedFor(file.id), isTrue);
+
+        final pendingDestination = Completer<String?>();
+        downloader.destinationPending = pendingDestination.future;
+        final cancelled = controller.downloadSelected();
+        controller.cancelDownload(file.id);
+        pendingDestination.complete('/tmp/report.pdf');
+        expect(await cancelled, HistoryFileDownloadResult.cancelled);
+        expect(controller.isDownloadPending(file.id), isFalse);
+        expect(controller.downloadFailedFor(file.id), isFalse);
         controller.dispose();
       },
     );
@@ -866,6 +1044,8 @@ class _HistoryRepository implements HistoryRepository {
   int sourceIconCalls = 0;
   HistoryClip? detailClip;
   final List<(String, String)> savedFiles = [];
+  Future<void>? savePending;
+  Object? saveError;
 
   @override
   Stream<HistoryRuntimeEvent> watch() => events.stream;
@@ -914,6 +1094,8 @@ class _HistoryRepository implements HistoryRepository {
   @override
   Future<void> saveFile(String id, String destinationPath) async {
     savedFiles.add((id, destinationPath));
+    await savePending;
+    if (saveError != null) throw saveError!;
   }
 
   @override
@@ -972,13 +1154,16 @@ class _HistoryFileDownloader implements HistoryFileDownloader {
 
   final String? destination;
   final List<String> presentedPaths = [];
+  Future<void>? presentPending;
+  Future<String?>? destinationPending;
 
   @override
   Future<String?> chooseDestination(HistoryFileDetails file) async =>
-      destination;
+      destinationPending == null ? destination : await destinationPending;
 
   @override
   Future<void> presentSavedFile(String path, HistoryFileDetails file) async {
     presentedPaths.add(path);
+    await presentPending;
   }
 }

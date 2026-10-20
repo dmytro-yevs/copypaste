@@ -21,13 +21,11 @@
 use std::sync::Arc;
 
 use copypaste_ipc::transport::{Listener, Stream};
-use copypaste_ipc::{ErrorCode, Method, Request, Response, ResponseData, MAX_FRAME_BYTES};
-use futures_util::StreamExt;
+use copypaste_ipc::{ErrorCode, Method, Request, Response, ResponseData};
 use tokio::sync::{watch, Semaphore};
-use tokio_util::codec::{FramedRead, LinesCodec};
 use tracing::{debug, warn};
 
-use super::listener::{send, MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT};
+use super::listener::{send, Reader, MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT};
 
 /// Accept connections and refuse each one, until told to stop.
 pub async fn serve(
@@ -69,7 +67,7 @@ async fn refuse(
     stop: watch::Sender<bool>,
 ) {
     let (reader, mut writer) = stream.into_split();
-    let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let mut lines = Reader::new(reader);
 
     loop {
         let Ok(next) = tokio::time::timeout(READ_TIMEOUT, lines.next()).await else {
@@ -82,14 +80,14 @@ async fn refuse(
             // request anyway.
             _ => break,
         };
-        if line.trim().is_empty() {
+        if line.text.trim().is_empty() {
             continue;
         }
 
         // An unparseable line still gets the refusal rather than `malformed`:
         // the condition the caller needs to hear about is this one, and a
         // client cannot fix its request into a working call.
-        let request: Option<Request> = serde_json::from_str(&line).ok();
+        let request: Option<Request> = serde_json::from_str(&line.text).ok();
         let id = request.as_ref().map_or(0, |request| request.id);
 
         if matches!(
@@ -126,7 +124,7 @@ mod tests {
     /// Round-trip one request against a halted daemon on a real socket.
     async fn ask(request: &str) -> Response {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("daemon.sock");
+        let path = super::super::listener::test_socket_path(&dir, "daemon.sock");
         let listener: Listener = UnixListener::bind(&path).unwrap().into();
         let stop = watch::channel(false).0;
         let refusal = CryptoError::KeystoreUnavailable("locked")
@@ -178,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_is_acknowledged_and_ends_the_server() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("daemon.sock");
+        let path = super::super::listener::test_socket_path(&dir, "daemon.sock");
         let listener: Listener = UnixListener::bind(&path).unwrap().into();
         let stop = watch::channel(false).0;
         let server = tokio::spawn(serve(

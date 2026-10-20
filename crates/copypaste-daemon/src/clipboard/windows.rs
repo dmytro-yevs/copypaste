@@ -13,6 +13,7 @@ use clipboard_win::{raw, Clipboard};
 use tracing::{debug, warn};
 
 mod attribution;
+mod notifications;
 mod read;
 mod staging;
 mod transcode;
@@ -47,10 +48,18 @@ pub struct WindowsClipboard {
     staging: Option<staging::StagingArea>,
     attribution: Attribution,
     sequence_unavailable_logged: bool,
+    notifications: Option<notifications::ClipboardNotifications>,
 }
 
 impl WindowsClipboard {
     pub fn new() -> std::io::Result<Self> {
+        let notifications = match notifications::ClipboardNotifications::start() {
+            Ok(listener) => Some(listener),
+            Err(error) => {
+                warn!(%error, "clipboard notifications unavailable; using polling");
+                None
+            }
+        };
         Ok(Self {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
@@ -58,6 +67,7 @@ impl WindowsClipboard {
             staging: None,
             attribution: Attribution::default(),
             sequence_unavailable_logged: false,
+            notifications,
         })
     }
 
@@ -157,6 +167,11 @@ impl WindowsClipboard {
 }
 
 impl ClipboardSource for WindowsClipboard {
+    fn change_signal(&self) -> Option<std::sync::Arc<super::ChangeSignal>> {
+        self.notifications
+            .as_ref()
+            .map(|listener| listener.signal())
+    }
     fn poll(&mut self) -> Option<Capture> {
         let settings = copypaste_ipc::ConfigData::default();
         self.poll_with_policy(CapturePolicy::new(&settings))
@@ -291,6 +306,12 @@ impl ClipboardSource for WindowsClipboard {
             Some(count) => !self.tracker.is_current(count),
             None => false,
         }
+    }
+
+    fn retry_required(&mut self) -> bool {
+        self.sequence_number()
+            .map(|count| !self.tracker.is_current(count))
+            .unwrap_or(true)
     }
 
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
@@ -489,6 +510,33 @@ mod tests {
         let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
         raw::empty().expect("empty the clipboard");
         raw::set_file_list(paths).expect("set a test file list");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "drives the real Windows clipboard"]
+    async fn clipboard_notification_wakes_and_sequence_captures_change() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        let signal = clipboard.change_signal().expect("notification listener");
+        let _ = clipboard.poll();
+        while tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            signal.notify.notified(),
+        )
+        .await
+        .is_ok()
+        {}
+
+        write_text("copypaste notification test");
+        tokio::time::timeout(std::time::Duration::from_secs(2), signal.notify.notified())
+            .await
+            .expect("clipboard notification");
+        assert!(clipboard.changed());
+        assert_eq!(
+            clipboard.poll().unwrap().content,
+            "copypaste notification test"
+        );
+        assert!(clipboard.poll().is_none());
     }
 
     /// T-21, T-4, I-1, I-2. Also the first question of all: does the sequence

@@ -172,7 +172,12 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     api.emitWatch(
-      frb.RuntimeEvent(kind: 'peers', itemCount: BigInt.zero, captured: false),
+      frb.RuntimeEvent(
+        kind: 'peers',
+        itemCount: BigInt.zero,
+        captured: false,
+        runtimeWatch: false,
+      ),
     );
     await Future<void>.delayed(Duration.zero);
 

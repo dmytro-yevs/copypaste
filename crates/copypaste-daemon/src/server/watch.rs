@@ -24,7 +24,6 @@
 
 use copypaste_ipc::transport::OwnedWriteHalf;
 use copypaste_ipc::{EventData, Response, ResponseData};
-use futures_util::StreamExt;
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 use tokio::sync::watch;
 use tracing::debug;
@@ -51,8 +50,8 @@ pub(super) async fn pump(
             _ = shutdown.changed() => break,
             next = reader.next() => match next {
                 // EOF: the client closed the connection.
-                None => break,
-                Some(_) => continue,
+                None | Some(Err(_)) => break,
+                Some(Ok(_)) => continue,
             },
             received = events.recv() => match received {
                 Ok(event) => event,
@@ -74,4 +73,121 @@ pub(super) async fn pump(
             break;
         }
     }
+}
+
+/// Opt-in stream: legacy changes and separate runtime-only payloads share one
+/// connection, while legacy watchers never see progress events.
+pub(super) async fn pump_runtime(
+    state: std::sync::Arc<crate::AppState>,
+    mut events: Receiver<EventData>,
+    mut runtime_events: Receiver<copypaste_ipc::RuntimeEventData>,
+    id: u64,
+    reader: &mut Reader,
+    writer: &mut OwnedWriteHalf,
+    shutdown: &mut watch::Receiver<bool>,
+) {
+    if !send_capture_snapshot(&state, id, writer).await {
+        return;
+    }
+    loop {
+        let event = tokio::select! {
+            biased;
+            _ = shutdown.changed() => break,
+            next = reader.next() => match next {
+                None | Some(Err(_)) => break,
+                Some(Ok(_)) => continue,
+            },
+            received = events.recv() => match received {
+                Ok(change) => copypaste_ipc::RuntimeEventData { change: Some(change), progress: None, capture: None },
+                Err(RecvError::Lagged(_)) => {
+                    if !send_recovery(&state, id, writer).await { break; }
+                    continue;
+                },
+                Err(RecvError::Closed) => break,
+            },
+            received = runtime_events.recv() => match received {
+                Ok(event) => event,
+                Err(RecvError::Lagged(_)) => {
+                    if !send_recovery(&state, id, writer).await { break; }
+                    continue;
+                },
+                Err(RecvError::Closed) => break,
+            },
+        };
+        if send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+async fn send_capture_snapshot(
+    state: &std::sync::Arc<crate::AppState>,
+    id: u64,
+    writer: &mut OwnedWriteHalf,
+) -> bool {
+    let state = std::sync::Arc::clone(state);
+    let snapshot =
+        tokio::task::spawn_blocking(move || crate::server::items::status(&state, 0).data).await;
+    let Ok(Some(ResponseData::Status(status))) = snapshot else {
+        return false;
+    };
+    let event = copypaste_ipc::RuntimeEventData {
+        change: None,
+        progress: None,
+        capture: Some(status),
+    };
+    send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
+        .await
+        .is_ok()
+}
+
+async fn send_recovery(
+    state: &std::sync::Arc<crate::AppState>,
+    id: u64,
+    writer: &mut OwnedWriteHalf,
+) -> bool {
+    if !send_capture_snapshot(state, id, writer).await {
+        return false;
+    }
+    let state = std::sync::Arc::clone(state);
+    let Ok((item_count, sync_status)) = tokio::task::spawn_blocking(move || {
+        let count = state.store.count().unwrap_or(0);
+        let sync = state
+            .p2p
+            .node()
+            .sync_status(state.settings.get().sync_enabled);
+        (count, sync)
+    })
+    .await
+    else {
+        return false;
+    };
+    // A lost invalidation can cover both history and peers. Re-read both once.
+    for kind in [
+        copypaste_ipc::EventKind::Items,
+        copypaste_ipc::EventKind::Peers,
+    ] {
+        let change = EventData {
+            event: kind,
+            item_count,
+            captured: false,
+            captured_item_id: None,
+            sync_status: (kind == copypaste_ipc::EventKind::Peers).then(|| sync_status.clone()),
+        };
+        let event = copypaste_ipc::RuntimeEventData {
+            change: Some(change),
+            progress: None,
+            capture: None,
+        };
+        if send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+    }
+    true
 }

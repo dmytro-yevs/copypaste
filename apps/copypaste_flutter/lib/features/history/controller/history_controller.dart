@@ -11,6 +11,7 @@ import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
 import 'history_resource_limits.dart';
 import 'history_summary.dart';
+import 'history_window_index.dart';
 import 'history_spoiler_controller.dart';
 
 enum HistoryLoadState { initial, loading, ready, empty, error }
@@ -21,6 +22,16 @@ enum _HistoryBulkMutation { delete, pin, unpin }
 
 typedef _ImagePreviewKey = ({String id, int? edge, int? width, int? height});
 
+String _historyDateSectionKey(DateTime value, DateTime now) {
+  final local = value.toLocal();
+  final date = DateTime(local.year, local.month, local.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = DateTime(today.year, today.month, today.day - 1);
+  if (date == today) return 'today';
+  if (date == yesterday) return 'yesterday';
+  return 'date-${date.toIso8601String().split('T').first}';
+}
+
 /// Keeps paged history, selection, query cancellation and bounded media caches
 /// outside the widget tree.
 class HistoryController extends ChangeNotifier {
@@ -28,6 +39,7 @@ class HistoryController extends ChangeNotifier {
     this._repository, {
     this.pageSize = 50,
     this.includeFacets = true,
+    this.separatePinnedWindow = false,
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
     this.ocr,
@@ -65,7 +77,9 @@ class HistoryController extends ChangeNotifier {
 
   final HistoryRepository _repository;
   final int pageSize;
+  int get _pageRows => pageSize.clamp(1, HistoryResourceLimits.pageRows);
   final bool includeFacets;
+  final bool separatePinnedWindow;
   final Duration _searchDebounce;
   final HistoryFileDownloader? _fileDownloader;
   late final HistoryFileTransfer _fileTransfer = HistoryFileTransfer(
@@ -76,7 +90,125 @@ class HistoryController extends ChangeNotifier {
   bool _refreshAfterFileImport = false;
   bool get canImportFiles => _filePicker != null && !_disposed;
   bool get isImportingFiles => _isImportingFiles;
-  final List<HistoryClip> _items = [];
+  // All row changes go through these helpers to preserve exposed snapshots.
+  List<HistoryClip> _items = [];
+  bool _itemsFrozen = false;
+  late HistoryWindowIndex _window = HistoryWindowIndex(
+    maxPages: HistoryResourceLimits.residentPages,
+    maxBytes: HistoryResourceLimits.residentSummaryBytes,
+    independentPins: separatePinnedWindow,
+  );
+  Future<Set<String>> Function()? beforeWindowChange;
+  VoidCallback? afterWindowChange;
+
+  int? get _firstResidentPage {
+    final index = _window.pages.indexWhere((page) => page.items != null);
+    return index < 0 ? null : index;
+  }
+
+  int? get _firstRecentResidentPage {
+    final index = _window.pages.indexWhere(
+      (page) => page.items != null && page.items!.any((item) => !item.pinned),
+    );
+    return index < 0 ? null : index;
+  }
+
+  int? get _lastResidentPage {
+    final index = _window.pages.lastIndexWhere((page) => page.items != null);
+    return index < 0 ? null : index;
+  }
+
+  int? get _firstScrollablePage => separatePinnedWindow
+      ? (_firstRecentResidentPage ?? _firstResidentPage)
+      : _firstResidentPage;
+  bool get _hasEvictedPages => _window.pages.any(
+    (page) => page.items == null || page.items!.length < page.ids.length,
+  );
+  bool get canLoadPrevious {
+    final first = _firstScrollablePage;
+    if (first == null || first == 0) return false;
+    if (!separatePinnedWindow || _firstRecentResidentPage == null) return true;
+    final previous = _window.pages[first - 1];
+    return previous.ids.length > previous.pinnedIds.length;
+  }
+
+  bool get canLoadPinnedPrevious {
+    final index = _window.pages.indexWhere(
+      (page) => page.items != null && page.items!.any((item) => item.pinned),
+    );
+    return index > 0 && _window.pages[index - 1].pinnedIds.isNotEmpty;
+  }
+
+  bool get canLoadPinnedMore {
+    final index = _window.pages.lastIndexWhere(
+      (page) => page.items != null && page.items!.any((item) => item.pinned),
+    );
+    return index >= 0 &&
+        index + 1 < _window.pages.length &&
+        _window.pages[index + 1].pinnedIds.isNotEmpty;
+  }
+
+  List<String> get visitedIds => List.unmodifiable(_window.ids);
+  bool hasVisited(String id) =>
+      _window.pages.any((page) => page.ids.contains(id));
+  List<String> get visitedPinnedIds => List.unmodifiable(_window.pinnedIds);
+  bool isVisitedPinned(String id) =>
+      _window.pages.any((page) => page.pinnedIds.contains(id));
+  List<String> get visitedRecentIds {
+    final pinned = _window.pinnedIds.toSet();
+    return List.unmodifiable(_window.ids.where((id) => !pinned.contains(id)));
+  }
+
+  List<String> get _visitedVisibleIds {
+    final now = DateTime.now();
+    final result = <String>[];
+    for (final page in _window.pages) {
+      for (var i = 0; i < page.ids.length; i++) {
+        final id = page.ids[i];
+        if (page.pinnedIds.contains(id)) {
+          if (!_collapsedSections.contains('pinned')) result.add(id);
+          continue;
+        }
+        if (_query.sort == HistorySort.relevance) {
+          result.add(id);
+          continue;
+        }
+        final section = _historyDateSectionKey(
+          DateTime.fromMillisecondsSinceEpoch(page.createdAtMillis[i]),
+          now,
+        );
+        if (!_collapsedSections.contains(section)) result.add(id);
+      }
+    }
+    return result;
+  }
+
+  List<String> get visibleVisitedIds => List.unmodifiable(_visitedVisibleIds);
+
+  String? get paginationMarker => _nextCursor;
+
+  void _publishWindow() {
+    _replaceItems([
+      for (final page in _window.pages)
+        if (page.items != null) ...page.items!,
+    ]);
+    _nextCursor = _window.pages.isEmpty ? null : _window.pages.last.nextCursor;
+    afterWindowChange?.call();
+  }
+
+  void _mutateItems(void Function(List<HistoryClip>) mutate) {
+    if (_itemsFrozen) {
+      _items = List.of(_items);
+      _itemsFrozen = false;
+    }
+    mutate(_items);
+  }
+
+  void _replaceItems(List<HistoryClip> items) {
+    _items = items;
+    _itemsFrozen = false;
+  }
+
   final LinkedHashMap<_ImagePreviewKey, HistoryImagePreview?> _imagePreviews =
       LinkedHashMap();
   final LinkedHashMap<String, HistorySourceAppIcon?> _sourceIcons =
@@ -91,8 +223,11 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _failedDownloads = <String>{};
   final Set<String> _cancelledDownloads = <String>{};
   final Map<String, double> _downloadProgress = <String, double>{};
+  final ValueNotifier<int> _downloadProgressChanges = ValueNotifier<int>(0);
   final Set<String> _collapsedSections = <String>{};
   final Set<String> _bulkSelectedIds = <String>{};
+  final Map<String, double> _quickPastePinnedRowExtents = <String, double>{};
+  final Map<String, double> _quickPasteRecentRowExtents = <String, double>{};
   String? _bulkAnchorId;
   Set<String>? _bulkDragBaseline;
   bool _refreshAfterBulkDrag = false;
@@ -167,7 +302,8 @@ class HistoryController extends ChangeNotifier {
     _bulkDragBaseline = null;
     _queryEpoch++;
     _mediaEpoch++;
-    _items.clear();
+    _replaceItems([]);
+    _window.clear();
     _facets = const HistoryFacets();
     _selectedClip = null;
     _selectedDetailEpoch++;
@@ -188,7 +324,89 @@ class HistoryController extends ChangeNotifier {
   HistoryQuery get query => _query;
   HistoryFacets get facets => _facets;
   HistoryLoadState get state => _state;
-  List<HistoryClip> get items => List.unmodifiable(_items);
+  List<HistoryClip> get items {
+    if (!_itemsFrozen) {
+      _items = List.unmodifiable(_items);
+      _itemsFrozen = true;
+    }
+    return _items;
+  }
+
+  /// Page views are controller-private ledger references plus at most three
+  /// resident summary pages. Callers must never retain the nullable summaries.
+  List<HistoryWindowPage> get windowPages => List.unmodifiable(_window.pages);
+
+  Future<void> reportPageExtent(int index, double extent) async {
+    if (_disposed || index < 0 || index >= _window.pages.length) return;
+    final page = _window.pages[index];
+    if (page.extent == extent) return;
+    page.extent = extent;
+    if (_window.exceedsLimits) {
+      final anchors = await beforeWindowChange?.call() ?? const <String>{};
+      if (_disposed) return;
+      _window.retainAround(index, protectedIds: anchors);
+      _publishWindow();
+      notifyListeners();
+    }
+  }
+
+  Future<void> reportQuickPastePageExtent(
+    int index,
+    bool pinned,
+    double extent,
+  ) async {
+    if (_disposed || index < 0 || index >= _window.pages.length) return;
+    final page = _window.pages[index];
+    if (pinned) {
+      page.pinnedExtent = extent;
+    } else {
+      page.recentExtent = extent;
+    }
+    if (_window.exceedsLimits) {
+      final anchors = await beforeWindowChange?.call() ?? const <String>{};
+      if (_disposed) return;
+      _window.retainAround(index, protectedIds: anchors);
+      _publishWindow();
+      notifyListeners();
+    }
+  }
+
+  double? quickPasteRowExtent(String id, {required bool pinned}) =>
+      (pinned ? _quickPastePinnedRowExtents : _quickPasteRecentRowExtents)[id];
+
+  void reportQuickPasteRowExtent(
+    String id, {
+    required bool pinned,
+    required double extent,
+  }) {
+    if (_disposed || extent < 0) return;
+    (pinned ? _quickPastePinnedRowExtents : _quickPasteRecentRowExtents)[id] =
+        extent;
+    final index = _window.pages.indexWhere((page) => page.ids.contains(id));
+    if (index < 0 || !_window.exceedsLimits) return;
+    _window.retainAround(index, protectedIds: {id});
+    _publishWindow();
+    notifyListeners();
+  }
+
+  Future<void> materializePage(int index, {bool force = false}) async {
+    if (index < 0 || index >= _window.pages.length) return;
+    final page = _window.pages[index];
+    if ((!force && page.items != null) || _isLoadingMore) return;
+    await _loadSavedPage(index);
+  }
+
+  Future<HistoryClip?> materializeId(String id) async {
+    final index = _window.pages.indexWhere((page) => page.ids.contains(id));
+    if (index < 0) return null;
+    final page = _window.pages[index];
+    await materializePage(
+      index,
+      force: page.items?.any((item) => item.id == id) != true,
+    );
+    return _items.where((item) => item.id == id).firstOrNull;
+  }
+
   String? get selectedId => _selectedId;
   HistoryClip? get selectedClip => _selectedClip;
   String? get errorMessage => _errorMessage;
@@ -258,6 +476,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   double? downloadProgressFor(String id) => _downloadProgress[id];
+  Listenable get downloadProgressChanges => _downloadProgressChanges;
   bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
 
   void toggleSection(String key) {
@@ -314,7 +533,11 @@ class HistoryController extends ChangeNotifier {
       toggleBulkSelection(id);
       return;
     }
-    final ids = _bulkRange(anchor, id, orderedIds);
+    final visited = _visitedVisibleIds;
+    final order = orderedIds.contains(anchor) && orderedIds.contains(id)
+        ? orderedIds
+        : visited;
+    final ids = _bulkRange(anchor, id, order);
     if (!additive) _bulkSelectedIds.clear();
     _bulkSelectedIds.addAll(ids);
     _bulkAnchorId = anchor;
@@ -326,10 +549,10 @@ class HistoryController extends ChangeNotifier {
     final end = orderedIds.indexOf(id);
     if (end < 0) return const [];
     if (start < 0) start = end;
-    final loaded = _items.map((clip) => clip.id).toSet();
+    final known = _window.ids.toSet();
     return orderedIds
         .sublist(start < end ? start : end, (start > end ? start : end) + 1)
-        .where(loaded.contains)
+        .where(known.contains)
         .toList(growable: false);
   }
 
@@ -355,7 +578,10 @@ class HistoryController extends ChangeNotifier {
     if (_disposed || baseline == null || anchor == null || _isBulkMutating) {
       return;
     }
-    final ids = {...baseline, ..._bulkRange(anchor, id, orderedIds)};
+    final order = orderedIds.contains(anchor) && orderedIds.contains(id)
+        ? orderedIds
+        : _visitedVisibleIds;
+    final ids = {...baseline, ..._bulkRange(anchor, id, order)};
     if (setEquals(ids, _bulkSelectedIds)) return;
     _bulkSelectedIds
       ..clear()
@@ -405,19 +631,21 @@ class HistoryController extends ChangeNotifier {
       while (_visibleItemsRefresh != null) {
         await _visibleItemsRefresh;
       }
-      final clips = _items
-          .where((clip) => _bulkSelectedIds.contains(clip.id))
-          .toList();
-      for (final clip in clips) {
+      final ids = List<String>.of(_bulkSelectedIds);
+      for (final id in ids) {
         if (_disposed) return false;
         try {
           if (action == _HistoryBulkMutation.delete) {
-            await _repository.delete(clip.id);
+            await _repository.delete(id);
             if (_disposed) return false;
-            _items.removeWhere((item) => item.id == clip.id);
-            _bulkSelectedIds.remove(clip.id);
+            _mutateItems((items) => items.removeWhere((item) => item.id == id));
+            _window.removeId(id);
+            _bulkSelectedIds.remove(id);
           } else {
             final pinned = action == _HistoryBulkMutation.pin;
+            final clip =
+                _items.where((item) => item.id == id).firstOrNull ??
+                await _repository.get(id);
             if (clip.pinned == pinned) continue;
             await _repository.setPinned(clip.id, pinned);
             if (_disposed) return false;
@@ -457,7 +685,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   void _pruneBulkSelection() {
-    final ids = _items.map((clip) => clip.id).toSet();
+    final ids = _window.ids.toSet();
     _bulkSelectedIds.removeWhere((id) => !ids.contains(id));
     if (!ids.contains(_bulkAnchorId)) _bulkAnchorId = null;
   }
@@ -631,14 +859,13 @@ class HistoryController extends ChangeNotifier {
       return;
     }
     final epoch = ++_queryEpoch;
-    final retainedCount = _items.length;
     _isLoadingMore = false;
     _nextCursor = null;
     var refreshed = false;
     await Future.wait([
       () async {
         try {
-          await _readVisibleItems(epoch, retainedCount);
+          await _readVisibleItems(epoch);
           refreshed = true;
         } catch (_) {
           if (_isCurrent(epoch)) {
@@ -657,36 +884,283 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
-  Future<void> _readVisibleItems(int epoch, int retainedCount) async {
-    final refreshed = <HistoryClip>[];
-    String? cursor;
-    var skipped = 0;
-    do {
+  bool _samePageBoundary(HistoryWindowPage ref, HistoryClipPage page) {
+    if (page.nextCursor != ref.nextCursor ||
+        !listEquals(ref.ids, page.items.map((item) => item.id).toList()))
+      return false;
+    return page.items.every(
+      (item) => ref.pinnedIds.contains(item.id) == item.pinned,
+    );
+  }
+
+  Future<void> _readVisibleItems(int epoch) async {
+    final resident = <int>[
+      for (var i = 0; i < _window.pages.length; i++)
+        if (_window.pages[i].items != null) i,
+    ];
+    final pending = <(int, HistoryClipPage)>[];
+    var boundaryChanged = false;
+    int? invalidFrom;
+    HistoryClipPage? freshFirstPage;
+    var changed = false;
+    for (final index in resident) {
+      final ref = _window.pages[index];
       final page = await _repository.query(
         query: _query,
-        limit: pageSize,
-        cursor: cursor,
+        limit: _pageRows,
+        cursor: ref.inputCursor,
       );
       if (!_isCurrent(epoch)) return;
-      refreshed.addAll(page.items);
-      skipped += page.skippedUndecryptable;
-      cursor = page.nextCursor;
-    } while (cursor != null && refreshed.length < retainedCount);
+      if (!_samePageBoundary(ref, page)) {
+        if (index == 0 && ref.inputCursor == null) freshFirstPage = page;
+        boundaryChanged = true;
+        invalidFrom = index;
+        break;
+      }
+      final previous = {for (final item in ref.items!) item.id: item};
+      final rows = <HistoryClip>[];
+      for (final candidate in page.items) {
+        if (ref.pinnedIds.contains(candidate.id) != candidate.pinned) {
+          boundaryChanged = true;
+          break;
+        }
+        final old = previous[candidate.id];
+        if (old == null) continue; // This half of a mixed page is evicted.
+        if (old.pinned != candidate.pinned) {
+          boundaryChanged = true;
+          break;
+        }
+        final item = _sameSummary(old, candidate) ? old : candidate;
+        rows.add(item);
+        if (!identical(old, item)) changed = true;
+      }
+      if (boundaryChanged) {
+        if (index == 0 && ref.inputCursor == null) freshFirstPage = page;
+        break;
+      }
+      pending.add((
+        index,
+        HistoryClipPage(
+          items: rows,
+          nextCursor: page.nextCursor,
+          skippedUndecryptable: page.skippedUndecryptable,
+        ),
+      ));
+    }
     if (_repository is HistorySpoilerRepository) {
       await spoilers.refresh();
       if (!_isCurrent(epoch)) return;
     }
-    _items
-      ..clear()
-      ..addAll(refreshed);
-    _pruneBulkSelection();
-    _nextCursor = cursor;
-    _skippedUndecryptable = skipped;
+    if (boundaryChanged) {
+      pending.clear();
+      await _rebuildWindow(
+        epoch,
+        invalidFrom: invalidFrom ?? resident.first,
+        freshFirstPage: freshFirstPage,
+      );
+      return;
+    }
+    for (final (index, page) in pending) {
+      // Keep the complete ID metadata even if only one half of a mixed page
+      // is materialized.
+      _window.pages[index].items = page.items;
+      _window.pages[index].skippedUndecryptable = page.skippedUndecryptable;
+    }
+    if (changed) {
+      final anchors = await beforeWindowChange?.call() ?? <String>{};
+      if (!_isCurrent(epoch)) {
+        afterWindowChange?.call();
+        return;
+      }
+      _window.retainAround(resident.last, protectedIds: anchors);
+      _publishWindow();
+    }
+    _nextCursor = _lastResidentPage == null
+        ? null
+        : _window.pages[_lastResidentPage!].nextCursor;
+    _skippedUndecryptable = _window.pages.fold(
+      0,
+      (sum, page) => sum + page.skippedUndecryptable,
+    );
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
     final selectedId = _selectedId;
-    if (selectedId != null) {
-      unawaited(select(selectedId));
+    if (selectedId != null) unawaited(select(selectedId));
+  }
+
+  /// A changed boundary invalidates later keyset cursors. Rebuild metadata in
+  /// order, retaining only the page that contains the actual visible anchor.
+  Future<void> _rebuildWindow(
+    int epoch, {
+    int invalidFrom = 0,
+    HistoryClipPage? freshFirstPage,
+  }) async {
+    final anchors = await beforeWindowChange?.call() ?? <String>{};
+    if (!_isCurrent(epoch)) {
+      afterWindowChange?.call();
+      return;
     }
+    final wanted = anchors.firstOrNull ?? _items.firstOrNull?.id ?? _selectedId;
+    final oldIds = visitedIds;
+    final previous = {for (final item in _items) item.id: item};
+    final anchorRank = oldIds.indexOf(wanted ?? '');
+    final ranks = <String, int>{
+      for (var i = 0; i < oldIds.length; i++) oldIds[i]: i,
+    };
+    final rebuilt = HistoryWindowIndex(
+      maxPages: HistoryResourceLimits.residentPages,
+      maxBytes: HistoryResourceLimits.residentSummaryBytes,
+      independentPins: separatePinnedWindow,
+    );
+    final start = invalidFrom.clamp(0, _window.pages.length).toInt();
+    for (var index = 0; index < start; index++) {
+      rebuilt.pages.add(_window.pages[index].ledgerCopy());
+    }
+    String? cursor = start < _window.pages.length
+        ? _window.pages[start].inputCursor
+        : null;
+    int? fallbackPage;
+    HistoryClipPage? fallbackContents;
+    var fallbackDistance = 1 << 30;
+    var found = false;
+    do {
+      final incoming = cursor == null && start == 0 && freshFirstPage != null
+          ? freshFirstPage
+          : await _repository.query(
+              query: _query,
+              limit: _pageRows,
+              cursor: cursor,
+            );
+      freshFirstPage = null;
+      final page = HistoryClipPage(
+        items: [
+          for (final candidate in incoming.items)
+            if (previous[candidate.id] case final old?)
+              _sameSummary(old, candidate) ? old : candidate
+            else
+              candidate,
+        ],
+        nextCursor: incoming.nextCursor,
+        skippedUndecryptable: incoming.skippedUndecryptable,
+      );
+      if (!_isCurrent(epoch)) {
+        afterWindowChange?.call();
+        return;
+      }
+      final index = rebuilt.pages.length;
+      rebuilt.append(cursor, page);
+      if (fallbackPage == null && page.items.isNotEmpty) {
+        fallbackPage = index;
+        fallbackContents = page;
+      }
+      if (wanted != null && page.items.any((item) => item.id == wanted)) {
+        found = true;
+        break;
+      }
+      for (final item in page.items) {
+        final rank = ranks[item.id];
+        if (rank == null || anchorRank < 0) continue;
+        final distance =
+            (rank - anchorRank).abs() * 2 + (rank < anchorRank ? 1 : 0);
+        if (distance < fallbackDistance) {
+          fallbackDistance = distance;
+          fallbackPage = index;
+          fallbackContents = page;
+        }
+      }
+      rebuilt.pages.last.items = null;
+      cursor = page.nextCursor;
+    } while (cursor != null);
+    if (!found && fallbackPage != null && fallbackContents != null) {
+      rebuilt.pages[fallbackPage].items = fallbackContents.items;
+    }
+    if (found && rebuilt.pages.last.nextCursor != null) {
+      final input = rebuilt.pages.last.nextCursor;
+      final page = await _repository.query(
+        query: _query,
+        limit: _pageRows,
+        cursor: input,
+      );
+      if (!_isCurrent(epoch)) {
+        afterWindowChange?.call();
+        return;
+      }
+      rebuilt.append(input, page);
+    }
+    if (separatePinnedWindow) {
+      final pinned = rebuilt.pages.indexWhere(
+        (page) => page.pinnedIds.isNotEmpty,
+      );
+      if (pinned >= 0 && rebuilt.pages[pinned].items == null) {
+        final page = await _repository.query(
+          query: _query,
+          limit: _pageRows,
+          cursor: rebuilt.pages[pinned].inputCursor,
+        );
+        if (!_isCurrent(epoch)) {
+          afterWindowChange?.call();
+          return;
+        }
+        rebuilt.replace(pinned, page);
+      }
+    }
+    final active = rebuilt.pages.indexWhere(
+      (page) =>
+          page.items != null && (wanted == null || page.ids.contains(wanted)),
+    );
+    if (active >= 0)
+      rebuilt.retainAround(active, protectedIds: {if (wanted != null) wanted});
+    _window = rebuilt;
+    if (_window.pages.isNotEmpty && _window.pages.last.nextCursor == null) {
+      _pruneBulkSelection();
+    }
+    _publishWindow();
+    _skippedUndecryptable = _window.pages.fold(
+      0,
+      (sum, page) => sum + page.skippedUndecryptable,
+    );
+    _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
+    final selectedId = _selectedId;
+    if (selectedId != null) unawaited(select(selectedId));
+  }
+
+  // Retain the row object only when every field supplied to the UI is equal.
+  // A stable snapshot lets consumers reuse their derived list after refresh.
+  bool _sameSummary(HistoryClip a, HistoryClip b) {
+    final af = a.file;
+    final bf = b.file;
+    final ai = a.image;
+    final bi = b.image;
+    return a.id == b.id &&
+        a.secret == b.secret &&
+        a.transient == b.transient &&
+        a.contentType == b.contentType &&
+        a.preview == b.preview &&
+        a.createdAt == b.createdAt &&
+        a.pinned == b.pinned &&
+        a.kind == b.kind &&
+        a.origin == b.origin &&
+        a.originDeviceClass == b.originDeviceClass &&
+        a.sourceApp == b.sourceApp &&
+        a.sourceAppIconId == b.sourceAppIconId &&
+        a.truncated == b.truncated &&
+        a.body == b.body &&
+        a.colorRgba == b.colorRgba &&
+        a.tooLargeToSync == b.tooLargeToSync &&
+        ((af == null && bf == null) ||
+            (af != null &&
+                bf != null &&
+                af.name == bf.name &&
+                af.mimeType == bf.mimeType &&
+                af.sourceReference == bf.sourceReference &&
+                af.sourceAvailable == bf.sourceAvailable &&
+                af.sizeBytes == bf.sizeBytes &&
+                af.fileCount == bf.fileCount)) &&
+        ((ai == null && bi == null) ||
+            (ai != null &&
+                bi != null &&
+                ai.width == bi.width &&
+                ai.height == bi.height &&
+                ai.sizeBytes == bi.sizeBytes));
   }
 
   Future<void> refreshFacets() async {
@@ -740,17 +1214,19 @@ class HistoryController extends ChangeNotifier {
     final epoch = ++_queryEpoch;
     _isLoadingMore = false;
     _nextCursor = null;
-    _items.clear();
+    _replaceItems([]);
+    _window.clear();
     _skippedUndecryptable = 0;
     _state = HistoryLoadState.loading;
     _errorMessage = null;
     notifyListeners();
     try {
-      final page = await _repository.query(query: _query, limit: pageSize);
+      final page = await _repository.query(query: _query, limit: _pageRows);
       if (!_isCurrent(epoch)) {
         return;
       }
-      _items.addAll(page.items);
+      _window.append(null, page);
+      _replaceItems(List.of(page.items));
       _pruneBulkSelection();
       _nextCursor = page.nextCursor;
       _skippedUndecryptable = page.skippedUndecryptable;
@@ -789,19 +1265,106 @@ class HistoryController extends ChangeNotifier {
     try {
       final page = await _repository.query(
         query: _query,
-        limit: pageSize,
+        limit: _pageRows,
         cursor: cursor,
       );
       if (!_isCurrent(epoch)) {
         return;
       }
-      _items.addAll(page.items);
-      _nextCursor = page.nextCursor;
-      _skippedUndecryptable += page.skippedUndecryptable;
+      final next = _window.pages.length;
+      _window.append(cursor, page);
+      _skippedUndecryptable = _window.pages.fold(
+        0,
+        (sum, ref) => sum + ref.skippedUndecryptable,
+      );
+      final anchors = _window.exceedsLimits
+          ? await beforeWindowChange?.call() ?? <String>{}
+          : <String>{};
+      if (!_isCurrent(epoch)) {
+        afterWindowChange?.call();
+        return;
+      }
+      _window.retainAround(next, protectedIds: anchors);
+      _publishWindow();
     } catch (_) {
       if (_isCurrent(epoch)) {
         _errorMessage = 'More history could not be loaded.';
       }
+    } finally {
+      if (_isCurrent(epoch)) {
+        _isLoadingMore = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> loadPrevious() async {
+    while (_visibleItemsRefresh != null) {
+      await _visibleItemsRefresh;
+      if (_disposed) return;
+    }
+    final first = _firstScrollablePage;
+    if (first == null || first == 0) return;
+    await _loadSavedPage(first - 1);
+  }
+
+  Future<void> loadPinnedPrevious() async {
+    if (!canLoadPinnedPrevious) return;
+    final first = _window.pages.indexWhere(
+      (page) => page.items != null && page.items!.any((item) => item.pinned),
+    );
+    await _loadSavedPage(first - 1);
+  }
+
+  Future<void> loadPinnedMore() async {
+    if (!canLoadPinnedMore) return;
+    final last = _window.pages.lastIndexWhere(
+      (page) => page.items != null && page.items!.any((item) => item.pinned),
+    );
+    await _loadSavedPage(last + 1);
+  }
+
+  Future<void> _loadSavedPage(int index) async {
+    if (_isLoadingMore ||
+        _isBulkMutating ||
+        _isReorderingPinned ||
+        _state != HistoryLoadState.ready)
+      return;
+    final epoch = _queryEpoch;
+    _isLoadingMore = true;
+    notifyListeners();
+    try {
+      final page = await _repository.query(
+        query: _query,
+        limit: _pageRows,
+        cursor: _window.pages[index].inputCursor,
+      );
+      if (!_isCurrent(epoch)) return;
+      if (!_samePageBoundary(_window.pages[index], page)) {
+        await _rebuildWindow(
+          epoch,
+          invalidFrom: index,
+          freshFirstPage: index == 0 ? page : null,
+        );
+        return;
+      }
+      _window.replace(index, page);
+      _skippedUndecryptable = _window.pages.fold(
+        0,
+        (sum, ref) => sum + ref.skippedUndecryptable,
+      );
+      final anchors = _window.exceedsLimits
+          ? await beforeWindowChange?.call() ?? <String>{}
+          : <String>{};
+      if (!_isCurrent(epoch)) {
+        afterWindowChange?.call();
+        return;
+      }
+      _window.retainAround(index, protectedIds: anchors);
+      _publishWindow();
+    } catch (_) {
+      if (_isCurrent(epoch))
+        _errorMessage = 'Earlier history could not be loaded.';
     } finally {
       if (_isCurrent(epoch)) {
         _isLoadingMore = false;
@@ -933,7 +1496,7 @@ class HistoryController extends ChangeNotifier {
         onProgress: (progress) {
           if (_disposed) return;
           _downloadProgress[clip.id] = progress;
-          notifyListeners();
+          _downloadProgressChanges.value++;
         },
       );
       if (_cancelledDownloads.contains(clip.id)) {
@@ -1087,10 +1650,17 @@ class HistoryController extends ChangeNotifier {
       return false;
     }
     final next = !clip.pinned;
+    if (_hasEvictedPages) await beforeWindowChange?.call();
+    if (_disposed) {
+      _pinMutations.remove(clip.id);
+      afterWindowChange?.call();
+      return false;
+    }
     _replace(clip.copyWith(pinned: next));
     if (_selectedId == clip.id) {
       _selectedClip = _selectedClip?.copyWith(pinned: next);
     }
+    if (_hasEvictedPages) afterWindowChange?.call();
     notifyListeners();
     try {
       await _repository.setPinned(clip.id, next);
@@ -1166,23 +1736,26 @@ class HistoryController extends ChangeNotifier {
     if (!canReorderPinned || id == targetId || _cancelledPinnedId == id) {
       return false;
     }
-    final previous = _items
-        .where((item) => item.pinned)
-        .map((item) => item.id)
-        .toList();
+    final previous = _window.pinnedIds.toList();
     if (!previous.contains(id) || !previous.contains(targetId)) return false;
     final ordered = previous.where((value) => value != id).toList();
     ordered.insert(ordered.indexOf(targetId) + (before ? 0 : 1), id);
     if (listEquals(previous, ordered)) return false;
 
-    final retainedCount = _items.length;
     final previousCursor = _nextCursor;
     final epoch = ++_queryEpoch;
     _isReorderingPinned = true;
     _isLoadingMore = false;
     _nextCursor = null;
     _errorMessage = null;
+    if (_hasEvictedPages) await beforeWindowChange?.call();
+    if (!_isCurrent(epoch)) {
+      _isReorderingPinned = false;
+      afterWindowChange?.call();
+      return false;
+    }
     _applyPinnedOrder(ordered);
+    if (_hasEvictedPages) afterWindowChange?.call();
     notifyListeners();
     try {
       await _repository.reorderPinned(ordered);
@@ -1203,7 +1776,7 @@ class HistoryController extends ChangeNotifier {
         _refreshAfterPinnedInteraction = false;
         // Rebuild the continuation marker without clearing the visible list or
         // using a cursor whose last pin may have moved to a different position.
-        await _readVisibleItems(epoch, retainedCount);
+        await _readVisibleItems(epoch);
       }
     } catch (_) {
       if (_isCurrent(epoch)) {
@@ -1223,10 +1796,10 @@ class HistoryController extends ChangeNotifier {
       for (final item in _items.where((item) => item.pinned)) item.id: item,
     };
     final unpinned = _items.where((item) => !item.pinned).toList();
-    _items
-      ..clear()
-      ..addAll(ids.map((id) => byId[id]).whereType<HistoryClip>())
-      ..addAll(unpinned);
+    _replaceItems([
+      ...ids.map((id) => byId[id]).whereType<HistoryClip>(),
+      ...unpinned,
+    ]);
   }
 
   Future<bool> deleteSelected() async {
@@ -1244,11 +1817,18 @@ class HistoryController extends ChangeNotifier {
     notifyListeners();
     try {
       await _repository.delete(id);
-      _items.removeWhere((item) => item.id == id);
+      if (_hasEvictedPages) await beforeWindowChange?.call();
+      if (_disposed) {
+        afterWindowChange?.call();
+        return true;
+      }
+      _mutateItems((items) => items.removeWhere((item) => item.id == id));
+      _window.removeId(id);
       _bulkSelectedIds.remove(id);
       if (_selectedId == id) clearSelection();
       _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
       if (_items.isEmpty) _state = HistoryLoadState.empty;
+      if (_hasEvictedPages) afterWindowChange?.call();
       notifyListeners();
       return true;
     } catch (_) {
@@ -1274,7 +1854,13 @@ class HistoryController extends ChangeNotifier {
     notifyListeners();
     try {
       await _repository.deleteAll();
-      _items.removeWhere((item) => !item.pinned);
+      if (_hasEvictedPages || _nextCursor != null) {
+        if (_selectedClip != null && !_selectedClip!.pinned) clearSelection();
+        await reload();
+        return true;
+      }
+      _mutateItems((items) => items.removeWhere((item) => !item.pinned));
+      _window.retainPinnedOnly();
       _pruneBulkSelection();
       _nextCursor = null;
       _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
@@ -1449,7 +2035,9 @@ class HistoryController extends ChangeNotifier {
   void _replace(HistoryClip clip) {
     final index = _items.indexWhere((item) => item.id == clip.id);
     if (index >= 0) {
-      _items[index] = historySummary(clip);
+      final summary = historySummary(clip);
+      _mutateItems((items) => items[index] = summary);
+      _window.replaceItem(summary);
     }
   }
 
@@ -1469,6 +2057,8 @@ class HistoryController extends ChangeNotifier {
     _cancelWatch();
     _imagePreviewLoads.clear();
     _sourceIconLoads.clear();
+    _downloadProgress.clear();
+    _downloadProgressChanges.dispose();
     super.dispose();
   }
 }

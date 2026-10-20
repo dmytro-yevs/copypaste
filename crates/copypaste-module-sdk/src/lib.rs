@@ -124,5 +124,14 @@ macro_rules! export_host_module {
             // SAFETY: the module host retains these buffers and callbacks through destruction.
             unsafe { $crate::native::create_with_host::<$module>(data, len, host) }
         }
+        #[allow(unsafe_code)]
+        #[no_mangle]
+        pub unsafe extern "C" fn copypaste_module_with_host_v2(
+            data: *const u8,
+            len: usize,
+            host: *const $crate::native::NativeHostApiV2,
+        ) -> *mut std::ffi::c_void {
+            unsafe { $crate::native::create_with_host_v2::<$module>(data, len, host) }
+        }
     };
 }

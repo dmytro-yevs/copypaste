@@ -9,6 +9,7 @@ license.workspace = true
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
+base64.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-core = { path = "../copypaste-core" }
 copypaste-runtime = { path = "../copypaste-runtime" }

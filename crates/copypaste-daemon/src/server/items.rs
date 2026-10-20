@@ -21,7 +21,7 @@ mod wire;
 
 pub(super) use self::copy::{copy, copy_plain_text, save_file};
 use self::wire::{
-    bound_item_preview, decrypt_rows, is_oversized_text, to_wire, to_wire_and_payload,
+    bound_item_preview, decrypt_rows, is_oversized_text, preview_rows, to_wire, to_wire_and_payload,
 };
 use super::messages::{
     decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_BAD_HISTORY_QUERY, MSG_CONTENT_TOO_LARGE,
@@ -39,7 +39,7 @@ use crate::AppState;
 /// is 10 000 items — so a real ordering is never refused.
 const MAX_REORDER_IDS: usize = 10_000;
 
-pub(super) fn status(state: &AppState, id: u64) -> Response {
+pub(crate) fn status(state: &AppState, id: u64) -> Response {
     // `status` never fails: an unreadable count is reported as zero rather than
     // turned into an error, because the caller may be probing precisely because
     // the database is unhappy.
@@ -51,16 +51,39 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
         }
     };
 
-    let settings = state.settings.get();
+    let (
+        capture_revision,
+        private_mode,
+        private_mode_epoch,
+        settings_health,
+        sync_enabled,
+        capture_running,
+        clipboard_available,
+    ) = loop {
+        let revision = state.capture_revision();
+        let settings = state.settings.get();
+        let fields = (
+            revision,
+            settings.private_mode,
+            settings.private_mode_epoch(),
+            settings.health().cloned(),
+            settings.sync_enabled,
+            state.capture_running(),
+            state.clipboard_available(),
+        );
+        if revision == state.capture_revision() {
+            break fields;
+        }
+    };
     let device_name = state.meta.device_name();
     let listen_addr = state.p2p.listen_addr();
     Response::ok(
         id,
         ResponseData::Status(StatusData {
-            sync_status: state
-                .p2p
-                .node()
-                .sync_status(state.settings.get().sync_enabled),
+            runtime_watch: true,
+            capture_watch: true,
+            capture_revision,
+            sync_status: state.p2p.node().sync_status(sync_enabled),
             device_details: Some(p2p_contract::local_device_details(
                 &device_name,
                 listen_addr.as_deref(),
@@ -71,16 +94,16 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             protocol_version: PROTOCOL_VERSION,
             listen_addr,
             item_count,
-            capture_running: state.capture_running(),
-            clipboard_available: state.clipboard_available(),
+            capture_running,
+            clipboard_available,
             clipboard_backend: state.backend_name().to_string(),
-            private_mode: settings.private_mode,
-            private_mode_epoch: settings.private_mode_epoch(),
+            private_mode,
+            private_mode_epoch,
             counters: state.counters(),
             // Carried on `status` for the reason the counters are: a client
             // that had to make a second call could render the settings screen
             // before it learned they were not the user's own values.
-            settings_health: settings.health().cloned(),
+            settings_health,
         }),
     )
 }
@@ -107,16 +130,19 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR),
     };
 
-    let page = match state
-        .store
-        .list_from_bounded(after.as_ref(), limit, MAX_PAGE_CONTENT_BYTES)
-    {
+    let page = match state.store.list_previews_bounded(
+        after.as_ref(),
+        limit,
+        MAX_PAGE_CONTENT_BYTES,
+        &state.keyring.item_key(),
+        &state.keyring.preview_key(),
+    ) {
         Ok(page) => page,
         Err(e) => return storage_error(id, "list", &e),
     };
 
     let next = page.next.map(|cursor| cursor.token());
-    let mut wire = decrypt_rows(state, page.items);
+    let mut wire = preview_rows(state, page.items);
     wire.next_cursor = next;
     Response::ok(id, ResponseData::Page(wire))
 }
@@ -154,13 +180,15 @@ pub(super) fn history_query(
         }
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY),
     };
-    let page = match state.modules.query_history(
+    let page = match state.modules.query_history_previews(
         &state.store,
         query,
         after.as_ref(),
         limit,
         MAX_PAGE_CONTENT_BYTES,
         Some(state.meta.device_id()),
+        &state.keyring.item_key(),
+        &state.keyring.preview_key(),
     ) {
         Ok(page) => page,
         Err(StoreError::InvalidCursor) => {
@@ -171,7 +199,7 @@ pub(super) fn history_query(
         }
         Err(error) => return storage_error(id, "history_query", &error),
     };
-    let mut wire = decrypt_rows(state, page.items);
+    let mut wire = preview_rows(state, page.items);
     wire.next_cursor = page.next.map(|cursor| cursor.token());
     Response::ok(id, ResponseData::Page(wire))
 }
@@ -198,36 +226,39 @@ pub(super) fn image_preview(
     max_edge: Option<u32>,
     bounds: Option<copypaste_ipc::ImagePreviewBounds>,
 ) -> Response {
-    let row = match state.store.get(item_id) {
-        Ok(Some(row)) => row,
-        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(error) => return storage_error(id, "image_preview", &error),
-    };
-    if !matches!(
-        copypaste_ipc::content_type::classify(&row.content_type),
-        copypaste_ipc::ContentClass::Image
-    ) {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
-    }
-    let bytes = match copypaste_core::open_binary(
-        &row.content_ciphertext,
-        &state.keyring.item_key(),
-        &row.id,
-    ) {
-        Ok(bytes) => bytes,
-        Err(error) => return decrypt_error(id, &error),
-    };
-    let budget = state.settings.get().max_decoded_image_mb;
-    let thumbnail = match copypaste_core::thumbnail_png(
-        &bytes,
-        budget,
-        max_edge,
-        bounds.map(|bounds| (bounds.width, bounds.height)),
-    ) {
-        Ok(thumbnail) => thumbnail,
-        Err(error) => {
-            warn!(id = %row.id, error = ?error, "image preview unavailable");
+    // Release the encrypted row and decrypted source before encoding the response.
+    let thumbnail = {
+        let row = match state.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+            Err(error) => return storage_error(id, "image_preview", &error),
+        };
+        if !matches!(
+            copypaste_ipc::content_type::classify(&row.content_type),
+            copypaste_ipc::ContentClass::Image
+        ) {
             return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
+        }
+        let bytes = match copypaste_core::open_binary(
+            &row.content_ciphertext,
+            &state.keyring.item_key(),
+            &row.id,
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) => return decrypt_error(id, &error),
+        };
+        let budget = state.settings.get().max_decoded_image_mb;
+        match copypaste_core::thumbnail_png(
+            &bytes,
+            budget,
+            max_edge,
+            bounds.map(|bounds| (bounds.width, bounds.height)),
+        ) {
+            Ok(thumbnail) => thumbnail,
+            Err(error) => {
+                warn!(id = %row.id, error = ?error, "image preview unavailable");
+                return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
+            }
         }
     };
     Response::ok(

@@ -31,6 +31,12 @@ impl SyncSource for ObservedSource {
     ) -> Result<Vec<copypaste_p2p::protocol::ItemSummary>, SyncError> {
         self.source.summaries(since)
     }
+    fn local_summaries(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<copypaste_p2p::protocol::ItemSummary>, SyncError> {
+        self.source.local_summaries(ids)
+    }
     fn fetch(&self, ids: &[String]) -> Result<Vec<copypaste_p2p::protocol::SyncItem>, SyncError> {
         self.source.fetch(ids)
     }
@@ -185,18 +191,31 @@ async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copi
     ));
     assert!(!early.exists());
 
+    let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&progress);
     downloads
-        .save(
+        .save_with_progress(
             &target,
             &target_key,
             &receiver,
             "receiver",
-            &row.id,
-            &destination,
             &config,
+            crate::file_download::FileDownloadRequest {
+                id: &row.id,
+                destination: &destination,
+                token: Some("remote-progress"),
+            },
+            Arc::new(move |written, total| observed.lock().unwrap().push((written, total))),
         )
         .await
         .unwrap();
+    let progress = progress.lock().unwrap();
+    assert_eq!(
+        progress.last(),
+        Some(&(expected.size_bytes, expected.size_bytes))
+    );
+    assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    drop(progress);
     assert_eq!(
         source_view.reads.load(Ordering::SeqCst) as u64,
         expected

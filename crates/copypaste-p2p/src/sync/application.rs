@@ -144,6 +144,9 @@ mod tests {
             fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
                 self.inner.summaries(since_ms)
             }
+            fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                self.inner.local_summaries(ids)
+            }
             fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
                 self.inner.fetch(ids)
             }

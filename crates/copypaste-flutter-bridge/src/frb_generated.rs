@@ -2546,6 +2546,9 @@ impl SseDecode for bool {
 impl SseDecode for crate::api::CaptureState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_captureWatch = <bool>::sse_decode(deserializer);
+        let mut var_captureRevision = <u64>::sse_decode(deserializer);
+        let mut var_runtimeWatch = <bool>::sse_decode(deserializer);
         let mut var_syncStatus = <crate::api::RuntimeSyncStatus>::sse_decode(deserializer);
         let mut var_running = <bool>::sse_decode(deserializer);
         let mut var_paused = <bool>::sse_decode(deserializer);
@@ -2553,6 +2556,9 @@ impl SseDecode for crate::api::CaptureState {
         let mut var_settingsHealth =
             <Option<crate::api::RuntimeSettingsHealth>>::sse_decode(deserializer);
         return crate::api::CaptureState {
+            capture_watch: var_captureWatch,
+            capture_revision: var_captureRevision,
+            runtime_watch: var_runtimeWatch,
             sync_status: var_syncStatus,
             running: var_running,
             paused: var_paused,
@@ -2657,11 +2663,11 @@ impl SseDecode for crate::api::ClipImageDetails {
 impl SseDecode for crate::api::ClipImagePreview {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_pngBase64 = <String>::sse_decode(deserializer);
+        let mut var_pngBytes = <Vec<u8>>::sse_decode(deserializer);
         let mut var_width = <u32>::sse_decode(deserializer);
         let mut var_height = <u32>::sse_decode(deserializer);
         return crate::api::ClipImagePreview {
-            png_base64: var_pngBase64,
+            png_bytes: var_pngBytes,
             width: var_width,
             height: var_height,
         };
@@ -2990,6 +2996,20 @@ impl SseDecode for crate::api::DiscoveredDevice {
     }
 }
 
+impl SseDecode for crate::api::FileProgress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_token = <String>::sse_decode(deserializer);
+        let mut var_written = <u64>::sse_decode(deserializer);
+        let mut var_total = <u64>::sse_decode(deserializer);
+        return crate::api::FileProgress {
+            token: var_token,
+            written: var_written,
+            total: var_total,
+        };
+    }
+}
+
 impl SseDecode for crate::api::HistoryDeviceFacet {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3202,6 +3222,17 @@ impl SseDecode for Option<bool> {
     }
 }
 
+impl SseDecode for Option<crate::api::CaptureState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::CaptureState>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::ClipFileDetails> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3308,6 +3339,17 @@ impl SseDecode for Option<crate::api::DeviceProfile> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::DeviceProfile>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::FileProgress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::FileProgress>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -3452,12 +3494,18 @@ impl SseDecode for crate::api::RuntimeEvent {
         let mut var_itemCount = <u64>::sse_decode(deserializer);
         let mut var_captured = <bool>::sse_decode(deserializer);
         let mut var_capturedItemId = <Option<String>>::sse_decode(deserializer);
+        let mut var_progress = <Option<crate::api::FileProgress>>::sse_decode(deserializer);
+        let mut var_capture = <Option<crate::api::CaptureState>>::sse_decode(deserializer);
+        let mut var_runtimeWatch = <bool>::sse_decode(deserializer);
         return crate::api::RuntimeEvent {
             sync_status: var_syncStatus,
             kind: var_kind,
             item_count: var_itemCount,
             captured: var_captured,
             captured_item_id: var_capturedItemId,
+            progress: var_progress,
+            capture: var_capture,
+            runtime_watch: var_runtimeWatch,
         };
     }
 }
@@ -3798,6 +3846,9 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::BackupSummary> for crate::api
 impl flutter_rust_bridge::IntoDart for crate::api::CaptureState {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.capture_watch.into_into_dart().into_dart(),
+            self.capture_revision.into_into_dart().into_dart(),
+            self.runtime_watch.into_into_dart().into_dart(),
             self.sync_status.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.paused.into_into_dart().into_dart(),
@@ -3910,7 +3961,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::ClipImageDetails>
 impl flutter_rust_bridge::IntoDart for crate::api::ClipImagePreview {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.png_base64.into_into_dart().into_dart(),
+            self.png_bytes.into_into_dart().into_dart(),
             self.width.into_into_dart().into_dart(),
             self.height.into_into_dart().into_dart(),
         ]
@@ -4304,6 +4355,23 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::DiscoveredDevice>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FileProgress {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.token.into_into_dart().into_dart(),
+            self.written.into_into_dart().into_dart(),
+            self.total.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::FileProgress {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FileProgress> for crate::api::FileProgress {
+    fn into_into_dart(self) -> crate::api::FileProgress {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::HistoryDeviceFacet {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4447,6 +4515,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeEvent {
             self.item_count.into_into_dart().into_dart(),
             self.captured.into_into_dart().into_dart(),
             self.captured_item_id.into_into_dart().into_dart(),
+            self.progress.into_into_dart().into_dart(),
+            self.capture.into_into_dart().into_dart(),
+            self.runtime_watch.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4722,6 +4793,9 @@ impl SseEncode for bool {
 impl SseEncode for crate::api::CaptureState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.capture_watch, serializer);
+        <u64>::sse_encode(self.capture_revision, serializer);
+        <bool>::sse_encode(self.runtime_watch, serializer);
         <crate::api::RuntimeSyncStatus>::sse_encode(self.sync_status, serializer);
         <bool>::sse_encode(self.running, serializer);
         <bool>::sse_encode(self.paused, serializer);
@@ -4796,7 +4870,7 @@ impl SseEncode for crate::api::ClipImageDetails {
 impl SseEncode for crate::api::ClipImagePreview {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.png_base64, serializer);
+        <Vec<u8>>::sse_encode(self.png_bytes, serializer);
         <u32>::sse_encode(self.width, serializer);
         <u32>::sse_encode(self.height, serializer);
     }
@@ -5061,6 +5135,15 @@ impl SseEncode for crate::api::DiscoveredDevice {
     }
 }
 
+impl SseEncode for crate::api::FileProgress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.token, serializer);
+        <u64>::sse_encode(self.written, serializer);
+        <u64>::sse_encode(self.total, serializer);
+    }
+}
+
 impl SseEncode for crate::api::HistoryDeviceFacet {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5231,6 +5314,16 @@ impl SseEncode for Option<bool> {
     }
 }
 
+impl SseEncode for Option<crate::api::CaptureState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::CaptureState>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::ClipFileDetails> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5327,6 +5420,16 @@ impl SseEncode for Option<crate::api::DeviceProfile> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::DeviceProfile>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::FileProgress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::FileProgress>::sse_encode(value, serializer);
         }
     }
 }
@@ -5438,6 +5541,9 @@ impl SseEncode for crate::api::RuntimeEvent {
         <u64>::sse_encode(self.item_count, serializer);
         <bool>::sse_encode(self.captured, serializer);
         <Option<String>>::sse_encode(self.captured_item_id, serializer);
+        <Option<crate::api::FileProgress>>::sse_encode(self.progress, serializer);
+        <Option<crate::api::CaptureState>>::sse_encode(self.capture, serializer);
+        <bool>::sse_encode(self.runtime_watch, serializer);
     }
 }
 

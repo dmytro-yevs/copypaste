@@ -25,6 +25,11 @@ abstract interface class SettingsRepository {
   Future<void> dispose();
 }
 
+/// Optional typed capture stream. A null event marks a newly connected watch.
+abstract interface class CaptureEventsRepository {
+  Stream<CaptureSettingsState?> captureEvents();
+}
+
 abstract interface class SettingsFilePicker {
   Future<String?> chooseTextExportPath();
 

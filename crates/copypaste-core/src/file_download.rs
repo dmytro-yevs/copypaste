@@ -81,6 +81,29 @@ impl FileDownloads {
         settings: &copypaste_ipc::ConfigData,
         request: FileDownloadRequest<'_>,
     ) -> Result<(), FileTransferError> {
+        self.save_with_progress(
+            store,
+            keyring,
+            node,
+            local_device,
+            settings,
+            request,
+            Arc::new(|_, _| {}),
+        )
+        .await
+    }
+
+    /// Progress is advisory: only a successful return confirms a committed file.
+    pub async fn save_with_progress(
+        &self,
+        store: &Store,
+        keyring: &Arc<Keyring>,
+        node: &copypaste_p2p::Node,
+        local_device: &str,
+        settings: &copypaste_ipc::ConfigData,
+        request: FileDownloadRequest<'_>,
+        progress: Arc<dyn Fn(u64, u64) + Send + Sync>,
+    ) -> Result<(), FileTransferError> {
         let FileDownloadRequest {
             id,
             destination,
@@ -124,13 +147,14 @@ impl FileDownloads {
             let id = id.to_owned();
             let destination = destination.to_owned();
             return tokio::task::spawn_blocking(move || {
-                file_transfer::save_local(
+                file_transfer::save_local_with_progress(
                     &store,
                     &keyring.item_key(),
                     &id,
                     &destination,
                     limit,
                     || token.is_cancelled(),
+                    |written, total| progress(written, total),
                 )
             })
             .await
@@ -163,6 +187,7 @@ impl FileDownloads {
             }
             hash.update(bytes);
             written += bytes.len() as u64;
+            progress(written, offer.size_bytes);
             Ok(())
         });
         tokio::select! {
