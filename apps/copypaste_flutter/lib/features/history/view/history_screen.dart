@@ -10,6 +10,7 @@ import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 
@@ -27,6 +28,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../presentation/secret_spoiler.dart';
 
 import 'history_inspector.dart';
+import 'history_window_scroll.dart';
 import 'history_delete_dialog.dart';
 import 'history_bulk_toolbar.dart';
 import '../presentation/history_color_swatch.dart';
@@ -38,10 +40,12 @@ class HistoryScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.onDrawerVisibilityChanged,
+    this.findRequests,
   });
 
   final HistoryController controller;
   final ValueChanged<bool>? onDrawerVisibilityChanged;
+  final ValueNotifier<bool>? findRequests;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -60,10 +64,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
   ScrollController? _fallbackScrollController;
   bool _detailDrawerOpen = false;
   bool _fileDragHover = false;
+  late int _operationErrorRevision;
 
   @override
   void initState() {
     super.initState();
+    _operationErrorRevision = widget.controller.operationErrorRevision;
     _searchController = TextEditingController(
       text: widget.controller.query.search,
     );
@@ -74,6 +80,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       viewportBounds: () => _listKey.currentState?.viewportBounds,
     );
     widget.controller.addListener(_selectionChanged);
+    widget.controller.beforeWindowChange = _captureMutationAnchor;
+    widget.controller.afterWindowChange = _restoreMutationAnchor;
     unawaited(widget.controller.initialize());
   }
 
@@ -92,6 +100,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void dispose() {
     widget.controller.removeListener(_selectionChanged);
+    widget.controller.beforeWindowChange = null;
+    widget.controller.afterWindowChange = null;
     _selectionGesture.dispose();
     _selectionFocus.dispose();
     _searchController.dispose();
@@ -101,6 +111,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _selectionChanged() {
+    final revision = widget.controller.operationErrorRevision;
+    if (revision != _operationErrorRevision) {
+      _operationErrorRevision = revision;
+      final message = widget.controller.operationError;
+      if (message != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AppToast.show(
+              context,
+              title: 'Action failed',
+              message: message,
+              tone: AppToastTone.error,
+            );
+          }
+        });
+      }
+    }
     final selecting = widget.controller.isBulkSelecting;
     if (selecting && !_wasSelecting) _selectionFocus.requestFocus();
     _wasSelecting = selecting;
@@ -117,12 +144,65 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  List<(String, double)> _mutationAnchors = const [];
+
+  Future<Set<String>> _captureMutationAnchor() async {
+    final viewport = _listKey.currentState?.viewportBounds;
+    if (viewport == null) return const {};
+    final anchors = <(String, double)>[];
+    for (final entry in _listKey.currentState!._clipKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      if (rect.overlaps(viewport)) {
+        anchors.add((entry.key, rect.top - viewport.top));
+      }
+    }
+    anchors.sort((left, right) => left.$2.compareTo(right.$2));
+    _mutationAnchors = List.unmodifiable(anchors);
+    return anchors.map((anchor) => anchor.$1).toSet();
+  }
+
+  void _restoreMutationAnchor() {
+    final anchors = _mutationAnchors;
+    if (anchors.isEmpty) return;
+    _mutationAnchors = const [];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final viewport = _listKey.currentState?.viewportBounds;
+        final scroll = _scrollController;
+        if (viewport == null || scroll?.hasClients != true) return;
+        for (final anchor in anchors) {
+          final box = _listKey
+              .currentState
+              ?._clipKeys[anchor.$1]
+              ?.currentContext
+              ?.findRenderObject();
+          if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+          final delta =
+              box.localToGlobal(Offset.zero).dy - viewport.top - anchor.$2;
+          final position = scroll!.position;
+          scroll.jumpTo(
+            (position.pixels + delta).clamp(
+              position.minScrollExtent,
+              position.maxScrollExtent,
+            ),
+          );
+          break;
+        }
+      });
+    });
+  }
+
   void _loadMoreWhenNeeded() {
     _selectionGesture.updateAfterScroll();
     final controller = _scrollController;
     if (controller == null || !controller.hasClients) return;
     final position = controller.position;
-    if (position.pixels >= position.maxScrollExtent - 360) {
+    if (position.pixels <= position.minScrollExtent + 1 &&
+        widget.controller.canLoadPrevious) {
+      unawaited(widget.controller.loadPrevious());
+    } else if (position.pixels >= position.maxScrollExtent - 360) {
       unawaited(widget.controller.loadMore());
     }
   }
@@ -203,6 +283,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       controller: widget.controller,
       scrollController: _scrollController!,
       searchController: _searchController,
+      findRequests: widget.findRequests,
       showKindLabel: wide,
       onSelected: (clip) => _select(context, clip, wide: wide),
       onDragSelection: _selectionGesture.begin,
@@ -253,7 +334,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     widget.onDrawerVisibilityChanged?.call(true);
     try {
       await WidgetsBinding.instance.endOfFrame;
-      if (!context.mounted) return;
+      if (!context.mounted || widget.controller.selectedId == null) return;
+      var drawerCloseScheduled = false;
       await showOverlay<void>(
         context,
         AppOverlays.drawerConfiguration(context),
@@ -262,8 +344,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
           constraints: AppOverlays.drawerContentConstraints(context),
           child: AnimatedBuilder(
             animation: widget.controller,
-            builder: (context, child) =>
-                HistoryInspector(controller: widget.controller, inDrawer: true),
+            builder: (context, child) {
+              if (widget.controller.selectedId == null &&
+                  !drawerCloseScheduled) {
+                drawerCloseScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) unawaited(closeDrawer(context));
+                });
+              }
+              return HistoryInspector(
+                controller: widget.controller,
+                inDrawer: true,
+              );
+            },
           ),
         ),
       ).future;
@@ -280,6 +373,7 @@ class _HistoryList extends StatefulWidget {
     required this.controller,
     required this.scrollController,
     required this.searchController,
+    this.findRequests,
     required this.showKindLabel,
     required this.onSelected,
     required this.onDragSelection,
@@ -288,6 +382,7 @@ class _HistoryList extends StatefulWidget {
   final HistoryController controller;
   final ScrollController scrollController;
   final TextEditingController searchController;
+  final ValueNotifier<bool>? findRequests;
   final bool showKindLabel;
   final ValueChanged<HistoryClip> onSelected;
   final void Function(String, Offset, ScrollableState) onDragSelection;
@@ -355,6 +450,7 @@ class _HistoryListState extends State<_HistoryList> {
           _HistoryToolbar(
             controller: controller,
             searchController: searchController,
+            findRequests: widget.findRequests,
           ),
           if (controller.skippedUndecryptable > 0) ...[
             const Gap(AppSpacing.md),
@@ -376,6 +472,7 @@ class _HistoryListState extends State<_HistoryList> {
           _HistoryToolbar(
             controller: controller,
             searchController: searchController,
+            findRequests: widget.findRequests,
           ),
           const Expanded(
             child: StateView.loading(message: 'Loading clipboard history.'),
@@ -383,27 +480,27 @@ class _HistoryListState extends State<_HistoryList> {
         ],
       );
     }
-    final rows = _historyListRows(
-      controller.items,
-      sort: controller.query.sort,
-      now: DateTime.now(),
-      isSectionCollapsed: controller.isSectionCollapsed,
-    );
-    orderedIds = rows
-        .whereType<_HistoryClipRow>()
-        .map((row) => row.clip.id)
-        .toList();
-    final rowIndices = <Key, int>{
-      for (var index = 0; index < rows.length; index++)
-        _rowKey(rows[index]): index,
-    };
-    final showLoadMore =
-        controller.canLoadMore &&
-        rows.any(
-          (row) =>
-              row is _HistorySectionRow &&
-              controller.isSectionCollapsed(row.section.key),
-        );
+    final now = DateTime.now();
+    final pages = controller.windowPages;
+    String? previousSectionKey;
+    final pageRows = <List<_HistoryListRow>?>[];
+    for (final page in pages) {
+      final items = page.items;
+      pageRows.add(
+        items == null
+            ? null
+            : _historyListRows(
+                items,
+                sort: controller.query.sort,
+                now: now,
+                isSectionCollapsed: controller.isSectionCollapsed,
+                initialSectionKey: previousSectionKey,
+              ),
+      );
+      previousSectionKey = _pageFinalSectionKey(page, now);
+    }
+    orderedIds = controller.visibleVisitedIds;
+    final showLoadMore = controller.canLoadMore;
     final retainedIds = controller.items.map((item) => item.id).toSet();
     _sortableData.removeWhere((id, _) => !retainedIds.contains(id));
     _clipKeys.removeWhere((id, _) => !retainedIds.contains(id));
@@ -417,6 +514,7 @@ class _HistoryListState extends State<_HistoryList> {
         _HistoryToolbar(
           controller: controller,
           searchController: searchController,
+          findRequests: widget.findRequests,
         ),
         if (controller.skippedUndecryptable > 0) ...[
           const Gap(AppSpacing.md),
@@ -431,50 +529,47 @@ class _HistoryListState extends State<_HistoryList> {
             child: ScrollableSortableLayer(
               controller: scrollController,
               scrollThreshold: AppControlSize.touch,
-              child: ListView.builder(
-                key: _viewportKey,
+              child: HistoryWindowScroll(
                 controller: scrollController,
-                padding: EdgeInsets.only(bottom: bottomPadding),
-                findChildIndexCallback: (key) => rowIndices[key],
-                itemCount:
-                    rows.length + (hasLoadMore ? 1 : 0) + (hasError ? 1 : 0),
-                itemBuilder: (context, index) {
-                  if (hasError &&
-                      index == rows.length + (hasLoadMore ? 1 : 0)) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: AppSpacing.sm),
-                      child: Alert.destructive(
-                        leading: const Icon(LucideIcons.circleAlert),
-                        title: const Text('History needs attention'),
-                        content: Text(controller.errorMessage!),
+                viewportKey: _viewportKey,
+                bottomPadding: bottomPadding,
+                pages: [
+                  for (var pageIndex = 0; pageIndex < pages.length; pageIndex++)
+                    HistoryWindowPageView(
+                      id: pageIndex,
+                      extent: pages[pageIndex].extent,
+                      rows: pageRows[pageIndex]?.length ?? 0,
+                      rowBuilder: pageRows[pageIndex] == null
+                          ? null
+                          : (context, index) =>
+                                _buildRow(pageRows[pageIndex]![index]),
+                      onMeasured: (extent) => unawaited(
+                        controller.reportPageExtent(pageIndex, extent),
                       ),
-                    );
-                  }
-                  if (index >= rows.length) {
-                    return Padding(
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      child: Center(
-                        child: controller.isLoadingMore
-                            ? const CircularProgressIndicator()
-                            : Button.ghost(
-                                onPressed: () =>
-                                    unawaited(controller.loadMore()),
-                                child: const Text('Load more'),
-                              ),
-                      ),
-                    );
-                  }
-                  return switch (rows[index]) {
-                    _HistorySectionRow(:final section) =>
-                      _HistorySectionDivider(
-                        key: _rowKey(rows[index]),
-                        section: section,
-                        collapsed: controller.isSectionCollapsed(section.key),
-                        onToggle: () => controller.toggleSection(section.key),
-                      ),
-                    _HistoryClipRow(:final clip) => _clipRow(clip),
-                  };
-                },
+                      onPlaceholderVisible: () =>
+                          unawaited(controller.materializePage(pageIndex)),
+                    ),
+                ],
+                trailing: hasLoadMore || hasError
+                    ? Padding(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        child: Center(
+                          child: hasError
+                              ? Alert.destructive(
+                                  leading: const Icon(LucideIcons.circleAlert),
+                                  title: const Text('History needs attention'),
+                                  content: Text(controller.errorMessage!),
+                                )
+                              : controller.isLoadingMore
+                              ? const CircularProgressIndicator()
+                              : Button.ghost(
+                                  onPressed: () =>
+                                      unawaited(controller.loadMore()),
+                                  child: const Text('Load more'),
+                                ),
+                        ),
+                      )
+                    : null,
               ),
             ),
           ),
@@ -489,6 +584,27 @@ class _HistoryListState extends State<_HistoryList> {
     ),
     _HistoryClipRow(:final clip) => ValueKey<String>('history-row-${clip.id}'),
   };
+
+  Widget _buildRow(_HistoryListRow row) => switch (row) {
+    _HistorySectionRow(:final section) => _HistorySectionDivider(
+      key: _rowKey(row),
+      section: section,
+      collapsed: controller.isSectionCollapsed(section.key),
+      onToggle: () => controller.toggleSection(section.key),
+    ),
+    _HistoryClipRow(:final clip) => _clipRow(clip),
+  };
+
+  String? _pageFinalSectionKey(dynamic page, DateTime now) {
+    if (page.ids.isEmpty) return null;
+    final last = page.ids.length - 1;
+    if (page.pinnedIds.contains(page.ids[last])) return 'pinned';
+    if (controller.query.sort == HistorySort.relevance) return null;
+    return _historyDateSectionKey(
+      DateTime.fromMillisecondsSinceEpoch(page.createdAtMillis[last]),
+      now,
+    );
+  }
 
   Widget _clipRow(HistoryClip clip) {
     final child = Padding(
@@ -654,13 +770,16 @@ List<_HistoryListRow> _historyListRows(
   required HistorySort sort,
   required DateTime now,
   required bool Function(String) isSectionCollapsed,
+  String? initialSectionKey,
 }) {
   final rows = <_HistoryListRow>[];
   final pinned = items.where((item) => item.pinned);
   if (pinned.isNotEmpty) {
-    rows.add(
-      const _HistorySectionRow(_HistorySection(_HistorySectionKind.pinned)),
-    );
+    if (initialSectionKey != 'pinned') {
+      rows.add(
+        const _HistorySectionRow(_HistorySection(_HistorySectionKind.pinned)),
+      );
+    }
     if (!isSectionCollapsed('pinned')) {
       rows.addAll(pinned.map(_HistoryClipRow.new));
     }
@@ -681,11 +800,10 @@ List<_HistoryListRow> _historyListRows(
   });
 
   final today = _calendarDate(now);
-  final yesterday = DateTime(today.year, today.month, today.day - 1);
-  String? previousSectionKey;
+  String? previousSectionKey = initialSectionKey;
   for (final clip in unpinned) {
     final date = _calendarDate(clip.createdAt);
-    final section = _dateSection(date, today: today, yesterday: yesterday);
+    final section = _dateSection(date, today: today);
     if (section.key != previousSectionKey) {
       rows.add(_HistorySectionRow(section));
       previousSectionKey = section.key;
@@ -702,18 +820,21 @@ DateTime _calendarDate(DateTime value) {
   return DateTime(local.year, local.month, local.day);
 }
 
-_HistorySection _dateSection(
-  DateTime date, {
-  required DateTime today,
-  required DateTime yesterday,
-}) {
-  if (date == today) {
-    return const _HistorySection(_HistorySectionKind.today);
-  }
-  if (date == yesterday) {
-    return const _HistorySection(_HistorySectionKind.yesterday);
-  }
-  return _HistorySection(_HistorySectionKind.date, date: date);
+String _historyDateSectionKey(DateTime value, DateTime now) {
+  final date = _calendarDate(value);
+  final today = _calendarDate(now);
+  final yesterday = DateTime(today.year, today.month, today.day - 1);
+  if (date == today) return 'today';
+  if (date == yesterday) return 'yesterday';
+  return 'date-${date.toIso8601String().split('T').first}';
+}
+
+_HistorySection _dateSection(DateTime date, {required DateTime today}) {
+  return switch (_historyDateSectionKey(date, today)) {
+    'today' => const _HistorySection(_HistorySectionKind.today),
+    'yesterday' => const _HistorySection(_HistorySectionKind.yesterday),
+    _ => _HistorySection(_HistorySectionKind.date, date: date),
+  };
 }
 
 class _SkippedRowsWarning extends StatelessWidget {
@@ -738,16 +859,63 @@ class _HistoryToolbar extends StatefulWidget {
   const _HistoryToolbar({
     required this.controller,
     required this.searchController,
+    this.findRequests,
   });
 
   final HistoryController controller;
   final TextEditingController searchController;
+  final ValueNotifier<bool>? findRequests;
 
   @override
   State<_HistoryToolbar> createState() => _HistoryToolbarState();
 }
 
 class _HistoryToolbarState extends State<_HistoryToolbar> {
+  final _searchFocus = FocusNode(debugLabel: 'History search');
+
+  @override
+  void initState() {
+    super.initState();
+    widget.findRequests?.addListener(_find);
+    if (widget.findRequests?.value ?? false) _find();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HistoryToolbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.findRequests != widget.findRequests) {
+      oldWidget.findRequests?.removeListener(_find);
+      widget.findRequests?.addListener(_find);
+      if (widget.findRequests?.value ?? false) _find();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.findRequests?.removeListener(_find);
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _find() {
+    if (!(widget.findRequests?.value ?? false)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !(widget.findRequests?.value ?? false)) return;
+      widget.controller.endBulkSelection();
+      setState(() => _searchExpanded = true);
+      widget.findRequests!.value = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _searchFocus.requestFocus();
+        widget.searchController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.searchController.text.length,
+        );
+      });
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   double _controlExtent(BuildContext context) =>
       AppTheme.controlHeight(context, minimum: AppControlSize.large);
   static const double _minimumExpandedSearchWidth =
@@ -866,6 +1034,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         minimum: AppControlSize.large,
       ),
       controller: widget.searchController,
+      focusNode: _searchFocus,
       autofocus: compact,
       placeholder: const Text('Search history'),
       onChanged: widget.controller.updateSearch,
@@ -1490,7 +1659,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
   }
 }
 
-class _ClipContent extends StatelessWidget {
+class _ClipContent extends StatefulWidget {
   const _ClipContent({
     required this.clip,
     required this.controller,
@@ -1502,8 +1671,31 @@ class _ClipContent extends StatelessWidget {
   final bool revealed;
 
   @override
+  State<_ClipContent> createState() => _ClipContentState();
+}
+
+class _ClipContentState extends State<_ClipContent> {
+  final _highlightMemo = HistoryCodeHighlightMemo();
+  String? _highlightClipId;
+
+  HistoryClip get clip => widget.clip;
+  HistoryController get controller => widget.controller;
+  bool get revealed => widget.revealed;
+
+  @override
+  void dispose() {
+    _highlightMemo.clear();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (clip.id != _highlightClipId) {
+      _highlightMemo.clear();
+      _highlightClipId = clip.id;
+    }
     if (clip.secret && !revealed) {
+      _highlightMemo.clear();
       return FutureBuilder<HistoryClip>(
         future: controller.spoilerContent(clip.id),
         builder: (context, snapshot) => Align(
@@ -1524,6 +1716,9 @@ class _ClipContent extends StatelessWidget {
       );
     }
     final kind = clip.contentKind;
+    if (kind != HistoryClipKind.code && kind != HistoryClipKind.json) {
+      _highlightMemo.clear();
+    }
     if (kind == HistoryClipKind.color && clip.colorRgba != null) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1542,7 +1737,7 @@ class _ClipContent extends StatelessWidget {
       );
     }
     if (kind == HistoryClipKind.code || kind == HistoryClipKind.json) {
-      final highlighted = HistoryCodeHighlighter.highlight(
+      final highlighted = _highlightMemo.highlight(
         clip.preview,
         Theme.of(context),
         json: kind == HistoryClipKind.json,

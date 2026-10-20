@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 mod streaming_png;
 
@@ -15,8 +16,22 @@ pub const MAX_THUMBNAIL_EDGE: u32 = 2_048;
 
 // All callers in a process share decoder admission. A per-image allocation
 // limit alone otherwise multiplies with concurrent IPC preview requests.
-// This bounds decoded overlap, not encoded inputs, engine images or total RAM.
+// This bounds decoded overlap, not encoded input sizes, engine images or total RAM.
 static PREVIEW_DECODER: Mutex<()> = Mutex::new(());
+
+// Bound concurrent source reads and decryptions before they enter the blocking
+// pool. The decoder remains separately serialized by PREVIEW_DECODER.
+const PREVIEW_SOURCE_CAPACITY: usize = 1;
+static PREVIEW_SOURCES: Semaphore = Semaphore::const_new(PREVIEW_SOURCE_CAPACITY);
+
+/// Admit one preview source before loading its encrypted payload.
+/// The semaphore is never closed; dropping the permit releases admission.
+pub async fn acquire_preview_source() -> SemaphorePermit<'static> {
+    PREVIEW_SOURCES
+        .acquire()
+        .await
+        .expect("preview source admission is never closed")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageThumbnail {
@@ -184,6 +199,61 @@ mod tests {
             .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
             .unwrap();
         encoded
+    }
+
+    #[tokio::test]
+    async fn source_admission_bounds_and_releases_cancelled_waiters() {
+        use std::time::Duration;
+
+        let mut permits = Vec::new();
+        for _ in 0..PREVIEW_SOURCE_CAPACITY {
+            permits.push(acquire_preview_source().await);
+        }
+        let mut waiting = Box::pin(acquire_preview_source());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiting)
+                .await
+                .is_err()
+        );
+        drop(waiting);
+        drop(permits.pop());
+        let replacement = tokio::time::timeout(Duration::from_secs(2), acquire_preview_source())
+            .await
+            .expect("cancelled waiter must not consume a permit");
+        drop(replacement);
+        drop(permits);
+        let mut all = Vec::new();
+        for _ in 0..PREVIEW_SOURCE_CAPACITY {
+            all.push(
+                tokio::time::timeout(Duration::from_secs(2), acquire_preview_source())
+                    .await
+                    .expect("every permit must be released"),
+            );
+        }
+
+        // Cancelling an async requester cannot release admission while its
+        // already-started blocking source loader still owns the permit.
+        let permit = all.pop().unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        let mut waiting = Box::pin(acquire_preview_source());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut waiting)
+                .await
+                .is_err()
+        );
+        release_tx.send(()).unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(2), &mut waiting)
+            .await
+            .expect("completed blocking loader must release its permit");
+        drop(permit);
     }
 
     #[test]

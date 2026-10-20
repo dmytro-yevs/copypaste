@@ -46,12 +46,14 @@ pub use payload::{
     ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData,
     PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
-pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
+pub use response::{
+    ConfigApplied, EventData, EventKind, FileProgress, Response, ResponseData, RuntimeEventData,
+};
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +164,11 @@ pub enum Method {
     SaveFile {
         id: String,
         dest_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        download_token: Option<String>,
+    },
+    CancelFileDownload {
+        id: String,
     },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
@@ -375,6 +382,9 @@ pub enum Method {
     /// that watchers cannot consume every connection slot.
     Watch,
 
+    /// Opt in to typed runtime events, including transfer progress.
+    WatchRuntime,
+
     /// Stop the daemon.
     ///
     /// Acknowledged first and acted on second, so a client learns the request
@@ -443,6 +453,8 @@ mod tests {
         assert!(status.device_name.is_empty());
         assert!(status.listen_addr.is_none());
         assert!(!status.clipboard_available);
+        assert_eq!(status.capture_revision, 0);
+        assert!(!status.capture_watch);
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());
@@ -466,6 +478,7 @@ mod tests {
             Method::SaveFile {
                 id: "i".into(),
                 dest_path: "d".into(),
+                download_token: None,
             },
             Method::SyncNow { pairing_id: None },
             Method::CloudSyncNow,

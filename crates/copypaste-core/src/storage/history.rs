@@ -11,13 +11,24 @@ use rusqlite::{params_from_iter, types::Value};
 use sha2::{Digest, Sha256};
 
 use super::fuzzy_search;
-use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
+use super::model::{
+    item_columns_ci, item_columns_preview_ci, row_to_item, ItemColumns, StoreError, StoredItem,
+};
 use super::search::sanitize_fts5_query;
 use super::store::Store;
 
 pub use copypaste_ipc::{
     HistoryDeviceFacet, HistoryFacets, HistoryQuery, HistorySort, HistorySourceAppFacet,
 };
+
+pub(super) struct FacetCache {
+    generation: String,
+    revision: i64,
+    device_id: String,
+    device_name: String,
+    device_class: copypaste_ipc::DeviceClass,
+    facets: HistoryFacets,
+}
 
 /// Where a filtered history query stopped.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -60,6 +71,26 @@ impl HistoryCursor {
 pub struct HistoryPage {
     pub items: Vec<StoredItem>,
     pub next: Option<HistoryCursor>,
+}
+
+/// One authenticated, payload-derived preview and its current row metadata.
+#[derive(Debug, Clone)]
+pub struct HistoryPreviewRow {
+    pub row: StoredItem,
+    /// None indicates that the original payload failed authentication.
+    pub preview: Option<crate::history_item::StaticHistoryPreview>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryPreviewPage {
+    pub items: Vec<HistoryPreviewRow>,
+    pub next: Option<HistoryCursor>,
+}
+
+struct QueryPage {
+    items: Vec<StoredItem>,
+    previews: Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    next: Option<HistoryCursor>,
 }
 
 #[derive(serde::Serialize)]
@@ -138,7 +169,9 @@ fn class_clause(classes: &[&str]) -> Option<&'static str> {
         ["text"] => Some("(ci.content_type = 'text' OR ci.content_type LIKE 'text/%')"),
         ["image"] => Some("ci.content_type LIKE 'image/%'"),
         ["file"] => Some("ci.content_type = 'file'"),
-        ["other"] => Some("NOT (ci.content_type = 'text' OR ci.content_type LIKE 'text/%' OR ci.content_type LIKE 'image/%' OR ci.content_type = 'file')"),
+        ["other"] => Some(
+            "NOT (ci.content_type = 'text' OR ci.content_type LIKE 'text/%' OR ci.content_type LIKE 'image/%' OR ci.content_type = 'file')",
+        ),
         _ => Some("("),
     }
 }
@@ -227,7 +260,10 @@ impl Store {
     /// Labels are mandatory: unknown device/app metadata is deliberately not
     /// returned as a selectable raw identifier. `local_device_id` maps the
     /// storage representation for local captures (an empty origin id) to the
-    /// stable id clients receive on [`copypaste_ipc::Item`].
+    /// stable id clients receive on [`copypaste_ipc::Item`]. Grouping uses that
+    /// resolved identity because a newer version can return through sync with
+    /// an explicit local id. Current local metadata takes precedence over the
+    /// device registry for both representations.
     pub fn history_facets(
         &self,
         local_device_id: &str,
@@ -235,16 +271,35 @@ impl Store {
         local_device_class: copypaste_ipc::DeviceClass,
     ) -> Result<HistoryFacets, StoreError> {
         let conn = self.conn()?;
+        let before = super::resource_revisions::read(&conn)?;
+        {
+            let mut cache = self
+                .facet_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(entry) = cache.as_ref().filter(|entry| {
+                entry.generation == before.generation
+                    && entry.revision == before.facets
+                    && entry.device_id == local_device_id
+                    && entry.device_name == local_device_name
+                    && entry.device_class == local_device_class
+            }) {
+                return Ok(entry.facets.clone());
+            }
+            // Drop obsolete data even when the replacement is too large to cache.
+            *cache = None;
+        }
         let mut origins = Vec::new();
         let mut origin_stmt = conn.prepare(
-            "SELECT ci.origin_device_id, dn.name, dc.value \
+            "SELECT CASE WHEN ci.origin_device_id = '' THEN ?1 ELSE ci.origin_device_id END \
+                 AS resolved_device_id, dn.name, dc.value \
              FROM clipboard_items ci \
              LEFT JOIN sync_device_name dn ON dn.device_id = ci.origin_device_id \
              LEFT JOIN sync_device_state dc ON dc.key = 'device_class:' || ci.origin_device_id \
              WHERE ci.deleted = 0 \
-             GROUP BY ci.origin_device_id, dn.name, dc.value",
+             GROUP BY resolved_device_id",
         )?;
-        let origin_rows = origin_stmt.query_map([], |row| {
+        let origin_rows = origin_stmt.query_map([local_device_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -252,11 +307,11 @@ impl Store {
             ))
         })?;
         for row in origin_rows {
-            let (stored_id, known_label, known_class) = row?;
-            let (id, label) = if stored_id.is_empty() {
-                (local_device_id, Some(local_device_name))
+            let (id, known_label, known_class) = row?;
+            let label = if id == local_device_id {
+                Some(local_device_name)
             } else {
-                (stored_id.as_str(), known_label.as_deref())
+                known_label.as_deref()
             };
             if !id.is_empty() {
                 if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
@@ -280,7 +335,7 @@ impl Store {
         // the stable bundle/package id remains the selected value.
         let mut apps = BTreeMap::new();
         let mut app_stmt = conn.prepare(
-            "SELECT id, app_bundle_id, app_name, source_icon_id FROM clipboard_items \
+            "SELECT app_bundle_id, app_name, source_icon_id FROM clipboard_items \
              WHERE deleted = 0 AND app_bundle_id IS NOT NULL AND app_name IS NOT NULL \
              ORDER BY app_bundle_id ASC, created_at DESC, id DESC",
         )?;
@@ -288,12 +343,11 @@ impl Store {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(2)?,
             ))
         })?;
         for row in app_rows {
-            let (_item_id, id, label, source_icon_id) = row?;
+            let (id, label, source_icon_id) = row?;
             if !id.is_empty() && !label.trim().is_empty() {
                 let has_icon = source_icon_id.is_some();
                 let entry = apps.entry(id).or_insert_with(|| (label, None));
@@ -309,10 +363,48 @@ impl Store {
         origins.sort_by(|left, right| left.label.cmp(&right.label).then(left.id.cmp(&right.id)));
         source_apps
             .sort_by(|left, right| left.label.cmp(&right.label).then(left.id.cmp(&right.id)));
-        Ok(HistoryFacets {
+        let facets = HistoryFacets {
             origin_devices: origins,
             source_apps,
-        })
+        };
+        let bytes: usize = facets
+            .origin_devices
+            .iter()
+            .map(|v| v.id.capacity() + v.label.capacity())
+            .sum::<usize>()
+            + facets.origin_devices.capacity() * std::mem::size_of::<HistoryDeviceFacet>()
+            + facets
+                .source_apps
+                .iter()
+                .map(|v| {
+                    v.id.capacity()
+                        + v.label.capacity()
+                        + v.icon_id.as_ref().map_or(0, String::capacity)
+                })
+                .sum::<usize>()
+            + facets.source_apps.capacity() * std::mem::size_of::<HistorySourceAppFacet>()
+            + std::mem::size_of::<FacetCache>()
+            + local_device_id.len()
+            + local_device_name.len()
+            + before.generation.len();
+        let after = super::resource_revisions::read(&conn)?;
+        if bytes <= 512 * 1024
+            && before.generation == after.generation
+            && before.facets == after.facets
+        {
+            *self
+                .facet_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(FacetCache {
+                generation: before.generation,
+                revision: before.facets,
+                device_id: local_device_id.into(),
+                device_name: local_device_name.into(),
+                device_class: local_device_class,
+                facets: facets.clone(),
+            });
+        }
+        Ok(facets)
     }
 
     /// Read a byte-bounded page of the whole history after applying `query`.
@@ -334,8 +426,9 @@ impl Store {
     /// Device-aware counterpart of [`Self::query_history_bounded`].
     ///
     /// Local captures are stored with an empty origin id, while IPC correctly
-    /// presents the real local device id. The transport owner supplies that id
-    /// here so selecting the local facet filters the same identity users see.
+    /// presents the real local device id. Synced versions can also store the
+    /// explicit local id. The transport owner supplies that id here so selecting
+    /// the local facet includes both representations of the same identity.
     pub fn query_history_bounded_for_device(
         &self,
         query: &HistoryQuery,
@@ -357,9 +450,59 @@ impl Store {
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
     ) -> Result<HistoryPage, StoreError> {
+        let page =
+            self.query_history_inner(query, after, limit, budget, local_device_id, semantic, None)?;
+        Ok(HistoryPage {
+            items: page.items,
+            next: page.next,
+        })
+    }
+
+    pub fn query_history_previews_with_semantic(
+        &self,
+        query: &HistoryQuery,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        local_device_id: Option<&str>,
+        semantic: Option<&super::SemanticMatches>,
+        item_key: &crate::ItemKey,
+        preview_key: &crate::crypto::PreviewKey,
+    ) -> Result<HistoryPreviewPage, StoreError> {
+        let page = self.query_history_inner(
+            query,
+            after,
+            limit,
+            budget,
+            local_device_id,
+            semantic,
+            Some((item_key, preview_key)),
+        )?;
+        Ok(HistoryPreviewPage {
+            items: page
+                .items
+                .into_iter()
+                .zip(page.previews)
+                .map(|(row, preview)| HistoryPreviewRow { row, preview })
+                .collect(),
+            next: page.next,
+        })
+    }
+
+    fn query_history_inner(
+        &self,
+        query: &HistoryQuery,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        local_device_id: Option<&str>,
+        semantic: Option<&super::SemanticMatches>,
+        preview_keys: Option<(&crate::ItemKey, &crate::crypto::PreviewKey)>,
+    ) -> Result<QueryPage, StoreError> {
         if limit == 0 {
-            return Ok(HistoryPage {
+            return Ok(QueryPage {
                 items: Vec::new(),
+                previews: Vec::new(),
                 next: None,
             });
         }
@@ -385,8 +528,9 @@ impl Store {
                 .as_deref()
                 .is_some_and(|raw| !raw.trim().is_empty())
         {
-            return Ok(HistoryPage {
+            return Ok(QueryPage {
                 items: Vec::new(),
+                previews: Vec::new(),
                 next: None,
             });
         }
@@ -431,10 +575,13 @@ impl Store {
             filters.push_str(" AND ci.pinned = 1");
         }
         if let Some(origin) = &query.origin_device_id {
+            values.push(Value::Text(origin.clone()));
             if Some(origin.as_str()) == local_device_id {
-                filters.push_str(" AND ci.origin_device_id = ''");
+                filters.push_str(&format!(
+                    " AND ci.origin_device_id IN ('', ?{})",
+                    values.len()
+                ));
             } else {
-                values.push(Value::Text(origin.clone()));
                 filters.push_str(&format!(" AND ci.origin_device_id = ?{}", values.len()));
             }
         }
@@ -454,7 +601,7 @@ impl Store {
         if let Some(semantic) = semantic {
             conn.execute_batch("CREATE TEMP TABLE IF NOT EXISTS copypaste_semantic_hits(id TEXT PRIMARY KEY, relevance REAL NOT NULL); DELETE FROM temp.copypaste_semantic_hits;")?;
             let tx = super::connection::write_tx(&mut conn)?;
-            for (id, score) in &semantic.scores {
+            for (id, score) in semantic.scores.iter() {
                 if !score.is_finite() || !(0.0..=1.0).contains(score) {
                     return Err(StoreError::InvalidHistoryQuery);
                 }
@@ -462,6 +609,11 @@ impl Store {
             }
             tx.commit()?;
         }
+        let projection = if preview_keys.is_some() {
+            preview_projection()
+        } else {
+            item_columns_ci!().to_owned()
+        };
         let mut sql = String::new();
         if query.sort == HistorySort::Relevance {
             // Rank ids and cursor fields, not potentially huge clip bodies.
@@ -502,7 +654,7 @@ impl Store {
                  created_at DESC, id DESC LIMIT ?",
             );
             sql.push_str(") SELECT ");
-            sql.push_str(item_columns_ci!());
+            sql.push_str(&projection);
             sql.push_str(
                 ", matches.relevance FROM matches JOIN clipboard_items ci ON ci.id = matches.id \
                 ORDER BY matches.pinned DESC, matches.pin_order ASC, \
@@ -511,7 +663,7 @@ impl Store {
             );
         } else {
             sql.push_str("SELECT ");
-            sql.push_str(item_columns_ci!());
+            sql.push_str(&projection);
             sql.push_str(" FROM clipboard_items ci");
             if search.is_some() || !semantic_kinds.is_empty() {
                 sql.push_str(" JOIN clipboard_fts ON ci.id = clipboard_fts.id");
@@ -559,11 +711,19 @@ impl Store {
         }
         values.push(Value::Integer(i64::from(limit).saturating_add(1)));
 
-        let mut stmt = conn.prepare(&sql)?;
+        let tx = conn.transaction()?;
+        let generation: String = tx.query_row(
+            "SELECT generation FROM resource_revisions WHERE singleton = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut stmt = tx.prepare(&sql)?;
         let columns = ItemColumns::resolve(&stmt)?;
         let mut rows = stmt.query(params_from_iter(values.iter()))?;
         let mut items = Vec::with_capacity(limit as usize);
         let mut bytes = 0usize;
+        let mut previews = Vec::new();
+        let mut pending = Vec::new();
         let mut more = false;
         let mut last_relevance = None;
         while let Some(row) = rows.next()? {
@@ -572,10 +732,13 @@ impl Store {
                 break;
             }
             let item = row_to_item(row, &columns)?;
-            let item_bytes = item
-                .content_ciphertext
-                .len()
-                .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
+            let item_bytes = if preview_keys.is_some() {
+                let logical: i64 = row.get("logical_cipher_bytes")?;
+                usize::try_from(logical).unwrap_or(usize::MAX)
+            } else {
+                item.content_ciphertext.len()
+            }
+            .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
             if !items.is_empty() && bytes.saturating_add(item_bytes) > budget {
                 more = true;
                 break;
@@ -583,6 +746,14 @@ impl Store {
             bytes = bytes.saturating_add(item_bytes);
             if query.sort == HistorySort::Relevance {
                 last_relevance = Some(row.get::<_, f64>("relevance")?);
+            }
+            if let Some((item_key, preview_key)) = preview_keys {
+                let resolved =
+                    super::history_preview::resolve(&tx, row, &item, item_key, preview_key)?;
+                previews.push(resolved.preview);
+                if let Some(write) = resolved.pending {
+                    pending.push(write);
+                }
             }
             items.push(item);
         }
@@ -598,11 +769,26 @@ impl Store {
         }
         drop(rows);
         drop(stmt);
+        tx.commit()?;
+        if preview_keys.is_some() {
+            super::history_preview::store_pending(&mut conn, &generation, pending);
+        }
         if semantic.is_some() {
             conn.execute("DELETE FROM temp.copypaste_semantic_hits", [])?;
         }
-        Ok(HistoryPage { items, next })
+        Ok(QueryPage {
+            items,
+            previews,
+            next,
+        })
     }
+}
+
+pub(super) fn preview_projection() -> String {
+    let projection = item_columns_preview_ci!();
+    format!("{projection}, ci.rowid AS source_rowid, ci.content_ciphertext IS NOT NULL AS source_present, LENGTH(COALESCE(ci.content_ciphertext, X'')) AS source_cipher_bytes, \
+        (SELECT p.rowid FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id) AS shared_rowid, \
+        CASE WHEN ci.content_ciphertext IS NULL THEN 0 ELSE LENGTH(ci.content_ciphertext) + COALESCE((SELECT LENGTH(p.ciphertext) FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id), 0) END AS logical_cipher_bytes")
 }
 
 #[cfg(test)]
@@ -626,7 +812,8 @@ mod tests {
                 (exact.id.clone(), 0.99),
                 (meaning.id.clone(), 0.95),
                 (unrelated.id.clone(), 0.9),
-            ],
+            ]
+            .into(),
         };
         for sort in [
             HistorySort::Relevance,
@@ -689,7 +876,7 @@ mod tests {
         };
         let semantic = super::super::SemanticMatches {
             scope: "model-a".into(),
-            scores: vec![],
+            scores: vec![].into(),
         };
         let cursor = s
             .query_history_with_semantic(&query, None, 1, usize::MAX, None, Some(&semantic))
@@ -703,7 +890,7 @@ mod tests {
         ));
         let different = super::super::SemanticMatches {
             scope: "model-b".into(),
-            scores: vec![],
+            scores: vec![].into(),
         };
         assert!(matches!(
             s.query_history_with_semantic(
@@ -1207,6 +1394,64 @@ mod tests {
     }
 
     #[test]
+    fn device_facets_preserve_distinct_ids_with_the_same_name() {
+        for include_empty_origin in [false, true] {
+            let store = store();
+            if include_empty_origin {
+                store.insert(item("local capture", T0)).unwrap();
+            }
+            let returned = store
+                .insert(item("returned local version", T0 + 1))
+                .unwrap();
+            let remote = store.insert(item("another phone", T0 + 2)).unwrap();
+            let conn = store.conn().unwrap();
+            for (item_id, device_id) in [
+                (&returned.id, "local-device"),
+                (&remote.id, "another-phone"),
+            ] {
+                conn.execute(
+                    "UPDATE clipboard_items SET origin_device_id = ?2 WHERE id = ?1",
+                    rusqlite::params![item_id, device_id],
+                )
+                .unwrap();
+            }
+            drop(conn);
+            store
+                .record_device_name("local-device", "Old name")
+                .unwrap();
+            store
+                .record_device_class("local-device", copypaste_ipc::DeviceClass::Desktop)
+                .unwrap();
+            store
+                .record_device_name("another-phone", "CPH2305")
+                .unwrap();
+            store
+                .record_device_class("another-phone", copypaste_ipc::DeviceClass::Phone)
+                .unwrap();
+
+            let facets = store
+                .history_facets("local-device", "CPH2305", copypaste_ipc::DeviceClass::Phone)
+                .unwrap();
+            assert_eq!(
+                facets.origin_devices,
+                vec![
+                    HistoryDeviceFacet {
+                        id: "another-phone".into(),
+                        label: "CPH2305".into(),
+                        device_class: copypaste_ipc::DeviceClass::Phone,
+                    },
+                    HistoryDeviceFacet {
+                        id: "local-device".into(),
+                        label: "CPH2305".into(),
+                        device_class: copypaste_ipc::DeviceClass::Phone,
+                    },
+                ],
+                "empty local origin present: {include_empty_origin}"
+            );
+        }
+    }
+
+    #[test]
     fn keyset_ties_at_one_item_pages_never_repeat_or_skip() {
         let store = store();
         let created_at = T0 + 50;
@@ -1264,5 +1509,65 @@ mod tests {
             walk_with_page_size(&store, &relevance, 1),
             vec!["tie-c", "tie-b", "tie-a"]
         );
+    }
+    #[test]
+    fn facet_cache_survives_pinning_and_refreshes_when_labels_change() {
+        let store = store();
+        let mut clip = item("facet", T0);
+        clip.app_bundle_id = Some("org.example".into());
+        clip.app_name = Some("Old name".into());
+        let clip = store.insert(clip).unwrap();
+        let class = copypaste_ipc::DeviceClass::Laptop;
+        let before = store.history_facets("local", "Laptop", class).unwrap();
+        let revision = store.facet_cache.lock().unwrap().as_ref().unwrap().revision;
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET pinned = 1 WHERE id = ?1",
+                [&clip.id],
+            )
+            .unwrap();
+        assert_eq!(
+            store.history_facets("local", "Laptop", class).unwrap(),
+            before
+        );
+        assert_eq!(
+            store.facet_cache.lock().unwrap().as_ref().unwrap().revision,
+            revision
+        );
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET app_name = 'New name' WHERE id = ?1",
+                [&clip.id],
+            )
+            .unwrap();
+        let after = store.history_facets("local", "Laptop", class).unwrap();
+        assert_eq!(after.source_apps[0].label, "New name");
+        assert!(store.facet_cache.lock().unwrap().as_ref().unwrap().revision > revision);
+    }
+    #[test]
+    fn facet_cache_discards_obsolete_entry_before_oversize_result() {
+        let store = store();
+        let mut clip = item("facet", T0);
+        clip.app_bundle_id = Some("org.example".into());
+        clip.app_name = Some("small".into());
+        let clip = store.insert(clip).unwrap();
+        let class = copypaste_ipc::DeviceClass::Laptop;
+        store.history_facets("local", "Laptop", class).unwrap();
+        assert!(store.facet_cache.lock().unwrap().is_some());
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET app_name = ?2 WHERE id = ?1",
+                rusqlite::params![clip.id, "x".repeat(512 * 1024)],
+            )
+            .unwrap();
+        let facets = store.history_facets("other", "Laptop", class).unwrap();
+        assert_eq!(facets.source_apps[0].label.len(), 512 * 1024);
+        assert!(store.facet_cache.lock().unwrap().is_none());
     }
 }

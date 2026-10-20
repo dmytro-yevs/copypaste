@@ -32,11 +32,22 @@ fn set_with_effects<F>(state: &AppState, id: u64, patch: &ConfigPatch, effects: 
 where
     F: FnOnce(&SettingsTransition),
 {
+    let before = {
+        let settings = state.settings.get();
+        (settings.private_mode_epoch(), settings.health().cloned())
+    };
     match state
         .settings
         .apply_with_effects(&state.meta, patch, effects)
     {
         Ok(config) => {
+            let changed = {
+                let settings = state.settings.get();
+                (settings.private_mode_epoch(), settings.health().cloned()) != before
+            };
+            if changed {
+                state.note_capture_state_changed();
+            }
             if patch.sync_enabled.is_some() {
                 state
                     .modules
@@ -114,6 +125,10 @@ pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
 }
 
 pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Response {
+    let before = {
+        let settings = state.settings.get();
+        (settings.private_mode_epoch(), settings.health().cloned())
+    };
     match state.settings.apply_with_effects(
         &state.meta,
         &ConfigPatch {
@@ -122,13 +137,22 @@ pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Resp
         },
         |transition| advance_private_cursor(state, transition),
     ) {
-        Ok(config) => Response::ok(
-            id,
-            ResponseData::PrivateMode(PrivateModeData {
-                private_mode: config.config.private_mode,
-                private_mode_epoch: config.private_mode_epoch,
-            }),
-        ),
+        Ok(config) => {
+            let changed = {
+                let settings = state.settings.get();
+                (settings.private_mode_epoch(), settings.health().cloned()) != before
+            };
+            if changed {
+                state.note_capture_state_changed();
+            }
+            Response::ok(
+                id,
+                ResponseData::PrivateMode(PrivateModeData {
+                    private_mode: config.config.private_mode,
+                    private_mode_epoch: config.private_mode_epoch,
+                }),
+            )
+        }
         Err(e @ SettingsError::Invalid(_)) => {
             Response::err(id, ErrorCode::InvalidRequest, e.to_string())
         }
@@ -162,6 +186,19 @@ mod tests {
             Some(ResponseData::PrivateMode(mode)) => mode,
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn private_mode_change_publishes_authoritative_capture_state() {
+        let (state, _dir) = test_state("private-mode-push");
+        let mut events = state.subscribe_runtime();
+        assert!(set_private_mode(&state, 1, true).ok);
+        let capture = events.try_recv().unwrap().capture.unwrap();
+        assert!(capture.private_mode);
+        assert_eq!(capture.private_mode_epoch, 1);
+        assert_eq!(capture.capture_revision, 1);
+        assert!(set_private_mode(&state, 2, true).ok);
+        assert!(events.try_recv().is_err());
     }
 
     #[derive(Default)]

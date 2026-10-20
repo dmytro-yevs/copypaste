@@ -70,6 +70,14 @@ impl SyncSource for BenchSource {
         Ok(v)
     }
 
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        let items = self.items.lock().unwrap();
+        Ok(ids
+            .iter()
+            .filter_map(|id| items.get(id).map(SyncItem::summary))
+            .collect())
+    }
+
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
         let items = self.items.lock().unwrap();
         Ok(ids.iter().filter_map(|id| items.get(id).cloned()).collect())

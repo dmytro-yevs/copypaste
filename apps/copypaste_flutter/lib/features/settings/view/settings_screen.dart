@@ -86,6 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _excludedApplicationsKey = GlobalKey();
   final _retentionKey = GlobalKey();
   final _storageQuotaKey = GlobalKey();
+  final _maxFileSizeKey = GlobalKey();
   final _historyFilesKey = GlobalKey();
   final _syncEnabledKey = GlobalKey();
   final _instantClipboardKey = GlobalKey();
@@ -599,6 +600,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         targetKey: _historyFilesKey,
       ),
       _SettingsNavigationTarget(
+        id: _SettingsTargetId.maxFileSize,
+        section: SettingsSectionId.clipboard,
+        label: 'Maximum file size',
+        description: 'Limit for adding and downloading files.',
+        keywords: 'import download transfer size limit',
+        targetKey: _maxFileSizeKey,
+      ),
+      _SettingsNavigationTarget(
         id: _SettingsTargetId.sync,
         section: SettingsSectionId.sync,
         label: 'Sync',
@@ -977,6 +986,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             values: _quotaOptions,
             label: _formatQuota,
             onChanged: widget.controller.setStorageQuotaBytes,
+          ),
+        ),
+        _SettingRow(
+          key: _maxFileSizeKey,
+          highlighted: _isHighlighted(_SettingsTargetId.maxFileSize),
+          title: 'Maximum file size',
+          description:
+              'Limit for adding and downloading files. File contents transfer only when you choose Download.',
+          trailing: _valueSelect<int>(
+            value: settings.maxFileSizeBytes,
+            values: const [
+              1048576,
+              4194304,
+              16777216,
+              67108864,
+              268435456,
+              1073741824,
+              4294967296,
+              21474836480,
+            ],
+            label: (bytes) => bytes >= 1073741824
+                ? '${bytes ~/ 1073741824} GiB'
+                : '${bytes ~/ 1048576} MiB',
+            onChanged: widget.controller.setMaxFileSizeBytes,
           ),
         ),
       ],
@@ -1501,59 +1534,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _addExcludedApplication() async {
     final input = TextEditingController();
-    final value = await AppOverlays.showDialog<String>(
-      context,
-      builder: (dialogContext) => AppOverlays.alertDialog(
+    try {
+      await AppOverlays.showActionDialog(
+        context,
         icon: LucideIcons.shieldPlus,
         title: const Text('Exclude application'),
+        actionLabel: 'Exclude',
+        destructive: false,
+        changes: input,
+        canConfirm: () =>
+            input.text.trim().isNotEmpty && !widget.controller.busy,
         content: TextField(
           controller: input,
           autofocus: true,
           placeholder: const Text('Application identifier'),
-          decoration: AppOverlays.dialogFieldDecoration(dialogContext),
+          decoration: AppOverlays.dialogFieldDecoration(context),
         ),
-        actions: [
-          Button.ghost(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          Button.primary(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
-            onPressed: () => Navigator.pop(dialogContext, input.text),
-            child: const Text('Exclude'),
-          ),
-        ],
-      ),
-    );
-    input.dispose();
-    if (value != null) await widget.controller.addExcludedApp(value);
+        onConfirm: () => widget.controller.addExcludedApp(input.text),
+        failureMessage: () =>
+            widget.controller.errorMessage ??
+            'The application could not be excluded.',
+      );
+    } finally {
+      input.dispose();
+    }
   }
 
   Future<void> _confirmRestore() async {
-    final confirmed = await AppOverlays.showDialog<bool>(
+    await AppOverlays.showActionDialog(
       context,
-      builder: (dialogContext) => AppOverlays.alertDialog(
-        icon: LucideIcons.history,
-        title: const Text('Replace local history?'),
-        content: const Text(
-          'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.',
-        ),
-        actions: [
-          Button.ghost(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          Button.destructive(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Choose backup'),
-          ),
-        ],
+      icon: LucideIcons.history,
+      title: const Text('Replace local history?'),
+      content: const Text(
+        'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.',
       ),
+      actionLabel: 'Restore',
+      changes: widget.controller,
+      canConfirm: () => !widget.controller.busy,
+      onConfirm: widget.controller.restoreBackup,
+      failureMessage: () =>
+          widget.controller.errorMessage ?? 'The backup could not be restored.',
     );
-    if (confirmed == true) await widget.controller.restoreBackup();
   }
 
   Future<void> _exportTextHistory() async {
@@ -1964,6 +1985,7 @@ class _SettingsNavigationTarget {
 }
 
 abstract final class _SettingsTargetId {
+  static const String maxFileSize = 'result-max-file-size';
   static const String skipSecret = 'result-skip-secret';
   static const String skipTransient = 'result-skip-transient';
   static const String blockScreenshots = 'result-block-screenshots';

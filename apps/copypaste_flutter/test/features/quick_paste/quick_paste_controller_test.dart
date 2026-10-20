@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 
@@ -31,6 +32,120 @@ import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import '../modules/modules_test_support.dart';
 
 void main() {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets(
+      'standard find, text editing, and close in Quick Paste on $platform',
+      (tester) async {
+        var clipboard = '';
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(SystemChannels.platform, (
+          call,
+        ) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard = (call.arguments as Map)['text'] as String;
+          }
+          if (call.method == 'Clipboard.getData') return {'text': clipboard};
+          return null;
+        });
+        addTearDown(
+          () =>
+              messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+        );
+        final repository = _Repository();
+        final host = _ContextHost();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: host,
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        await controller.opened(1);
+        await tester.pumpAndSettle();
+        final search = find.byType(EditableText).first;
+        await tester.enterText(search, 'find text');
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 600));
+        final modifier = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        final editable = tester.widget<EditableText>(search);
+        expect(editable.focusNode.hasFocus, isTrue);
+        expect(
+          editable.controller.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 9),
+        );
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, isEmpty);
+        expect(repository.copied, isEmpty);
+        expect(host.closeCalls, 0);
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, 'find text');
+        await tester.sendKeyDownEvent(modifier);
+        if (platform != TargetPlatform.windows) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        }
+        await tester.sendKeyEvent(
+          platform == TargetPlatform.windows
+              ? LogicalKeyboardKey.keyY
+              : LogicalKeyboardKey.keyZ,
+        );
+        if (platform != TargetPlatform.windows) {
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        }
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, isEmpty);
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        if (platform == TargetPlatform.macOS) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        if (platform == TargetPlatform.macOS) {
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        }
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, 'find text');
+        expect(repository.copied, isEmpty);
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(host.closeIds, [1]);
+        await controller.opened(2);
+        await tester.pumpAndSettle();
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(host.quitCalls, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
   test(
     'file transfer reports written bytes, reuses a copy, and retries failure',
     () async {
@@ -59,8 +174,15 @@ void main() {
       repository.failSave = false;
       repository.saveGate = Completer<void>();
       final progress = <double>[];
-      final preparation = transfer.prepare(clip, onProgress: progress.add);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final halfWritten = Completer<void>();
+      final preparation = transfer.prepare(
+        clip,
+        onProgress: (value) {
+          progress.add(value);
+          if (value == 0.5 && !halfWritten.isCompleted) halfWritten.complete();
+        },
+      );
+      await halfWritten.future;
       expect(progress, contains(0.5));
       repository.saveGate!.complete();
       final path = await preparation;
@@ -73,13 +195,18 @@ void main() {
       repository.saveGate = Completer<void>();
       var cancelled = false;
       final destination = File('${directory.path}/cancelled.bin');
+      final cancellableWriteStarted = Completer<void>();
       final cancelledSave = transfer.saveTo(
         clip,
         destination.path,
-        onProgress: (_) {},
+        onProgress: (value) {
+          if (value == 0.5 && !cancellableWriteStarted.isCompleted) {
+            cancellableWriteStarted.complete();
+          }
+        },
         isCancelled: () => cancelled,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await cancellableWriteStarted.future;
       cancelled = true;
       repository.saveGate!.complete();
       await expectLater(
@@ -233,6 +360,24 @@ void main() {
     expect(shortened, startsWith('/Users'));
     expect(shortened, endsWith('report.bin'));
     expect(shortened, contains('…'));
+    final rtl = middleEllipsis(
+      '😀אבגדהוזחטיכלמנסעפצקרשת📄',
+      maxWidth: 100,
+      style: style,
+      direction: TextDirection.rtl,
+    );
+    expect(rtl, startsWith('😀'));
+    expect(rtl, endsWith('📄'));
+    expect(rtl, contains('…'));
+    expect(
+      middleEllipsis(
+        'anything',
+        maxWidth: 0,
+        style: style,
+        direction: TextDirection.ltr,
+      ),
+      isEmpty,
+    );
     expect(
       middleEllipsis(
         'short',
@@ -571,8 +716,8 @@ void main() {
         final pinnedFinder = find.byKey(
           const ValueKey('quick-paste-pinned-scroll'),
         );
-        final recent = tester.widget<ListView>(recentFinder).controller!;
-        final pinned = tester.widget<ListView>(pinnedFinder).controller!;
+        final recent = tester.widget<ScrollView>(recentFinder).controller!;
+        final pinned = tester.widget<ScrollView>(pinnedFinder).controller!;
         recent.jumpTo(400);
         pinned.jumpTo(80);
         await tester.pumpAndSettle();
@@ -717,7 +862,7 @@ void main() {
         const ValueKey('quick-paste-history-scroll'),
       );
       ScrollController scroll() =>
-          tester.widget<ListView>(historyScroll).controller!;
+          tester.widget<ScrollView>(historyScroll).controller!;
       expect(controller.items, hasLength(50));
       expect(repository.requests, hasLength(1));
       expect(find.byKey(const ValueKey('quick-paste-clip-49')), findsNothing);
@@ -763,6 +908,54 @@ void main() {
       TargetPlatform.android,
     }),
   );
+
+  testWidgets('keeps pinned and recent windows independently bounded', (
+    tester,
+  ) async {
+    final repository = _PagedRepository();
+    _populateHistory(repository, 280, pinnedCount: 80);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 500));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    Future<void> loadPage() async {
+      final load = controller.history.loadMore();
+      await tester.pumpAndSettle();
+      await load;
+      await tester.pumpAndSettle();
+    }
+
+    for (var page = 1; page < 4; page++) {
+      await loadPage();
+    }
+    final pinned = find.byKey(const ValueKey('quick-paste-clip-0'));
+    final recent = find.byKey(const ValueKey('quick-paste-clip-80'));
+    expect(pinned, findsOneWidget);
+    expect(recent, findsOneWidget);
+    final pinnedY = tester.getTopLeft(pinned).dy;
+    final recentY = tester.getTopLeft(recent).dy;
+    await loadPage();
+    expect(pinned, findsOneWidget);
+    expect(recent, findsOneWidget);
+    expect(tester.getTopLeft(pinned).dy, closeTo(pinnedY, 1));
+    expect(tester.getTopLeft(recent).dy, closeTo(recentY, 1));
+    expect(controller.history.visitedIds.length, 250);
+    expect(controller.items.where((clip) => clip.pinned), hasLength(80));
+    expect(
+      controller.items.where((clip) => !clip.pinned).length,
+      lessThanOrEqualTo(200),
+    );
+    expect(
+      controller.shortcuts.values.any((clip) => clip.id == 'clip-0'),
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   for (final pinned in [false, true]) {
     testWidgets(
@@ -815,7 +1008,7 @@ void main() {
       expect(controller.items, hasLength(50));
       expect(controller.items.every((clip) => clip.pinned), isTrue);
       final pinnedScroll = tester
-          .widget<ListView>(
+          .widget<ScrollView>(
             find.byKey(const ValueKey('quick-paste-pinned-scroll')),
           )
           .controller!;
@@ -824,7 +1017,7 @@ void main() {
       expect(controller.items, hasLength(100));
       expect(find.byKey(const ValueKey('quick-paste-clip-70')), findsOneWidget);
       final recentScroll = tester
-          .widget<ListView>(
+          .widget<ScrollView>(
             find.byKey(const ValueKey('quick-paste-history-scroll')),
           )
           .controller!;
@@ -915,7 +1108,7 @@ void main() {
       final historyScroll = find.byKey(
         const ValueKey('quick-paste-history-scroll'),
       );
-      final scroll = tester.widget<ListView>(historyScroll).controller!;
+      final scroll = tester.widget<ScrollView>(historyScroll).controller!;
       scroll.jumpTo(scroll.position.maxScrollExtent);
       await tester.pumpAndSettle();
       expect(controller.items, hasLength(50));
@@ -1109,7 +1302,7 @@ void main() {
           matching: find.byType(Image),
         );
         expect(preview, findsOneWidget);
-        expect(tester.widget<Image>(preview).image, isA<MemoryImage>());
+        expect(tester.widget<Image>(preview).image, isA<ResizeImage>());
         expect(find.text('[image]'), findsNothing);
       } else if (kind == HistoryClipKind.file) {
         expect(find.text(label).hitTestable(), findsOneWidget);
@@ -1166,7 +1359,7 @@ void main() {
 
     await tester.drag(historyScroll, const Offset(0, -300));
     await tester.pumpAndSettle();
-    final scroll = tester.widget<ListView>(historyScroll);
+    final scroll = tester.widget<ScrollView>(historyScroll);
     expect(scroll.controller!.offset, greaterThan(0));
     expect(tester.getRect(pinned), pinnedRect);
     expect(tester.getRect(find.text('Clear')), footerRect);
@@ -1302,6 +1495,12 @@ void main() {
     expect(find.text('[image]'), findsNothing);
     expect(tester.getSize(preview).height, 120);
     expect(repository.imagePreviewEdges, contains(480));
+      final ratio = tester.view.devicePixelRatio;
+      expect(
+        repository.imagePreviewBounds,
+        contains(((240 * ratio).ceil().clamp(1, 480),
+            (120 * ratio).ceil().clamp(1, 480))),
+      );
     final row = find.byKey(const ValueKey('quick-paste-image'));
     final size = tester.getSize(row);
     await controller.history.toggleSecret(repository.clips.first);
@@ -1483,7 +1682,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 1000));
     final scroll = tester
-        .widget<ListView>(
+        .widget<ScrollView>(
           find.byKey(const ValueKey('quick-paste-history-scroll')),
         )
         .controller!;
@@ -1728,6 +1927,63 @@ void main() {
     await controller.activateIndex(1);
     expect(repository.copied, ['recent']);
   });
+
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    test(
+      'saved editing and search clip accelerators migrate on $platform',
+      () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final repository = _Repository();
+        final saved = {
+          'pinned': 'c',
+          'find': 'f',
+          'refresh': 'r',
+          'cut': 'x',
+          'redo': 'y',
+          'valid': 'b',
+        };
+        for (final id in saved.keys.where((id) => id != 'pinned')) {
+          repository.clips.add(
+            HistoryClip(
+              id: id,
+              contentType: 'text/plain',
+              preview: id,
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          );
+        }
+        final store = MemoryQuickPastePreferencesStore();
+        await store.writePinnedShortcuts(saved);
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost(),
+        );
+        await controller.initialize();
+        final migrated = await store.readPinnedShortcuts();
+        expect(migrated['valid'], 'b');
+        expect(migrated.values.toSet().length, saved.length);
+        for (final reserved in ['c', 'f', 'r', 'x', 'y']) {
+          expect(migrated.values, isNot(contains(reserved)));
+        }
+        controller.dispose();
+        final restarted = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost(),
+        );
+        addTearDown(restarted.dispose);
+        await restarted.initialize();
+        expect(await store.readPinnedShortcuts(), migrated);
+      },
+    );
+  }
 
   testWidgets('inspector shares History content and follows the focused clip', (
     tester,
@@ -2024,6 +2280,87 @@ void main() {
   );
 
   test(
+    'derived rows and shortcuts are immutable and reused until rows change',
+    () async {
+      final repository = _Repository();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final items = controller.items;
+      final shortcuts = controller.shortcuts;
+      expect(identical(controller.items, items), isTrue);
+      expect(identical(controller.shortcuts, shortcuts), isTrue);
+      expect(() => items.clear(), throwsUnsupportedError);
+      expect(() => shortcuts.clear(), throwsUnsupportedError);
+      await controller.history.select('recent');
+      expect(identical(controller.items, items), isTrue);
+      expect(identical(controller.shortcuts, shortcuts), isTrue);
+      repository.clips.removeWhere((clip) => clip.id == 'recent');
+      await controller.search('changed');
+      expect(controller.items.map((clip) => clip.id), ['pinned']);
+      expect(
+        controller.shortcuts.containsKey(LogicalKeyboardKey.digit1),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'unrelated history notifications do not persist pinned shortcuts',
+    () async {
+      final repository = _Repository();
+      final store = _CountingPreferences();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: _ContextHost(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+      final writes = store.writes;
+      await controller.history.select('recent');
+      await controller.history.select('pinned');
+      await Future<void>.delayed(Duration.zero);
+      expect(store.writes, writes);
+    },
+  );
+
+  test(
+    'pin changes during shortcut persistence are reconciled in order',
+    () async {
+      final repository = _Repository();
+      final store = _CountingPreferences();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: _ContextHost(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+      store.gate = Completer<void>();
+      store.started = Completer<void>();
+      final second = repository.clips.last.copyWith(pinned: true);
+      repository.clips[1] = second;
+      await controller.search('first');
+      await store.started!.future;
+      repository.clips[1] = second.copyWith(pinned: false);
+      await controller.search('second');
+      store.gate!.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      final saved = await store.readPinnedShortcuts();
+      expect(saved.containsKey(second.id), isFalse);
+      expect(controller.shortcuts[LogicalKeyboardKey.digit1]?.id, second.id);
+    },
+  );
+
+  test(
     'pinned letter shortcuts remain stable across filtering and restart',
     () async {
       final repository = _Repository();
@@ -2091,11 +2428,78 @@ void main() {
         LogicalKeyboardKey.keyW,
         LogicalKeyboardKey.keyZ,
         LogicalKeyboardKey.keyP,
+        LogicalKeyboardKey.keyC,
+        LogicalKeyboardKey.keyF,
+        LogicalKeyboardKey.keyR,
+        LogicalKeyboardKey.keyX,
+        LogicalKeyboardKey.keyY,
       ]) {
         expect(keys, isNot(contains(reserved)));
       }
     },
   );
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    test(
+      'pinned shortcuts respect native window commands on $platform',
+      () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final store = MemoryQuickPastePreferencesStore();
+        await store.writePinnedShortcuts({
+          'pinned': 'h',
+          'second-pin': 'm',
+          'unchanged': 'b',
+        });
+        final repository = _Repository();
+        for (final id in ['second-pin', 'unchanged']) {
+          repository.clips.add(
+            HistoryClip(
+              id: id,
+              contentType: 'text/plain',
+              preview: id,
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          );
+        }
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost()..permissionGranted = true,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final saved = await store.readPinnedShortcuts();
+        expect(saved['unchanged'], 'b');
+        if (platform == TargetPlatform.macOS) {
+          expect(saved.values, isNot(contains('h')));
+          expect(saved.values, isNot(contains('m')));
+          expect(
+            controller.shortcuts,
+            isNot(contains(LogicalKeyboardKey.keyH)),
+          );
+          expect(
+            controller.shortcuts,
+            isNot(contains(LogicalKeyboardKey.keyM)),
+          );
+        } else {
+          expect(saved['pinned'], 'h');
+          expect(saved['second-pin'], 'm');
+        }
+        expect(saved.values.toSet().length, 3);
+        controller.dispose();
+        final restarted = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost()..permissionGranted = true,
+        );
+        addTearDown(restarted.dispose);
+        await restarted.initialize();
+        expect(await store.readPinnedShortcuts(), saved);
+      },
+    );
+  }
 
   test(
     'Accessibility is requested only for paste and a denial survives reopen',
@@ -2510,6 +2914,7 @@ class _Repository implements HistoryRepository {
   final saveStarted = Completer<void>();
   final imagePreviewEdges = <int?>[];
   final imagePreviewIds = <String>[];
+  final imagePreviewBounds = <(int, int)>[];
   Completer<void>? imageLoadGate;
   int deleteAllCalls = 0;
   int getCalls = 0;
@@ -2584,6 +2989,7 @@ class _Repository implements HistoryRepository {
   }) async {
     imagePreviewEdges.add(maxEdge);
     imagePreviewIds.add(id);
+    if (bounds != null) imagePreviewBounds.add((bounds.width, bounds.height));
     if (id != 'image') return null;
     await imageLoadGate?.future;
     final preview = image.Image(width: 240, height: 180);
@@ -2727,6 +3133,7 @@ class _ContextHost implements QuickPasteContextHost {
   int permissionRequests = 0;
   int pasteCalls = 0;
   int closeCalls = 0;
+  int quitCalls = 0;
   QuickPasteOpenedHandler? openedHandler;
   final pasteIds = <int>[];
   final closeIds = <int>[];
@@ -2769,7 +3176,9 @@ class _ContextHost implements QuickPasteContextHost {
   }
 
   @override
-  Future<void> quit() async {}
+  Future<void> quit() async {
+    quitCalls += 1;
+  }
 
   @override
   Future<bool> requestAccessibility() async {
@@ -2860,5 +3269,19 @@ class _FrameHost extends _ContextHost implements QuickPasteFrameHost {
   Future<bool> presentFrame({required int presentationId}) async {
     presentedIds.add(presentationId);
     return true;
+  }
+}
+
+class _CountingPreferences extends MemoryQuickPastePreferencesStore {
+  int writes = 0;
+  Completer<void>? gate;
+  Completer<void>? started;
+
+  @override
+  Future<void> writePinnedShortcuts(Map<String, String> shortcuts) async {
+    writes++;
+    if (started case final value? when !value.isCompleted) value.complete();
+    await gate?.future;
+    await super.writePinnedShortcuts(shortcuts);
   }
 }

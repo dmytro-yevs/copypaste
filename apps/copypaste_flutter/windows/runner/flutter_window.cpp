@@ -419,8 +419,9 @@ bool FlutterWindow::OnCreate() {
   if (is_quick_paste_context_) {
     const auto handle = GetHandle();
     auto style = ::GetWindowLongPtr(handle, GWL_STYLE);
-    style &= ~(WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
-    style |= WS_POPUP | WS_THICKFRAME;
+    style &= ~(WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    // Keep native Alt+F4 and Alt+Space available without adding a title bar.
+    style |= WS_POPUP | WS_THICKFRAME | WS_SYSMENU;
     ::SetWindowLongPtr(handle, GWL_STYLE, style);
     ::SetWindowPos(handle, HWND_TOPMOST, 0, 0, 0, 0,
                    SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);

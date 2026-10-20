@@ -24,6 +24,7 @@ mod activity;
 mod channel;
 mod dial;
 mod error;
+mod files;
 mod listen;
 mod pairing;
 mod pairing_ceremony;
@@ -362,6 +363,14 @@ impl<S: SyncSource> ActiveSyncSource<'_, S> {
 }
 
 impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
+    fn summary_workspace(&self) -> Result<Box<dyn crate::sync::SummaryWorkspace>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.summary_workspace()
+    }
+    fn file_chunk(&self, id: &str, sha256: &str, index: u64) -> Result<Vec<u8>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.file_chunk(id, sha256, index)
+    }
     fn device_id(&self) -> String {
         self.source.device_id()
     }
@@ -377,6 +386,11 @@ impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
     fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
         let _operation = self.operation()?;
         self.source.summaries(since_ms)
+    }
+
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.local_summaries(ids)
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
@@ -439,6 +453,7 @@ pub struct Node {
     listen_addr: RwLock<Option<SocketAddr>>,
     bound_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
+    file_transfers: Semaphore,
     /// Established or dialling history sessions, indexed by the non-secret
     /// pairing id. A removal cancels every direction that already holds its
     /// authenticated transport; new handshakes are still controlled by
@@ -495,6 +510,7 @@ impl Node {
             listen_addr: RwLock::new(None),
             bound_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            file_transfers: Semaphore::new(1),
             active_syncs: Mutex::new(HashMap::new()),
             next_active_sync: AtomicU64::new(1),
             browse_until_ms: AtomicI64::new(0),
@@ -1341,6 +1357,10 @@ mod tests {
                 Ok(Vec::new())
             }
 
+            fn local_summaries(&self, _: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                Ok(Vec::new())
+            }
+
             fn fetch(&self, _: &[String]) -> Result<Vec<SyncItem>, SyncError> {
                 Ok(Vec::new())
             }
@@ -1430,6 +1450,45 @@ mod tests {
             "a later source batch started after unpair"
         );
         assert_eq!(source.writes.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[test]
+    fn active_source_forwards_workspace_and_comparison_lookups() {
+        struct ForwardingSource(crate::sync::testutil::TestSource);
+
+        impl SyncSource for ForwardingSource {
+            fn device_id(&self) -> String {
+                self.0.device_id()
+            }
+            fn device_name(&self) -> String {
+                self.0.device_name()
+            }
+            fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+                self.0.summaries(since_ms)
+            }
+            fn local_summaries(&self, _: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                Err(SyncError::Source("comparison lookup forwarded".into()))
+            }
+            fn summary_workspace(
+                &self,
+            ) -> Result<Box<dyn crate::sync::SummaryWorkspace>, SyncError> {
+                Err(SyncError::Source("workspace factory forwarded".into()))
+            }
+            fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+                self.0.fetch(ids)
+            }
+            fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+                self.0.apply(item)
+            }
+        }
+
+        let source = ForwardingSource(crate::sync::testutil::TestSource::new("local", vec![]));
+        let guarded = ActiveSyncSource {
+            source: &source,
+            state: Arc::new(ActiveSyncState::new()),
+        };
+        assert!(guarded.summary_workspace().is_err());
+        assert!(guarded.local_summaries(&[]).is_err());
     }
 
     #[test]

@@ -13,7 +13,15 @@ mod binary_reference;
 pub mod clipboard_payload;
 pub mod crypto;
 pub mod device_name;
+pub mod file_download;
+#[cfg(test)]
+mod file_download_tests;
 pub mod file_import;
+pub mod file_transfer;
+pub mod history_actions;
+pub mod history_backup;
+pub mod history_error;
+pub mod history_item;
 pub mod image_preview;
 pub mod ingest;
 pub mod p2p_contract;
@@ -21,6 +29,7 @@ pub mod peer_store;
 pub mod retention;
 pub mod semantic;
 pub mod settings_record;
+pub mod settings_transition;
 pub mod spoiler;
 pub mod storage;
 pub mod sync;
@@ -32,7 +41,7 @@ pub use binary::{
     CHUNK_BYTES,
 };
 pub use clipboard_payload::{ClipboardPayload, ClipboardWriteError};
-pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
+pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring, PreviewKey};
 pub use image_preview::{
     image_metadata, thumbnail_png, ImageMetadata, ImagePreviewError, ImageThumbnail,
     MAX_THUMBNAIL_EDGE,
@@ -47,9 +56,10 @@ pub use ingest::{
 pub use semantic::{classify_semantic, SemanticClassification};
 pub use storage::{
     compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity,
-    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
-    HistorySourceAppFacet, IncomingItem, Ingest, ItemCursor, NewItem, Page, RestoreError,
-    SemanticMatches, SemanticWork, Store, StoreError, StoredItem, Version,
+    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryPreviewPage,
+    HistoryPreviewRow, HistoryQuery, HistorySort, HistorySourceAppFacet, IncomingItem, Ingest,
+    ItemCursor, NewItem, Page, PreviewPage, RestoreError, SemanticMatches, SemanticWork, Store,
+    StoreError, StoredItem, Version,
 };
 pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

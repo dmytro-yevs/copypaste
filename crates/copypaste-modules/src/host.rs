@@ -93,7 +93,7 @@ impl ModuleHost {
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
         {
-            service.notify();
+            service.history_changed();
         }
     }
 
@@ -110,6 +110,33 @@ impl ModuleHost {
             service.query(query, after, limit, budget, device)
         } else {
             store.query_history_bounded_for_device(query, after, limit, budget, device)
+        }
+    }
+
+    pub fn query_history_previews(
+        &self,
+        store: &copypaste_core::Store,
+        query: &copypaste_core::HistoryQuery,
+        after: Option<&copypaste_core::HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        device: Option<&str>,
+        item_key: &copypaste_core::ItemKey,
+        preview_key: &copypaste_core::PreviewKey,
+    ) -> Result<copypaste_core::HistoryPreviewPage, copypaste_core::StoreError> {
+        if let Some(service) = self.search_service() {
+            service.query_previews(query, after, limit, budget, device, item_key, preview_key)
+        } else {
+            store.query_history_previews_with_semantic(
+                query,
+                after,
+                limit,
+                budget,
+                device,
+                None,
+                item_key,
+                preview_key,
+            )
         }
     }
 
@@ -208,15 +235,22 @@ impl ModuleHost {
                     return Ok(());
                 }
                 let manager = host.manager()?;
+                let mut first_error = None;
                 for (id, command) in manager.sync_providers(true)? {
                     if fence.load(std::sync::atomic::Ordering::Acquire) {
                         break;
                     }
-                    let _ = manager.invoke(&id, &command, std::collections::BTreeMap::new());
+                    if let Err(error) =
+                        manager.invoke(&id, &command, std::collections::BTreeMap::new())
+                    {
+                        // One unavailable provider must not starve another
+                        // provider's event-driven startup or recovery.
+                        first_error.get_or_insert(error);
+                    }
                 }
-                Ok(())
+                first_error.map_or(Ok(()), Err)
             });
-            tokio::select! {
+            let retry_after_failure = tokio::select! {
                 biased;
                 _ = shutdown.changed() => {
                     stopping.store(true, std::sync::atomic::Ordering::Release);
@@ -224,17 +258,32 @@ impl ModuleHost {
                     let _ = work.await;
                     return;
                 },
-                _ = &mut work => {},
-            }
-            tokio::select! {
-                biased;
-                _ = shutdown.changed() => break,
-                _ = self.wake.notified() => {},
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
+                result = &mut work => !matches!(result, Ok(Ok(()))),
+            };
+            // Providers own their network, session-refresh and reconnect deadlines.
+            // The host starts once and then reacts to durable local/configuration
+            // wakes. A failed provider startup gets a bounded retry so a transient
+            // module/load failure cannot strand sync forever.
+            if !Self::wait_for_sync_wake(&self.wake, &mut shutdown, retry_after_failure).await {
+                break;
             }
         }
         stopping.store(true, std::sync::atomic::Ordering::Release);
         self.stop_sync_workers().await;
+    }
+    const SYNC_FAILURE_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
+
+    async fn wait_for_sync_wake(
+        wake: &tokio::sync::Notify,
+        shutdown: &mut tokio::sync::watch::Receiver<bool>,
+        retry_after_failure: bool,
+    ) -> bool {
+        tokio::select! {
+            biased;
+            _ = shutdown.changed() => false,
+            _ = wake.notified() => true,
+            _ = tokio::time::sleep(Self::SYNC_FAILURE_RETRY), if retry_after_failure => true,
+        }
     }
     async fn stop_sync_workers(self: &Arc<Self>) {
         let host = Arc::clone(self);
@@ -454,6 +503,32 @@ mod tests {
         }
         archive.finish().unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn sync_host_stays_idle_until_a_wake_or_shutdown() {
+        let wake = tokio::sync::Notify::new();
+        let (stop, mut shutdown) = tokio::sync::watch::channel(false);
+        {
+            let mut waiting =
+                std::pin::pin!(ModuleHost::wait_for_sync_wake(&wake, &mut shutdown, false));
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut waiting)
+                    .await
+                    .is_err(),
+                "successful idle sync must not use a periodic provider tick"
+            );
+            wake.notify_one();
+            assert!(waiting.await);
+        }
+        assert_eq!(
+            ModuleHost::SYNC_FAILURE_RETRY,
+            std::time::Duration::from_secs(5)
+        );
+        let wake = tokio::sync::Notify::new();
+        let waiting = std::pin::pin!(ModuleHost::wait_for_sync_wake(&wake, &mut shutdown, false));
+        stop.send(true).unwrap();
+        assert!(!waiting.await);
     }
 
     #[tokio::test]

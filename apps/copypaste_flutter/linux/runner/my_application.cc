@@ -154,7 +154,9 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_default_size(window, 1280, 720);
   gtk_window_set_title(window, quick_paste ? "CopyPaste Quick Paste" : "CopyPaste");
   if (quick_paste) {
-    configure_linux_quick_paste_window(window);
+    configure_linux_quick_paste_window(window, [] {
+      close_linux_quick_paste_context();
+    });
   }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

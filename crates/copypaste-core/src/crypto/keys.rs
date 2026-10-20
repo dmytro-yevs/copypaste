@@ -37,6 +37,8 @@ const INFO_DB_KEY: &[u8] = b"copypaste/v2/sqlcipher-db-key";
 /// HKDF `info` for the per-item content AEAD key.
 const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 
+const INFO_PREVIEW_KEY: &[u8] = b"copypaste/v2/history-preview-key";
+
 const INFO_PEER_STORE_KEY: &[u8] = b"copypaste/v2/peer-store-key";
 
 /// Development bypass, compiled out unless `dev-ephemeral-key` is enabled.
@@ -140,6 +142,11 @@ impl Keyring {
         ItemKey(Zeroizing::new(derive(&self.secret, INFO_ITEM_KEY)))
     }
 
+    /// Key for disposable authenticated History previews.
+    pub fn preview_key(&self) -> PreviewKey {
+        PreviewKey(Zeroizing::new(derive(&self.secret, INFO_PREVIEW_KEY)))
+    }
+
     /// Key for the encrypted LAN pairing store, separate from content and SQLCipher.
     pub fn peer_store_key(&self) -> Zeroizing<[u8; KEY_LEN]> {
         Zeroizing::new(derive(&self.secret, INFO_PEER_STORE_KEY))
@@ -193,6 +200,15 @@ where
 impl std::fmt::Debug for Keyring {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Keyring").finish_non_exhaustive()
+    }
+}
+
+/// Separate key for the disposable History preview cache.
+pub struct PreviewKey(pub(super) Zeroizing<[u8; KEY_LEN]>);
+
+impl std::fmt::Debug for PreviewKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreviewKey").finish_non_exhaustive()
     }
 }
 
@@ -475,6 +491,13 @@ mod tests {
         assert_ne!(*ring.db_key(), *item.0.as_ref());
         assert_ne!(*ring.peer_store_key(), *ring.db_key());
         assert_ne!(*ring.peer_store_key(), *item.0.as_ref());
+        assert_ne!(*ring.preview_key().0, *ring.db_key());
+        assert_ne!(*ring.preview_key().0, *item.0);
+        assert_ne!(*ring.preview_key().0, *ring.peer_store_key());
+        assert_eq!(
+            *ring.preview_key().0,
+            *Keyring::from_secret(&SECRET_A).preview_key().0
+        );
         assert_eq!(
             *ring.peer_store_key(),
             *Keyring::from_secret(&SECRET_A).peer_store_key()

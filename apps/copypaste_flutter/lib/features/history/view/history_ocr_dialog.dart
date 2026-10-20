@@ -50,12 +50,12 @@ Future<void> showHistoryOcrDialog(
           ),
           actions: [
             Button.secondary(
-              style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
+              style: AppTheme.dialogButtonStyle(const ButtonStyle.secondary()),
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Close'),
             ),
             Button.primary(
-              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+              style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
               key: const ValueKey('history-ocr-copy'),
               onPressed: controller.busy || text == null || text.trim().isEmpty
                   ? null

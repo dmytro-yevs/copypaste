@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-17",
+  "date": "2026-10-20",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -84,18 +84,26 @@
       "owner_module": "Desktop Quick Paste",
       "platforms": [
         "macOS",
-        "Windows"
+        "Windows",
+        "Linux"
       ],
       "source_references": [
         "docs/adr/0033-quick-paste-popup.md",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
-        "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
+        "apps/copypaste_flutter/macos/Runner/MacosWindowCommands.swift",
+        "apps/copypaste_flutter/macos/RunnerTests/MacosWindowCommandsTests.swift",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/linux/runner/linux_quick_paste_window.cc",
+        "apps/copypaste_flutter/linux/runner/linux_host_channels.cc",
+        "scripts/fixtures/linux-quick-paste-close.cc",
+        "docs/ui/desktop-keyboard-shortcuts.md"
       ],
-      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior.",
+      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior. Standard keyboard and native window close use the existing cancellation/hide/retirement paths. macOS Command-W and Option-Command-W invalidate the popup paste session before acknowledged retirement. Windows preserves the native system-menu close command. Linux GTK close/iconify coalesces duplicate requests, cancels/restores the transaction, and exits on idle; its callback is owned and released by the GTK window. Quit from the Linux popup requests primary-process termination through PID/transaction authorization. No event monitor, polling timer, retained presentation, or engine prewarming is introduced.",
       "next_step": "Measure startup latency, peak and recovered memory for 100 open/close cycles; compare reuse only with evidence.",
       "native_resource_qualification": {
         "macOS": "not_established",
-        "Windows": "not_established"
+        "Windows": "not_established",
+        "Linux": "not_established"
       },
       "measured_saving": null,
       "evidence_refs": [
@@ -103,6 +111,34 @@
           "kind": "functional_test_log",
           "name": "flutter-resource-tests.log",
           "sha256": "036f614b32eb18f2113f1e3f1a7a9acfabb71a12ad219b4f54580be07f1248c9",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-flutter-tests.log",
+          "sha256": "87732ae75a50e16a27dbc0e29cb02aac7cf979c4c1450e49390cb1d08fc343a5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-macos-tests.log",
+          "sha256": "a78724695db82f2b0319c332295e04bf53bb9c8eeda7b4c1b726b6d407865df7",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-linux-gtk.log",
+          "sha256": "1ed37d3fd33e249b7fcf50b8b38391dedd10b71d818f08f7650d959250c9b488",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-linux-quit.log",
+          "sha256": "2a688a284fc5e23cb954eb2a0734f31570edc737015fedf1926410a3a1524f96",
           "source_state": "dirty_workspace",
           "release_qualification": false
         }
@@ -153,10 +189,12 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/inference/client.rs",
-        "docs/release-qualification.md"
+        "docs/release-qualification.md",
+        "modules/ocr/src/lib.rs",
+        "modules/ocr/vendor/paddle-ocr-rs/src/crnn_net.rs"
       ],
       "invariant": "OCR success/error releases its worker; subsequent requests reload; semantic reuse stays separate.",
-      "next_step": "Verify installed same-commit release behavior, OCR accuracy, latency, peak, crash and disable recovery.",
+      "next_step": "Collect controlled macOS comparison after the other test task ends; Android/Windows native evidence and unresolved budgets remain open.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -165,7 +203,13 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_9_unit_tests_and_840_route_parity_comparisons",
+      "allocation_lifetime": "One OCR invocation; ten routes execute unchanged. Prepared RGB crops are released after recognition, and tensor scores are borrowed rather than cloned.",
+      "bounds": {
+        "prepared_rgb_cache_bytes": 8388608,
+        "routes": 10
+      },
+      "tradeoffs": "Oversized crops are reconstructed instead of retained. All 840 compared per-route texts and confidence bit patterns matched. Preliminary timing/resource samples had concurrent external test load and are not controlled performance evidence."
     },
     {
       "id": "RUN-006",
@@ -181,7 +225,9 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/semantic_search.rs",
-        "docs/semantic-inference.md"
+        "docs/semantic-inference.md",
+        "crates/copypaste-core/src/storage/semantic_index.rs",
+        "crates/copypaste-core/src/storage/resource_revisions.rs"
       ],
       "invariant": "32-entry query/cache bounds, latest query priority, lexical results while inference is pending.",
       "next_step": "Measure sustained indexing and repeated queries; separately bound AI peak and return to ordinary budget.",
@@ -193,7 +239,13 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_core_cache_storage_tests_and_final_combined_compilation",
+      "bounds": {
+        "score_cache_entries": 4,
+        "accounted_score_cache_bytes": 4194304
+      },
+      "allocation_lifetime": "Scores are Arc-shared only for an exact model scope, query vector/threshold bits, database generation and semantic revision. Clear on semantic service disable/stop/scope change and restore.",
+      "tradeoffs": "Accounting controls retained cache data, not total allocator/native memory. Semantic vector/document mutations add transactional revision updates; pin-only and file-chunk writes do not invalidate scores."
     },
     {
       "id": "RUN-007",
@@ -358,17 +410,42 @@
         "crates/copypaste-core/src/storage/connection.rs",
         "docs/adr/0023-retention-batch-scope-guard.md"
       ],
-      "invariant": "Four pooled connections, 8 MiB configured page-cache target per connection, batched retention.",
-      "next_step": "Measure encrypted DB, temporary B-trees, WAL, batch latency and retained allocator memory; cache setting is not a total-memory hard limit.",
+      "invariant": "One minimum idle connection, up to four pooled connections, an 8 MiB configured page-cache target per connection, and batched retention; cache targets are not hard total-memory bounds.",
+      "next_step": "Measure sustained full-app storage and sync workloads, connection retirement, encrypted temporary state and platform-native memory. Preserve four-way checkout and existing timeouts.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "rust-final-storage-tests.log",
+          "sha256": "9b1278599e78df1d2e5b4598e7cd8bff072d154aebf13e4de39b22bbc3625c43",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        },
+        {
+          "kind": "macos_developer_diagnostic",
+          "name": "v3-comparison.json",
+          "sha256": "a3146da03902b3ad2f356b1006d30c132b5d7f059eaf0a1d343a5b03aa98fcd9",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_integrated_targeted_tests_native_resource_qualification_pending",
+      "allocation_lifetime": "The file-backed pool initially maintains one idle connection and can grow lazily to the unchanged maximum of four. Existing 600-second idle timeout and connection lifetime remain unchanged; in-memory pools retain their no-retirement policy.",
+      "bounds": {
+        "minimum_idle_connections": 1,
+        "maximum_connections": 4,
+        "connection_timeout_seconds": 10,
+        "configured_page_cache_target_per_connection_bytes": 8388608,
+        "total_memory": "Page-cache settings are targets, not hard process-memory bounds."
+      },
+      "cancellation": "Existing pool checkout, connection retirement and application shutdown behavior is preserved.",
+      "tradeoffs": "Initial concurrent work can open more connections lazily. Native combined-candidate startup/read data is recorded; it does not isolate pool savings. First binary launch cache state differs and cannot establish a startup regression or improvement."
     },
     {
       "id": "RUN-013",
@@ -383,9 +460,12 @@
         "Windows"
       ],
       "source_references": [
-        "crates/copypaste-daemon/src/p2p/poll.rs"
+        "crates/copypaste-sync/src/peer_driver.rs",
+        "crates/copypaste-sync/src/cadence.rs",
+        "crates/copypaste-daemon/src/p2p/poll.rs",
+        "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "Long no-peer wait, adaptive cadence and capture-triggered wake; preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -393,9 +473,25 @@
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "rust-tests-final.log",
+          "sha256": "84cbd2a727692471b7c9bd86c89af1dbbd0fd19a6409333d206384b40d95184a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending",
+      "allocation_lifetime": "One outgoing round; per-peer tasks exist only while its sessions run. Cancelled sessions are aborted and joined before releasing the round permit.",
+      "cancellation": "Sync disable cancels the live SyncCycle; shutdown and new capture wakes abort and join unfinished sessions. Capture wake is preserved for the next round.",
+      "bounds": {
+        "outgoing_rounds": 1,
+        "peer_tasks": "One per dialable paired peer, retaining existing fanout; active network sessions use the shared Node admission limit.",
+        "idle_timing": "Existing AdaptiveCadence constants and NO_PEERS_INTERVAL; allocation policy, not a measured runtime budget."
+      },
+      "tradeoffs": "Android now shares the desktop no-peer wait and adaptive idle policy. Native latency, wakeup, CPU and memory effects remain unmeasured."
     },
     {
       "id": "RUN-014",
@@ -414,7 +510,7 @@
         "crates/copypaste-p2p/src/sync/summary.rs"
       ],
       "invariant": "Summary pages/items/messages have individual bounds.",
-      "next_step": "Reduce simultaneous retained summary sets and payload copies if large-history sync exceeds ordinary budget.",
+      "next_step": "RUN-054 supplies the bounded encrypted session workspace and complete catch-up tests; measure native supported-platform scaling and transfer latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -423,7 +519,13 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "Protocol bounds retained; 316 P2P tests and real 5000-row StoreSource catch-up tests passed with RUN-054.",
+      "session_workspace_attempt": {
+        "status": "superseded_rejected_prototype",
+        "candidate": "a54d374bf1b1705153f563bc29f246da63d15e99",
+        "reason": "Real 5000-row catch-up stopped at 2000 rows after six rounds. Baseline cause was not established; no resource saving is claimed.",
+        "superseded_by": "RUN-054"
+      }
     },
     {
       "id": "RUN-015",
@@ -464,17 +566,25 @@
         "Android"
       ],
       "source_references": [
-        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt"
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/NativeRuntimeCapture.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
       ],
       "invariant": "One ingestion worker, 32 queue entries, 16 MiB encoded and 50 MiB decoded image caps.",
-      "next_step": "Measure queued payload bytes and cancellation storms; cap lifecycle/cleanup threads.",
+      "next_step": "Collect controlled macOS comparison after the other test task ends; Android/Windows native evidence and unresolved budgets remain open.",
       "native_resource_qualification": {
         "Android": "not_established"
       },
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_16_jvm_tests_and_android_arm64_bridge_check_before_runtime_event_changes",
+      "bounds": {
+        "encoded_image_bytes": 16777216,
+        "decoded_image_bytes": 52428800,
+        "heavy_image_operations": 1
+      },
+      "allocation_lifetime": "Owned encoded PNG backing buffer crosses JNI with an explicit valid length; Rust copies only that prefix. Shared image admission covers source read, normalization and JNI ingestion."
     },
     {
       "id": "RUN-017",
@@ -531,7 +641,7 @@
       "id": "RUN-019",
       "title": "Bound visible history pages and total media bytes",
       "domain": "runtime",
-      "implementation_status": "partially_implemented",
+      "implementation_status": "present_in_source",
       "priority": "P0",
       "owner_module": "HistoryController",
       "platforms": [
@@ -541,10 +651,13 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
-        "apps/copypaste_flutter/lib/features/history/controller/history_resource_limits.dart"
+        "apps/copypaste_flutter/lib/features/history/controller/history_resource_limits.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_index.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_window_scroll.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_row_geometry.dart"
       ],
       "invariant": "Bound retained pages, preview/icon/spoiler bytes and in-flight work without truncating navigable history.",
-      "next_step": "Encoded media is byte-bounded and full detail bodies no longer enter retained row summaries. Reloadable page windows and aggregate in-flight byte admission remain open.",
+      "next_step": "Native process-family observations are developer diagnostics; missing supported-platform evidence and unresolved budgets prevent resource qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -558,16 +671,50 @@
           "sha256": "036f614b32eb18f2113f1e3f1a7a9acfabb71a12ad219b4f54580be07f1248c9",
           "source_state": "dirty_workspace",
           "release_qualification": false
+        },
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "tmp/implementation-wave-4/logs/history-qp-after-fix.log",
+          "sha256": "9cd7f9ab7844279bae887717a1e4a59394bc5c282adc98ca4de14b066a241cfd",
+          "source_state": "worker_ui_8eaae98ed8d8fc129e77ee83ff9ba2ac9c61bc7a",
+          "release_qualification": false
+        },
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "tmp/implementation-wave-4/logs/pin-metadata-test-fixed.log",
+          "sha256": "fd2cf9db2f102b6a5d3261563d674b4469b06b1d9040882e25ee76bc753f5c35",
+          "source_state": "worker_ui_b56b59a8131cbc409ba229f6e6901bb24d4d0119",
+          "release_qualification": false
+        },
+        {
+          "kind": "matched_combined_macos_developer_diagnostic",
+          "name": "outputs/macos-wave4-resource-comparison.json",
+          "sha256": "ba6aa1fe6f098abd4b757b57943da1d815bc921a1b559ad5f97a0647024384ec",
+          "source_state": "combined_executable_code_34abf13ec",
+          "release_qualification": false
         }
       ],
       "supersedes": [],
-      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+      "functional_validation": "passed_210_history_quick_paste_tests_and_6_index_tests_after_partial_pin_metadata_fix",
+      "last_wave_disposition": "The earlier rejected centered/eager-page prototypes were replaced with lazy SliverList/ListView windows, saved-cursor refetch, independent Quick Paste lanes, surviving visible anchors and preserved evicted pin metadata.",
+      "allocation_lifetime": "Resident summaries are page-window owned; suspend/query reset releases summaries and media. Visited cursor/ID/pin/date metadata remains compact while navigating; visible selection owns its detail separately.",
+      "bounds": {
+        "resident_page_target": 3,
+        "page_rows": 50,
+        "quick_paste_lanes": 2,
+        "encoded_preview_bytes": 16777216,
+        "encoded_source_icon_bytes": 4194304,
+        "history_accounted_summary_bytes_target": 2097152,
+        "quick_paste_shared_accounted_summary_bytes_target": 4194304
+      },
+      "tradeoffs": "Incoming and protected visible regions, or a single oversized visible page, can exceed targets temporarily. Compact visited metadata still grows with visited history. Unseen rows use ordinary lazy-scroll extent estimates; measured visible anchors are restored after eviction/refetch. These controls are not a hard native-memory ceiling.",
+      "combined_diagnostic_attribution": "One incremental e9-to-34ab combined-candidate pair, not per-optimization attribution. Same 10000-item fixture, 1500 ordered logical IDs, first-row selection and viewport, four images and lifecycle phases. Resident summaries 1500 to 150; see raw process-family/role counters. OS cache/background uncontrolled; no stable speedup or resource qualification claim."
     },
     {
       "id": "RUN-020",
       "title": "Shared memory admission for image and IPC work",
       "domain": "runtime",
-      "implementation_status": "partially_implemented",
+      "implementation_status": "present_in_source",
       "priority": "P0",
       "owner_module": "Runtime resource policy",
       "platforms": [
@@ -578,16 +725,32 @@
       "source_references": [
         "crates/copypaste-daemon/src/server/dispatch.rs",
         "crates/copypaste-core/src/image_preview.rs",
-        "crates/copypaste-ipc/src/config.rs"
+        "crates/copypaste-ipc/src/config.rs",
+        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-daemon/src/server/listener.rs",
+        "crates/copypaste-ipc/src/lib.rs"
       ],
       "invariant": "Per-operation limits and parallelism must fit a common process-tree envelope.",
-      "next_step": "Core preview decoding is serialized per process. Aggregate encoded inputs, IPC buffers, Flutter/GPU surfaces and process-family byte admission remain open.",
+      "next_step": "Keep measuring representative UI scrolling, inspector and full process-family scenarios. Aggregate bytes, visible-request priority, complete cancellation and supported-platform native evidence remain open.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
         "Windows": "not_established"
       },
-      "measured_saving": null,
+      "measured_saving": {
+        "metric": "sampled daemon physical footprint bytes",
+        "baseline": 152241088,
+        "candidate": 24855296,
+        "cpu_work_ms_before": 738.022958333333,
+        "cpu_work_ms_after": 571.434375,
+        "preview_p95_ms_before": 368.8301670000005,
+        "preview_p95_ms_after": 537.9276669999999,
+        "scenario": "32 preview requests per group, 2048x2048 4-bit PNG; 32 mixed history/status reads at concurrency 4",
+        "repetitions_per_version": 3,
+        "attribution": "Combined daemon candidate including lazy SQLite connections; not an isolated per-change saving or total-app measurement.",
+        "qualification": false
+      },
       "evidence_refs": [
         {
           "kind": "functional_test_log",
@@ -595,10 +758,41 @@
           "sha256": "6bfbdd004ae1dbd3d1161984a1ec6af5af6e5af16c15c2ca96312091bef0694e",
           "source_state": "dirty_workspace",
           "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-integrated-preview-tests.log",
+          "sha256": "6ef563dabbcec8b9168b396dd13d2045aabfc047878185d7a56afc680840afb9",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-selected-preview-tests.log",
+          "sha256": "dc9ff765dc0ce4d05b5a8436ec5844aad2eeb71e2fede515ee6ed67d1176ae37",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        },
+        {
+          "kind": "macos_developer_diagnostic",
+          "name": "v3-comparison.json",
+          "sha256": "a3146da03902b3ad2f356b1006d30c132b5d7f059eaf0a1d343a5b03aa98fcd9",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
         }
       ],
       "supersedes": [],
-      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+      "functional_validation": "passed_27_listener_tests_critical_stalled_export_copy_status_test_and_combined_rust_check",
+      "allocation_lifetime": "Charge frame growth before allocation; drop raw request text after parsing while transferring credit through queued requests, running blocking jobs and response writes. Copy/control lanes are reserved from bulk pressure. Image preview scope releases both encrypted source row and decrypted source bytes before PNG base64 response encoding.",
+      "bounds": {
+        "control_wire_bytes": 4194304,
+        "bulk_wire_bytes": 134217728,
+        "interactive_wire_bytes": 67108864,
+        "estimated_bulk_handler_bytes": 100663296,
+        "estimated_interactive_handler_bytes": 33554432
+      },
+      "cancellation": "Dropping queued admission releases its waiter. A started blocking closure owns its permit until actual completion, including caller cancellation and errors. Other request classes, capture, paste and sync do not acquire this semaphore.",
+      "tradeoffs": "Wire credits and weighted handler classes do not establish a hard bound for all decoded, legacy first-row, module/network or native allocations. Large Add input can be refused under saturated inbound bulk. Quick Paste preload and display share DPR-bounded preview/decode keys; renderer/native memory still requires process-family measurement."
     },
     {
       "id": "RUN-021",
@@ -614,10 +808,12 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
-        "apps/copypaste_flutter/lib/main.dart"
+        "apps/copypaste_flutter/lib/main.dart",
+        "apps/copypaste_flutter/lib/app/navigation/app_destination_viewport.dart",
+        "apps/copypaste_flutter/lib/app/navigation/settings_presentation_lifecycle.dart"
       ],
       "invariant": "No presentation-only periodic work while hidden; no overlapping capture refresh.",
-      "next_step": "Single-flight refresh follows visibility; hidden mobile/UI-only polling stops. Desktop tray capture-state polling is retained because runtime push events do not carry private-mode changes. Add typed push events before removing that necessary fallback; native measurement pending.",
+      "next_step": "Collect controlled macOS comparison after the other test task ends; Android/Windows native evidence and unresolved budgets remain open.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -634,7 +830,9 @@
         }
       ],
       "supersedes": [],
-      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+      "functional_validation": "passed_43_widget_navigation_tests_and_6_settings_lifecycle_tests",
+      "allocation_lifetime": "Retained destinations preserve state; fully hidden tabs disable tickers. Settings-only work runs only for the visible selected Settings destination; tray/capture authority remains independent.",
+      "tradeoffs": "Partly visible swipe destinations retain ticking. State and current values are preserved on return."
     },
     {
       "id": "RUN-022",
@@ -671,30 +869,42 @@
       "id": "RUN-023",
       "title": "Bound Android cleanup executors",
       "domain": "runtime",
-      "implementation_status": "proposed",
+      "implementation_status": "present_in_source",
       "priority": "P1",
       "owner_module": "AndroidClipboardReader",
       "platforms": [
         "Android"
       ],
       "source_references": [
-        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt"
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/CaptureResourceAdmission.kt"
       ],
       "invariant": "Bound cleanup/drain threads and backlog while maintaining prompt cancellation and stream closure.",
-      "next_step": "Choose bounded cleanup concurrency from stress measurements; do not serialize potentially blocking close/drain work in a way that deadlocks cancellation.",
+      "next_step": "Collect controlled macOS comparison after the other test task ends; Android/Windows native evidence and unresolved budgets remain open.",
       "native_resource_qualification": {
         "Android": "not_established"
       },
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_16_focused_jvm_tests",
+      "bounds": {
+        "hosts": 32,
+        "pending_operations": 33,
+        "inputs_waiting_for_close": 33,
+        "threads_per_cleanup_lane": 2,
+        "cleanup_lanes": 2,
+        "aggregate_text_reservation_bytes": 33554432,
+        "heavy_image_operations": 1
+      },
+      "allocation_lifetime": "Host/input reservations include their eventual cleanup. Text/pending leases remain held until snapshotting or running work actually exits; queued cancellation releases exactly once.",
+      "tradeoffs": "New captures may be refused at existing overload boundaries. Explicit capture reports failure. No accepted drain/close job is dropped and no blocking cleanup runs on the UI thread."
     },
     {
       "id": "RUN-024",
       "title": "Memory-pressure and native-retention investigation",
       "domain": "runtime",
-      "implementation_status": "proposed",
+      "implementation_status": "documented_current_design",
       "priority": "P1",
       "owner_module": "Platform lifecycle adapters",
       "platforms": [
@@ -707,16 +917,26 @@
         "apps/copypaste_flutter/lib/main.dart"
       ],
       "invariant": "Releasing Dart references is distinct from reclaiming allocator, engine, GPU or native memory.",
-      "next_step": "Measure after real workloads, profile retaining allocations, add tiered cache eviction; consider main-engine retirement only if measured benefit exceeds startup/CPU/UI costs.",
+      "next_step": "Use equivalent native observations for retention attribution; missing budgets/platform/scenario evidence prevent qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "tmp/implementation-wave-4/a22-existing-evidence.txt",
+          "sha256": "f0f6c2a7e61496ffbc191c067e09bddd3cb355d3ce13e3147b7fa0c13926c547",
+          "source_state": "wave3_non_equivalent_diagnostic_snapshots",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "not_recorded",
+      "last_wave_decision": "Primary engine lifetime and executor counts remain unchanged. Main engines own OS channels/window/tray/shortcut integration. Existing UI stack captures showed under 1.2 MiB resident against 57.5 MiB reserved virtual stack space; this does not attribute daemon executor cost or justify shrinking pools.",
+      "tradeoffs": "A18 retains in-progress pairing/dialog/camera/user-operation state. Native allocator/GPU recovery is distinct from Dart object release."
     },
     {
       "id": "GOV-001",
@@ -1474,7 +1694,11 @@
       "implementation_status": "present_in_source",
       "priority": "P2",
       "owner_module": "History file transfer",
-      "platforms": ["macOS", "Android", "Windows"],
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
@@ -1491,6 +1715,939 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending."
+    },
+    {
+      "id": "DISK-001",
+      "title": "Owned temporary payload cleanup and encrypted database reclamation",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Storage and temporary-file adapters",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/space.rs",
+        "crates/copypaste-core/src/storage/creation.rs",
+        "crates/copypaste-core/src/storage/store.rs",
+        "apps/copypaste_flutter/lib/platform/files/temporary_artifacts.dart",
+        "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
+        "apps/copypaste_flutter/lib/features/update/repository/obsolete_update_cleanup.dart",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardCache.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/HistoryFilesChannel.kt",
+        "docs/engineering/disk-storage.md",
+        "crates/copypaste-modules/src/staging_cleanup.rs",
+        "crates/copypaste-modules/src/manager.rs"
+      ],
+      "invariant": "Preserve original History bytes, pins, retention settings and live clear boundaries. Current Android URI ownership survives restart and interrupted publication; stale inactive publications have one-day grace. Flutter staging is namespaced, leased across processes and protected across engines. No periodic cleanup timer or permanent cleanup executor. Recognized installed-version packages are removed offline; newer pending installers remain. Completed transfer paths identify actual bytes; only complete outputs are published. New databases reclaim incrementally after committed deletes; legacy full rebuild requires exclusive lifetime Store ownership before runtime publication. Module managers retain shared lifetime leases; exclusive startup maintenance removes only expired default temporary input/extraction/download directories, preserving installed models and completed pending module updates.",
+      "next_step": "Measure equivalent native baseline/candidate cache and data growth, CPU, I/O, startup/action latency, process-family memory and low-space behavior on macOS, physical Android and installed Windows. A legacy file opened before a large deletion requires a later exclusive reopen; conversion admission requires 8 MiB and 25% free pages. Busy readers can defer WAL truncation. Unmarked generic legacy desktop staging is preserved because ownership is unknown. Recent/current/leased payloads and pending newer installers have no aggregate byte ceiling. Allocation policies are not resource budgets; unresolved non-memory thresholds remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_validation_log",
+          "name": "core-tests.log",
+          "sha256": "58ecd1dc14298957b17b2c3d702ed4595432b9dd116c1124b5909cf78fad9559",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "modules-tests.log",
+          "sha256": "8ca2dfab0f69ae9dd9cd71dd4e4cb9329615397ad668801b5e3c8ddcef880919",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "flutter-tests.log",
+          "sha256": "41b00003af4ec3a767ccf1f6cd24a260c717c8318304c44b955432b557a85b89",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "flutter-analysis.log",
+          "sha256": "f446cdcbef620357d8e0d1a48e88721258500b369a697a26ab26ae5a0795bd6f",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "dart-format.log",
+          "sha256": "0cc9c066013eec993ad556ea1d08770bc3a9fe37923f21341d2c7543ded4d5c5",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "rust-owned-format.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "blocked_android_build_log",
+          "name": "android-tests-final.log",
+          "sha256": "c2de7bc454118992e6816eba833724d23f14d109737b4b660ce5a50eb4601782",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "partial_physical_android_aggregate_diagnostic",
+          "name": "android-disk-audit/storage-receipts.json",
+          "sha256": "dda20ef0582bc574af5624e4c0d1780610e1bf1d3a7c5000807ab282a74e3f04",
+          "source_state": "installed_1.0.29_not_bound_to_current_source",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "454 core Rust tests, 45 module tests and 224 targeted Flutter tests passed in dirty workspace snapshots; Flutter analysis and owned-source formatting passed. Two existing asset-dependent native module tests remain ignored by their pre-existing definitions. Android host tests could not run: the Android native build is blocked by parallel JNI/generated-binding changes (including missing JString import). User explicitly instructed this task to leave parallel code unchanged and record the blocker. No installed candidate or native resource qualification is established."
+    },
+    {
+      "id": "RUN-036",
+      "title": "Explicit bounded file transfer",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Shared file offers, encrypted chunk store and authenticated peer sessions",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/file_transfer.rs",
+        "crates/copypaste-core/src/file_download.rs",
+        "crates/copypaste-core/src/storage/file_transfers.rs",
+        "crates/copypaste-p2p/src/node/files.rs",
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/history_item.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFocusCaptureGuard.kt"
+      ],
+      "invariant": "Ordinary P2P/cloud history sync transfers only an authenticated file offer. File bodies move only for an explicit Download. Import, encryption, save and native copy use bounded blocks; no file-sized allocation for new files. One explicit outgoing/incoming file session per node. Cancellation, revocation and shutdown close sessions; partial destinations and scoped plaintext are removed. Encrypted chunks share a digest and are released with the final retained row. File byte quota includes retained bodies. A downloaded destination is user-owned and has no second hidden full-byte cache.",
+      "allocation_lifetime": "64 KiB plaintext blocks while actively importing, serving, downloading or copying. Existing small inline rows are converted before sync starts; legacy decryption remains bounded by the former 4 MiB cap.",
+      "cancellation": "Explicit Cancel, pairing removal/revocation and runtime shutdown cancel active downloads. Reads have the existing peer deadline.",
+      "bounds": {
+        "plaintext_chunk_bytes": 65536,
+        "file_sessions_per_node": 1,
+        "file_downloads_per_host": 1,
+        "file_limit": "Live editable max_file_size_bytes; default 64 MiB, supported setting range 1 MiB through 20 GiB. This is an allocation policy, not a native resource budget."
+      },
+      "tradeoffs": "Import hashes then encrypts the source and holds one SQLite write transaction for the snapshot. Peer requests acknowledge each chunk. Source device must be online for an uncached download. Native clipboard staging retains its existing timed cleanup owner.",
+      "next_step": "Collect equivalent baseline/candidate native peak, steady, recovery, growth, CPU, latency and I/O evidence on macOS, physical Android and installed Windows. Resolve unset runtime budgets before resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "accepted-file-tests.log",
+          "sha256": "a8fb558841f7653fe7bc3994e0fb5e44f2fd5daf5d9fada9f12d1c99e9592dea",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "accepted-toast-tests.log",
+          "sha256": "1576e917c7f89cd213ab2ca432ec240883e09efebb32624f879ed849637d516b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "final-kotlin-check.log",
+          "sha256": "27d839f20e9e43da0a1a1d64fe16a1da26a7f83266cc1948fb3d39ba2ee8e7cc",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_targeted_file_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-037",
+      "title": "Shared bounded GitHub release-asset transport",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "GitHubArtifactDownloader",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/shared/network/github_artifact_downloader.dart",
+        "apps/copypaste_flutter/lib/features/update/repository/github_app_update_repository.dart",
+        "apps/copypaste_flutter/lib/features/modules/repository/github_module_marketplace_repository.dart"
+      ],
+      "invariant": "One trusted HTTPS authority and redirect policy for app and module artifacts. Stream through IOSink backpressure, hash received bytes in the same pass, enforce declared and streamed size bounds, remove failed partial files, and preserve signature validation before use. Repository-specific metadata, staging and cache publication remain with their owner.",
+      "allocation_lifetime": "Only the current HTTP stream and sink buffers during an active download; no whole-package byte list or retained payload.",
+      "bounds": {
+        "redirects": 5,
+        "request_timeout_seconds": 30,
+        "artifact_limits": "Existing app, module, metadata and signature size limits; unchanged."
+      },
+      "cancellation": "Network timeout, stream or integrity failure closes the output and removes its partial destination. Repository disposal force-closes its HttpClient.",
+      "tradeoffs": "Disk and hash work share one streamed pass; physical buffer sizes remain owned by dart:io. Native memory, CPU, latency and I/O effects are unmeasured.",
+      "next_step": "Measure equivalent baseline/candidate downloads and failure cleanup on macOS, physical Android and installed Windows; resolve pending resource budgets before qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-tests-final.log",
+          "sha256": "19b8861f7202586aaf1b93e6daa166caa72757b2c8558b79ad174db0b73b9001",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-038",
+      "title": "Reuse immutable History row snapshots",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "HistoryController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/test/features/history/history_controller_test.dart"
+      ],
+      "invariant": "Repeated reads reuse one immutable canonical row list until row mutation. Previously exposed snapshots remain immutable; selection, order, pagination and watch behavior remain unchanged.",
+      "allocation_lifetime": "Canonical rows live until refresh, mutation, suspend or controller disposal; in-place mutations copy only a frozen list. Wholesale replacement and clear do not clone the old list.",
+      "bounds": {
+        "internally_retained_row_arrays": "One canonical array; external widgets may retain earlier immutable snapshots.",
+        "history_page_window": "Unchanged and still open work in RUN-019."
+      },
+      "cancellation": "Existing query epochs, watch cancellation and suspension are preserved.",
+      "tradeoffs": "Unchanged refreshes preserve both canonical snapshot and individual row identities after comparing all exposed fields, avoiding downstream Quick Paste cache invalidation.",
+      "next_step": "Collect controlled macOS comparison after the other test task ends; Android/Windows native evidence and unresolved budgets remain open.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-integrated-tests.log",
+          "sha256": "36eaf9ee6c6729df4af2f74370e71d236d26890a159279735a84afffb18e2c57",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        },
+        {
+          "kind": "macos_developer_diagnostic",
+          "name": "results-summary.txt",
+          "sha256": "9be1ecc1eb3f3c2352944d57c9e94a290f760bcdd423343138487194782c684c",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_34_history_controller_tests"
+    },
+    {
+      "id": "RUN-039",
+      "title": "Reuse presentation-owned syntax highlighting",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History code presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/history_code_highlighter.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
+        "apps/copypaste_flutter/test/features/history/history_code_highlighter_test.dart"
+      ],
+      "invariant": "Identical source, JSON mode and theme reuse the exact highlighted result without changing detection, spans or visible text.",
+      "allocation_lifetime": "One memo result belongs to each mounted row or inspector, clears on owner disposal, clip identity/non-code changes, and source/theme replacement; no process-global source cache.",
+      "bounds": {
+        "results_per_owner": 1,
+        "maximum_memoized_source_code_units": 200000,
+        "oversized_sources": "Rendered using existing behavior and not memoized."
+      },
+      "cancellation": "Presentation disposal clears memo ownership; there are no new workers or asynchronous jobs.",
+      "tradeoffs": "Retains the current TextSpan while its existing presentation owner is alive; avoids repeated detection/rendering. Framework/native text allocations need native attribution. Native inspector timing and UI-harness memory had substantial variation; no causal CPU/RAM saving is established for the memo in isolation.",
+      "next_step": "Android and Windows native measurements and unresolved non-memory budgets remain required before qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-integrated-tests.log",
+          "sha256": "36eaf9ee6c6729df4af2f74370e71d236d26890a159279735a84afffb18e2c57",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_integrated_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-040",
+      "title": "Bound repeated Quick Paste text and shortcut work",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "QuickPasteController and middleEllipsis",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/middle_ellipsis.dart",
+        "apps/copypaste_flutter/test/features/quick_paste/quick_paste_controller_test.dart"
+      ],
+      "invariant": "Preserve visible order, platform shortcut assignment, persistence and Unicode/RTL ellipsis. Shortcut lookup uses a cached reverse map; unrelated History notifications do not enqueue redundant pin reconciliation.",
+      "allocation_lifetime": "Derived rows and maps belong to the popup controller/current data revision. Each ellipsis call owns one reusable TextPainter and disposes it in finally.",
+      "bounds": {
+        "derived_data": "One current items snapshot, shortcut map and reverse lookup per controller; existing navigable history limits are unchanged.",
+        "painters_per_ellipsis_call": 1
+      },
+      "cancellation": "Existing serialized shortcut persistence and disposal checks remain; changes arriving during queued writes are reconciled.",
+      "tradeoffs": "Caches derived metadata while the popup controller exists. Requires shortcut race/failure, pin/delete and platform-key tests; does not change sync or OCR.",
+      "next_step": "Android and Windows native measurements and unresolved non-memory budgets remain required before qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-integrated-tests.log",
+          "sha256": "36eaf9ee6c6729df4af2f74370e71d236d26890a159279735a84afffb18e2c57",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_integrated_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-041",
+      "title": "Localize History file download progress notifications",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "HistoryController and inspector Download button",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart",
+        "apps/copypaste_flutter/test/features/history/history_controller_test.dart",
+        "apps/copypaste_flutter/test/features/history/history_screen_test.dart"
+      ],
+      "invariant": "Progress changes notify only the dedicated progress signal consumed by the Download button; start, cancel, failure and finish retain general state notifications and existing accessibility/labels.",
+      "allocation_lifetime": "One progress signal per controller and existing active-download progress values; values are removed after completion and signal is disposed with the controller.",
+      "bounds": {
+        "progress_notifiers_per_controller": 1,
+        "progress_entries": "Existing active downloads only; no per-clip notifier cache."
+      },
+      "cancellation": "Disposed-controller callbacks are ignored; existing save cancellation and error propagation remain.",
+      "tradeoffs": "Typed writer events now drive only the dedicated progress signal; general start/fail/cancel/finish behavior remains unchanged. Legacy capability still uses the original polling fallback.",
+      "next_step": "Android and Windows native measurements and unresolved non-memory budgets remain required before qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-integrated-tests.log",
+          "sha256": "36eaf9ee6c6729df4af2f74370e71d236d26890a159279735a84afffb18e2c57",
+          "source_state": "isolated_candidate_5fe69388f12f1ed90ab6a09c1b16b23166782959",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_integrated_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-042",
+      "title": "Suppress unchanged Settings refresh notifications",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "SettingsController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
+        "apps/copypaste_flutter/test/features/settings/settings_controller_test.dart"
+      ],
+      "invariant": "Suppress unchanged successful state notifications. Typed capable backends update capture state from revisioned events; legacy and disconnected cases retain three-second polling.",
+      "allocation_lifetime": "Only current capture/sync comparison snapshots are retained; mutable peer and health lists are copied so later in-place changes remain observable.",
+      "bounds": {
+        "comparison_state": "One current raw capture snapshot and one accepted sync snapshot, each bounded by existing live-state collections; no historical snapshots are accumulated."
+      },
+      "cancellation": "Existing single-flight, presentation-epoch, busy and disposal guards remain.",
+      "tradeoffs": "Avoids full UI notifications for unchanged successful polls at the cost of small bounded comparison snapshots. Does not remove required polling or alter sync cadence. Native isolated saving is unmeasured.",
+      "next_step": "Measure the isolated runtime effect and full-app scenarios on supported platforms; unresolved budgets and missing native evidence prevent qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_settings_capture_lifecycle_tests_and_combined_dart_analysis"
+    },
+    {
+      "id": "RUN-043",
+      "title": "Use one filesystem probe per file progress tick",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "HistoryFileTransfer",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
+        "apps/copypaste_flutter/test/features/history/history_file_transfer_test.dart"
+      ],
+      "invariant": "Legacy progress fallback performs one stat per tick; typed runtime backends instead consume writer progress events.",
+      "allocation_lifetime": "One current FileStat result during the existing active-save progress callback.",
+      "bounds": {
+        "legacy_filesystem_probes_per_tick": 1,
+        "legacy_timer_interval_ms": 40,
+        "typed_timer_interval_ms": null
+      },
+      "cancellation": "Existing timer cancellation, partial-file rollback and caller cancellation are unchanged.",
+      "tradeoffs": "Source-level reduction from two filesystem probes to one per active tick. No isolated native CPU or IO saving is claimed; event-driven writer progress remains separate work.",
+      "next_step": "Measure the isolated runtime effect and full-app scenarios on supported platforms; unresolved budgets and missing native evidence prevent qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-selected-tests.log",
+          "sha256": "38f0dd989919af11716c1a8806d557d09b8ec9604714d81d4e351eae1e82034a",
+          "source_state": "isolated_candidate_be6424fee7b21fb1f24c0ca1ef4afefde48ccecf",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_integrated_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-044",
+      "title": "Transfer binary preview bytes into Flutter",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Flutter Rust bridge",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-flutter-bridge/src/api.rs",
+        "apps/copypaste_flutter/lib/features/history/repository/runtime_history_repository.dart",
+        "apps/copypaste_flutter/lib/features/settings/repository/runtime_settings_repository.dart"
+      ],
+      "invariant": "Identical image/icon bytes and dimensions; daemon IPC JSON remains compatible.",
+      "allocation_lifetime": "Rust decodes daemon base64 once; generated bridge delivers Uint8List to current presentation owners.",
+      "bounds": {
+        "retained_extra_image_cache": 0
+      },
+      "cancellation": "Owned resources remain alive through actual work completion and release on owner teardown.",
+      "tradeoffs": "Removes Dart base64 strings/decoding on this boundary; isolated native savings are unmeasured.",
+      "next_step": "Controlled native comparison is pending; native coverage and unresolved budgets prevent qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_4_rust_and_5_flutter_tests_and_analyzer"
+    },
+    {
+      "id": "RUN-046",
+      "title": "Notify module host revocation without idle probes",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Module SDK and Supabase host",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-module-sdk/src/native.rs",
+        "crates/copypaste-modules/src/host_lifetime.rs",
+        "crates/copypaste-modules/src/native.rs",
+        "modules/supabase/src/lib.rs"
+      ],
+      "invariant": "Optional v2 host entrypoint preserves exact v1 ABI; revoke before draining invocation and callbacks before module context destruction.",
+      "allocation_lifetime": "One bounded callback registry per module instance; subscription unregister waits for in-flight callbacks.",
+      "bounds": {
+        "callbacks_per_instance": 32,
+        "modern_idle_active_probes_per_second": 0
+      },
+      "cancellation": "Owned resources remain alive through actual work completion and release on owner teardown.",
+      "tradeoffs": "Legacy modules/hosts retain their 100 ms watchdog; modern idle path issues zero Active requests in the focused test.",
+      "next_step": "Controlled native comparison is pending; native coverage and unresolved budgets prevent qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_2_sdk_4_lifetime_3_supabase_unit_tests"
+    },
+    {
+      "id": "RUN-047",
+      "title": "Push cloud session token changes",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "ModuleHost, CloudSync and Supabase Realtime",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/sync/driver.rs",
+        "modules/supabase/src/realtime.rs",
+        "crates/copypaste-modules/src/host.rs",
+        "modules/supabase/src/lib.rs"
+      ],
+      "invariant": "Rotation and fencing notify subscribers immediately; cancellation and session updates precede inbound stream events.",
+      "allocation_lifetime": "One level-triggered generation watch; carries no credentials.",
+      "bounds": {
+        "retained_generations": 1,
+        "token_poll_timer_removed_seconds": 1
+      },
+      "cancellation": "Owned resources remain alive through actual work completion and release on owner teardown.",
+      "tradeoffs": "Successful host rounds sleep until local/config/module/enable wake; failed provider startup retains five-second retry and does not starve other providers. Provider-owned adaptive network/auth/reconnect deadlines and the legacy V1 lifetime watchdog remain.",
+      "next_step": "Native resource and platform evidence remain incomplete; do not infer CPU savings from removed timers alone.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_host_idle_wake_test_and_4_supabase_tests; actual_manager_failure_recovery_reviewed_statically"
+    },
+    {
+      "id": "RUN-051",
+      "title": "Wake Windows clipboard capture from native events",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Windows ClipboardSource",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows/notifications.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "Sequence number remains authoritative; listener failure and pending reads keep reliable polling fallback.",
+      "allocation_lifetime": "One message-only window, notification thread and native stop event; teardown unregisters and joins.",
+      "bounds": {
+        "notification_threads": 1
+      },
+      "cancellation": "Owned resources remain alive through actual work completion and release on owner teardown.",
+      "tradeoffs": "macOS polling is retained. Windows source cross-compiles in an isolated harness, but actual Windows behavior and resource use are unmeasured.",
+      "next_step": "Controlled native comparison is pending; native coverage and unresolved budgets prevent qualification.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_36_capture_tests_and_windows_api_typecheck"
+    },
+    {
+      "id": "RUN-045",
+      "title": "Gate settled semantic indexing by durable revisions",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "SemanticSearch",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/semantic_search.rs"
+      ],
+      "invariant": "Preserve cross-process writes and model integrity.",
+      "allocation_lifetime": "Separate level-triggered urgent/background generations; settled indexing skips semantic_work and pruning until generation/semantic revision or model scope changes. Disabling/shutdown clears pending queries and caches.",
+      "bounds": {
+        "cross_store_maintenance_seconds": 5,
+        "background_fragment_yield_ms": 15
+      },
+      "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
+      "tradeoffs": "The failed filesystem watcher remains rejected. A five-second revision/integrity maintenance wake preserves external Store/process recovery; this is not a zero-wakeup service.",
+      "next_step": "Resource qualification remains unestablished; native inference/platform measurements and unresolved budgets remain.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_9_semantic_tests_including_local_wake_external_store_no_rescan_yield_and_cache_lifecycle",
+      "previous_attempt": "Filesystem watcher failed cross-Store wake validation twice and was removed."
+    },
+    {
+      "id": "RUN-048",
+      "title": "Cache History facets by durable revision",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Core Store History facets",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/migrations/006_resource_revisions.sql"
+      ],
+      "invariant": "Cache identity includes source/device revision and local device identity; preserve exact existing grouping/labels.",
+      "allocation_lifetime": "One entry, discarded on identity/revision mismatch, oversized replacement or restore.",
+      "bounds": {
+        "entries": 1,
+        "accounted_bytes": 524288
+      },
+      "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
+      "tradeoffs": "Avoids repeated facet aggregation; classification SQL predicates remain unchanged. Relevant mutations add revision updates.",
+      "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_storage_cache_tests_and_combined_compilation"
+    },
+    {
+      "id": "RUN-050",
+      "title": "Push capture state through one runtime watch",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Daemon Runtime Flutter Settings",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/server/watch.rs",
+        "crates/copypaste-daemon/src/state.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/lib/shared/runtime_event_service.dart",
+        "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureSignals.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureChannel.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureSignals.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureStateObserver.kt"
+      ],
+      "invariant": "Initial/reconnect/lag snapshots preserve capture/private/health state; both capabilities must be present before retiring fallback polling.",
+      "allocation_lifetime": "One lazy shared watch per engine, released after the last subscriber; Android screenshot listeners follow settings presentation.",
+      "bounds": {
+        "shared_watchers_per_engine": 1,
+        "fallback_interval_seconds": 3,
+        "android_pending_state_tasks": 1,
+        "android_setup_fallback_seconds": 1,
+        "android_setup_fallback_condition": "active stream, focused window, unresolved privileged grants"
+      },
+      "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
+      "tradeoffs": "Legacy/unsupported/disconnected runtime backends retain polling. Android setup uses process-local signals, public own-UID AppOps observers and window resume/focus callbacks; a focused unresolved-grant setup stream retains a one-second fallback for READ_LOGS changes lacking a public listener. Signals coalesce to one pending UI task.",
+      "next_step": "Physical Android and installed Windows runtime/resource evidence remain unavailable; qualification is not established.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "prior_74_ipc_and_runtime_tests; wave4_15_kotlin_tests_eventchannel_test_and_final_incremental_kotlin_compile_passed"
+    },
+    {
+      "id": "RUN-052",
+      "title": "Authenticate lightweight History previews",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Core History projection",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/history_preview.rs",
+        "crates/copypaste-core/src/crypto/preview.rs",
+        "crates/copypaste-core/src/history_item.rs",
+        "crates/copypaste-core/src/storage/migrations/007_history_preview_cache.sql"
+      ],
+      "invariant": "Read metadata and streaming source fingerprint in one SQLite snapshot; domain-separated AEAD binds row ID, nonce, content type and exact metadata. Cache failure falls back to authenticating the original.",
+      "allocation_lifetime": "Lazy page-scoped resolution and best-effort cache writes; restore/tombstones release entries. Fresh origins, pin/source labels and file availability are applied at presentation.",
+      "bounds": {
+        "ciphertext_entries": 1024,
+        "ciphertext_bytes_per_entry": 65536,
+        "logical_cached_ciphertext_bytes": 67108864,
+        "hash_buffer_bytes": 65536
+      },
+      "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
+      "tradeoffs": "Logical cache limits exclude SQLite metadata, WAL/freelist and page caches. Adds SHA work and best-effort writes; workload-specific CPU/IO tradeoffs require measurement. Full get/copy/save authentication remains unchanged.",
+      "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_15_focused_tests_225_prior_storage_tests_runtime_route_domain_separation_checks_independent_crypto_review_and_final_combined_compile"
+    },
+    {
+      "id": "RUN-053",
+      "title": "Report file writer progress without filesystem polling",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Core writer Runtime Flutter History",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/file_transfer.rs",
+        "crates/copypaste-core/src/file_download.rs",
+        "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
+        "apps/copypaste_flutter/lib/shared/runtime_event_service.dart"
+      ],
+      "invariant": "Progress carries opaque token and bytes; unary save result alone declares success, preserving rollback/cancellation. Legacy Watch receives no new event kind.",
+      "allocation_lifetime": "One token subscription during each save; native producer coalesces percentages and shared watch is lazy.",
+      "bounds": {
+        "progress_events_per_transfer_maximum": 101
+      },
+      "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
+      "tradeoffs": "Typed backend removes 40 ms filesystem progress polling; old capability keeps existing fallback. Real Flutter-to-FRB-to-daemon save interaction remains unverified.",
+      "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "passed_2_daemon_2_core_1_runtime_26_flutter_tests_bridge_check_analyzer_and_android_arm64_compilation"
+    },
+    {
+      "id": "RUN-054",
+      "title": "Bound P2P session summaries and preserve catch-up progress",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P0",
+      "owner_module": "P2P summary workspace and StoreSource",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/sync/workspace.rs",
+        "crates/copypaste-p2p/src/sync/summary.rs",
+        "crates/copypaste-p2p/src/sync/plan.rs",
+        "crates/copypaste-p2p/src/sync/source.rs",
+        "crates/copypaste-p2p/src/node/mod.rs",
+        "crates/copypaste-core/src/sync/source.rs",
+        "crates/copypaste-core/src/storage/summary_workspace.rs",
+        "crates/copypaste-core/src/storage/summary_workspace_cleanup.rs",
+        "crates/copypaste-core/src/storage/file_lock.rs"
+      ],
+      "invariant": "Separate immutable advertised authorization from page-bounded local comparison metadata; preserve every remote occurrence, exact conflict rules, deferred watermarks and complete persisted-cursor catch-up.",
+      "allocation_lifetime": "One session-owned workspace; spill uses a random ephemeral SQLCipher key and owned directory/lease. Blocking work retains ownership until actual completion, including caller cancellation.",
+      "bounds": {
+        "accounted_memory_before_spill_bytes": 4194304,
+        "sqlite_cache_kib": 512,
+        "selected_wanted_limit": "Existing protocol request cap",
+        "local_lookup": "One bounded metadata-only query per remote summary page"
+      },
+      "cancellation": "No primary Store connection is retained across network awaits; session completion/error/cancellation drops the workspace after running blocking I/O completes. Startup cleanup respects active cross-process leases. Android uses rustix flock; macOS/Windows retain standard locks.",
+      "tradeoffs": "Spill adds encrypted disk I/O and metadata lookups; estimated bounds are not a native whole-heap limit. One-pair 10k/four-peer observation showed nearly unchanged sampled peak and slightly longer wall time; no causal speed or RAM improvement is claimed.",
+      "functional_validation": "passed_316_p2p_tests_2_real_store_5k_catchup_tests_3_lock_tests_and_bench_typecheck; combined_android_arm64_check_passed_after_error_constant_fix",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "tmp/implementation-wave-4/logs/p2p-focused-tests.log",
+          "sha256": "c67f850aafc8a6afee7d602b57cb69b2da5f7b2cfaa9fafb3e510b48f7a63e15",
+          "source_state": "worker_d1883b90e2c598b475098c6ec700f72fa3552fa8",
+          "release_qualification": false
+        },
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "outputs/p2p-a06-resource-comparison.json",
+          "sha256": "e9f01a351f78416debf1ea8ad16165f9e1ca4de0da3b375e678f2158e0ae927c",
+          "source_state": "worker_d1883b90e2c598b475098c6ec700f72fa3552fa8",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "next_step": "Native process-family, sustained and supported-platform qualification remains incomplete."
+    },
+    {
+      "id": "RUN-055",
+      "title": "Evaluate OCR thread-pool spinning",
+      "domain": "runtime",
+      "implementation_status": "documented_current_design",
+      "priority": "P1",
+      "owner_module": "OCR ONNX session builder",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "modules/ocr/vendor/paddle-ocr-rs/src/base_net.rs"
+      ],
+      "invariant": "Preserve all ten OCR routes, results and critical latency; select scheduling policies from equivalent native evidence.",
+      "allocation_lifetime": "Existing per-invocation OCR worker lifecycle retained.",
+      "bounds": {
+        "production_setting": "Unchanged",
+        "experiment_pairs_per_fixture": 3
+      },
+      "cancellation": "Existing worker cancellation/teardown unchanged.",
+      "tradeoffs": "Experimental spin-off candidate lowered observed CPU but mixed latency regressed amid browser/backup contention; final text matched all 12 runs. No production change accepted; direct new per-route confidence tracing was unavailable.",
+      "functional_validation": "experiment_compiled; final_text_identical_12_runs; prior_840_route_proof_applies_to_unchanged_production_ocr_logic",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "developer_diagnostic_or_functional_log",
+          "name": "tmp/implementation-wave-4/tmp/ocr-a15/a15-measurements.json",
+          "sha256": "2de9927519d1b17684becfccb11babde7266c3ecab1d5326fac2e64615af395f",
+          "source_state": "experiment_fb7a3b3b143430ee0d8d3927b0e2e3051737f284",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "next_step": "Retain production defaults; no further experiment is scheduled automatically."
     }
   ]
 }

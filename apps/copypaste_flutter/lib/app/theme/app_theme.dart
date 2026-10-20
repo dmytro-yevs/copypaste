@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app_motion.dart';
@@ -307,8 +308,12 @@ abstract final class AppTheme {
     bool compact = false,
   }) => DefaultTextStyle.of(context).style.merge(
     compact
-        ? clipboardMetadataTextStyle(context)
-        : Theme.of(context).typography.xSmall,
+        ? clipboardMetadataTextStyle(
+            context,
+          ).copyWith(fontSize: AppTypographySize.inspectorCompactMetadata)
+        : Theme.of(context).typography.xSmall.copyWith(
+            fontSize: AppTypographySize.inspectorMetadata,
+          ),
   );
 
   static const inspectorCellPadding = EdgeInsets.all(AppSpacing.sm);
@@ -893,6 +898,17 @@ abstract final class AppTheme {
   static AbstractButtonStyle actionButtonStyle(AbstractButtonStyle style) =>
       (style is ButtonStyle ? controlButtonStyle(style) : style).copyWith(
         decoration: actionButtonDecoration,
+      );
+
+  /// Dialog footer actions share a touch-sized minimum on Android.
+  static AbstractButtonStyle dialogButtonStyle(ButtonStyle style) =>
+      actionButtonStyle(style).copyWith(
+        padding: (context, states, value) => controlFieldPadding(
+          context,
+          minimum: defaultTargetPlatform == TargetPlatform.android
+              ? AppControlSize.touch
+              : AppControlSize.regular,
+        ),
       );
 
   static Decoration actionButtonDecoration(

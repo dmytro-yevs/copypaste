@@ -51,7 +51,9 @@ fn expected(method: &Method) -> Expected {
         Method::PairProgress | Method::PairCancel => {
             Expected::Data(|data| matches!(data, ResponseData::PairingProgress(_)))
         }
-        Method::Revoke { .. } | Method::SourceAppIcon { .. } => {
+        Method::Revoke { .. }
+        | Method::SourceAppIcon { .. }
+        | Method::CancelFileDownload { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
         Method::Peers => Expected::Data(|data| matches!(data, ResponseData::Peers(_))),
@@ -70,7 +72,7 @@ fn expected(method: &Method) -> Expected {
         Method::GetPrivateMode | Method::SetPrivateMode { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::PrivateMode(_)))
         }
-        Method::Watch | Method::Shutdown => {
+        Method::Watch | Method::WatchRuntime | Method::Shutdown => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
         Method::Copy { .. }
@@ -139,9 +141,13 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::SourceAppIcon {
             id: "missing".into(),
         },
+        Method::CancelFileDownload {
+            id: "transfer-token".into(),
+        },
         Method::SaveFile {
             id: "missing".into(),
             dest_path: root.join("saved-file.bin").display().to_string(),
+            download_token: None,
         },
         Method::ImportFile {
             path: root.join("missing-import.pdf").display().to_string(),
@@ -288,7 +294,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        50,
+        51,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

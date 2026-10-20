@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import '../../devices/flutter_rust_devices_gateway.dart';
+import '../../../shared/runtime_event_service.dart';
 import '../models/history_models.dart';
 import 'history_repository.dart';
 import '../controller/history_spoiler_controller.dart';
@@ -15,33 +19,38 @@ import 'history_file_importer.dart';
 /// Runtime startup and its isolated debug profile are owned by app integration.
 /// This adapter never starts a daemon and never supplies a fallback data source.
 class RuntimeHistoryRepository
-    implements HistoryRepository, HistorySpoilerRepository {
+    implements
+        HistoryRepository,
+        HistorySpoilerRepository,
+        HistoryFileDownloadCancellation,
+        HistoryFileProgressRepository {
   RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
-    : _watchLease =
-          watchLease ??
-          RuntimeWatchLease(
-            allocate: runtime.allocateRuntimeWatch,
-            cancel: (watchId) => runtime.cancelRuntimeWatch(watchId: watchId),
-          );
+    : _watchLease = watchLease;
 
-  final RuntimeWatchLease _watchLease;
+  final RuntimeWatchLease? _watchLease;
   bool _disposed = false;
-  Future<BigInt>? _fileImportMaxBytes;
+  final _downloadTokens = <String, String>{};
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
     _ensureActive();
+    if (_watchLease == null) {
+      return RuntimeEventService.instance.events
+          .where((event) => event.kind == 'items' || event.kind == 'ready')
+          .map((_) => HistoryRuntimeEvent.itemsChanged);
+    }
     return _watch();
   }
 
   Stream<HistoryRuntimeEvent> _watch() async* {
-    final watchId = await _watchLease.watchId;
+    final lease = _watchLease!;
+    final watchId = await lease.watchId;
     try {
       await for (final event in runtime.watchRuntime(watchId: watchId)) {
         if (event.kind == 'items') yield HistoryRuntimeEvent.itemsChanged;
       }
     } finally {
-      await _watchLease.release(watchId);
+      await lease.release(watchId);
     }
   }
 
@@ -134,13 +143,13 @@ class RuntimeHistoryRepository
     _ensureActive();
     final preview = await runtime.sourceAppIcon(id: id);
     if (preview == null) return null;
-    return HistorySourceAppIcon(base64Decode(preview.pngBase64));
+    return HistorySourceAppIcon(preview.pngBytes);
   }
 
   @override
   Future<void> copy(String id) async {
     _ensureActive();
-    await runtime.copyClip(id: id);
+    await _fileOperation(() => runtime.copyClip(id: id));
   }
 
   @override
@@ -152,22 +161,98 @@ class RuntimeHistoryRepository
   @override
   Future<void> saveFile(String id, String destinationPath) async {
     _ensureActive();
-    await runtime.saveClipFile(id: id, destPath: destinationPath);
+    final random = Random.secure();
+    final token = base64UrlEncode(
+      List<int>.generate(16, (_) => random.nextInt(256)),
+    );
+    _downloadTokens[id] = token;
+    try {
+      await _fileOperation(
+        () => runtime.saveClipFile(
+          id: id,
+          destPath: destinationPath,
+          downloadToken: token,
+        ),
+      );
+    } finally {
+      if (_downloadTokens[id] == token) _downloadTokens.remove(id);
+    }
+  }
+
+  @override
+  Future<bool> saveFileWithProgress(
+    String id,
+    String destinationPath,
+    void Function(int written, int total) onProgress,
+  ) async {
+    _ensureActive();
+    final service = RuntimeEventService.instance;
+    final random = Random.secure();
+    final token = base64UrlEncode(
+      List<int>.generate(16, (_) => random.nextInt(256)),
+    );
+    final subscription = service.events.listen(
+      (event) {
+        final progress = event.progress;
+        if (progress != null && progress.token == token) {
+          onProgress(progress.written.toInt(), progress.total.toInt());
+        }
+      },
+      onError: (Object _, StackTrace _) {
+        // The save response remains authoritative if progress disconnects.
+      },
+    );
+    _downloadTokens[id] = token;
+    try {
+      // Match the runtime's ordinary request budget when a reconnect stalls.
+      if (!await service.ready.timeout(const Duration(seconds: 5))) {
+        return false;
+      }
+      await _fileOperation(
+        () => runtime.saveClipFile(
+          id: id,
+          destPath: destinationPath,
+          downloadToken: token,
+        ),
+      );
+      return true;
+    } finally {
+      if (_downloadTokens[id] == token) _downloadTokens.remove(id);
+      await subscription.cancel();
+    }
+  }
+
+  @override
+  Future<void> cancelFileDownload(String id) async {
+    final token = _downloadTokens[id];
+    if (token != null) await runtime.cancelClipFileDownload(id: token);
+  }
+
+  Future<T> _fileOperation<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
+    } on runtime.RuntimeError catch (error) {
+      throw HistoryFileOperationException(error.message);
+    } on PlatformException catch (error) {
+      throw HistoryFileOperationException(
+        error.message ?? 'The selected file could not be accessed.',
+      );
+    }
   }
 
   @override
   Future<void> importFile(HistoryImportFile file) async {
     _ensureActive();
-    final maxBytes =
-        (await (_fileImportMaxBytes ??= runtime.historyFileImportMaxBytes()))
-            .toInt();
-    final path = await file.prepare(maxBytes);
-    await runtime.importClipFile(
-      path: path,
-      filename: file.name,
-      mimeType: file.mimeType,
-      sourceReference: file.sourceReference,
-    );
+    await _fileOperation(() async {
+      final maxBytes = (await runtime.historyFileImportMaxBytes()).toInt();
+      final path = await file.prepare(maxBytes);
+      await runtime.importClipFile(
+        path: path,
+        filename: file.name,
+        mimeType: file.mimeType,
+        sourceReference: file.sourceReference,
+      );
+    });
   }
 
   @override
@@ -231,7 +316,7 @@ class RuntimeHistoryRepository
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    await _watchLease.dispose();
+    await _watchLease?.dispose();
   }
 
   void _ensureActive() {
@@ -353,7 +438,7 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
 HistoryImagePreview _fromRuntimeImagePreview(
   runtime.ClipImagePreview preview,
 ) => HistoryImagePreview(
-  base64Decode(preview.pngBase64),
+  preview.pngBytes,
   width: preview.width,
   height: preview.height,
 );

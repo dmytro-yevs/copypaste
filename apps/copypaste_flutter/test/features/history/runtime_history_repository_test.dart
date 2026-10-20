@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
@@ -131,21 +131,18 @@ void main() {
     }
   });
 
-  test(
-    'decodes generated image preview bytes once at the repository boundary',
-    () {
-      final preview = runtime.ClipImagePreview(
-        pngBase64: base64Encode([1, 2, 3]),
-        width: 1,
-        height: 1,
-      );
+  test('maps generated image preview bytes without changing them', () {
+    final preview = runtime.ClipImagePreview(
+      pngBytes: Uint8List.fromList([1, 2, 3]),
+      width: 1,
+      height: 1,
+    );
 
-      final mapped = RuntimeHistoryRepository.mapImagePreview(preview);
-      expect(mapped.bytes, [1, 2, 3]);
-      expect(mapped.width, 1);
-      expect(mapped.height, 1);
-    },
-  );
+    final mapped = RuntimeHistoryRepository.mapImagePreview(preview);
+    expect(mapped.bytes, [1, 2, 3]);
+    expect(mapped.width, 1);
+    expect(mapped.height, 1);
+  });
 
   test('maps opaque filter IDs separately from display labels', () {
     final facets = RuntimeHistoryRepository.mapFacets(

@@ -1,7 +1,7 @@
 //! Conversion from encrypted stored rows to IPC items.
 
 use copypaste_core::{ClipboardPayload, StoredItem};
-use copypaste_ipc::{FileDetails, ImageDetails, Item, ItemPage};
+use copypaste_ipc::{Item, ItemPage};
 use tracing::warn;
 
 use crate::AppState;
@@ -108,8 +108,7 @@ mod tests {
 }
 
 pub(super) fn is_oversized_text(payload: &ClipboardPayload) -> bool {
-    matches!(payload, ClipboardPayload::Text(_))
-        && payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES
+    copypaste_core::history_actions::oversized_text(payload)
 }
 
 pub(super) fn bound_item_preview(item: &mut Item) {
@@ -130,10 +129,7 @@ pub(super) fn to_wire_and_payload(
     state: &AppState,
     row: StoredItem,
 ) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
-    let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
-        warn!(error = ?e, "could not resolve an item's origin device");
-        origin_identity(state, &row)
-    });
+    let origin = origin_identity_for(state, &row);
     to_wire_with(
         row,
         &origin,
@@ -141,6 +137,14 @@ pub(super) fn to_wire_and_payload(
         &state.keyring.item_key(),
         false,
     )
+}
+
+pub(super) fn origin_identity_for(state: &AppState, row: &StoredItem) -> crate::meta::Origin {
+    let origin = state.meta.origin_of(row).unwrap_or_else(|e| {
+        warn!(error = ?e, "could not resolve an item's origin device");
+        origin_identity(state, row)
+    });
+    origin
 }
 
 fn origin_identity(state: &AppState, row: &StoredItem) -> crate::meta::Origin {
@@ -160,115 +164,7 @@ fn origin_identity(state: &AppState, row: &StoredItem) -> crate::meta::Origin {
 ///
 /// The plaintext accompanies the item so `copy` writes the exact bytes
 /// authenticated for this row; no entry point accepts externally opened bytes.
-fn to_wire_with(
-    row: StoredItem,
-    origin: &crate::meta::Origin,
-    local_device_id: &str,
-    key: &copypaste_core::ItemKey,
-    preview: bool,
-) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
-    // The item id is the AAD: a row decrypted under another row's identity must
-    // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
-    // "fail closed on crypto").
-    let privacy = row.clipboard_privacy();
-    let payload = ClipboardPayload::open(&row, key)?;
-    // Measured on the plaintext bytes, because that is what the cloud path
-    // measures: `LocalItem::content` is the opened payload, and the seal that
-    // follows is a fixed overhead the cap does not count.
-    let too_large_to_sync =
-        copypaste_sync::too_large_to_sync(&row.content_type, payload.byte_len());
-    let (content, truncated) = if preview && privacy.secret {
-        (String::new(), false)
-    } else if preview {
-        payload.display_preview()
-    } else {
-        (payload.display_text(), false)
-    };
-    let imported_image_metadata = row
-        .payload_metadata
-        .as_deref()
-        .and_then(|value| copypaste_core::PayloadMetadata::from_json(value, &row.content_type))
-        .and_then(|value| value.file);
-    let file_details = match &payload {
-        ClipboardPayload::File { bytes, .. } | ClipboardPayload::Image { bytes, .. }
-            if imported_image_metadata.is_some()
-                || matches!(&payload, ClipboardPayload::File { .. }) =>
-        {
-            let metadata = match &payload {
-                ClipboardPayload::File { metadata, .. } => metadata,
-                _ => &imported_image_metadata,
-            };
-            let source_reference = metadata
-                .as_ref()
-                .and_then(|metadata| metadata.source_reference.clone());
-            Some(FileDetails {
-                filename: metadata.as_ref().map(|metadata| metadata.filename.clone()),
-                mime_type: metadata.as_ref().map(|metadata| metadata.mime_type.clone()),
-                source_available: origin.device_id == local_device_id
-                    && source_reference
-                        .as_deref()
-                        .is_some_and(|reference| std::path::Path::new(reference).is_file()),
-                source_reference,
-                size_bytes: bytes.len() as u64,
-                file_count: 1,
-            })
-        }
-        ClipboardPayload::File { .. }
-        | ClipboardPayload::Text(_)
-        | ClipboardPayload::Image { .. }
-        | ClipboardPayload::Unsupported { .. } => None,
-    };
-    let image_details = if preview {
-        None
-    } else {
-        match &payload {
-            ClipboardPayload::Image { bytes, .. } => copypaste_core::image_metadata(bytes)
-                .ok()
-                .map(|metadata| ImageDetails {
-                    width: metadata.width,
-                    height: metadata.height,
-                    size_bytes: metadata.size_bytes,
-                }),
-            ClipboardPayload::Text(_)
-            | ClipboardPayload::File { .. }
-            | ClipboardPayload::Unsupported { .. } => None,
-        }
-    };
-    let semantic = payload
-        .plain_text()
-        .and_then(|text| copypaste_core::classify_semantic(&row.content_type, text));
-    let content_class = copypaste_ipc::content_type::classify(&row.content_type);
-    let item = Item {
-        privacy,
-        id: row.id,
-        content,
-        content_type: row.content_type,
-        content_class,
-        semantic_kind: semantic
-            .filter(|_| !privacy.secret || !preview)
-            .map(|classification| classification.kind),
-        color_rgba: semantic
-            .filter(|_| !privacy.secret || !preview)
-            .and_then(|classification| classification.color_rgba),
-        created_at: row.created_at,
-        pinned: row.pinned,
-        file_details: if preview && privacy.secret {
-            None
-        } else {
-            file_details
-        },
-        image_details,
-        origin_device_id: origin.device_id.clone(),
-        origin_device_name: origin.device_name.clone(),
-        origin_device_class: origin.device_class,
-        source_app_bundle_id: row.app_bundle_id,
-        source_app_name: row.app_name,
-        source_app_icon_id: row.source_icon_id,
-        too_large_to_sync,
-        truncated,
-    };
-    Ok((item, payload))
-}
+use copypaste_core::history_item::open_item as to_wire_with;
 
 /// Decrypt a page of rows, dropping any row that will not open — and saying how
 /// many.
@@ -277,6 +173,42 @@ fn to_wire_with(
 /// are still the user's data. `CopyPaste-00zz`: a shortened page must carry the
 /// unreadable count instead of explaining it only in logs. The
 /// count goes back on the wire so a client can say "3 items could not be read".
+pub(super) fn preview_rows(
+    state: &AppState,
+    rows: Vec<copypaste_core::HistoryPreviewRow>,
+) -> ItemPage {
+    let (rows, previews): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .map(|entry| (entry.row, entry.preview))
+        .unzip();
+    let origins = state.meta.origins_for(&rows).unwrap_or_else(|error| {
+        warn!(?error, "could not resolve origin devices for a page");
+        std::collections::HashMap::new()
+    });
+    let mut page = ItemPage {
+        items: Vec::with_capacity(rows.len()),
+        skipped_undecryptable: 0,
+        next_cursor: None,
+    };
+    for (row, preview) in rows.into_iter().zip(previews) {
+        let Some(preview) = preview else {
+            page.skipped_undecryptable += 1;
+            continue;
+        };
+        let fallback;
+        let origin = match origins.get(&row.id) {
+            Some(origin) => origin,
+            None => {
+                fallback = origin_identity(state, &row);
+                &fallback
+            }
+        };
+        page.items
+            .push(preview.into_item(&row, origin, state.meta.device_id()));
+    }
+    page
+}
+
 pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     let mut page = ItemPage {
         items: Vec::with_capacity(rows.len()),

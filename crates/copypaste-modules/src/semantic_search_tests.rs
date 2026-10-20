@@ -6,6 +6,7 @@ use std::{
     io::{Cursor, Write},
     path::PathBuf,
     sync::atomic::AtomicUsize,
+    thread,
 };
 
 struct Fixture {
@@ -16,6 +17,8 @@ struct Fixture {
     stopped: Arc<AtomicUsize>,
     entered: std::sync::mpsc::Receiver<()>,
     model_path: PathBuf,
+    database_path: PathBuf,
+    database_key: [u8; 32],
 }
 
 impl Fixture {
@@ -93,7 +96,9 @@ impl Fixture {
         let (launcher, launched, stopped, entered) = crate::inference::launcher_fixture();
         manager.set_inference_launcher(launcher);
         let keyring = copypaste_core::Keyring::from_secret(&[19; 32]);
-        let store = Store::open(&directory.path().join("history.db"), &keyring.db_key()).unwrap();
+        let database_path = directory.path().join("history.db");
+        let database_key = *keyring.db_key();
+        let store = Store::open(&database_path, &database_key).unwrap();
         if let Some(text) = text {
             let id = "fixture-item";
             let (nonce, ciphertext) =
@@ -121,6 +126,8 @@ impl Fixture {
             stopped,
             entered,
             model_path: assets.join("model.onnx"),
+            database_path,
+            database_key,
         }
     }
     fn service(&self) -> Arc<SemanticSearch> {
@@ -174,6 +181,14 @@ fn until(mut condition: impl FnMut() -> bool) {
     }
 }
 
+fn until_for(limit: Duration, mut condition: impl FnMut() -> bool) {
+    let started = Instant::now();
+    while !condition() {
+        assert!(started.elapsed() < limit);
+        thread::yield_now();
+    }
+}
+
 #[test]
 fn empty_history_does_not_load_a_model_to_mark_the_index_ready() {
     let fixture = Fixture::new(None);
@@ -181,6 +196,119 @@ fn empty_history_does_not_load_a_model_to_mark_the_index_ready() {
     until(|| service.ready.load(Ordering::Acquire));
     assert_eq!(fixture.launched.load(Ordering::SeqCst), 0);
     service.shutdown();
+}
+
+#[test]
+fn history_notifications_only_schedule_changed_semantic_input() {
+    let fixture = Fixture::new(Some("semantic fixture"));
+    let service = fixture.service();
+    until(|| service.ready.load(Ordering::Acquire));
+    let before = fixture.store.resource_revisions().unwrap();
+    let scheduled = service.wake.0.lock().unwrap().background_generation;
+
+    assert!(fixture.store.set_pinned("fixture-item", true).unwrap());
+    assert_eq!(fixture.store.resource_revisions().unwrap(), before);
+    service.history_changed();
+    assert_eq!(
+        service.wake.0.lock().unwrap().background_generation,
+        scheduled
+    );
+
+    assert!(fixture.store.delete("fixture-item").unwrap());
+    service.history_changed();
+    assert_eq!(
+        service.wake.0.lock().unwrap().background_generation,
+        scheduled.wrapping_add(1)
+    );
+    service.shutdown();
+}
+
+#[test]
+fn external_store_changes_are_observed_by_maintenance_wake() {
+    let fixture = Fixture::new(Some("external semantic fixture"));
+    let service = fixture.service();
+    until(|| service.ready.load(Ordering::Acquire));
+    let other = Store::open(&fixture.database_path, &fixture.database_key).unwrap();
+    assert!(other.delete("fixture-item").unwrap());
+    let expected = SemanticRevision::from(other.resource_revisions().unwrap());
+
+    until_for(Duration::from_secs(6), || {
+        service.wake.0.lock().unwrap().observed_revision.as_ref() == Some(&expected)
+    });
+    service.shutdown();
+}
+
+#[test]
+fn background_notifications_preserve_fragment_yield() {
+    let fixture = Fixture::new(None);
+    let service = fixture.service();
+    until(|| service.ready.load(Ordering::Acquire));
+    let (background, urgent) = {
+        let wake = service.wake.0.lock().unwrap();
+        (wake.background_generation, wake.urgent_generation)
+    };
+    let notifier = Arc::clone(&service);
+    let (sent, received) = std::sync::mpsc::channel();
+    let signal = thread::spawn(move || {
+        let mut wake = notifier.wake.0.lock().unwrap();
+        wake.background_generation = wake.background_generation.wrapping_add(1);
+        drop(wake);
+        notifier.wake.1.notify_all();
+        sent.send(()).unwrap();
+    });
+    received.recv_timeout(Duration::from_secs(1)).unwrap();
+    let started = Instant::now();
+    service.wait_for_wake(Duration::from_millis(15), true, background, urgent);
+    assert!(started.elapsed() >= Duration::from_millis(13));
+    signal.join().unwrap();
+    service.shutdown();
+}
+
+#[test]
+fn urgent_notification_preempts_fragment_yield() {
+    let fixture = Fixture::new(None);
+    let service = fixture.service();
+    until(|| service.ready.load(Ordering::Acquire));
+    let (background, urgent) = {
+        let wake = service.wake.0.lock().unwrap();
+        (wake.background_generation, wake.urgent_generation)
+    };
+    let notifier = Arc::clone(&service);
+    let (sent, received) = std::sync::mpsc::channel();
+    let signal = thread::spawn(move || {
+        notifier.notify();
+        sent.send(()).unwrap();
+    });
+    received.recv_timeout(Duration::from_secs(1)).unwrap();
+    let started = Instant::now();
+    service.wait_for_wake(Duration::from_millis(15), true, background, urgent);
+    assert!(started.elapsed() < Duration::from_millis(5));
+    signal.join().unwrap();
+    service.shutdown();
+}
+
+#[test]
+fn no_work_settles_only_the_examined_revision_and_never_an_error() {
+    let examined = SemanticRevision {
+        generation: "before".into(),
+        semantic: 4,
+    };
+    let concurrent_write = SemanticRevision {
+        generation: "after".into(),
+        semantic: 5,
+    };
+    assert_eq!(
+        settled_after_no_work(examined.clone(), Ok(())),
+        Some(examined.clone())
+    );
+    assert_ne!(
+        settled_after_no_work(examined.clone(), Ok(())),
+        Some(concurrent_write)
+    );
+    assert_eq!(
+        settled_after_no_work(examined, Err(StoreError::InvalidHistoryQuery)),
+        None
+    );
 }
 
 #[test]
@@ -224,6 +352,7 @@ fn lexical_results_remain_immediate_while_inference_is_blocked_and_disable_cance
     until(|| {
         !service.ready.load(Ordering::Acquire) && service.pending.lock().unwrap().queued.is_empty()
     });
+    assert!(service.queries.lock().unwrap().is_empty());
     service.shutdown();
 }
 
@@ -272,4 +401,5 @@ fn cached_query_vectors_survive_worker_exit_and_preserve_semantic_results() {
     );
     assert_eq!(fixture.launched.load(Ordering::SeqCst), launches);
     service.shutdown();
+    assert!(service.queries.lock().unwrap().is_empty());
 }

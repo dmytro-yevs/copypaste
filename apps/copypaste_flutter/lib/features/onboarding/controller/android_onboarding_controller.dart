@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'onboarding_controller.dart';
 
 import '../../../platform/android/android_capture_setup_gateway.dart';
 import '../../../platform/clipboard/clipboard_writer.dart';
@@ -8,7 +8,7 @@ import '../repository/android_onboarding_store.dart';
 
 enum AndroidOnboardingStep { welcome, capture, sync }
 
-class AndroidOnboardingController extends ChangeNotifier {
+class AndroidOnboardingController extends OnboardingController {
   AndroidOnboardingController({
     required AndroidOnboardingStore store,
     required AndroidCaptureSetupGateway setup,
@@ -26,13 +26,9 @@ class AndroidOnboardingController extends ChangeNotifier {
   AndroidCaptureSetupMethod _method = AndroidCaptureSetupMethod.shizuku;
   AndroidCaptureSetupState? _setupState;
   bool _initialized = false;
-  bool _complete = false;
-  bool _busy = false;
   bool _verifying = false;
   bool _verified = false;
-  bool _disposed = false;
   int? _verificationBaseline;
-  String? _errorMessage;
   StreamSubscription<AndroidCaptureSetupState>? _stateSubscription;
   bool _automaticGrantsAttempted = false;
   bool _grantError = false;
@@ -45,11 +41,8 @@ class AndroidOnboardingController extends ChangeNotifier {
   AndroidCaptureSetupMethod get method => _method;
   AndroidCaptureSetupState? get setupState => _setupState;
   bool get initialized => _initialized;
-  bool get complete => _complete;
-  bool get busy => _busy;
   bool get verifying => _verifying;
   bool get verified => _verified;
-  String? get errorMessage => _errorMessage;
   String get adbCommandText => _setupState?.adbCommands.join('\n') ?? '';
 
   Future<bool> copyAdbCommands() async {
@@ -58,18 +51,18 @@ class AndroidOnboardingController extends ChangeNotifier {
       await _clipboard.writeText(adbCommandText);
       return true;
     } catch (_) {
-      _errorMessage = 'Setup commands could not be copied.';
-      _notify();
+      errorMessage = 'Setup commands could not be copied.';
+      notifyIfActive();
       return false;
     }
   }
 
   bool get canContinueCapture =>
-      !_busy && (_selectedMode == AndroidCaptureMode.limited || _verified);
+      !busy && (_selectedMode == AndroidCaptureMode.limited || _verified);
 
   /// Observe Android only while the setup screen is visible and resumed.
   void setMonitoring(bool enabled) {
-    if (_disposed) return;
+    if (disposed) return;
     if (!enabled) {
       unawaited(_stateSubscription?.cancel());
       _stateSubscription = null;
@@ -79,12 +72,12 @@ class AndroidOnboardingController extends ChangeNotifier {
     _stateSubscription = _setup.changes.listen(
       (state) {
         _acceptState(state);
-        _notify();
+        notifyIfActive();
         _applyAuthorizedSetup();
       },
       onError: (Object error) {
-        _errorMessage = 'Android setup monitoring is unavailable.';
-        _notify();
+        errorMessage = 'Android setup monitoring is unavailable.';
+        notifyIfActive();
       },
     );
     unawaited(refresh());
@@ -92,12 +85,12 @@ class AndroidOnboardingController extends ChangeNotifier {
 
   Future<void> initialize() async {
     if (_initialized) return;
-    _busy = true;
-    _notify();
+    busy = true;
+    notifyIfActive();
     try {
       final progress = await _store.read();
       _method = progress.method;
-      _complete = progress.complete;
+      complete = progress.complete;
       _step = progress.captureStarted
           ? AndroidOnboardingStep.capture
           : AndroidOnboardingStep.welcome;
@@ -107,74 +100,74 @@ class AndroidOnboardingController extends ChangeNotifier {
       _selectedMode = progress.complete || mode == AndroidCaptureMode.full
           ? mode
           : progress.mode;
-      if (_complete && !await _setup.setForegroundCaptureEnabled(true)) {
-        _errorMessage = 'Clipboard intake could not be enabled.';
+      if (complete && !await _setup.setForegroundCaptureEnabled(true)) {
+        errorMessage = 'Clipboard intake could not be enabled.';
       } else {
-        _errorMessage = null;
+        errorMessage = null;
       }
     } catch (_) {
-      _errorMessage = 'CopyPaste could not read Android setup state.';
+      errorMessage = 'CopyPaste could not read Android setup state.';
     } finally {
       _initialized = true;
-      _busy = false;
-      _notify();
+      busy = false;
+      notifyIfActive();
     }
   }
 
   void showCapture() {
-    if (_busy || _step != AndroidOnboardingStep.welcome) return;
+    if (busy || _step != AndroidOnboardingStep.welcome) return;
     _step = AndroidOnboardingStep.capture;
     unawaited(_saveCaptureProgress());
-    _notify();
+    notifyIfActive();
     _applyAuthorizedSetup();
   }
 
   void showPreviousStep() {
-    if (_busy) return;
+    if (busy) return;
     _step = switch (_step) {
       AndroidOnboardingStep.welcome => AndroidOnboardingStep.welcome,
       AndroidOnboardingStep.capture => AndroidOnboardingStep.welcome,
       AndroidOnboardingStep.sync => AndroidOnboardingStep.capture,
     };
-    _notify();
+    notifyIfActive();
   }
 
   Future<void> selectMode(AndroidCaptureMode mode) async {
-    if (_busy || _selectedMode == mode) return;
+    if (busy || _selectedMode == mode) return;
     if (mode == AndroidCaptureMode.limited &&
         (_setupState?.captureEnabled ?? false)) {
       await _runStateAction(_setup.stopCapture);
       if (_setupState?.captureEnabled ?? true) {
-        _errorMessage = 'Background capture could not be stopped.';
-        _notify();
+        errorMessage = 'Background capture could not be stopped.';
+        notifyIfActive();
         return;
       }
     }
     _selectedMode = mode;
-    _errorMessage = null;
-    _notify();
+    errorMessage = null;
+    notifyIfActive();
     await _saveChoice();
     _applyAuthorizedSetup();
   }
 
   Future<void> selectMethod(AndroidCaptureSetupMethod method) async {
-    if (_busy || _method == method) return;
+    if (busy || _method == method) return;
     _method = method;
-    _errorMessage = null;
-    _notify();
+    errorMessage = null;
+    notifyIfActive();
     await _saveChoice();
     _applyAuthorizedSetup();
   }
 
   Future<void> refresh() async {
-    if (_disposed) return;
+    if (disposed) return;
     try {
       _acceptState(await _setup.state());
-      _notify();
+      notifyIfActive();
       _applyAuthorizedSetup();
     } catch (_) {
-      _errorMessage = 'Android capture state could not be refreshed.';
-      _notify();
+      errorMessage = 'Android capture state could not be refreshed.';
+      notifyIfActive();
     }
   }
 
@@ -182,49 +175,49 @@ class AndroidOnboardingController extends ChangeNotifier {
       _runStateAction(_setup.requestNotifications);
 
   Future<void> requestBatteryExemption() async {
-    if (_busy) return;
+    if (busy) return;
     try {
       if (!await _setup.requestBatteryExemption()) {
-        _errorMessage = 'Battery settings could not be opened.';
-        _notify();
+        errorMessage = 'Battery settings could not be opened.';
+        notifyIfActive();
       }
     } catch (_) {
-      _errorMessage = 'Battery settings could not be opened.';
-      _notify();
+      errorMessage = 'Battery settings could not be opened.';
+      notifyIfActive();
     }
   }
 
   Future<void> openShizuku() async {
-    if (_busy) return;
+    if (busy) return;
     try {
       if (!await _setup.openShizuku()) {
-        _errorMessage = 'Shizuku could not be opened.';
-        _notify();
+        errorMessage = 'Shizuku could not be opened.';
+        notifyIfActive();
       }
     } catch (_) {
-      _errorMessage = 'Shizuku could not be opened.';
-      _notify();
+      errorMessage = 'Shizuku could not be opened.';
+      notifyIfActive();
     }
   }
 
   Future<void> applyShizukuGrants() async {
-    if (_busy || _disposed) return;
+    if (busy || disposed) return;
     _automaticGrantsAttempted = true;
     _grantError = false;
     await _runStateAction(_setup.applyShizukuGrants);
-    if (_setupState?.privilegedGrants != true && _errorMessage == null) {
+    if (_setupState?.privilegedGrants != true && errorMessage == null) {
       _grantError = true;
-      _errorMessage = _setupState?.shizuku.permission == true
+      errorMessage = _setupState?.shizuku.permission == true
           ? 'CopyPaste is allowed in Shizuku, but Android capture grants could not be applied.'
           : 'Allow CopyPaste in Shizuku to apply capture grants.';
-      _notify();
+      notifyIfActive();
     }
   }
 
   void _applyAuthorizedSetup() {
     final state = _setupState;
-    if (_disposed ||
-        _busy ||
+    if (disposed ||
+        busy ||
         _automaticGrantsAttempted ||
         _step != AndroidOnboardingStep.capture ||
         _selectedMode != AndroidCaptureMode.full ||
@@ -239,11 +232,11 @@ class AndroidOnboardingController extends ChangeNotifier {
   }
 
   void _acceptState(AndroidCaptureSetupState state) {
-    if (_disposed) return;
+    if (disposed) return;
     _setupState = state;
     if (state.privilegedGrants && _grantError) {
       _grantError = false;
-      _errorMessage = null;
+      errorMessage = null;
     }
     if (!state.shizuku.running || !state.shizuku.permission) {
       _automaticGrantsAttempted = false;
@@ -264,18 +257,18 @@ class AndroidOnboardingController extends ChangeNotifier {
   }
 
   Future<void> beginVerification() async {
-    if (_busy) return;
-    _busy = true;
-    _errorMessage = null;
-    _notify();
+    if (busy) return;
+    busy = true;
+    errorMessage = null;
+    notifyIfActive();
     try {
       final before = await _setup.state();
       if (!before.privilegedGrants) {
-        _errorMessage = 'Grant background clipboard access first.';
+        errorMessage = 'Grant background clipboard access first.';
         return;
       }
       if (!before.notificationGranted) {
-        _errorMessage =
+        errorMessage =
             'Allow notifications before starting background capture.';
         return;
       }
@@ -287,25 +280,25 @@ class AndroidOnboardingController extends ChangeNotifier {
       );
       _acceptState(await _setup.startCapture());
       if (!_setupState!.captureEnabled) {
-        _errorMessage = 'Background capture could not be started.';
+        errorMessage = 'Background capture could not be started.';
         return;
       }
     } catch (_) {
-      _errorMessage = 'Background capture could not be started.';
+      errorMessage = 'Background capture could not be started.';
     } finally {
-      _busy = false;
-      _notify();
+      busy = false;
+      notifyIfActive();
     }
   }
 
   Future<void> continueFromCapture() async {
     if (!canContinueCapture) return;
-    _busy = true;
-    _errorMessage = null;
-    _notify();
+    busy = true;
+    errorMessage = null;
+    notifyIfActive();
     try {
       if (!await _setup.setForegroundCaptureEnabled(true)) {
-        _errorMessage = 'Clipboard intake could not be enabled.';
+        errorMessage = 'Clipboard intake could not be enabled.';
         return;
       }
       // Capture setup is complete before the optional pairing screen. A process
@@ -313,66 +306,54 @@ class AndroidOnboardingController extends ChangeNotifier {
       await _store.markComplete(mode: _selectedMode, method: _method);
       _step = AndroidOnboardingStep.sync;
     } catch (_) {
-      _errorMessage = 'CopyPaste could not save onboarding progress.';
+      errorMessage = 'CopyPaste could not save onboarding progress.';
     } finally {
-      _busy = false;
-      _notify();
+      busy = false;
+      notifyIfActive();
     }
   }
 
-  Future<bool> finish() async {
-    if (_busy || _step != AndroidOnboardingStep.sync) return false;
-    _busy = true;
-    _notify();
-    try {
-      await _store.markComplete(mode: _selectedMode, method: _method);
-      _complete = true;
-      return true;
-    } catch (_) {
-      _errorMessage = 'CopyPaste could not save onboarding progress.';
-      return false;
-    } finally {
-      _busy = false;
-      _notify();
-    }
-  }
+  Future<bool> finish() => finishOnboarding(
+    canFinish: _step == AndroidOnboardingStep.sync,
+    persist: () => _store.markComplete(mode: _selectedMode, method: _method),
+  );
 
   Future<bool> reopenCaptureSetup() async {
-    if (_busy) return false;
-    _busy = true;
-    _errorMessage = null;
-    _notify();
+    if (busy) return false;
+    busy = true;
+    errorMessage = null;
+    notifyIfActive();
     try {
       _acceptState(await _setup.state());
       await _store.writeCaptureProgress();
-      _complete = false;
+      complete = false;
       _step = AndroidOnboardingStep.capture;
       _selectedMode = mode;
       _automaticGrantsAttempted = false;
       return true;
     } catch (_) {
-      _errorMessage = 'Android capture setup could not be opened.';
+      errorMessage = 'Android capture setup could not be opened.';
       return false;
     } finally {
-      _busy = false;
-      _notify();
+      busy = false;
+      notifyIfActive();
     }
   }
 
   Future<void> _runStateAction(
     Future<AndroidCaptureSetupState> Function() action,
   ) async {
-    if (_busy) return;
-    _busy = true;
-    _errorMessage = null;
-    _notify();
+    if (busy) return;
+    busy = true;
+    errorMessage = null;
+    notifyIfActive();
     try {
       _acceptState(await action());
     } catch (_) {
-      _errorMessage = 'Android capture state could not be refreshed.';
+      errorMessage = 'Android capture state could not be refreshed.';
     } finally {
-      _busy = false;
-      _notify();
+      busy = false;
+      notifyIfActive();
     }
   }
 
@@ -380,8 +361,8 @@ class AndroidOnboardingController extends ChangeNotifier {
     try {
       await _store.writeChoice(mode: _selectedMode, method: _method);
     } catch (_) {
-      _errorMessage = 'Android setup choice could not be saved.';
-      _notify();
+      errorMessage = 'Android setup choice could not be saved.';
+      notifyIfActive();
     }
   }
 
@@ -389,18 +370,13 @@ class AndroidOnboardingController extends ChangeNotifier {
     try {
       await _store.writeCaptureProgress();
     } catch (_) {
-      _errorMessage = 'CopyPaste could not save onboarding progress.';
-      _notify();
+      errorMessage = 'CopyPaste could not save onboarding progress.';
+      notifyIfActive();
     }
-  }
-
-  void _notify() {
-    if (!_disposed) notifyListeners();
   }
 
   @override
   void dispose() {
-    _disposed = true;
     unawaited(_stateSubscription?.cancel());
     super.dispose();
   }

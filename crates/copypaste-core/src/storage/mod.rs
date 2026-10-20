@@ -37,9 +37,12 @@
 mod connection;
 mod creation;
 mod dbfile;
+mod file_lock;
 mod file_payloads;
+mod file_transfers;
 mod fuzzy_search;
 mod history;
+mod history_preview;
 mod identity;
 mod items;
 mod merge_page;
@@ -48,15 +51,20 @@ mod model;
 mod page;
 mod pinning;
 mod privacy;
+mod resource_revisions;
 mod retention;
+pub use resource_revisions::ResourceRevisions;
 mod schema;
 mod schema_verify;
 mod search;
 mod semantic_index;
+mod space;
 pub use semantic_index::{SemanticMatches, SemanticWork};
 mod source_icons;
 mod state;
 mod store;
+mod summary_workspace;
+mod summary_workspace_cleanup;
 mod versions;
 
 #[cfg(test)]
@@ -66,13 +74,13 @@ pub use dbfile::{
     attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
 };
 pub use history::{
-    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
-    HistorySourceAppFacet,
+    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryPreviewPage,
+    HistoryPreviewRow, HistoryQuery, HistorySort, HistorySourceAppFacet,
 };
 pub use identity::DeviceIdentity;
 pub(crate) use merge_page::MergePageError;
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
-pub use page::{ItemCursor, Page};
+pub use page::{ItemCursor, Page, PreviewPage};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
 pub use store::Store;
 pub use versions::{origin_or, IncomingItem, Version};

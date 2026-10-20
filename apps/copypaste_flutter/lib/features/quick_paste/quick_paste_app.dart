@@ -2,6 +2,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../platform/desktop/desktop_shortcuts.dart';
 import 'quick_paste_controller.dart';
 import 'quick_paste_view.dart';
 
@@ -34,7 +35,13 @@ class _QuickPasteAppState extends State<QuickPasteApp> {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: AppTheme.mode,
-      builder: AppTheme.builder,
+      builder: (context, child) => AppTheme.builder(
+        context,
+        Shortcuts(
+          shortcuts: desktopTextEditingShortcuts,
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: ShadcnLocalizations.supportedLocales,
       home: QuickPasteView(controller: widget.controller),

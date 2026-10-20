@@ -338,7 +338,48 @@ fn store_error(e: crate::StoreError, what: &str) -> SyncError {
     SyncError::Source(MSG_STORE.to_string())
 }
 
+fn summary_from_version(version: crate::storage::Version, device_id: &str) -> ItemSummary {
+    ItemSummary {
+        item_id: version.id,
+        created_at: version.created_at,
+        deleted: version.deleted,
+        content_hash: version.content_hash,
+        origin_device_id: origin_or(&version.origin_device_id, device_id).to_string(),
+        pinned: version.pinned,
+        pin_order: version.pin_order,
+        pin_updated_at: version.pin_updated_at,
+    }
+}
+
 impl SyncSource for StoreSource {
+    fn summary_workspace(
+        &self,
+    ) -> Result<Box<dyn copypaste_p2p::sync::SummaryWorkspace>, SyncError> {
+        Ok(self.store.summary_workspace())
+    }
+    fn file_chunk(&self, id: &str, sha256: &str, index: u64) -> Result<Vec<u8>, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let row = self
+                .store
+                .get(id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            if !self.store.has_file_transfer(&row.id).unwrap_or(false) {
+                return Err(SyncError::Source("The file is unavailable.".into()));
+            }
+            crate::file_transfer::read_chunk(
+                &self.store,
+                &self.keyring.item_key(),
+                id,
+                sha256,
+                index,
+            )
+            .map(|mut bytes| std::mem::take(&mut *bytes))
+            .map_err(|error| SyncError::Source(error.to_string()))
+        })
+    }
     fn device_id(&self) -> String {
         self.device_id.clone()
     }
@@ -358,17 +399,22 @@ impl SyncSource for StoreSource {
                 .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
             Ok(rows
                 .into_iter()
-                .map(|version| ItemSummary {
-                    item_id: version.id,
-                    created_at: version.created_at,
-                    deleted: version.deleted,
-                    content_hash: version.content_hash,
-                    origin_device_id: origin_or(&version.origin_device_id, &self.device_id)
-                        .to_string(),
-                    pinned: version.pinned,
-                    pin_order: version.pin_order,
-                    pin_updated_at: version.pin_updated_at,
-                })
+                .map(|version| summary_from_version(version, &self.device_id))
+                .collect())
+        })
+    }
+
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        self.settings_if_sync_enabled()?;
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        super::blocking(|| {
+            let rows = self
+                .store
+                .version_summaries(&ids)
+                .map_err(|e| store_error(e, "could not read page-local sync summaries"))?;
+            Ok(rows
+                .into_values()
+                .map(|version| summary_from_version(version, &self.device_id))
                 .collect())
         })
     }
@@ -552,6 +598,117 @@ mod tests {
         assert_eq!(summaries[0].origin_device_id, source.device_id());
         assert!(!summaries[0].pinned);
         assert_eq!(summaries[0].pin_order, None);
+    }
+
+    #[test]
+    fn a_recaptured_local_version_returning_from_a_peer_keeps_one_device_filter() {
+        let phone = fixture_named("CPH2305");
+        let peer = fixture_named("MacBook Air");
+        let phone_source = phone.source();
+        let peer_source = peer.source();
+        let stamp = crate::now_ms();
+        let returned_id = add(&phone, "phone-capture", "needle shared", stamp);
+        let sent = phone_source
+            .fetch(std::slice::from_ref(&returned_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(!phone_source.apply(sent.clone()).unwrap());
+        assert!(peer_source.apply(sent).unwrap());
+
+        assert_eq!(
+            add(&peer, "peer-recapture", "needle shared", stamp + 1),
+            returned_id
+        );
+        let returned = peer_source
+            .fetch(std::slice::from_ref(&returned_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(returned.origin_device_id, phone.here);
+        assert!(phone_source.apply(returned).unwrap());
+        assert_eq!(
+            phone
+                .store
+                .get(&returned_id)
+                .unwrap()
+                .unwrap()
+                .origin_device_id,
+            phone.here
+        );
+
+        let local_id = add(&phone, "new-local-capture", "needle local", stamp + 2);
+        let remote_id = add(&peer, "peer-capture", "needle remote", stamp + 3);
+        let remote = peer_source
+            .fetch(std::slice::from_ref(&remote_id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(phone_source.apply(remote).unwrap());
+        phone
+            .store
+            .record_device_name(&peer.here, "MacBook Air")
+            .unwrap();
+        phone
+            .store
+            .record_device_class(&peer.here, copypaste_ipc::DeviceClass::Laptop)
+            .unwrap();
+
+        let facets = phone
+            .store
+            .history_facets(&phone.here, "CPH2305", copypaste_ipc::DeviceClass::Phone)
+            .unwrap();
+        assert_eq!(
+            facets.origin_devices,
+            vec![
+                crate::HistoryDeviceFacet {
+                    id: phone.here.clone(),
+                    label: "CPH2305".into(),
+                    device_class: copypaste_ipc::DeviceClass::Phone,
+                },
+                crate::HistoryDeviceFacet {
+                    id: peer.here.clone(),
+                    label: "MacBook Air".into(),
+                    device_class: copypaste_ipc::DeviceClass::Laptop,
+                },
+            ]
+        );
+
+        for sort in [
+            crate::HistorySort::Newest,
+            crate::HistorySort::Oldest,
+            crate::HistorySort::Relevance,
+        ] {
+            let query = crate::HistoryQuery {
+                search: Some("needle".into()),
+                origin_device_id: Some(phone.here.clone()),
+                sort,
+                ..Default::default()
+            };
+            let mut cursor = None;
+            let mut ids = Vec::new();
+            loop {
+                let page = phone
+                    .store
+                    .query_history_bounded_for_device(
+                        &query,
+                        cursor.as_ref(),
+                        1,
+                        usize::MAX,
+                        Some(&phone.here),
+                    )
+                    .unwrap();
+                ids.extend(page.items.into_iter().map(|item| item.id));
+                let Some(next) = page.next else { break };
+                cursor = Some(crate::HistoryCursor::parse_for(&next.token(), &query).unwrap());
+            }
+            let expected = if sort == crate::HistorySort::Oldest {
+                vec![returned_id.clone(), local_id.clone()]
+            } else {
+                vec![local_id.clone(), returned_id.clone()]
+            };
+            assert_eq!(ids, expected, "sort: {sort:?}");
+        }
     }
 
     #[test]

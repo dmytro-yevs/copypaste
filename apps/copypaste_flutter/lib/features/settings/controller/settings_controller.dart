@@ -51,7 +51,9 @@ class SettingsController extends ChangeNotifier {
   SettingsLoadState _loadState = SettingsLoadState.loading;
   RuntimeSettings? _settings;
   CaptureSettingsState? _capture;
+  CaptureSettingsState? _captureSnapshot;
   SyncStatus _syncStatus = const SyncStatus();
+  SyncStatus _syncSnapshot = const SyncStatus();
   StreamSubscription<SyncStatus>? _syncSubscription;
   String? _errorMessage;
   String? _settingsHealthNotice;
@@ -63,6 +65,18 @@ class SettingsController extends ChangeNotifier {
   bool _captureRefreshInFlight = false;
   int _presentationEpoch = 0;
   StreamSubscription<String?>? _captureSubscription;
+  StreamSubscription<CaptureSettingsState?>? _captureStateSubscription;
+  bool _capturePushActive = false;
+  bool _captureWatchReady = false;
+  bool _captureStreamConnected = false;
+  bool _screenshotEventsReady = false;
+  int _screenshotEventGeneration = 0;
+  int _screenshotWatchGeneration = 0;
+  StreamSubscription<ScreenshotCaptureStatus>? _screenshotSubscription;
+  int _captureRevision = -1;
+  int _captureWatchGeneration = 0;
+  bool _captureEpochReset = false;
+  bool _syncRevisionReset = false;
   Future<void> _notificationQueue = Future<void>.value();
 
   SettingsLoadState get loadState => _loadState;
@@ -112,7 +126,7 @@ class SettingsController extends ChangeNotifier {
       ]);
       if (_disposed) return;
       _settings = values[0] as RuntimeSettings;
-      _capture = values[1] as CaptureSettingsState;
+      _setCapture(values[1] as CaptureSettingsState);
       _acceptSyncStatus(_capture!.syncStatus);
       _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
       _blockScreenshots = values[2] as bool;
@@ -122,6 +136,17 @@ class SettingsController extends ChangeNotifier {
       if (_disposed) return;
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
+      if (_repository case final CaptureEventsRepository captureEvents) {
+        _captureStateSubscription ??= captureEvents.captureEvents().listen(
+          _acceptCaptureEvent,
+          onError: (Object _, StackTrace _) {
+            _captureStreamConnected = false;
+            _captureWatchReady = false;
+            _updateCapturePush();
+            unawaited(_refreshCapture());
+          },
+        );
+      }
       _startCaptureRefresh();
       _syncSubscription ??= _repository.syncEvents().listen(
         (status) {
@@ -157,17 +182,17 @@ class SettingsController extends ChangeNotifier {
     if (capture == null || _busy) return false;
     return _run(() async {
       final paused = !capture.paused;
-      _capture = await _repository.setCapturePaused(paused);
+      _setCapture(await _repository.setCapturePaused(paused));
       try {
         await _captureControl.setPaused(paused);
       } on CaptureServiceUnavailable {
         try {
-          _capture = await _repository.setCapturePaused(true);
+          _setCapture(await _repository.setCapturePaused(true));
         } catch (_) {
           // The authoritative read below reports whether compensation persisted.
         } finally {
           try {
-            _capture = await _repository.captureState();
+            _setCapture(await _repository.captureState());
           } catch (_) {
             // Retain the latest known persisted state when the runtime is unavailable.
           }
@@ -175,14 +200,14 @@ class SettingsController extends ChangeNotifier {
         throw const CaptureServiceUnavailable();
       } catch (_) {
         try {
-          _capture = await _repository.captureState();
+          _setCapture(await _repository.captureState());
         } catch (_) {
           // The persisted result above remains the best available state.
         }
         if (paused) throw const CaptureServiceStopFailed();
         rethrow;
       }
-      _capture = await _repository.captureState();
+      _setCapture(await _repository.captureState());
       _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
     });
   }
@@ -197,6 +222,9 @@ class SettingsController extends ChangeNotifier {
 
   Future<bool> setStorageQuotaBytes(int value) =>
       _update(RuntimeSettingsChange(storageQuotaBytes: value));
+
+  Future<bool> setMaxFileSizeBytes(int value) =>
+      _update(RuntimeSettingsChange(maxFileSizeBytes: value));
 
   Future<bool> addExcludedApp(String rawValue) async {
     final value = rawValue.trim();
@@ -304,12 +332,18 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
-  Future<bool> restoreBackup() async {
-    final path = await _filePicker.chooseRestorePath();
-    if (path == null) return false;
-    return _run(() async {
+  /// Returns null when the native picker is cancelled without restoring.
+  Future<bool?> restoreBackup() async {
+    var cancelled = false;
+    final restored = await _run(() async {
+      final path = await _filePicker.chooseRestorePath();
+      if (path == null) {
+        cancelled = true;
+        return;
+      }
       await _repository.restoreHistory(path);
     });
+    return cancelled ? null : restored;
   }
 
   void clearMessages() {
@@ -352,6 +386,7 @@ class SettingsController extends ChangeNotifier {
     if (_disposed || active == _presentationActive) return;
     _presentationActive = active;
     _presentationEpoch++;
+    _updateCapturePush();
     _startCaptureRefresh();
     if ((active || backgroundCaptureStatusRequired) &&
         _loadState == SettingsLoadState.ready) {
@@ -365,12 +400,100 @@ class SettingsController extends ChangeNotifier {
     if (_disposed ||
         (!_presentationActive && !backgroundCaptureStatusRequired) ||
         _loadState != SettingsLoadState.ready ||
-        captureRefreshInterval <= Duration.zero) {
+        captureRefreshInterval <= Duration.zero ||
+        _capturePushActive) {
       return;
     }
     _captureTimer = Timer.periodic(captureRefreshInterval, (_) {
       unawaited(_refreshCapture());
     });
+  }
+
+  void _acceptCaptureEvent(CaptureSettingsState? next) {
+    if (_disposed) return;
+    if (next == null) {
+      // A new daemon can restart its revision at zero.
+      _captureRevision = -1;
+      _captureWatchGeneration++;
+      _captureEpochReset = true;
+      _syncRevisionReset = true;
+      _captureStreamConnected = true;
+      _captureWatchReady = false;
+      _updateCapturePush();
+      unawaited(_refreshCapture());
+      return;
+    }
+    if (next.captureRevision < _captureRevision ||
+        (!_captureEpochReset &&
+            next.captureRevision == _captureRevision &&
+            next.epoch < (_capture?.epoch ?? 0))) {
+      return;
+    }
+    _captureRevision = next.captureRevision;
+    final previousCapture = _captureSnapshot;
+    final previousSync = _syncSnapshot;
+    final previousNotice = _settingsHealthNotice;
+    _setCapture(next);
+    _captureEpochReset = false;
+    _acceptSyncStatus(next.syncStatus);
+    _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
+    _captureWatchReady = _captureStreamConnected && next.captureWatch;
+    _updateCapturePush();
+    if (!_sameCapture(previousCapture, _captureSnapshot) ||
+        !_sameSync(previousSync, _syncSnapshot) ||
+        previousNotice != _settingsHealthNotice) {
+      _notify();
+    }
+  }
+
+  void _acceptScreenshotEvent(ScreenshotCaptureStatus next) {
+    if (_disposed) return;
+    final previous = _screenshotStatus;
+    _screenshotEventGeneration++;
+    _screenshotStatus = next;
+    _screenshotEventsReady = true;
+    _updateCapturePush();
+    if (!_sameScreenshot(previous, next)) _notify();
+  }
+
+  void _updateCapturePush() {
+    final screenshotRequired =
+        _screenshotCapture.supported && _presentationActive;
+    if (_captureWatchReady &&
+        screenshotRequired &&
+        _screenshotSubscription == null) {
+      final screenshotEvents = _screenshotCapture;
+      if (screenshotEvents is ScreenshotCaptureEvents) {
+        final generation = ++_screenshotWatchGeneration;
+        _screenshotSubscription = (screenshotEvents as ScreenshotCaptureEvents)
+            .changes
+            .listen(
+              _acceptScreenshotEvent,
+              onError: (Object _, StackTrace _) {
+                if (generation != _screenshotWatchGeneration) return;
+                _screenshotEventsReady = false;
+                _updateCapturePush();
+              },
+              onDone: () {
+                if (generation != _screenshotWatchGeneration) return;
+                _screenshotEventsReady = false;
+                _updateCapturePush();
+              },
+            );
+      }
+    } else if ((!_captureWatchReady || !screenshotRequired) &&
+        _screenshotSubscription != null) {
+      _screenshotWatchGeneration++;
+      final subscription = _screenshotSubscription;
+      _screenshotSubscription = null;
+      _screenshotEventsReady = false;
+      unawaited(subscription?.cancel());
+    }
+    final active =
+        _captureWatchReady && (!screenshotRequired || _screenshotEventsReady);
+    if (active == _capturePushActive) return;
+    _capturePushActive = active;
+    _startCaptureRefresh();
   }
 
   Future<void> _refreshCapture() async {
@@ -382,6 +505,9 @@ class SettingsController extends ChangeNotifier {
     }
     _captureRefreshInFlight = true;
     final epoch = _presentationEpoch;
+    final watchGeneration = _captureWatchGeneration;
+    final captureRevision = _captureRevision;
+    final screenshotGeneration = _screenshotEventGeneration;
     try {
       final next = await _repository.captureState();
       if (_disposed || epoch != _presentationEpoch) {
@@ -394,16 +520,36 @@ class SettingsController extends ChangeNotifier {
       if (_disposed ||
           _busy ||
           epoch != _presentationEpoch ||
-          next.epoch < (_capture?.epoch ?? 0)) {
+          watchGeneration != _captureWatchGeneration ||
+          (!_captureEpochReset && next.epoch < (_capture?.epoch ?? 0)) ||
+          next.captureRevision < _captureRevision) {
         return;
       }
-      _screenshotStatus = screenshotStatus;
-      _capture = next;
+      final previousCapture = _captureSnapshot;
+      final previousSync = _syncSnapshot;
+      final previousScreenshot = _screenshotStatus;
+      final previousNotice = _settingsHealthNotice;
+      if (screenshotGeneration == _screenshotEventGeneration) {
+        _screenshotStatus = screenshotStatus;
+      }
+      _captureRevision = next.captureRevision;
+      _setCapture(next);
+      _captureEpochReset = false;
+      _captureWatchReady = _captureStreamConnected && next.captureWatch;
+      _updateCapturePush();
       _acceptSyncStatus(next.syncStatus);
       _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
-      _notify();
+      if (!_sameCapture(previousCapture, _captureSnapshot) ||
+          !_sameSync(previousSync, _syncSnapshot) ||
+          !_sameScreenshot(previousScreenshot, _screenshotStatus) ||
+          previousNotice != _settingsHealthNotice) {
+        _notify();
+      }
     } catch (_) {
-      if (!_disposed && epoch == _presentationEpoch) {
+      if (!_disposed &&
+          epoch == _presentationEpoch &&
+          watchGeneration == _captureWatchGeneration &&
+          captureRevision == _captureRevision) {
         _invalidateSyncStatus();
         _notify();
       }
@@ -412,22 +558,114 @@ class SettingsController extends ChangeNotifier {
       // A resumed window may have inherited an outstanding hidden request.
       if (!_disposed &&
           (_presentationActive || backgroundCaptureStatusRequired) &&
-          epoch != _presentationEpoch) {
+          (epoch != _presentationEpoch ||
+              watchGeneration != _captureWatchGeneration)) {
         unawaited(_refreshCapture());
       }
     }
   }
 
   void _acceptSyncStatus(SyncStatus status) {
-    if (_disposed || status.revision < _syncStatus.revision) return;
+    if (_disposed ||
+        (!_syncRevisionReset && status.revision < _syncStatus.revision)) {
+      return;
+    }
+    _syncRevisionReset = false;
     _syncStatus = status;
+    _syncSnapshot = _snapshotSync(status);
   }
+
+  void _setCapture(CaptureSettingsState state) {
+    if (state.captureRevision < _captureRevision ||
+        (!_captureEpochReset &&
+            state.captureRevision == _captureRevision &&
+            state.epoch < (_capture?.epoch ?? 0))) {
+      return;
+    }
+    if (state.captureRevision > _captureRevision) {
+      _captureRevision = state.captureRevision;
+    }
+    _capture = state;
+    _captureSnapshot = _snapshotCapture(state);
+  }
+
+  CaptureSettingsState _snapshotCapture(CaptureSettingsState state) {
+    final health = state.settingsHealth;
+    return CaptureSettingsState(
+      captureWatch: state.captureWatch,
+      captureRevision: state.captureRevision,
+      running: state.running,
+      paused: state.paused,
+      epoch: state.epoch,
+      syncStatus: _snapshotSync(state.syncStatus),
+      settingsHealth: health == null
+          ? null
+          : RuntimeSettingsHealth(
+              recordUnreadable: health.recordUnreadable,
+              unreadableFields: List.unmodifiable(health.unreadableFields),
+            ),
+    );
+  }
+
+  SyncStatus _snapshotSync(SyncStatus status) => SyncStatus(
+    revision: status.revision,
+    phase: status.phase,
+    peers: List.unmodifiable(status.peers),
+  );
+
+  bool _sameCapture(CaptureSettingsState? a, CaptureSettingsState? b) {
+    if (a == null || b == null) return a == b;
+    final aHealth = a.settingsHealth;
+    final bHealth = b.settingsHealth;
+    return a.running == b.running &&
+        a.paused == b.paused &&
+        a.epoch == b.epoch &&
+        _sameSync(a.syncStatus, b.syncStatus) &&
+        (aHealth == null || bHealth == null
+            ? aHealth == bHealth
+            : aHealth.recordUnreadable == bHealth.recordUnreadable &&
+                  listEquals(
+                    aHealth.unreadableFields,
+                    bHealth.unreadableFields,
+                  ));
+  }
+
+  bool _sameSync(SyncStatus a, SyncStatus b) {
+    if (a.revision != b.revision ||
+        a.phase != b.phase ||
+        a.peers.length != b.peers.length) {
+      return false;
+    }
+    for (var i = 0; i < a.peers.length; i++) {
+      final x = a.peers[i];
+      final y = b.peers[i];
+      if (x.id != y.id ||
+          x.name != y.name ||
+          x.phase != y.phase ||
+          x.startedAt != y.startedAt ||
+          x.lastSuccess != y.lastSuccess ||
+          x.sent != y.sent ||
+          x.received != y.received ||
+          x.skippedTooLarge != y.skippedTooLarge ||
+          x.error != y.error) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _sameScreenshot(ScreenshotCaptureStatus a, ScreenshotCaptureStatus b) =>
+      a.enabled == b.enabled &&
+      a.mediaGranted == b.mediaGranted &&
+      a.notificationGranted == b.notificationGranted &&
+      a.running == b.running;
 
   void _invalidateSyncStatus() {
     _syncStatus = SyncStatus(
       revision: _syncStatus.revision,
       peers: _syncStatus.peers,
     );
+    _syncSnapshot = _snapshotSync(_syncStatus);
   }
 
   String _message(Object error, String fallback) =>
@@ -469,6 +707,8 @@ class SettingsController extends ChangeNotifier {
     _disposed = true;
     _captureTimer?.cancel();
     unawaited(_captureSubscription?.cancel());
+    unawaited(_captureStateSubscription?.cancel());
+    unawaited(_screenshotSubscription?.cancel());
     unawaited(_syncSubscription?.cancel());
     unawaited(_repository.dispose());
     super.dispose();

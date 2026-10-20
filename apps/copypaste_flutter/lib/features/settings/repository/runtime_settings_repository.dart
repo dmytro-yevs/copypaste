@@ -1,40 +1,58 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
 
 import '../../../platform/notifications/capture_notification_preview.dart';
+import '../../../shared/runtime_event_service.dart';
 
 import '../models/settings_models.dart';
 import '../models/sync_status.dart';
 import 'settings_repository.dart';
 
-class RuntimeSettingsRepository implements SettingsRepository {
+class RuntimeSettingsRepository
+    implements SettingsRepository, CaptureEventsRepository {
   RuntimeSettingsRepository();
 
   @override
-  Stream<SyncStatus> syncEvents() async* {
-    final watchId = await runtime.allocateRuntimeWatch();
-    try {
-      await for (final event in runtime.watchRuntime(watchId: watchId)) {
-        if (event.syncStatus case final status?) yield _syncStatus(status);
-      }
-    } finally {
-      await runtime.cancelRuntimeWatch(watchId: watchId);
-    }
+  Stream<SyncStatus> syncEvents() => RuntimeEventService.instance.events
+      .where((event) => event.syncStatus != null)
+      .map((event) => _syncStatus(event.syncStatus!));
+
+  @override
+  Stream<String?> capturedEvents() {
+    // Android feedback belongs to its capture service, including while Dart sleeps.
+    if (Platform.isAndroid) return const Stream.empty();
+    return RuntimeEventService.instance.events
+        .where((event) => event.captured)
+        .map((event) => event.capturedItemId);
   }
 
   @override
-  Stream<String?> capturedEvents() async* {
-    // Android feedback belongs to its capture service, including while Dart sleeps.
-    if (Platform.isAndroid) return;
-    final watchId = await runtime.allocateRuntimeWatch();
-    try {
-      await for (final event in runtime.watchRuntime(watchId: watchId)) {
-        if (event.captured) yield event.capturedItemId;
+  Stream<CaptureSettingsState?> captureEvents() async* {
+    final service = RuntimeEventService.instance;
+    final pending = StreamController<CaptureSettingsState?>();
+    var active = true;
+    final subscription = service.events.listen((event) {
+      if (event.kind == 'ready') {
+        pending.add(null);
+      } else if (event.capture case final capture?) {
+        pending.add(_captureState(capture));
       }
+    }, onError: pending.addError);
+    // Another feature may have connected the shared watch before Settings
+    // subscribed. Read the authoritative state after joining either way.
+    unawaited(
+      service.ready.then((_) {
+        if (active) pending.add(null);
+      }, onError: (Object _, StackTrace _) {}),
+    );
+    try {
+      yield* pending.stream;
     } finally {
-      await runtime.cancelRuntimeWatch(watchId: watchId);
+      active = false;
+      await subscription.cancel();
+      await pending.close();
     }
   }
 
@@ -50,7 +68,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
           text: details == null
               ? 'Image'
               : 'Image · ${details.width} × ${details.height}',
-          imagePng: base64Decode(image.pngBase64),
+          imagePng: image.pngBytes,
         );
       case runtime.ClipContentClass.file:
         final details = clip.fileDetails;
@@ -83,6 +101,9 @@ class RuntimeSettingsRepository implements SettingsRepository {
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
     final updated = await runtime.updateRuntimeSettings(
       patch: runtime.RuntimeSettingsPatch(
+        maxFileSizeBytes: change.maxFileSizeBytes == null
+            ? null
+            : BigInt.from(change.maxFileSizeBytes!),
         skipSecret: change.skipSecret,
         skipTransient: change.skipTransient,
         retentionDays: change.retentionDays,
@@ -127,6 +148,8 @@ class RuntimeSettingsRepository implements SettingsRepository {
   CaptureSettingsState _captureState(runtime.CaptureState state) =>
       CaptureSettingsState(
         syncStatus: _syncStatus(state.syncStatus),
+        captureWatch: state.captureWatch && state.runtimeWatch,
+        captureRevision: state.captureRevision.toInt(),
         running: state.running,
         paused: state.paused,
         epoch: state.privateModeEpoch.toInt(),
@@ -173,6 +196,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
 
   RuntimeSettings _settings(runtime.RuntimeSettingsData settings) =>
       RuntimeSettings(
+        maxFileSizeBytes: settings.maxFileSizeBytes.toInt(),
         retentionDays: settings.retentionDays,
         storageQuotaBytes: settings.storageQuotaBytes.toInt(),
         skipSecret: settings.skipSecret,

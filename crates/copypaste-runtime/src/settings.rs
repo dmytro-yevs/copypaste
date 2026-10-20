@@ -25,6 +25,7 @@ pub(crate) struct RuntimeSettings {
 struct SettingsState {
     config: ConfigData,
     private_mode_epoch: u64,
+    capture_privacy_epoch: u64,
     health: Option<SettingsHealth>,
 }
 
@@ -35,12 +36,7 @@ pub(crate) struct SettingsSnapshot {
     pub(crate) health: Option<SettingsHealth>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct SettingsApplied {
-    pub(crate) before: ConfigData,
-    pub(crate) config: ConfigData,
-    pub(crate) private_mode_epoch: u64,
-}
+pub(crate) use copypaste_core::settings_transition::SettingsTransition as SettingsApplied;
 
 impl RuntimeSettings {
     pub(crate) fn load(store: &Store) -> Self {
@@ -61,6 +57,7 @@ impl RuntimeSettings {
             current: RwLock::new(SettingsState {
                 config,
                 private_mode_epoch: 0,
+                capture_privacy_epoch: 0,
                 health: health.is_degraded().then_some(health),
             }),
             applying: Mutex::new(false),
@@ -136,31 +133,25 @@ impl RuntimeSettings {
         effects: impl FnOnce(&SettingsApplied),
     ) -> Result<SettingsApplied, SettingsError> {
         let _serialised = self.enter_apply()?;
-        let (before, next, next_epoch) = {
+        let applied = {
             let current = self.current.read().map_err(|poison| {
                 drop(poison);
                 self.capture.fail_closed();
                 SettingsError::Store
             })?;
-            let next = patch.apply(&current.config)?;
-            let next_epoch = if patch.private_mode.is_some() {
-                current
-                    .private_mode_epoch
-                    .checked_add(1)
-                    .ok_or(SettingsError::Store)?
-            } else {
-                current.private_mode_epoch
-            };
-            (current.config.clone(), next, next_epoch)
+            SettingsApplied::prepare(
+                &current.config,
+                current.private_mode_epoch,
+                current.capture_privacy_epoch,
+                patch,
+            )?
         };
-
         let transition = self
             .capture
             .transition()
             .map_err(|_| SettingsError::Store)?;
-        let encoded = serde_json::to_string(&next).map_err(|_| SettingsError::Store)?;
-        self.store
-            .set_state(KEY_SETTINGS, &encoded)
+        applied
+            .persist(|encoded| self.store.set_state(KEY_SETTINGS, encoded))
             .map_err(|_| SettingsError::Store)?;
 
         let mut current = self.current.write().map_err(|poison| {
@@ -168,19 +159,15 @@ impl RuntimeSettings {
             self.capture.fail_closed();
             SettingsError::Store
         })?;
-        current.config = next.clone();
-        current.private_mode_epoch = next_epoch;
+        current.config = applied.config.clone();
+        current.private_mode_epoch = applied.private_mode_epoch;
+        current.capture_privacy_epoch = applied.capture_privacy_epoch;
         current.health = None;
         drop(current);
-        transition.publish(next.clone()).map_err(|_| {
+        transition.publish(applied.config.clone()).map_err(|_| {
             self.capture.fail_closed();
             SettingsError::Store
         })?;
-        let applied = SettingsApplied {
-            before,
-            config: next,
-            private_mode_epoch: next_epoch,
-        };
         effects(&applied);
         Ok(applied)
     }
@@ -207,6 +194,17 @@ pub(crate) enum SettingsError {
     Invalid(#[from] ConfigError),
     #[error("the settings could not be saved")]
     Store,
+}
+
+impl From<copypaste_core::settings_transition::TransitionError> for SettingsError {
+    fn from(error: copypaste_core::settings_transition::TransitionError) -> Self {
+        match error {
+            copypaste_core::settings_transition::TransitionError::Invalid(error) => {
+                Self::Invalid(error)
+            }
+            copypaste_core::settings_transition::TransitionError::EpochExhausted => Self::Store,
+        }
+    }
 }
 
 #[cfg(test)]

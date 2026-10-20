@@ -32,7 +32,7 @@ class AndroidClipboardPendingTest {
             beforeEnqueue()
             tasks.add(task)
         }
-        override fun remove(task: Runnable) { tasks.remove(task) }
+        override fun remove(task: Runnable): Boolean = tasks.remove(task)
         override fun postMain(action: () -> Unit) { main.add(action) }
         override fun closeInput(input: InputStream) { closes.add(input) }
         override fun abandon(token: Long) { abandoned.add(token); cancellation() }
@@ -77,6 +77,72 @@ class AndroidClipboardPendingTest {
         if (attach) pending.attach(12)
         return Fixture(host, runtime, pending, results)
     }
+
+    @Test fun pendingSlotRemainsReservedUntilRunningWorkExits() {
+        val slots = CaptureSlots(1)
+        val host = AndroidClipboardReader.Host(11)
+        val runtime = NativeRuntime()
+        val pending = AndroidClipboardReader.Pending(host, runtime = runtime, slot = slots.reserve()!!)
+        val bytes = CaptureBytes(8)
+        assertTrue(pending.retainText(bytes.reserve(8)!!))
+        pending.attach(12)
+        val entered = CountDownLatch(1)
+        val unblock = CountDownLatch(1)
+        pending.enqueue(AndroidClipboardReader.Snapshot(text = "value")) {
+            entered.countDown()
+            unblock.await()
+            false
+        }
+        val worker = Thread { runtime.runWorker() }.apply { start() }
+        assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        pending.cancel()
+        assertNull(slots.reserve())
+        assertNull(bytes.reserve(1))
+        unblock.countDown()
+        worker.join(2000)
+        assertFalse(worker.isAlive)
+        slots.reserve()!!.close()
+        bytes.reserve(8)!!.close()
+    }
+
+    @Test fun cancellingQueuedWorkReleasesItsSlotOnce() {
+        val slots = CaptureSlots(1)
+        val runtime = NativeRuntime()
+        val pending = AndroidClipboardReader.Pending(AndroidClipboardReader.Host(11), runtime = runtime, slot = slots.reserve()!!)
+        pending.attach(12)
+        pending.enqueue(AndroidClipboardReader.Snapshot(text = "value")) { true }
+        pending.cancel()
+        val next = slots.reserve()!!
+        pending.cancel()
+        assertNull(slots.reserve())
+        next.close()
+    }
+
+    @Test fun cancellationKeepsSnapshotReservationUntilCopyReturns() {
+        val slots = CaptureSlots(1)
+        val bytes = CaptureBytes(8)
+        val pending = AndroidClipboardReader.Pending(AndroidClipboardReader.Host(11), runtime = NativeRuntime(), slot = slots.reserve()!!)
+        pending.attach(12)
+        val entered = CountDownLatch(1)
+        val unblock = CountDownLatch(1)
+        val worker = Thread {
+            pending.snapshot {
+                assertTrue(pending.retainText(bytes.reserve(8)!!))
+                entered.countDown()
+                unblock.await()
+                true
+            }
+        }.apply { start() }
+        assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        pending.cancel()
+        assertNull(slots.reserve())
+        assertNull(bytes.reserve(1))
+        unblock.countDown()
+        worker.join(2000)
+        assertFalse(worker.isAlive)
+        slots.reserve()!!.close()
+        bytes.reserve(8)!!.close()
+    }
     private fun assertFailedOnce(f: Fixture) {
         f.runtime.runMain()
         assertEquals(listOf(false), f.results)
@@ -117,7 +183,7 @@ class AndroidClipboardPendingTest {
         f.pending.cancel()
         release.countDown()
         enqueuer.join()
-        f.runtime.runWorker()
+        assertTrue(f.runtime.tasks.isEmpty())
         assertFailedOnce(f)
         assertEquals(0, reads)
     }

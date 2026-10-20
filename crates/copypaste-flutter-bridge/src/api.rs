@@ -6,6 +6,7 @@
 
 use std::io::Write;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{Method, ResponseData};
 
 use crate::client;
@@ -308,7 +309,7 @@ pub enum ClipSort {
 
 #[derive(Debug, Clone)]
 pub struct ClipImagePreview {
-    pub png_base64: String,
+    pub png_bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
@@ -459,6 +460,16 @@ pub struct RuntimeEvent {
     pub item_count: u64,
     pub captured: bool,
     pub captured_item_id: Option<String>,
+    pub progress: Option<FileProgress>,
+    pub capture: Option<CaptureState>,
+    pub runtime_watch: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileProgress {
+    pub token: String,
+    pub written: u64,
+    pub total: u64,
 }
 
 /// Safe pairing state for ordinary Flutter UI. It deliberately has no invite
@@ -543,6 +554,9 @@ pub(crate) fn runtime_sync_status(status: copypaste_ipc::SyncStatus) -> RuntimeS
 
 #[derive(Debug, Clone)]
 pub struct CaptureState {
+    pub capture_watch: bool,
+    pub capture_revision: u64,
+    pub runtime_watch: bool,
     pub sync_status: RuntimeSyncStatus,
     pub running: bool,
     pub paused: bool,
@@ -560,6 +574,7 @@ pub struct RuntimeSettingsHealth {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSettingsData {
+    pub max_file_size_bytes: u64,
     pub skip_secret: bool,
     pub skip_transient: bool,
     pub retention_days: u32,
@@ -575,6 +590,7 @@ pub struct RuntimeSettingsData {
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeSettingsPatch {
+    pub max_file_size_bytes: Option<u64>,
     pub skip_secret: Option<bool>,
     pub skip_transient: Option<bool>,
     pub retention_days: Option<u32>,
@@ -673,14 +689,21 @@ pub async fn clipboard_available() -> Result<bool, RuntimeError> {
 pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
     let response = client::request(Method::Status).await?;
     match response.data {
-        Some(ResponseData::Status(status)) => Ok(CaptureState {
-            sync_status: runtime_sync_status(status.sync_status),
-            running: status.capture_running,
-            paused: status.private_mode,
-            private_mode_epoch: status.private_mode_epoch,
-            settings_health: status.settings_health.map(runtime_settings_health),
-        }),
+        Some(ResponseData::Status(status)) => Ok(runtime_capture_state(status)),
         _ => Err(RuntimeError::internal()),
+    }
+}
+
+pub(crate) fn runtime_capture_state(status: copypaste_ipc::StatusData) -> CaptureState {
+    CaptureState {
+        capture_watch: status.capture_watch,
+        capture_revision: status.capture_revision,
+        runtime_watch: status.runtime_watch,
+        sync_status: runtime_sync_status(status.sync_status),
+        running: status.capture_running,
+        paused: status.private_mode,
+        private_mode_epoch: status.private_mode_epoch,
+        settings_health: status.settings_health.map(runtime_settings_health),
     }
 }
 
@@ -707,6 +730,7 @@ pub async fn update_runtime_settings(
         patch: copypaste_ipc::ConfigPatch {
             retention_days: patch.retention_days,
             storage_quota_bytes: patch.storage_quota_bytes,
+            max_file_size_bytes: patch.max_file_size_bytes,
             skip_secret: patch.skip_secret,
             skip_transient: patch.skip_transient,
             excluded_app_bundle_ids: patch.excluded_app_ids,
@@ -979,12 +1003,29 @@ pub async fn copy_clip_as_plain_text(id: String) -> Result<Clip, RuntimeError> {
     item_response(Method::CopyPlainText { id }).await
 }
 
-pub async fn save_clip_file(id: String, dest_path: String) -> Result<(), RuntimeError> {
-    empty_response(Method::SaveFile { id, dest_path }).await
+pub async fn save_clip_file(
+    id: String,
+    dest_path: String,
+    download_token: Option<String>,
+) -> Result<(), RuntimeError> {
+    empty_response(Method::SaveFile {
+        id,
+        dest_path,
+        download_token,
+    })
+    .await
 }
 
-pub fn history_file_import_max_bytes() -> u64 {
-    copypaste_ipc::MAX_CONTENT_BYTES as u64
+pub async fn cancel_clip_file_download(id: String) -> Result<(), RuntimeError> {
+    empty_response(Method::CancelFileDownload { id }).await
+}
+
+pub async fn history_file_import_max_bytes() -> Result<u64, RuntimeError> {
+    let response = client::request(Method::GetConfig).await?;
+    match response.data {
+        Some(ResponseData::Config(config)) => Ok(config.config.max_file_size_bytes),
+        _ => Err(RuntimeError::internal()),
+    }
 }
 
 pub async fn import_clip_file(
@@ -1082,12 +1123,12 @@ pub async fn clip_image_preview(
         }),
     })
     .await?;
-    match response.data {
-        Some(ResponseData::ImagePreview(preview)) => Ok(ClipImagePreview {
-            png_base64: preview.png_base64,
-            width: preview.width,
-            height: preview.height,
-        }),
+    image_preview_response(response.data)
+}
+
+fn image_preview_response(data: Option<ResponseData>) -> Result<ClipImagePreview, RuntimeError> {
+    match data {
+        Some(ResponseData::ImagePreview(preview)) => image_preview(preview),
         _ => Err(RuntimeError::internal()),
     }
 }
@@ -1096,15 +1137,28 @@ pub async fn clip_image_preview(
 /// authenticated icon metadata for this clip.
 pub async fn source_app_icon(id: String) -> Result<Option<ClipImagePreview>, RuntimeError> {
     let response = client::request(Method::SourceAppIcon { id }).await?;
-    match response.data {
-        Some(ResponseData::SourceAppIcon(preview)) => Ok(Some(ClipImagePreview {
-            png_base64: preview.png_base64,
-            width: preview.width,
-            height: preview.height,
-        })),
+    source_app_icon_response(response.data)
+}
+
+fn source_app_icon_response(
+    data: Option<ResponseData>,
+) -> Result<Option<ClipImagePreview>, RuntimeError> {
+    match data {
+        Some(ResponseData::SourceAppIcon(preview)) => image_preview(preview).map(Some),
         Some(ResponseData::Empty {}) => Ok(None),
         _ => Err(RuntimeError::internal()),
     }
+}
+
+fn image_preview(preview: copypaste_ipc::ImagePreview) -> Result<ClipImagePreview, RuntimeError> {
+    let png_bytes = STANDARD
+        .decode(preview.png_base64)
+        .map_err(|_| RuntimeError::internal())?;
+    Ok(ClipImagePreview {
+        png_bytes,
+        width: preview.width,
+        height: preview.height,
+    })
 }
 
 pub async fn list_peers() -> Result<Vec<Peer>, RuntimeError> {
@@ -1218,6 +1272,7 @@ async fn cloud_status_response(method: Method) -> Result<CloudAccountStatus, Run
 
 fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
     RuntimeSettingsData {
+        max_file_size_bytes: config.max_file_size_bytes,
         skip_secret: config.skip_secret,
         skip_transient: config.skip_transient,
         retention_days: config.retention_days,
@@ -1484,8 +1539,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn image_preview_preserves_bytes_and_dimensions() {
+        let bytes = [0, 1, 2, 127, 128, 255];
+        let preview = image_preview(copypaste_ipc::ImagePreview {
+            png_base64: STANDARD.encode(bytes),
+            width: 123,
+            height: 456,
+        })
+        .unwrap();
+        assert_eq!(preview.png_bytes, bytes);
+        assert_eq!((preview.width, preview.height), (123, 456));
+    }
+
+    #[test]
+    fn image_preview_rejects_invalid_base64_without_panicking() {
+        let error = image_preview(copypaste_ipc::ImagePreview {
+            png_base64: "invalid!".into(),
+            width: 1,
+            height: 1,
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "runtime_internal");
+    }
+
+    #[test]
+    fn image_and_source_icon_responses_preserve_bytes_and_missing_icon() {
+        let input = copypaste_ipc::ImagePreview {
+            png_base64: STANDARD.encode([137, 80, 78, 71]),
+            width: 8,
+            height: 6,
+        };
+        let image =
+            image_preview_response(Some(ResponseData::ImagePreview(input.clone()))).unwrap();
+        let icon = source_app_icon_response(Some(ResponseData::SourceAppIcon(input)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(image.png_bytes, [137, 80, 78, 71]);
+        assert_eq!(icon.png_bytes, image.png_bytes);
+        assert_eq!((icon.width, icon.height), (8, 6));
+        assert!(source_app_icon_response(Some(ResponseData::Empty {}))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            source_app_icon_response(None).unwrap_err().code,
+            "runtime_internal"
+        );
+    }
+
+    #[test]
     fn this_device_maps_the_explicit_local_identity() {
         let device = this_device(copypaste_ipc::StatusData {
+            runtime_watch: false,
+            capture_watch: false,
+            capture_revision: 0,
             sync_status: Default::default(),
             device_name: "Desktop".into(),
             device_id: Some("local-device-id".into()),

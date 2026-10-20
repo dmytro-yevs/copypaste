@@ -45,6 +45,7 @@ internal object AndroidCaptureState {
             .edit()
             .putBoolean(captureEnabledKey, enabled)
             .apply()
+        AndroidCaptureSignals.changed()
     }
 
     fun foregroundCaptureEnabled(context: Context): Boolean =
@@ -56,6 +57,7 @@ internal object AndroidCaptureState {
             .edit()
             .putBoolean(foregroundCaptureEnabledKey, enabled)
             .apply()
+        AndroidCaptureSignals.changed()
     }
 
     fun lastCaptureAt(context: Context): Long =
@@ -67,6 +69,7 @@ internal object AndroidCaptureState {
             .edit()
             .putLong(lastBackgroundCaptureAtKey, at)
             .apply()
+        AndroidCaptureSignals.changed()
     }
 
     private fun backgroundAppOpsAllowed(context: Context): Boolean {

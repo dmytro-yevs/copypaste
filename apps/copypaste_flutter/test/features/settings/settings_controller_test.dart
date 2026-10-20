@@ -7,6 +7,8 @@ import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
+import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
+import 'package:copypaste_flutter/platform/android/screenshot_capture.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/capture/capture_service_control.dart';
@@ -23,6 +25,337 @@ import 'package:copypaste_flutter/features/modules/controller/modules_controller
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 
 void main() {
+  testWidgets('capture polling notifies only for exposed value changes', (
+    tester,
+  ) async {
+    final repository = _PollingSettingsRepository();
+    final screenshot = _PollingScreenshotCapture();
+    final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      screenshotCapture: screenshot,
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: const Duration(seconds: 3),
+    );
+    try {
+      await controller.initialize();
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      Future<void> poll() async {
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pump();
+      }
+
+      await poll();
+      expect(notifications, 0);
+
+      final start = DateTime.utc(2024);
+      final success = DateTime.utc(2025);
+      PeerSyncStatus peer({
+        String id = 'id',
+        String name = 'name',
+        SyncPhase phase = SyncPhase.syncing,
+        DateTime? startedAt,
+        DateTime? lastSuccess,
+        int sent = 1,
+        int received = 2,
+        int skippedTooLarge = 3,
+        String? error,
+      }) => PeerSyncStatus(
+        id: id,
+        name: name,
+        phase: phase,
+        startedAt: startedAt,
+        lastSuccess: lastSuccess,
+        sent: sent,
+        received: received,
+        skippedTooLarge: skippedTooLarge,
+        error: error,
+      );
+      CaptureSettingsState capture({
+        bool running = true,
+        bool paused = false,
+        int epoch = 0,
+        SyncStatus sync = const SyncStatus(),
+        RuntimeSettingsHealth? health,
+      }) => CaptureSettingsState(
+        running: running,
+        paused: paused,
+        epoch: epoch,
+        syncStatus: sync,
+        settingsHealth: health,
+      );
+      Future<void> transition(CaptureSettingsState value) async {
+        repository.capture = value;
+        final previous = notifications;
+        await poll();
+        expect(notifications, previous + 1);
+        await poll();
+        expect(notifications, previous + 1);
+      }
+
+      await transition(capture(running: false));
+      await transition(capture(paused: true));
+      await transition(capture(epoch: 1));
+      final peerVariants = [
+        peer(),
+        peer(id: 'other'),
+        peer(name: 'other'),
+        peer(phase: SyncPhase.failed),
+        peer(startedAt: start),
+        peer(lastSuccess: success),
+        peer(sent: 4),
+        peer(received: 4),
+        peer(skippedTooLarge: 4),
+        peer(error: 'error'),
+      ];
+      for (final value in peerVariants) {
+        await transition(
+          capture(
+            epoch: 1,
+            sync: SyncStatus(
+              revision: 1,
+              phase: SyncPhase.syncing,
+              peers: [value],
+            ),
+          ),
+        );
+      }
+      await transition(
+        capture(
+          epoch: 1,
+          sync: const SyncStatus(revision: 2, phase: SyncPhase.syncing),
+        ),
+      );
+      await transition(
+        capture(
+          epoch: 1,
+          sync: const SyncStatus(revision: 2, phase: SyncPhase.synced),
+        ),
+      );
+      await transition(
+        capture(
+          epoch: 1,
+          sync: SyncStatus(
+            revision: 2,
+            phase: SyncPhase.synced,
+            peers: [
+              peer(),
+              peer(id: 'b'),
+            ],
+          ),
+        ),
+      );
+      await transition(
+        capture(
+          epoch: 1,
+          sync: SyncStatus(
+            revision: 2,
+            phase: SyncPhase.synced,
+            peers: [
+              peer(id: 'b'),
+              peer(),
+            ],
+          ),
+        ),
+      );
+      final fields = <String>['field'];
+      await transition(
+        capture(
+          epoch: 1,
+          sync: SyncStatus(
+            revision: 2,
+            phase: SyncPhase.synced,
+            peers: [
+              peer(id: 'b'),
+              peer(),
+            ],
+          ),
+          health: RuntimeSettingsHealth(
+            recordUnreadable: false,
+            unreadableFields: fields,
+          ),
+        ),
+      );
+      fields.add('another');
+      final beforeMutation = notifications;
+      await poll();
+      expect(notifications, beforeMutation + 1);
+      expect(controller.capture!.settingsHealth!.unreadableFields, fields);
+      await transition(
+        capture(
+          epoch: 1,
+          sync: SyncStatus(
+            revision: 2,
+            phase: SyncPhase.synced,
+            peers: [
+              peer(id: 'b'),
+              peer(),
+            ],
+          ),
+          health: const RuntimeSettingsHealth(
+            recordUnreadable: true,
+            unreadableFields: ['field', 'another'],
+          ),
+        ),
+      );
+      expect(
+        controller.errorMessage,
+        contains('could not read saved settings'),
+      );
+      await transition(
+        capture(
+          epoch: 1,
+          sync: SyncStatus(
+            revision: 2,
+            phase: SyncPhase.synced,
+            peers: [
+              peer(id: 'b'),
+              peer(),
+            ],
+          ),
+        ),
+      );
+      expect(controller.errorMessage, isNull);
+
+      for (final status in const [
+        ScreenshotCaptureStatus(enabled: false),
+        ScreenshotCaptureStatus(mediaGranted: true),
+        ScreenshotCaptureStatus(notificationGranted: true),
+        ScreenshotCaptureStatus(running: true),
+      ]) {
+        screenshot.current = status;
+        final previous = notifications;
+        await poll();
+        expect(notifications, previous + 1);
+        await poll();
+        expect(notifications, previous + 1);
+      }
+
+      repository.fail = true;
+      final beforeError = notifications;
+      await poll();
+      expect(notifications, beforeError + 1);
+      expect(controller.syncStatus.phase, SyncPhase.unavailable);
+      repository.fail = false;
+      await poll();
+      expect(notifications, beforeError + 2);
+      expect(controller.syncStatus.phase, SyncPhase.synced);
+
+      repository.syncChanges.add(
+        const SyncStatus(revision: 3, phase: SyncPhase.waiting),
+      );
+      await tester.pump();
+      final beforeStale = notifications;
+      await poll();
+      expect(notifications, beforeStale);
+      expect(controller.syncStatus.phase, SyncPhase.waiting);
+      final peers = <PeerSyncStatus>[peer()];
+      repository.capture = capture(
+        epoch: 1,
+        sync: SyncStatus(revision: 2, phase: SyncPhase.synced, peers: peers),
+      );
+      await poll();
+      expect(notifications, beforeStale + 1);
+      expect(controller.syncStatus.phase, SyncPhase.waiting);
+      peers.add(peer(id: 'new'));
+      await poll();
+      expect(notifications, beforeStale + 2);
+      expect(controller.capture!.syncStatus.peers, hasLength(2));
+      expect(controller.syncStatus.phase, SyncPhase.waiting);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  testWidgets(
+    'restore confirmation survives cancellation and failure until restoration succeeds',
+    (tester) async {
+      final repository = _DialogRestoreRepository();
+      final picker = FakeSettingsFilePicker()..restorePath = null;
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: picker,
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: SettingsScreen(controller: controller),
+        ),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('settings-section-data')),
+          matching: find.text('Data'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      await tester.ensureVisible(find.text('Restore'));
+      await tester.tap(find.text('Restore'));
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(find.text('Action failed'), findsNothing);
+      expect(repository.restoreCalls, 0);
+
+      picker.restorePath = '/selected.copypaste-backup';
+      repository.failRestore = true;
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(find.text('Action failed'), findsOneWidget);
+
+      repository.failRestore = false;
+      repository.pending = Completer<void>();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Action failed'), findsNothing);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(
+        tester.widget<Button>(find.widgetWithText(Button, 'Cancel')).onPressed,
+        isNull,
+      );
+      repository.pending!.complete();
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(repository.restoreCalls, 1);
+      expect(find.text('Replace local history?'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   testWidgets(
     'mobile settings categories clear the floating navigation at every text scale',
     (tester) async {
@@ -136,7 +469,13 @@ void main() {
           if (slug == 'data') {
             await tester.tap(find.widgetWithText(Button, 'Restore'));
             await tester.pumpAndSettle();
-            expect(find.text('Choose backup'), findsOneWidget);
+            expect(
+              find.descendant(
+                of: find.byType(AlertDialog),
+                matching: find.text('Restore'),
+              ),
+              findsOneWidget,
+            );
             await tester.tap(find.widgetWithText(Button, 'Cancel'));
             await tester.pumpAndSettle();
           }
@@ -174,6 +513,9 @@ void main() {
     expect(controller.capture?.paused, isTrue);
     expect(await controller.setRetentionDays(30), isTrue);
     expect(controller.settings?.retentionDays, 30);
+    expect(await controller.setMaxFileSizeBytes(256 * 1024 * 1024), isTrue);
+    expect(controller.settings?.maxFileSizeBytes, 256 * 1024 * 1024);
+    expect(repository.currentSettings.maxFileSizeBytes, 256 * 1024 * 1024);
     expect(await controller.addExcludedApp('com.example.private'), isTrue);
     expect(controller.settings?.excludedAppIds, ['com.example.private']);
 
@@ -940,7 +1282,12 @@ void main() {
       expect(repository.restoreCalls, 0);
       await tester.tap(restore);
       await tester.pump();
-      await tester.tap(find.text('Choose backup'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
       await tester.pump(AppMotion.emphasized);
       await tester.pump();
       expect(repository.restoreCalls, 1);
@@ -1181,6 +1528,18 @@ void main() {
   });
 }
 
+class _DialogRestoreRepository extends FakeSettingsRepository {
+  bool failRestore = false;
+  Completer<void>? pending;
+
+  @override
+  Future<void> restoreHistory(String path) async {
+    if (failRestore) throw StateError('Backup unavailable');
+    await pending?.future;
+    await super.restoreHistory(path);
+  }
+}
+
 class _RejectedExclusionRepository extends FakeSettingsRepository {
   @override
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) {
@@ -1294,4 +1653,27 @@ class _SettingsUpdatePlatform implements AppUpdatePlatform {
 
   @override
   Future<void> openReleasePage(Uri uri) async {}
+}
+
+class _PollingSettingsRepository extends FakeSettingsRepository {
+  bool fail = false;
+
+  @override
+  Future<CaptureSettingsState> captureState() async {
+    if (fail) throw StateError('disconnected');
+    return capture;
+  }
+}
+
+class _PollingScreenshotCapture implements ScreenshotCapture {
+  ScreenshotCaptureStatus current = const ScreenshotCaptureStatus();
+
+  @override
+  bool get supported => true;
+  @override
+  Future<ScreenshotCaptureStatus> status() async => current;
+  @override
+  Future<ScreenshotCaptureStatus> requestPermission() async => current;
+  @override
+  Future<ScreenshotCaptureStatus> setEnabled(bool enabled) async => current;
 }

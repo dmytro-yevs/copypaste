@@ -34,6 +34,7 @@ class QuickPasteController extends ChangeNotifier {
          repository,
          pageSize: 50,
          includeFacets: false,
+         separatePinnedWindow: true,
          searchDebounce: Duration.zero,
          fileDownloader: fileDownloader,
          ocr: ocr,
@@ -68,7 +69,16 @@ class QuickPasteController extends ChangeNotifier {
   bool _disposed = false;
   bool _inspectorOpen = false;
   Map<String, String> _pinnedShortcuts = {};
+  final Map<String, HistoryClip> _shortcutClips = {};
+  HistoryQuery? _shortcutClipQuery;
   Future<void> _shortcutSync = Future<void>.value();
+  List<(String, bool)>? _scheduledPinState;
+  final Set<String> _pendingDeletedPinIds = {};
+  List<HistoryClip>? _derivedSource;
+  TargetPlatform? _derivedPlatform;
+  List<HistoryClip> _derivedItems = const [];
+  Map<LogicalKeyboardKey, HistoryClip> _derivedShortcuts = const {};
+  Map<String, LogicalKeyboardKey> _derivedClipKeys = const {};
   Future<void>? _repositoryDisposal;
   Future<void>? _pageLoad;
   bool _paginationFailed = false;
@@ -109,24 +119,82 @@ class QuickPasteController extends ChangeNotifier {
     );
   }
 
-  List<HistoryClip> get items => [
-    ...history.items.where((clip) => !clip.pinned),
-    ...history.items.where((clip) => clip.pinned),
-  ];
-
-  Map<LogicalKeyboardKey, HistoryClip> get shortcuts {
-    final recent = history.items.where((clip) => !clip.pinned).take(9).toList();
-    return {
-      for (final (index, clip) in recent.indexed) _numberKeys[index]: clip,
-      for (final clip in history.items.where((clip) => clip.pinned))
-        ?_pinKeys[_pinnedShortcuts[clip.id]]: clip,
-    };
+  List<HistoryClip> get items {
+    _ensureDerived();
+    return _derivedItems;
   }
 
-  LogicalKeyboardKey? shortcutFor(HistoryClip clip) => shortcuts.entries
-      .where((entry) => entry.value.id == clip.id)
-      .firstOrNull
-      ?.key;
+  Map<String, LogicalKeyboardKey> get _availablePinKeys =>
+      defaultTargetPlatform == TargetPlatform.macOS ? _pinKeys : _otherPinKeys;
+
+  Map<LogicalKeyboardKey, HistoryClip> get shortcuts {
+    _ensureDerived();
+    return _derivedShortcuts;
+  }
+
+  LogicalKeyboardKey? shortcutFor(HistoryClip clip) {
+    _ensureDerived();
+    return _derivedClipKeys[clip.id];
+  }
+
+  void _ensureDerived() {
+    final platform = defaultTargetPlatform;
+    if (_derivedSource != null && platform == _derivedPlatform) return;
+    final source = history.items;
+    if (!identical(_shortcutClipQuery, history.query) ||
+        history.state == HistoryLoadState.initial) {
+      _shortcutClipQuery = history.query;
+      _shortcutClips.clear();
+    }
+    _shortcutClips.removeWhere(
+      (id, _) =>
+          !_pinnedShortcuts.containsKey(id) || !history.isVisitedPinned(id),
+    );
+    for (final clip in source) {
+      if (clip.pinned && _pinnedShortcuts.containsKey(clip.id)) {
+        // Activation resolves the full clip by ID; keep no preview payload.
+        _shortcutClips[clip.id] = HistoryClip(
+          id: clip.id,
+          contentType: '',
+          preview: '',
+          createdAt: clip.createdAt,
+          pinned: true,
+        );
+      }
+    }
+    for (final id in history.visitedPinnedIds) {
+      if (!_pinnedShortcuts.containsKey(id) || _shortcutClips.containsKey(id)) {
+        continue;
+      }
+      // Pinned shortcut activation resolves the complete summary by ID.
+      // The compact key binding never needs an evicted preview payload.
+      _shortcutClips[id] = HistoryClip(
+        id: id,
+        contentType: '',
+        preview: '',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+        pinned: true,
+      );
+    }
+    _derivedSource = source;
+    _derivedPlatform = platform;
+    final recent = <HistoryClip>[];
+    final pinned = <HistoryClip>[];
+    for (final clip in source) {
+      (clip.pinned ? pinned : recent).add(clip);
+    }
+    _derivedItems = List.unmodifiable([...recent, ...pinned]);
+    final keys = <LogicalKeyboardKey, HistoryClip>{
+      for (final (index, clip) in recent.take(9).indexed)
+        _numberKeys[index]: clip,
+      for (final clip in _shortcutClips.values)
+        ?_availablePinKeys[_pinnedShortcuts[clip.id]]: clip,
+    };
+    _derivedShortcuts = Map.unmodifiable(keys);
+    _derivedClipKeys = Map.unmodifiable({
+      for (final entry in keys.entries) entry.value.id: entry.key,
+    });
+  }
 
   Future<void> initialize() async {
     if (_disposed || _initialized) return;
@@ -137,6 +205,7 @@ class QuickPasteController extends ChangeNotifier {
       }(),
       () async {
         _pinnedShortcuts = await _preferencesStore.readPinnedShortcuts();
+        _derivedSource = null;
       }(),
     ]);
     if (_disposed) return;
@@ -232,14 +301,14 @@ class QuickPasteController extends ChangeNotifier {
     final pending = _pageLoad;
     if (pending != null) return pending;
     final generation = _focusGeneration;
-    final count = history.items.length;
+    final marker = history.paginationMarker;
     _paginationFailed = false;
     late final Future<void> operation;
     operation = history.loadMore().whenComplete(() {
       if (identical(_pageLoad, operation)) _pageLoad = null;
       if (!_disposed && generation == _focusGeneration) {
         _paginationFailed =
-            history.items.length == count && history.canLoadMore;
+            history.paginationMarker == marker && history.canLoadMore;
         notifyListeners();
       }
     });
@@ -255,22 +324,57 @@ class QuickPasteController extends ChangeNotifier {
     for (var step = 0; step < offset.abs(); step++) {
       if (_disposed || generation != _focusGeneration) return;
       var visible = items;
-      final recent = visible.where((clip) => !clip.pinned).toList();
+      if (visible.isEmpty) return;
+      if (current == null) {
+        current = visible.first;
+        continue;
+      }
+      var group = current.pinned
+          ? history.visitedPinnedIds
+          : history.visitedRecentIds;
+      var index = group.indexOf(current.id);
       if (offset > 0 &&
-          history.canLoadMore &&
-          (visible.isEmpty ||
-              (current != null &&
-                  current.id == (recent.lastOrNull ?? visible.last).id))) {
-        final count = visible.length;
+          !current.pinned &&
+          index == group.length - 1 &&
+          history.canLoadMore) {
+        final marker = history.paginationMarker;
         await loadMore();
         if (_disposed || generation != _focusGeneration) return;
-        visible = items;
-        if (visible.length == count && history.canLoadMore) break;
+        if (history.paginationMarker == marker && history.canLoadMore) break;
+        group = history.visitedRecentIds;
+        index = group.indexOf(current.id);
+      } else if (offset < 0 &&
+          current.pinned &&
+          history.canLoadPinnedPrevious &&
+          visible.where((clip) => clip.pinned).firstOrNull?.id == current.id) {
+        await history.loadPinnedPrevious();
+      } else if (offset > 0 &&
+          current.pinned &&
+          history.canLoadPinnedMore &&
+          visible.where((clip) => clip.pinned).lastOrNull?.id == current.id) {
+        await history.loadPinnedMore();
+      } else if (offset < 0 &&
+          !current.pinned &&
+          history.canLoadPrevious &&
+          visible.where((clip) => !clip.pinned).firstOrNull?.id == current.id) {
+        await history.loadPrevious();
       }
-      if (visible.isEmpty) return;
-      final index = visible.indexWhere((clip) => clip.id == current?.id);
-      final next = index < 0 ? 0 : index + offset.sign;
-      if (next < 0 || next >= visible.length) break;
+      if (_disposed || generation != _focusGeneration) return;
+      visible = items;
+      final nextIndex = index + offset.sign;
+      if (index >= 0 && nextIndex >= 0 && nextIndex < group.length) {
+        final target = group[nextIndex];
+        final next =
+            visible.where((clip) => clip.id == target).firstOrNull ??
+            await history.materializeId(target);
+        if (next != null) {
+          current = next;
+          continue;
+        }
+      }
+      final visibleIndex = visible.indexWhere((clip) => clip.id == current?.id);
+      final next = visibleIndex + offset.sign;
+      if (visibleIndex < 0 || next < 0 || next >= visible.length) break;
       current = visible[next];
     }
     if (!_disposed &&
@@ -541,6 +645,9 @@ class QuickPasteController extends ChangeNotifier {
 
   void _historyChanged() {
     if (_disposed) return;
+    if (_derivedSource != null && !listEquals(_derivedSource, history.items)) {
+      _derivedSource = null;
+    }
     final previousSelection = _inspectedClipId;
     final removedSelection =
         _inspectedClipId != null &&
@@ -549,9 +656,14 @@ class QuickPasteController extends ChangeNotifier {
     _inspectedClipId = history.selectedId;
     final focusedId = _focusedClip?.id;
     if (focusedId != null || removedSelection) {
-      _focusedClip = history.items
+      final resident = history.items
           .where((clip) => clip.id == focusedId)
           .firstOrNull;
+      if (resident != null) {
+        _focusedClip = resident;
+      } else if (focusedId == null || !history.hasVisited(focusedId)) {
+        _focusedClip = null;
+      }
       if (_focusedClip == null) {
         _cancelInspectorHover();
         _focusedClip = items.firstOrNull;
@@ -567,21 +679,37 @@ class QuickPasteController extends ChangeNotifier {
               !history.items.any((clip) => clip.id == focusedId)
         ? focusedId
         : null;
-    unawaited(
-      _reconcilePinnedShortcuts(
-        deletedId: deletedId,
-      ).catchError((Object error) {}),
-    );
+    final pinState = [
+      for (final clip in history.items)
+        if (clip.pinned || _pinnedShortcuts.containsKey(clip.id))
+          (clip.id, clip.pinned),
+    ];
+    if (deletedId != null) _pendingDeletedPinIds.add(deletedId);
+    if (deletedId != null || !listEquals(_scheduledPinState, pinState)) {
+      _scheduledPinState = pinState;
+      final deletedIds = Set<String>.of(_pendingDeletedPinIds);
+      unawaited(
+        _reconcilePinnedShortcuts(deletedIds: deletedIds)
+            .then((_) {
+              _pendingDeletedPinIds.removeAll(deletedIds);
+            })
+            .catchError((Object _) {
+              if (identical(_scheduledPinState, pinState)) {
+                _scheduledPinState = null;
+              }
+            }),
+      );
+    }
     notifyListeners();
   }
 
-  Future<void> _reconcilePinnedShortcuts({String? deletedId}) {
+  Future<void> _reconcilePinnedShortcuts({Set<String> deletedIds = const {}}) {
     final operation = _shortcutSync.then((_) async {
       if (_disposed) return;
       final next = <String, String>{};
       for (final entry in _pinnedShortcuts.entries) {
-        if (entry.key == deletedId) continue;
-        if (_pinKeys.containsKey(entry.value) &&
+        if (deletedIds.contains(entry.key)) continue;
+        if (_availablePinKeys.containsKey(entry.value) &&
             !next.containsValue(entry.value)) {
           next[entry.key] = entry.value;
         }
@@ -589,18 +717,19 @@ class QuickPasteController extends ChangeNotifier {
       for (final clip in history.items) {
         if (!clip.pinned) next.remove(clip.id);
       }
-      for (final clip in history.items.where((clip) => clip.pinned)) {
-        if (next.containsKey(clip.id)) continue;
-        final available = _pinKeys.keys
+      for (final id in history.visitedPinnedIds) {
+        if (next.containsKey(id)) continue;
+        final available = _availablePinKeys.keys
             .where((key) => !next.containsValue(key))
             .toList();
         if (available.isEmpty) break;
-        next[clip.id] = available[Random().nextInt(available.length)];
+        next[id] = available[Random().nextInt(available.length)];
       }
       if (mapEquals(next, _pinnedShortcuts)) return;
       await _preferencesStore.writePinnedShortcuts(next);
       if (_disposed) return;
       _pinnedShortcuts = next;
+      _derivedSource = null;
       notifyListeners();
     });
     _shortcutSync = operation.then<void>((_) {}, onError: (Object error) {});
@@ -644,26 +773,27 @@ const _numberKeys = [
   LogicalKeyboardKey.digit9,
 ];
 
-// Exclude select-all, quit, paste, close, undo and the pin action itself.
+// Reserve editing (select/copy/cut/paste/undo/redo), find, refresh, close,
+// quit, and the pin action. These commands must never activate a pinned clip.
+// macOS also owns Command-H and Command-M, including in the nonactivating popup.
 const _pinKeys = {
   'b': LogicalKeyboardKey.keyB,
-  'c': LogicalKeyboardKey.keyC,
   'd': LogicalKeyboardKey.keyD,
   'e': LogicalKeyboardKey.keyE,
-  'f': LogicalKeyboardKey.keyF,
   'g': LogicalKeyboardKey.keyG,
-  'h': LogicalKeyboardKey.keyH,
   'i': LogicalKeyboardKey.keyI,
   'j': LogicalKeyboardKey.keyJ,
   'k': LogicalKeyboardKey.keyK,
   'l': LogicalKeyboardKey.keyL,
-  'm': LogicalKeyboardKey.keyM,
   'n': LogicalKeyboardKey.keyN,
   'o': LogicalKeyboardKey.keyO,
-  'r': LogicalKeyboardKey.keyR,
   's': LogicalKeyboardKey.keyS,
   't': LogicalKeyboardKey.keyT,
   'u': LogicalKeyboardKey.keyU,
-  'x': LogicalKeyboardKey.keyX,
-  'y': LogicalKeyboardKey.keyY,
+};
+
+const _otherPinKeys = {
+  ..._pinKeys,
+  'h': LogicalKeyboardKey.keyH,
+  'm': LogicalKeyboardKey.keyM,
 };

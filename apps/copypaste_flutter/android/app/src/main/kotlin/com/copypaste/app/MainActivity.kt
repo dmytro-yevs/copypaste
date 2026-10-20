@@ -60,6 +60,13 @@ class MainActivity : FlutterActivity() {
 
         @Keep
         @JvmStatic
+        fun writeClipboardFile(path: String, filename: String, mimeType: String): Boolean {
+            val context=instance ?: return false
+            return AndroidClipboardWriter.writeFile(context,path,filename,mimeType)
+        }
+
+        @Keep
+        @JvmStatic
         fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String, received: Boolean): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType).also { written ->
@@ -107,6 +114,7 @@ class MainActivity : FlutterActivity() {
     private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
     private var historyFilesChannel: HistoryFilesChannel? = null
+    private val clipboardFocusGuard = ClipboardFocusCaptureGuard()
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
     private var pendingScreenshotPermission: (() -> Unit)? = null
@@ -119,6 +127,7 @@ class MainActivity : FlutterActivity() {
         ensureRuntime(applicationContext)
         ScreenshotCaptureState.initialize(this)
         super.onCreate(savedInstanceState)
+        AndroidClipboardCache.scheduleCleanup(applicationContext)
         clipboardManager = getSystemService(ClipboardManager::class.java)
         handleExplicitIntake(intent)
         ClipboardCaptureService.restoreIfEnabled(this)
@@ -281,6 +290,7 @@ class MainActivity : FlutterActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         ) {
+            AndroidCaptureSignals.changed()
             completion(true)
             return
         }
@@ -335,6 +345,7 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        ScreenshotCaptureSignals.changed()
         if (requestCode == screenshotPermissionRequest) {
             val completion = pendingScreenshotPermission ?: return
             pendingScreenshotPermission = null
@@ -347,6 +358,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode != captureNotificationPermissionRequest) return
         val completion = pendingNotificationPermission ?: return
         pendingNotificationPermission = null
+        AndroidCaptureSignals.changed()
         completion(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
         ScreenshotCaptureService.restoreIfEnabled(this)
     }
@@ -407,6 +419,10 @@ class MainActivity : FlutterActivity() {
         isForeground = true
         appUpdateChannel?.onResume()
         ScreenshotCaptureState.reconcileMediaPermission(this)
+        ScreenshotCaptureSignals.changed()
+        // External settings, AppOps, ADB grants, battery exemptions, and a
+        // returning Shizuku activity have no reliable broadcast for this app.
+        AndroidCaptureSignals.changed()
         if (ScreenshotCaptureState.enabled(this)) {
             if (!ScreenshotCaptureState.permissionRequested(this)) requestScreenshotPermission {}
             else ScreenshotCaptureService.restoreIfEnabled(this)
@@ -421,9 +437,31 @@ class MainActivity : FlutterActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        AndroidCaptureSignals.changed()
         if (hasFocus && clipboardListenerRegistered) {
-            captureForegroundClipboard()
+            if (!clipboardFocusGuard.hasPendingPicker ||
+                clipboardFocusGuard.shouldCaptureAfterFocus(clipboardGeneration())) {
+                captureForegroundClipboard()
+            }
         }
+    }
+
+    internal fun willOpenHistoryFilePicker() {
+        clipboardFocusGuard.beginFilePicker(clipboardGeneration())
+    }
+
+    internal fun failedToOpenHistoryFilePicker() {
+        clipboardFocusGuard.abandonFilePicker()
+    }
+
+    private fun clipboardGeneration(): Long? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        val host = foregroundCaptureHost ?: return null
+        var generation: Long? = null
+        AndroidClipboardReader.readCaptureMetadata(host) {
+            generation = clipboardManager.primaryClipDescription?.timestamp
+        }
+        return generation
     }
 
     override fun onPause() {

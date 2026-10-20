@@ -71,43 +71,8 @@ impl Deref for SettingsReadGuard<'_> {
     }
 }
 
-pub(crate) struct SettingsApplied {
-    pub(crate) config: ConfigData,
-    pub(crate) private_mode_epoch: u64,
-}
-
-/// One persisted settings value and the runtime work it requires.
-///
-/// The transition owner keeps the serialising mutex until its effects finish.
-/// Readers only hold `current` long enough to copy a snapshot, so persistence
-/// and retention never block a capture tick that is reading settings.
-pub(crate) struct SettingsTransition {
-    before: ConfigData,
-    applied: SettingsApplied,
-}
-
-impl SettingsTransition {
-    pub(crate) fn config(&self) -> &ConfigData {
-        &self.applied.config
-    }
-
-    pub(crate) fn resumes_capture(&self) -> bool {
-        self.before.private_mode && !self.applied.config.private_mode
-    }
-
-    pub(crate) fn should_enforce_retention(&self) -> bool {
-        copypaste_core::retention::policy_tightened(&self.before, &self.applied.config)
-    }
-
-    pub(crate) fn lan_visibility_changed(&self) -> bool {
-        self.applied.config.lan_visibility != self.before.lan_visibility
-    }
-
-    pub(crate) fn sync_enabled_changed(&self) -> Option<bool> {
-        (self.applied.config.sync_enabled != self.before.sync_enabled)
-            .then_some(self.applied.config.sync_enabled)
-    }
-}
+pub(crate) use copypaste_core::settings_transition::SettingsTransition;
+type SettingsApplied = SettingsTransition;
 
 impl Settings {
     /// Read the stored settings, failing closed on anything that will not read.
@@ -218,66 +183,36 @@ impl Settings {
     {
         let _serialised = self.applying.lock().map_err(|_| SettingsError::Store)?;
 
-        let (before, next, next_epoch, capture_privacy_epoch) = {
+        let transition = {
             let current = self.get();
-            let next = patch.apply(&current)?;
-            let next_epoch = if patch.private_mode.is_some() {
-                current
-                    .private_mode_epoch()
-                    .checked_add(1)
-                    .ok_or(SettingsError::Store)?
-            } else {
-                current.private_mode_epoch()
-            };
-            let capture_privacy_epoch = if next.private_mode != current.private_mode
-                || next.excluded_app_bundle_ids != current.excluded_app_bundle_ids
-                || next.skip_secret != current.skip_secret
-                || next.skip_transient != current.skip_transient
-            {
-                current
-                    .0
-                    .capture_privacy_epoch
-                    .checked_add(1)
-                    .ok_or(SettingsError::Store)?
-            } else {
-                current.0.capture_privacy_epoch
-            };
-            (
-                current.0.config.clone(),
-                next,
-                next_epoch,
-                capture_privacy_epoch,
-            )
+            SettingsTransition::prepare(
+                &current.0.config,
+                current.private_mode_epoch(),
+                current.0.capture_privacy_epoch,
+                patch,
+            )?
         };
-
-        let encoded = serde_json::to_string(&next).map_err(|e| {
-            warn!(error = %e, "settings could not be encoded");
-            SettingsError::Store
-        })?;
-        meta.set_state(KEY_SETTINGS, &encoded)?;
-
+        transition
+            .persist(|encoded| meta.set_state(KEY_SETTINGS, encoded))
+            .map_err(|error| {
+                warn!(?error, "settings could not be persisted");
+                SettingsError::Store
+            })?;
         let mut current = self
             .current
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        current.config = next.clone();
-        current.private_mode_epoch = next_epoch;
-        current.capture_privacy_epoch = capture_privacy_epoch;
+        current.config = transition.config.clone();
+        current.private_mode_epoch = transition.private_mode_epoch;
+        current.capture_privacy_epoch = transition.capture_privacy_epoch;
         // The record on disk has just been rewritten whole, so nothing is
         // degraded any more and the notice has to go — leaving it would outlive
         // the condition and disagree with what the next start reports.
         current.health = None;
         drop(current);
 
-        let transition = SettingsTransition {
-            before,
-            applied: SettingsApplied {
-                config: next,
-                private_mode_epoch: next_epoch,
-            },
-        };
         effects(&transition);
-        Ok(transition.applied)
+        Ok(transition)
     }
 
     #[cfg(test)]
@@ -296,6 +231,17 @@ pub enum SettingsError {
     Invalid(#[from] ConfigError),
     #[error("the settings could not be saved")]
     Store,
+}
+
+impl From<copypaste_core::settings_transition::TransitionError> for SettingsError {
+    fn from(error: copypaste_core::settings_transition::TransitionError) -> Self {
+        match error {
+            copypaste_core::settings_transition::TransitionError::Invalid(error) => {
+                Self::Invalid(error)
+            }
+            copypaste_core::settings_transition::TransitionError::EpochExhausted => Self::Store,
+        }
+    }
 }
 
 impl From<MetaError> for SettingsError {

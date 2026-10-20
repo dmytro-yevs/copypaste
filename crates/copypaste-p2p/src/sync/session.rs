@@ -16,8 +16,8 @@
 //! ```
 //!
 use super::application::receive_items;
-use super::plan::plan;
-use super::summary::{exchange_initiator, exchange_responder, watermark};
+use super::plan::plan_workspace;
+use super::summary::{exchange_workspace, workspace_watermark};
 use super::transfer::{receive_request, serve_items};
 use super::{SyncChannel, SyncCursor, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
@@ -35,20 +35,27 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         recv_hello(chan, source).await?
     };
 
-    let (advertised, remote) =
-        exchange_initiator(chan, source, cursor.advertise_from(peer.4)).await?;
+    let workspace = exchange_workspace(
+        chan,
+        source,
+        cursor.advertise_from(peer.4),
+        source.summary_workspace()?,
+        true,
+    )
+    .await?;
 
-    let mut stats = SyncStats::default();
-    let planned = plan(&advertised, &remote, now_ms(), &mut stats);
+    let (workspace, wanted, mut stats) = prepare_plan(workspace, SyncStats::default()).await?;
 
     chan.send(SyncMessage::Request {
-        item_ids: planned.wanted.keys().cloned().collect(),
+        item_ids: wanted.keys().cloned().collect(),
     })
     .await?;
-    let applied = receive_items(chan, source, &planned.wanted, &mut stats).await?;
+    let applied = receive_items(chan, source, &wanted, &mut stats).await?;
 
     let requested = receive_request(chan).await?;
+    let (workspace, advertised, requested) = prepare_requested(workspace, requested).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
+    let since_ms = finish_watermark(workspace, cursor.since_ms, wanted, applied.attempted).await?;
 
     Ok(SyncOutcome {
         stats,
@@ -57,7 +64,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         peer_profile: peer.2,
         peer_listen_addr: peer.3,
         cursor: SyncCursor {
-            since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
+            since_ms,
             relay_floor_ms: None,
         },
         applied_floor: applied.floor,
@@ -97,20 +104,28 @@ pub async fn run_responder_from_first<C: SyncChannel, S: SyncSource>(
         peer
     };
 
-    let (advertised, remote) =
-        exchange_responder(chan, source, cursor.advertise_from(peer.4)).await?;
+    let workspace = exchange_workspace(
+        chan,
+        source,
+        cursor.advertise_from(peer.4),
+        source.summary_workspace()?,
+        false,
+    )
+    .await?;
 
     let mut stats = SyncStats::default();
 
     let requested = receive_request(chan).await?;
+    let (workspace, advertised, requested) = prepare_requested(workspace, requested).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
 
-    let planned = plan(&advertised, &remote, now_ms(), &mut stats);
+    let (workspace, wanted, mut stats) = prepare_plan(workspace, stats).await?;
     chan.send(SyncMessage::Request {
-        item_ids: planned.wanted.keys().cloned().collect(),
+        item_ids: wanted.keys().cloned().collect(),
     })
     .await?;
-    let applied = receive_items(chan, source, &planned.wanted, &mut stats).await?;
+    let applied = receive_items(chan, source, &wanted, &mut stats).await?;
+    let since_ms = finish_watermark(workspace, cursor.since_ms, wanted, applied.attempted).await?;
 
     Ok(SyncOutcome {
         stats,
@@ -119,11 +134,69 @@ pub async fn run_responder_from_first<C: SyncChannel, S: SyncSource>(
         peer_profile: peer.2,
         peer_listen_addr: peer.3,
         cursor: SyncCursor {
-            since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
+            since_ms,
             relay_floor_ms: None,
         },
         applied_floor: applied.floor,
     })
+}
+
+type Wanted = std::collections::HashMap<String, crate::protocol::ItemSummary>;
+type Workspace = Box<dyn super::SummaryWorkspace>;
+
+async fn prepare_plan(
+    workspace: Workspace,
+    mut stats: SyncStats,
+) -> Result<(Workspace, Wanted, SyncStats), SyncError> {
+    let blocking = workspace.may_block(&[]);
+    let (workspace, (result, stats)) =
+        super::workspace_call(workspace, blocking, move |workspace| {
+            let result = plan_workspace(workspace, now_ms(), &mut stats);
+            (result, stats)
+        })
+        .await?;
+    Ok((workspace, result?, stats))
+}
+
+async fn prepare_requested(
+    workspace: Workspace,
+    requested: Vec<String>,
+) -> Result<(Workspace, Wanted, Vec<String>), SyncError> {
+    let blocking = workspace.may_block(&[]);
+    let (workspace, (result, requested)) =
+        super::workspace_call(workspace, blocking, move |workspace| {
+            let result = requested_advertised(workspace, &requested);
+            (result, requested)
+        })
+        .await?;
+    Ok((workspace, result?, requested))
+}
+
+async fn finish_watermark(
+    workspace: Workspace,
+    previous: i64,
+    wanted: Wanted,
+    attempted: std::collections::HashSet<String>,
+) -> Result<i64, SyncError> {
+    let blocking = workspace.may_block(&[]);
+    let (_, result) = super::workspace_call(workspace, blocking, move |workspace| {
+        workspace_watermark(previous, workspace, &wanted, &attempted)
+    })
+    .await?;
+    result
+}
+
+fn requested_advertised(
+    workspace: &mut dyn super::SummaryWorkspace,
+    requested: &[String],
+) -> Result<Wanted, SyncError> {
+    let mut advertised = std::collections::HashMap::new();
+    for id in requested {
+        if let Some(item) = workspace.advertised(id)? {
+            advertised.insert(id.clone(), item);
+        }
+    }
+    Ok(advertised)
 }
 
 fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i64) -> SyncMessage {
@@ -411,6 +484,51 @@ mod tests {
             "old history was never advertised"
         );
         assert_eq!(b.snapshot().len(), MAX_SUMMARIES_PER_MESSAGE + 1);
+    }
+
+    #[tokio::test]
+    async fn persisted_cursors_do_not_replay_the_same_request_subset() {
+        let history: Vec<_> = (0..5_000)
+            .map(|n| {
+                item(
+                    &format!("history-{n:05}"),
+                    n as i64 + 1,
+                    "archived",
+                    "dev-a",
+                )
+            })
+            .collect();
+        let a = TestSource::new("dev-a", history);
+        let b = TestSource::new("dev-b", vec![]);
+        let mut left = SyncCursor::default();
+        let mut right = SyncCursor::default();
+
+        // The request cap is 1,000. Each following session must compare the
+        // remote page with B's current metadata, not only A's newly advertised
+        // cursor page, so it selects another 1,000 IDs.
+        for _ in 0..6 {
+            let (out_left, out_right) = session_with(&a, &b, left, right).await;
+            left = out_left.cursor;
+            right = out_right.cursor;
+            if b.snapshot().len() == 5_000 {
+                break;
+            }
+        }
+
+        assert_eq!(b.snapshot().len(), 5_000);
+        assert_eq!(a.snapshot(), b.snapshot());
+    }
+
+    #[test]
+    fn comparison_rows_do_not_authorize_item_requests() {
+        use crate::sync::{MemorySummaryWorkspace, SummaryWorkspace};
+
+        let mut workspace = MemorySummaryWorkspace::default();
+        workspace
+            .add_comparison(&[crate::sync::testutil::summary("private", 1, "h", false)])
+            .unwrap();
+        let requested = requested_advertised(&mut workspace, &["private".to_owned()]).unwrap();
+        assert!(requested.is_empty());
     }
 
     #[tokio::test]
@@ -1032,6 +1150,9 @@ mod tests {
             fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
                 self.full_loads.fetch_add(1, Ordering::SeqCst);
                 self.inner.summaries(since_ms)
+            }
+            fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+                self.inner.local_summaries(ids)
             }
             fn summary_page(
                 &self,

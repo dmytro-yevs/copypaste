@@ -18,6 +18,7 @@ fn wire_name(method: &Method) -> &'static str {
         Method::ImagePreview { .. } => "image_preview",
         Method::SourceAppIcon { .. } => "source_app_icon",
         Method::SaveFile { .. } => "save_file",
+        Method::CancelFileDownload { .. } => "cancel_file_download",
         Method::Add { .. } => "add",
         Method::ImportFile { .. } => "import_file",
         Method::Delete { .. } => "delete",
@@ -54,6 +55,7 @@ fn wire_name(method: &Method) -> &'static str {
         Method::SetPrivateMode { .. } => "set_private_mode",
         Method::GetPrivateMode => "get_private_mode",
         Method::Watch => "watch",
+        Method::WatchRuntime => "watch_runtime",
         Method::Shutdown => "shutdown",
     }
 }
@@ -89,6 +91,7 @@ fn catalog() -> Vec<Value> {
         json!({"method":"image_preview","params":{"id":"item"}}),
         json!({"method":"source_app_icon","params":{"id":"item"}}),
         json!({"method":"save_file","params":{"id":"item","dest_path":"saved.bin"}}),
+        json!({"method":"cancel_file_download","params":{"id":"transfer-token"}}),
         json!({"method":"add","params":{"content":"text"}}),
         json!({"method":"import_file","params":{"path":"/selected/file.pdf","filename":"file.pdf","mime_type":"application/pdf","source_reference":null}}),
         json!({"method":"delete","params":{"id":"item"}}),
@@ -143,7 +146,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        50,
+        51,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }

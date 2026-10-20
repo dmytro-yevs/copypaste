@@ -1,3 +1,4 @@
+import '../../../platform/files/temporary_artifacts.dart';
 import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
@@ -20,19 +21,21 @@ class FileSelectorModuleInputPicker implements ModuleInputPicker {
       throw ModulesException('${field.title} is not an accepted file.');
     }
     final root = await getTemporaryDirectory();
-    final directory = await root.createTemp('copypaste-input-');
+    final lease = await TemporaryDirectoryLease.create(
+      root,
+      'copypaste-input-',
+    );
+    final directory = lease.directory;
     try {
       final path = '${directory.path}${Platform.pathSeparator}input.$extension';
       await selected.saveTo(path);
       return SelectedModuleInput(
         path: path,
         name: selected.name,
-        dispose: () async {
-          if (await directory.exists()) await directory.delete(recursive: true);
-        },
+        dispose: lease.dispose,
       );
     } catch (_) {
-      await directory.delete(recursive: true);
+      await lease.dispose();
       rethrow;
     }
   }

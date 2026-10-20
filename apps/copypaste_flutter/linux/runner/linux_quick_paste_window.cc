@@ -1,6 +1,7 @@
 #include "linux_quick_paste_window.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 // Keep these native dimensions aligned with AppLayoutSize and the other
@@ -8,6 +9,17 @@ namespace {
 constexpr int kMenuWidth = 448;
 constexpr int kExpandedWidth = 816;
 constexpr int kHeight = 800;
+
+struct CloseRequest {
+  std::function<void()> close;
+  bool requested = false;
+
+  void request() {
+    if (requested) return;
+    requested = true;
+    close();
+  }
+};
 }  // namespace
 
 LinuxQuickPasteFrame linux_quick_paste_frame(
@@ -52,7 +64,8 @@ bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible,
   return true;
 }
 
-void configure_linux_quick_paste_window(GtkWindow* window) {
+void configure_linux_quick_paste_window(GtkWindow* window,
+                                       std::function<void()> on_close) {
   gtk_window_set_default_size(window, kMenuWidth, kHeight);
   gtk_window_set_role(window, "copypaste-quick-paste");
   gtk_window_set_decorated(window, FALSE);
@@ -64,4 +77,24 @@ void configure_linux_quick_paste_window(GtkWindow* window) {
   GdkVisual* visual = gdk_screen_get_rgba_visual(gtk_widget_get_screen(widget));
   if (visual != nullptr) gtk_widget_set_visual(widget, visual);
   gtk_widget_set_app_paintable(widget, TRUE);
+  if (on_close) {
+    auto* close = new CloseRequest{std::move(on_close), false};
+    g_object_set_data_full(G_OBJECT(window), "copypaste-close-request", close,
+        +[](gpointer data) { delete static_cast<CloseRequest*>(data); });
+    g_signal_connect(
+        window, "delete-event",
+        G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer data) -> gboolean {
+          // The owner cancels the transaction and exits after this GTK event.
+          static_cast<CloseRequest*>(data)->request();
+          return TRUE;
+        }), close);
+    g_signal_connect(
+        window, "window-state-event",
+        G_CALLBACK(+[](GtkWidget*, GdkEventWindowState* event, gpointer data) -> gboolean {
+          if ((event->new_window_state & GDK_WINDOW_STATE_ICONIFIED) == 0) return FALSE;
+          // A temporary popup must not leave an unreachable hidden process.
+          static_cast<CloseRequest*>(data)->request();
+          return TRUE;
+        }), close);
+  }
 }

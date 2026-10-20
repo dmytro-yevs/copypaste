@@ -20,9 +20,11 @@ internal object NativeRuntimeCapture {
     @JvmStatic external fun classify(token: Long, secret: Boolean, transient: Boolean): Boolean
     @JvmStatic external fun abandon(token: Long)
     @JvmStatic external fun ingestText(token: Long, text: String): Boolean
+    @JvmStatic external fun ingestFile(token: Long, path: String, filename: String, mimeType: String, sourceReference: String): Boolean
     @JvmStatic external fun ingestBinary(
         token: Long,
         bytes: ByteArray,
+        length: Int,
         contentType: String,
         filename: String,
         sourceReference: String,

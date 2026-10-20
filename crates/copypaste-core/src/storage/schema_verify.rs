@@ -13,9 +13,15 @@ const CURRENT_TABLES: &[&str] = &[
     "source_app_icons",
     "shared_binary_payloads",
     "history_file_payloads",
+    "file_transfer_chunks",
+    "file_transfer_files",
+    "downloaded_files",
+    "file_transfer_staging",
     "copypaste_schema_migrations",
     "module_search_documents",
     "module_search_vectors",
+    "resource_revisions",
+    "history_preview_cache",
 ];
 
 #[derive(Debug, PartialEq)]

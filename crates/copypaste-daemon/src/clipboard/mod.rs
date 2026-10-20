@@ -225,6 +225,11 @@ impl Capture {
 ///
 /// `Send` so the poll loop can own one inside a spawned task.
 pub trait ClipboardSource: Send {
+    /// Optional event-driven wakeup for clipboard changes. The sequence or
+    /// equivalent backend state remains authoritative after each wakeup.
+    fn change_signal(&self) -> Option<std::sync::Arc<ChangeSignal>> {
+        None
+    }
     /// Return `Some(capture)` when the clipboard changed since the last poll.
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
@@ -245,6 +250,12 @@ pub trait ClipboardSource: Send {
     /// genuine copy.
     fn changed(&mut self) -> bool {
         true
+    }
+
+    /// Whether an event-driven backend needs a timed retry after a wakeup.
+    /// This includes temporary failure to read its authoritative change marker.
+    fn retry_required(&mut self) -> bool {
+        self.changed()
     }
 
     /// Whether the system clipboard transport is currently usable.
@@ -287,22 +298,12 @@ pub trait ClipboardSource: Send {
                 content_type,
                 bytes,
             } => self.set_binary_contents(item_id, content_type, bytes, None),
-            ClipboardPayload::File { bytes, metadata } => {
-                if let Some(source_reference) = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.source_reference.as_deref())
-                {
-                    self.set_contents(source_reference)
-                        .map_err(|_| ClipboardWriteError::Failed)
-                } else {
-                    self.set_binary_contents(
-                        item_id,
-                        copypaste_ipc::content_type::FILE,
-                        bytes,
-                        metadata.as_ref(),
-                    )
-                }
-            }
+            ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
+                item_id,
+                copypaste_ipc::content_type::FILE,
+                bytes,
+                metadata.as_ref(),
+            ),
             ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
         }
     }
@@ -347,6 +348,23 @@ pub trait ClipboardSource: Send {
     /// (§6.1). Surfaced the same way as the counter above.
     fn lost_intermediates_count(&self) -> u64 {
         0
+    }
+}
+
+/// A backend marks the signal unavailable and wakes the waiter if its event
+/// source fails, so the capture loop can fall back to its normal timer.
+pub struct ChangeSignal {
+    pub(crate) notify: tokio::sync::Notify,
+    pub(crate) available: std::sync::atomic::AtomicBool,
+}
+
+impl ChangeSignal {
+    #[cfg(target_os = "windows")]
+    fn new() -> Self {
+        Self {
+            notify: tokio::sync::Notify::new(),
+            available: std::sync::atomic::AtomicBool::new(true),
+        }
     }
 }
 
@@ -412,13 +430,12 @@ mod tests {
 
     /// And nothing it passes can outgrow a reply frame.
     #[test]
-    fn the_read_gate_stays_inside_the_wire_contract() {
+    fn text_and_image_read_gates_stay_inside_the_wire_contract() {
         let settings = ConfigData::default();
         let policy = CapturePolicy::new(&settings);
         for content_type in [
             copypaste_ipc::content_type::TEXT,
             copypaste_ipc::content_type::IMAGE_PNG,
-            copypaste_ipc::content_type::FILE,
         ] {
             assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
         }
@@ -558,8 +575,8 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
             )
             .unwrap();
-        assert_eq!(writes.text.as_deref(), Some("/old/deleted/file"));
-        assert!(writes.binary.is_none());
+        assert!(writes.text.is_none());
+        assert_eq!(writes.binary, Some(vec![7]));
         writes
             .write_payload(
                 "id",

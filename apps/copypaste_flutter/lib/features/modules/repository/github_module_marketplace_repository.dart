@@ -1,8 +1,9 @@
+import '../../../shared/network/github_artifact_downloader.dart';
+import '../../../platform/files/temporary_artifacts.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 import '../../../shared/security/minisign_verifier.dart';
@@ -11,7 +12,7 @@ import '../models/module_models.dart';
 import 'module_marketplace_repository.dart';
 import 'modules_repository.dart';
 
-const moduleRepositoryPath = '/dmytro-yevs/copypaste/releases/download/';
+const moduleRepositoryPath = githubReleaseAssetPath;
 const moduleCatalogName = 'modules-v2.json';
 const maximumModulePackageBytes = 2 * 1024 * 1024 * 1024;
 
@@ -34,15 +35,19 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
     'github.com',
     '${moduleRepositoryPath}modules/$moduleCatalogName',
   );
-  static const _timeout = Duration(seconds: 30);
   final Future<Directory> Function() _temporaryDirectory;
   final Future<ModuleMarketplaceTarget> Function() _currentTarget;
   final HttpClient _client;
+  late final _downloader = GitHubArtifactDownloader(
+    _client,
+    userAgent: 'CopyPaste modules',
+  );
   final MinisignVerifier _signatureVerifier;
 
   @override
   Future<List<MarketplaceModule>> list() async {
     final directory = await _createStagingDirectory('module-catalog-');
+    final lease = await TemporaryDirectoryLease.acquire(directory);
     try {
       final catalog = File('${directory.path}/$moduleCatalogName');
       if (!await _download(
@@ -79,7 +84,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
     } on TimeoutException {
       throw const ModulesException('The module marketplace did not respond.');
     } finally {
-      await directory.delete(recursive: true);
+      await lease.dispose();
     }
   }
 
@@ -100,6 +105,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       throw const ModulesException('The module package size is invalid.');
     }
     final directory = await _createStagingDirectory('module-download-');
+    final lease = await TemporaryDirectoryLease.acquire(directory);
     try {
       final file = File('${directory.path}/package.cpmodule');
       await _download(
@@ -107,20 +113,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         file,
         maximumBytes: artifact.sizeBytes,
         onProgress: onProgress,
+        expectedSize: artifact.sizeBytes,
+        expectedSha256: artifact.sha256,
       );
-      if (await file.length() != artifact.sizeBytes ||
-          (await sha256.bind(file.openRead()).first).toString() !=
-              artifact.sha256) {
-        throw const ModulesException(
-          'The module package failed its integrity check.',
-        );
-      }
-      return SelectedModulePackage(
-        path: file.path,
-        dispose: () => directory.delete(recursive: true),
-      );
+      return SelectedModulePackage(path: file.path, dispose: lease.dispose);
     } catch (error) {
-      await directory.delete(recursive: true);
+      await lease.dispose();
       if (error is SocketException) {
         throw const ModulesException('The module download was interrupted.');
       }
@@ -134,75 +132,47 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
   Future<Directory> _createStagingDirectory(String prefix) async {
     final root = await _temporaryDirectory();
     await root.create(recursive: true);
-    return root.createTemp(prefix);
+    final staging = Directory('${root.path}/copypaste-staging');
+    await staging.create(recursive: true);
+    return staging.createTemp(prefix);
   }
 
   Future<bool> _download(
     Uri uri,
     File destination, {
     required int maximumBytes,
-    void Function(double progress)? onProgress,
+    void Function(double)? onProgress,
     bool allowMissing = false,
+    int? expectedSize,
+    String? expectedSha256,
   }) async {
-    validateModuleAssetUri(uri);
-    for (var redirects = 0; redirects <= 5; redirects++) {
-      if (uri.scheme != 'https' ||
-          uri.userInfo.isNotEmpty ||
-          uri.port != 443 ||
-          !{
-            'github.com',
-            'objects.githubusercontent.com',
-            'release-assets.githubusercontent.com',
-          }.contains(uri.host)) {
-        throw const ModulesException('The module download left GitHub.');
-      }
-      final request = await _client.getUrl(uri).timeout(_timeout);
-      request.followRedirects = false;
-      request.headers.set(HttpHeaders.userAgentHeader, 'CopyPaste modules');
-      final response = await request.close().timeout(_timeout);
-      if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
-        final location = response.headers.value(HttpHeaders.locationHeader);
-        await response.drain<void>().timeout(_timeout);
-        if (location == null) break;
-        uri = uri.resolve(location);
-        continue;
-      }
-      if (response.statusCode != HttpStatus.ok) {
-        request.abort();
-        if (allowMissing && response.statusCode == HttpStatus.notFound) {
-          return false;
-        }
-        throw ModulesException(
-          response.statusCode == HttpStatus.notFound
+    try {
+      return await _downloader.download(
+        uri,
+        destination,
+        maximumBytes: maximumBytes,
+        expectedSize: expectedSize,
+        expectedSha256: expectedSha256,
+        onProgress: onProgress,
+        allowMissing: allowMissing,
+      );
+    } on ArtifactDownloadException catch (error) {
+      throw ModulesException(switch (error.failure) {
+        ArtifactDownloadFailure.untrustedUrl =>
+          'The module package URL is not trusted.',
+        ArtifactDownloadFailure.untrustedRedirect =>
+          'The module download left GitHub.',
+        ArtifactDownloadFailure.redirects =>
+          'The module download used too many redirects.',
+        ArtifactDownloadFailure.tooLarge => 'The module download is too large.',
+        ArtifactDownloadFailure.integrity =>
+          'The module package failed its integrity check.',
+        ArtifactDownloadFailure.unavailable =>
+          error.statusCode == HttpStatus.notFound
               ? 'This module download is currently unavailable.'
               : 'The module marketplace is unavailable. Try again.',
-        );
-      }
-      if (response.contentLength > maximumBytes) {
-        request.abort();
-        throw const ModulesException('The module download is too large.');
-      }
-      final output = destination.openWrite();
-      var received = 0;
-      try {
-        await for (final chunk in response.timeout(_timeout)) {
-          received += chunk.length;
-          if (received > maximumBytes) {
-            throw const ModulesException('The module download is too large.');
-          }
-          output.add(chunk);
-          await output.flush();
-          onProgress?.call(received / maximumBytes);
-        }
-        await output.flush();
-      } finally {
-        await output.close();
-      }
-      return true;
+      });
     }
-    throw const ModulesException(
-      'The module download used too many redirects.',
-    );
   }
 
   @override
@@ -210,14 +180,9 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
 }
 
 void validateModuleAssetUri(Uri uri) {
-  if (uri.scheme != 'https' ||
-      uri.host != 'github.com' ||
-      uri.port != 443 ||
-      uri.userInfo.isNotEmpty ||
-      uri.hasQuery ||
-      uri.hasFragment ||
-      !uri.path.startsWith(moduleRepositoryPath) ||
-      uri.pathSegments.any((part) => part == '..' || part == '.')) {
+  try {
+    GitHubArtifactDownloader.validateAssetUri(uri);
+  } on ArtifactDownloadException {
     throw const ModulesException('The module package URL is not trusted.');
   }
 }

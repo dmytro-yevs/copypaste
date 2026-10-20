@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as frb;
 
+import '../../shared/runtime_event_service.dart';
 import 'devices_gateway.dart';
 
 /// Production [DevicesGateway] backed by the generated Rust API.
@@ -146,6 +147,19 @@ class FlutterRustDevicesGateway
   }
 
   Future<void> _createRuntimeWatch() async {
+    if (_api is FrbGeneratedDevicesApi) {
+      _runtimeWatch = RuntimeEventService.instance.events.listen(
+        (event) {
+          if (event.kind == 'peers' || event.kind == 'ready') {
+            _emitExternalPeerChange();
+          }
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!_changes.isClosed) _changes.addError(error, stackTrace);
+        },
+      );
+      return;
+    }
     final watchId = await _api.allocateRuntimeWatch();
     if (_disposed) {
       await _api.cancelRuntimeWatch(watchId: watchId);

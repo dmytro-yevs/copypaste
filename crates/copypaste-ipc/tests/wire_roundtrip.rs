@@ -116,6 +116,9 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Modules { json: "[]".into() },
         ResponseData::Status(StatusData {
+            runtime_watch: false,
+            capture_watch: false,
+            capture_revision: 0,
             sync_status: Default::default(),
             device_name: "Laptop".into(),
             device_id: Some("device-1".into()),
@@ -269,6 +272,7 @@ fn status_without_a_device_id_remains_compatible_with_older_backends() {
 
     assert_eq!(status.device_id, None);
     assert!(!status.clipboard_available);
+    assert!(!status.runtime_watch);
 }
 
 #[test]

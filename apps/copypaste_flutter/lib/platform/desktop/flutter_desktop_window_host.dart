@@ -353,6 +353,13 @@ class FlutterDesktopWindowHost
   Future<void> quit() => windowManager.destroy();
 
   @override
+  Future<bool> isFullScreen() => windowManager.isFullScreen();
+
+  @override
+  Future<void> setFullScreen(bool enabled) =>
+      windowManager.setFullScreen(enabled);
+
+  @override
   void setBoundsChangedHandler(Future<void> Function() onBoundsChanged) {
     _onBoundsChanged = onBoundsChanged;
   }

@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:crypto/crypto.dart';
+
+import '../../../platform/files/temporary_artifacts.dart';
 
 import '../models/history_models.dart';
 import 'history_repository.dart';
@@ -20,19 +24,19 @@ class HistoryFileTransfer {
 
   final HistoryRepository _repository;
   final Future<Directory> Function() _temporaryDirectory;
-  final Map<String, Future<String>> _inFlight = {};
-  Future<void>? _cleanup;
+  final Map<HistoryClip, Future<String>> _inFlight = {};
+  (HistoryClip, String)? _prepared;
   static const _maxAge = Duration(minutes: 10);
 
   Future<String> prepare(
     HistoryClip clip, {
     required void Function(double) onProgress,
   }) {
-    final pending = _inFlight[clip.id];
+    final pending = _inFlight[clip];
     if (pending != null) return pending;
     final operation = _prepare(clip, onProgress);
-    _inFlight[clip.id] = operation;
-    operation.whenComplete(() => _inFlight.remove(clip.id)).ignore();
+    _inFlight[clip] = operation;
+    operation.whenComplete(() => _inFlight.remove(clip)).ignore();
     return operation;
   }
 
@@ -45,37 +49,77 @@ class HistoryFileTransfer {
     final root = await _temporaryDirectory();
     final directory = Directory('${root.path}/copypaste-file-transfers');
     await directory.create(recursive: true);
-    await (_cleanup ??= _removeExpiredFiles(directory));
-    final id = clip.id.replaceAll(RegExp('[^A-Za-z0-9_-]'), '_');
-    final name = (details.name ?? 'file')
-        .split(RegExp(r'[/\\]'))
-        .last
-        .replaceAll(RegExp('[^A-Za-z0-9._ -]'), '_');
-    final destination = File(
-      '${directory.path}/$id-${name.isEmpty ? 'file' : name}',
-    );
-    if (await destination.exists()) {
-      final stat = await destination.stat();
-      if (stat.type == FileSystemEntityType.file &&
-          DateTime.now().difference(stat.modified) < _maxAge &&
-          (details.sizeBytes == null || stat.size == details.sizeBytes)) {
+    final previous = _prepared;
+    await _removeExpiredFiles(directory, protectedPath: previous?.$2);
+    if (previous != null && identical(previous.$1, clip)) {
+      final cached = File(previous.$2);
+      if (await cached.exists() &&
+          DateTime.now().difference((await cached.stat()).modified) < _maxAge) {
+        await cached.setLastModified(DateTime.now());
         onProgress(1);
-        return destination.path;
+        return cached.path;
       }
-      await destination.delete();
     }
 
+    // IDs can be updated by sync. Materialize a newly observed clip, then name
+    // its immutable cache file by its actual bytes, never by id and size alone.
+    final lease = await TemporaryDirectoryLease.create(
+      root,
+      'copypaste-transfer-',
+    );
+    final staging = lease.directory;
+    final staged = File('${staging.path}/payload');
     try {
-      await saveTo(clip, destination.path, onProgress: onProgress);
+      await saveTo(clip, staged.path, onProgress: onProgress);
       if (details.sizeBytes != null &&
-          await destination.length() != details.sizeBytes) {
+          await staged.length() != details.sizeBytes) {
         throw StateError('The saved file is incomplete.');
       }
-    } catch (_) {
-      if (await destination.exists()) await destination.delete();
-      rethrow;
+      final digest = (await sha256.bind(staged.openRead()).first).toString();
+      final id = sha256
+          .convert(utf8.encode(clip.id))
+          .toString()
+          .substring(0, 16);
+      var name = (details.name ?? 'file')
+          .split(RegExp(r'[/\\]'))
+          .last
+          .replaceAll(RegExp('[^A-Za-z0-9._ -]'), '_');
+      if (name.length > 100) {
+        final dot = name.lastIndexOf('.');
+        final extension = dot > 0 && name.length - dot <= 16
+            ? name.substring(dot)
+            : '';
+        name = '${name.substring(0, 100 - extension.length)}$extension';
+      }
+      var destination = File(
+        '${directory.path}/$id-$digest-${name.isEmpty ? 'file' : name}',
+      );
+      if (await destination.exists() &&
+          (await sha256.bind(destination.openRead()).first).toString() !=
+              digest) {
+        // An invalid old cache must not replace bytes another consumer may
+        // still have open. Publish this complete original under a unique name.
+        destination = File(
+          '${destination.path}-${staging.path.split(Platform.pathSeparator).last}',
+        );
+      }
+      try {
+        await staged.rename(destination.path);
+      } on FileSystemException {
+        // Windows can refuse replacement while another engine/consumer uses
+        // this path. Reuse it only after verifying the actual content hash.
+        if (!await destination.exists() ||
+            (await sha256.bind(destination.openRead()).first).toString() !=
+                digest) {
+          rethrow;
+        }
+      }
+      await destination.setLastModified(DateTime.now());
+      _prepared = (clip, destination.path);
+      return destination.path;
+    } finally {
+      await lease.dispose();
     }
-    return destination.path;
   }
 
   /// Saves to a user-selected destination and reports the bytes actually
@@ -97,15 +141,37 @@ class HistoryFileTransfer {
     }
 
     report(0);
+    if (_repository case final HistoryFileProgressRepository repository) {
+      final handled = await repository.saveFileWithProgress(
+        clip.id,
+        destination.path,
+        (written, total) {
+          if (total > 0) report((written / total).clamp(0, 0.99));
+        },
+      );
+      if (handled) {
+        if (isCancelled?.call() ?? false) {
+          if (await destination.exists()) await destination.delete();
+          throw const HistoryFileTransferCancelled();
+        }
+        report(1);
+        return;
+      }
+    }
+    if (isCancelled?.call() ?? false) {
+      throw const HistoryFileTransferCancelled();
+    }
     var reading = false;
     var finished = false;
     final timer = Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (reading || finished) return;
       reading = true;
       try {
-        if (total != null && total > 0 && await destination.exists()) {
-          final written = await destination.length();
-          if (!finished) report((written / total).clamp(0, 0.99));
+        if (total != null && total > 0) {
+          final stat = await destination.stat();
+          if (!finished && stat.type == FileSystemEntityType.file) {
+            report((stat.size / total).clamp(0, 0.99));
+          }
         }
       } on FileSystemException {
         // The writer may be creating or rolling back the destination.
@@ -132,10 +198,13 @@ class HistoryFileTransfer {
     if (await file.exists()) await file.delete();
   }
 
-  Future<void> _removeExpiredFiles(Directory directory) async {
-    final cutoff = DateTime.now().subtract(_maxAge);
+  Future<void> _removeExpiredFiles(
+    Directory directory, {
+    String? protectedPath,
+  }) async {
+    final cutoff = DateTime.now().subtract(const Duration(days: 1));
     await for (final entry in directory.list(followLinks: false)) {
-      if (entry is! File) continue;
+      if (entry is! File || entry.path == protectedPath) continue;
       try {
         if ((await entry.stat()).modified.isBefore(cutoff)) {
           await entry.delete();

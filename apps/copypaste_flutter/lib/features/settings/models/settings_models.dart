@@ -6,11 +6,15 @@ class CaptureSettingsState {
   const CaptureSettingsState({
     this.syncStatus = const SyncStatus(),
     this.settingsHealth,
+    this.captureWatch = false,
+    this.captureRevision = 0,
     required this.running,
     required this.paused,
     required this.epoch,
   });
 
+  final bool captureWatch;
+  final int captureRevision;
   final bool running;
   final bool paused;
   final int epoch;
@@ -38,6 +42,7 @@ class RuntimeSettingsHealth {
 
 class RuntimeSettings {
   const RuntimeSettings({
+    this.maxFileSizeBytes = 64 * 1024 * 1024,
     this.skipSecret = true,
     this.skipTransient = true,
     required this.retentionDays,
@@ -55,6 +60,7 @@ class RuntimeSettings {
   final bool skipTransient;
   final int retentionDays;
   final int storageQuotaBytes;
+  final int maxFileSizeBytes;
   final List<String> excludedAppIds;
   final bool lanVisibility;
   final bool syncEnabled;
@@ -66,6 +72,7 @@ class RuntimeSettings {
 
 class RuntimeSettingsChange {
   const RuntimeSettingsChange({
+    this.maxFileSizeBytes,
     this.skipSecret,
     this.skipTransient,
     this.retentionDays,
@@ -83,6 +90,7 @@ class RuntimeSettingsChange {
   final bool? skipTransient;
   final int? retentionDays;
   final int? storageQuotaBytes;
+  final int? maxFileSizeBytes;
   final List<String>? excludedAppIds;
   final bool? lanVisibility;
   final bool? syncEnabled;

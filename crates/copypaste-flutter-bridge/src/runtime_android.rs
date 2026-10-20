@@ -11,7 +11,7 @@ use std::ffi::c_void;
 use std::sync::{Arc, OnceLock};
 
 use jni::{
-    objects::{GlobalRef, JByteArray, JClass, JObject, JValue},
+    objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue},
     sys::{jboolean, jint, jlong, JNI_FALSE, JNI_TRUE},
     JNIEnv, JavaVM,
 };
@@ -382,11 +382,69 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    path: JString,
+    filename: JString,
+    mime_type: JString,
+    source_reference: JString,
+) -> jboolean {
+    let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    let Some(read) = runtime.capture_admission().acquire(
+        token as u64,
+        copypaste_runtime::capture_admission::CaptureScope::Read,
+    ) else {
+        return JNI_FALSE;
+    };
+    let values = (|| {
+        Some((
+            env.get_string(&path).ok()?.to_string_lossy().into_owned(),
+            env.get_string(&filename)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+            env.get_string(&mime_type)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+            env.get_string(&source_reference)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+        ))
+    })();
+    drop(read);
+    let Some((path, filename, mime_type, reference)) = values else {
+        return JNI_FALSE;
+    };
+    if runtime
+        .capture_file_operation(
+            token as u64,
+            std::path::Path::new(&path),
+            &filename,
+            &mime_type,
+            &reference,
+        )
+        .is_ok()
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     mut env: JNIEnv,
     _class: JClass,
     token: jlong,
     bytes: JByteArray,
+    length: jint,
     content_type: JObject,
     filename: JObject,
     source_reference: JObject,
@@ -406,8 +464,21 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     ) else {
         return JNI_FALSE;
     };
-    let (Ok(bytes), Ok(content_type), Ok(filename), Ok(source_reference)) = (
-        env.convert_byte_array(bytes),
+    // Java's owned PNG buffer can have spare capacity; only its written prefix is data.
+    let Ok(array_length) = env.get_array_length(&bytes) else {
+        return JNI_FALSE;
+    };
+    if length <= 0 || length > array_length || length > 16 * 1024 * 1024 {
+        return JNI_FALSE;
+    }
+    let mut payload = vec![0u8; length as usize];
+    // JNI represents byte arrays as signed bytes; the representation is identical.
+    let signed =
+        unsafe { std::slice::from_raw_parts_mut(payload.as_mut_ptr().cast::<i8>(), payload.len()) };
+    if env.get_byte_array_region(&bytes, 0, signed).is_err() {
+        return JNI_FALSE;
+    }
+    let (Ok(content_type), Ok(filename), Ok(source_reference)) = (
         env.get_string((&content_type).into()),
         env.get_string((&filename).into()),
         env.get_string((&source_reference).into()),
@@ -452,7 +523,7 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     if runtime
         .capture_binary_operation(
             token as u64,
-            &bytes,
+            &payload,
             &content_type,
             (!filename.is_empty()).then_some(filename.as_str()),
             (!source_reference.is_empty()).then_some(source_reference.as_str()),
@@ -690,6 +761,33 @@ impl AndroidClipboard {
                 received,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
+                if let Some(file) = metadata.as_ref().filter(|file| file.transfer.is_some()) {
+                    let path = file
+                        .source_reference
+                        .as_deref()
+                        .ok_or(copypaste_core::ClipboardWriteError::Failed)?;
+                    let path = env
+                        .new_string(path)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    let name = env
+                        .new_string(&file.filename)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    let mime = env
+                        .new_string(&file.mime_type)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    return env
+                        .call_static_method(
+                            "com/copypaste/app/MainActivity",
+                            "writeClipboardFile",
+                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+                            &[(&path).into(), (&name).into(), (&mime).into()],
+                        )
+                        .ok()
+                        .and_then(|value| value.z().ok())
+                        .filter(|value| *value)
+                        .map(|_| ())
+                        .ok_or(copypaste_core::ClipboardWriteError::Failed);
+                }
                 if let Some(source_reference) = metadata
                     .as_ref()
                     .and_then(|file| file.source_reference.as_deref())
@@ -786,6 +884,25 @@ pub(crate) async fn request(
     Ok(runtime.request(0, method).await)
 }
 
+async fn push_capture_snapshot(
+    runtime: &Arc<copypaste_runtime::Runtime>,
+    sink: &crate::frb_generated::StreamSink<crate::api::RuntimeEvent>,
+) -> Result<bool, crate::api::RuntimeError> {
+    let runtime = Arc::clone(runtime);
+    let status = tokio::task::spawn_blocking(move || runtime.status_data())
+        .await
+        .map_err(|_| crate::api::RuntimeError::internal())?;
+    Ok(sink
+        .add(crate::client::typed_runtime_event(
+            copypaste_ipc::RuntimeEventData {
+                change: None,
+                capture: Some(status),
+                progress: None,
+            },
+        ))
+        .is_ok())
+}
+
 pub(crate) async fn watch(
     watch_id: u64,
     sink: crate::frb_generated::StreamSink<crate::api::RuntimeEvent>,
@@ -798,6 +915,13 @@ pub(crate) async fn watch(
         .await
         .map_err(|_| crate::api::RuntimeError::internal())?;
     let mut events = runtime.subscribe_events();
+    let mut runtime_events = runtime.subscribe_runtime_events();
+    if sink.add(crate::client::runtime_ready(true)).is_err() {
+        return Ok(());
+    }
+    if !push_capture_snapshot(runtime, &sink).await? {
+        return Ok(());
+    }
     let mut cancelled = crate::runtime::watch_stop_rx(watch_id)?;
     loop {
         let event = tokio::select! {
@@ -806,24 +930,25 @@ pub(crate) async fn watch(
                 return Ok(());
             }
             event = events.recv() => match event {
-                Ok(event) => event,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Ok(event) => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { change: Some(event), capture: None, progress: None }),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
+                    continue;
+                },
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            event = runtime_events.recv() => match event {
+                Ok(event) => crate::client::typed_runtime_event(event),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
+                    continue;
+                },
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
             },
         };
-        if sink
-            .add(crate::api::RuntimeEvent {
-                sync_status: event.sync_status.map(crate::api::runtime_sync_status),
-                kind: match event.event {
-                    copypaste_ipc::EventKind::Items => "items".into(),
-                    copypaste_ipc::EventKind::Peers => "peers".into(),
-                },
-                item_count: event.item_count,
-                captured: event.captured,
-                captured_item_id: event.captured_item_id,
-            })
-            .is_err()
-        {
+        if sink.add(event).is_err() {
             return Ok(());
         }
     }

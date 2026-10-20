@@ -13,9 +13,11 @@ class ClipboardCaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        AndroidClipboardCache.scheduleCleanup(applicationContext)
         MainActivity.ensureRuntime(applicationContext)
         running.set(true)
         NativeRuntimeCapture.setCaptureRunning(true)
+        AndroidCaptureSignals.changed()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -31,6 +33,7 @@ class ClipboardCaptureService : Service() {
         if (!BackgroundClipboardMonitor.start(
                 this,
                 onStarted = { started ->
+                    AndroidCaptureSignals.changed()
                     if (!started) stopCapture(this)
                 },
                 onLost = { stopCapture(this) },
@@ -48,6 +51,7 @@ class ClipboardCaptureService : Service() {
         val listening = BackgroundClipboardMonitor.isListening()
         running.set(listening)
         NativeRuntimeCapture.setCaptureRunning(listening)
+        AndroidCaptureSignals.changed()
         super.onDestroy()
     }
 

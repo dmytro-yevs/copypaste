@@ -1,18 +1,7 @@
-//! Explicit file imports: separate History rows, shared encrypted original bytes.
-use crate::{ingest::IngestError, Keyring, NewItem, Store, StoredItem};
-use std::{fs::File, io::Read, path::Path};
-
-#[derive(Debug, thiserror::Error)]
-pub enum FileImportError {
-    #[error("The selected file could not be read or changed during import.")]
-    Read,
-    #[error("Only regular files can be imported.")]
-    NotFile,
-    #[error("The file exceeds the configured History size limit.")]
-    TooLarge,
-    #[error(transparent)]
-    Ingest(#[from] IngestError),
-}
+//! Explicit file imports publish a small offer and retain encrypted local chunks.
+pub use crate::file_transfer::FileTransferError as FileImportError;
+use crate::{Keyring, Store, StoredItem};
+use std::path::Path;
 
 pub fn import_file(
     store: &Store,
@@ -29,92 +18,19 @@ pub fn import_file(
         }
         None => crate::FileMetadata::new(filename, mime_type),
     }
-    .ok_or(IngestError::InvalidMetadata)?;
-    // Open nonblocking on Unix so a dropped FIFO can never hang an import.
-    #[cfg(unix)]
-    let file = {
-        use rustix::fs::{open, Mode, OFlags};
-        File::from(
-            open(
-                path,
-                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
-                Mode::empty(),
-            )
-            .map_err(|_| FileImportError::Read)?,
-        )
-    };
-    #[cfg(not(unix))]
-    let file = File::open(path).map_err(|_| FileImportError::Read)?;
-    let before = file.metadata().map_err(|_| FileImportError::Read)?;
-    if !before.is_file() {
-        return Err(FileImportError::NotFile);
-    }
-    let cap = copypaste_ipc::MAX_CONTENT_BYTES as u64;
-    if before.len() > cap {
-        return Err(FileImportError::TooLarge);
-    }
-    let mut reader = file.take(cap + 1);
-    let mut bytes = zeroize::Zeroizing::new(Vec::new());
-    reader
-        .read_to_end(&mut bytes)
-        .map_err(|_| FileImportError::Read)?;
-    let after = reader
-        .get_ref()
-        .metadata()
-        .map_err(|_| FileImportError::Read)?;
-    if bytes.len() as u64 > cap {
-        return Err(FileImportError::TooLarge);
-    }
-    if before.len() != bytes.len() as u64
-        || before.len() != after.len()
-        || before.modified().ok() != after.modified().ok()
-    {
-        return Err(FileImportError::Read);
-    }
-    let image_type = image::guess_format(&bytes).ok().filter(|format| {
-        matches!(
-            format,
-            image::ImageFormat::Png
-                | image::ImageFormat::Tiff
-                | image::ImageFormat::Jpeg
-                | image::ImageFormat::Gif
-                | image::ImageFormat::WebP
-                | image::ImageFormat::Bmp
-        )
-    });
-    let content_type = image_type.map_or(copypaste_ipc::content_type::FILE, |format| {
-        format.to_mime_type()
-    });
-    if bytes.len() as u64 > settings.capture_limit_bytes(content_type) {
-        return Err(FileImportError::TooLarge);
-    }
-    let payload_metadata = crate::PayloadMetadata::new(Some(metadata), None)
-        .and_then(|value| value.to_json(content_type))
-        .ok_or(IngestError::InvalidMetadata)?;
-    let digest = crate::binary::content_digest(&bytes);
-    let id = format!(
-        "{}{}",
-        crate::binary_reference::IMPORT_ID_PREFIX,
-        uuid::Uuid::new_v4()
-    );
-    let ciphertext = crate::binary_reference::seal(&bytes, &digest, &keyring.item_key(), &id)
-        .map_err(IngestError::from)?;
-    let item = store
-        .insert_imported_file(NewItem {
-            id,
-            content_ciphertext: ciphertext,
-            nonce: Vec::new(),
-            content_type: content_type.to_owned(),
-            content_hash: crate::binary::content_hash(&digest),
-            search_text: None,
-            created_at: crate::now_ms(),
-            app_bundle_id: None,
-            app_name: None,
-            payload_metadata: Some(payload_metadata),
-        })
-        .map_err(IngestError::from)?;
-    crate::ingest::enforce_retention(store, settings);
-    Ok(item)
+    .ok_or(FileImportError::InvalidMetadata)?;
+    crate::file_transfer::import(
+        store,
+        keyring,
+        path,
+        metadata,
+        crate::now_ms(),
+        None,
+        None,
+        None,
+        settings,
+        true,
+    )
 }
 
 #[cfg(test)]
@@ -130,6 +46,60 @@ mod tests {
             tempfile::tempdir().unwrap(),
         )
     }
+
+    #[test]
+    fn legacy_file_upgrade_preserves_identity_pin_name_and_original_bytes() {
+        let (store, key, dir) = fixture();
+        let metadata = crate::FileMetadata::new("retained.pdf", "application/pdf").unwrap();
+        let row = crate::ingest_binary_into_with_capture_context(
+            &store,
+            &key,
+            b"retained original bytes",
+            "file",
+            1,
+            None,
+            Some(&metadata),
+            &Default::default(),
+        )
+        .unwrap()
+        .into_item();
+        store.set_pinned(&row.id, true).unwrap();
+        assert_eq!(
+            crate::file_transfer::upgrade_legacy(&store, &key.item_key()).unwrap(),
+            1
+        );
+        let upgraded = store.get(&row.id).unwrap().unwrap();
+        assert!(upgraded.pinned);
+        assert!(upgraded.created_at > row.created_at);
+        assert_eq!(upgraded.origin_device_id, row.origin_device_id);
+        let payload = ClipboardPayload::open(&upgraded, &key.item_key()).unwrap();
+        let ClipboardPayload::File {
+            metadata: Some(metadata),
+            ..
+        } = payload
+        else {
+            panic!("expected file offer")
+        };
+        assert_eq!(metadata.filename, "retained.pdf");
+        let destination = dir.path().join("upgraded.pdf");
+        crate::file_transfer::save_local(
+            &store,
+            &key.item_key(),
+            &row.id,
+            &destination,
+            u64::MAX,
+            || false,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(destination).unwrap(),
+            b"retained original bytes"
+        );
+        assert_eq!(
+            crate::file_transfer::upgrade_legacy(&store, &key.item_key()).unwrap(),
+            0
+        );
+    }
     fn import(store: &Store, key: &Keyring, path: &Path, name: &str) -> StoredItem {
         import_file(
             store,
@@ -143,7 +113,7 @@ mod tests {
         .unwrap()
     }
     fn blob_count(store: &Store) -> u64 {
-        store.imported_payload_count()
+        store.file_transfer_blob_count()
     }
 
     #[test]
@@ -167,7 +137,8 @@ mod tests {
             else {
                 panic!("expected file");
             };
-            assert_eq!(&*recovered, bytes);
+            assert!(recovered.len() < 256);
+            assert_ne!(&*recovered, bytes);
             let metadata = metadata.unwrap();
             assert_eq!(metadata.filename, name);
             assert_eq!(
@@ -175,10 +146,15 @@ mod tests {
                 Some("content://documents/original")
             );
             let saved = dir.path().join(name);
-            ClipboardPayload::open(&row, &key.item_key())
-                .unwrap()
-                .save_file_to(&saved)
-                .unwrap();
+            crate::file_transfer::save_local(
+                &store,
+                &key.item_key(),
+                &row.id,
+                &saved,
+                u64::MAX,
+                || false,
+            )
+            .unwrap();
             assert_eq!(std::fs::read(saved).unwrap(), bytes);
             assert!(
                 crate::open_binary(&row.content_ciphertext, &key.item_key(), "another-row")
@@ -210,30 +186,29 @@ mod tests {
         assert_eq!(store.count().unwrap(), 2);
         assert_eq!(blob_count(&store), 1);
         for id in [a.id, b.id] {
-            assert_eq!(
-                &*crate::open_binary(
-                    &store.get(&id).unwrap().unwrap().content_ciphertext,
-                    &key.item_key(),
-                    &id
-                )
-                .unwrap(),
-                b"original"
-            );
+            let path = dir.path().join(format!("restored-{id}"));
+            crate::file_transfer::save_local(&store, &key.item_key(), &id, &path, u64::MAX, || {
+                false
+            })
+            .unwrap();
+            assert_eq!(std::fs::read(path).unwrap(), b"original");
         }
     }
 
     #[test]
-    fn synced_imports_remain_distinct_and_share_a_payload_on_the_receiver() {
+    fn synced_imports_remain_distinct_without_transferring_their_file_bodies() {
         let (store, key, dir) = fixture();
         let (peer, peer_key, _) = fixture();
         let path = dir.path().join("source");
         std::fs::write(&path, b"original").unwrap();
         for name in ["a.pdf", "b.pdf"] {
             let item = import(&store, &key, &path, name);
+            let descriptor =
+                crate::open_binary(&item.content_ciphertext, &key.item_key(), &item.id).unwrap();
             let incoming = crate::sync::RemoteVersion {
                 item_id: &item.id,
                 content: "",
-                binary_content: Some(b"original"),
+                binary_content: Some(&descriptor),
                 payload_metadata: item.payload_metadata.as_deref(),
                 content_type: &item.content_type,
                 created_at: item.created_at,
@@ -247,14 +222,16 @@ mod tests {
                 crate::sync::apply_remote_version(&peer, &peer_key, "receiver", &incoming).unwrap()
             );
             let row = peer.get(&item.id).unwrap().unwrap();
+            assert!(!peer.has_file_transfer(&row.id).unwrap());
+            let payload = ClipboardPayload::open(&row, &peer_key.item_key()).unwrap();
+            assert_eq!(payload.byte_len(), 8);
             assert_eq!(
-                &*crate::open_binary(&row.content_ciphertext, &peer_key.item_key(), &row.id)
-                    .unwrap(),
-                b"original"
+                crate::file_transfer::offer(&payload).unwrap().sha256,
+                crate::binary::content_hash(&crate::binary::content_digest(b"original"))
             );
         }
         assert_eq!(peer.count().unwrap(), 2);
-        assert_eq!(blob_count(&peer), 1);
+        assert_eq!(blob_count(&peer), 0);
     }
 
     #[test]
@@ -277,15 +254,22 @@ mod tests {
             &Default::default(),
         )
         .unwrap();
-        assert_eq!(row.content_type, "image/jpeg");
+        assert_eq!(row.content_type, "file");
         let metadata =
             PayloadMetadata::from_json(row.payload_metadata.as_deref().unwrap(), &row.content_type)
                 .unwrap();
         assert_eq!(metadata.file.unwrap().filename, "photo.jpg");
-        assert_eq!(
-            &*crate::open_binary(&row.content_ciphertext, &key.item_key(), &row.id).unwrap(),
-            buffer.get_ref()
-        );
+        let saved = dir.path().join("saved-photo.jpg");
+        crate::file_transfer::save_local(
+            &store,
+            &key.item_key(),
+            &row.id,
+            &saved,
+            u64::MAX,
+            || false,
+        )
+        .unwrap();
+        assert_eq!(&std::fs::read(saved).unwrap(), buffer.get_ref());
         let preview = crate::thumbnail_png(buffer.get_ref(), 16, Some(128), None).unwrap();
         assert_eq!((preview.width, preview.height), (3, 2));
     }
@@ -296,11 +280,17 @@ mod tests {
         let path = dir.path().join("empty");
         std::fs::write(&path, b"").unwrap();
         let row = import(&store, &key, &path, "empty.pdf");
-        assert!(
-            crate::open_binary(&row.content_ciphertext, &key.item_key(), &row.id)
-                .unwrap()
-                .is_empty()
-        );
+        let destination = dir.path().join("saved-empty.pdf");
+        crate::file_transfer::save_local(
+            &store,
+            &key.item_key(),
+            &row.id,
+            &destination,
+            u64::MAX,
+            || false,
+        )
+        .unwrap();
+        assert!(std::fs::read(destination).unwrap().is_empty());
         assert!(matches!(
             import_file(
                 &store,
@@ -328,7 +318,7 @@ mod tests {
                 None,
                 &settings
             ),
-            Err(FileImportError::TooLarge)
+            Err(FileImportError::TooLarge { .. })
         ));
         assert!(import_file(
             &store,

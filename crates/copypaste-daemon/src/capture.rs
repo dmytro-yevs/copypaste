@@ -15,6 +15,7 @@
 //!   inside one.
 
 use std::borrow::Borrow;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,6 +25,25 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 pub use copypaste_core::{IngestError, Ingested};
+
+async fn wait_for_clipboard(
+    signal: Option<&crate::clipboard::ChangeSignal>,
+    retry: bool,
+    interval: Duration,
+) {
+    if let Some(signal) = signal.filter(|s| s.available.load(Ordering::Acquire)) {
+        if retry {
+            tokio::select! {
+                _ = signal.notify.notified() => {},
+                _ = tokio::time::sleep(interval) => {},
+            }
+        } else {
+            signal.notify.notified().await;
+        }
+    } else {
+        tokio::time::sleep(interval).await;
+    }
+}
 
 fn source_icon_cache() -> &'static SourceAppIconCache {
     static CACHE: std::sync::OnceLock<SourceAppIconCache> = std::sync::OnceLock::new();
@@ -120,6 +140,10 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
 
     let pending = Arc::new(Mutex::new(None));
     let mut accepted_failure: Option<anyhow::Error> = None;
+    let change_signal = state.clipboard().change_signal();
+    // The first timer checks the current clipboard, even when no event arrives
+    // after listener registration. Failed reads and pending writes keep retries.
+    let mut retry = true;
 
     let result = 'capture: loop {
         let wait = Duration::from_millis(state.settings.get().poll_interval_ms);
@@ -165,21 +189,27 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
             // `sleep` rather than a ticker: a late tick must not cause a burst
             // of catch-up ticks — the clipboard has no backlog to drain, only a
             // current value — and the wait is recomputed each time round.
-            _ = tokio::time::sleep(wait) => {
+            _ = wait_for_clipboard(change_signal.as_deref(), retry, wait) => {
                 // Bound to a local so the clipboard guard is released before
                 // the handoff below rather than held across it.
-                let changed = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some() || state.clipboard().changed();
+                let (changed, available) = {
+                    let pending = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+                    let mut clipboard = state.clipboard();
+                    (pending || clipboard.changed(), clipboard.is_available())
+                };
+                state.observe_clipboard_availability(available);
                 if !changed {
+                    retry = change_signal.is_some() && state.clipboard().retry_required();
                     continue;
                 }
 
-                let state = Arc::clone(&state);
+                let worker_state = Arc::clone(&state);
                 // The pasteboard read, the AEAD seal and the SQLite write are
                 // all blocking. Running them on a worker keeps the reactor free
                 // for the IPC server — and reaching it costs six thread wakeups,
                 // which is why an idle clipboard stops short of here.
                 let worker_pending = Arc::clone(&pending);
-                match tokio::task::spawn_blocking(move || tick_slot(&state, &worker_pending)).await {
+                match tokio::task::spawn_blocking(move || tick_slot(&worker_state, &worker_pending)).await {
                     Ok(
                         CaptureOutcome::NoCapture
                         | CaptureOutcome::Stored
@@ -213,6 +243,8 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                         }
                     }
                 }
+                retry = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+                    || (change_signal.is_some() && state.clipboard().retry_required());
             }
         }
     };
@@ -233,6 +265,7 @@ enum CaptureOutcome {
     AuthorityUnavailable,
 }
 struct PendingCapture {
+    file_snapshot: Option<copypaste_core::file_transfer::FileSnapshot>,
     capture: crate::clipboard::Capture,
     created_at: i64,
     privacy_epoch: u64,
@@ -270,7 +303,29 @@ fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
                     reject_file_input(reason);
                     return CaptureOutcome::InputRejected;
                 }
+                let file_snapshot = if let Some(path) = capture.file_path.as_ref() {
+                    match copypaste_core::file_transfer::FileSnapshot::prepare(
+                        &state.store,
+                        &state.keyring.item_key(),
+                        path,
+                        settings.capture_limit_bytes("file"),
+                    ) {
+                        Ok(snapshot) => {
+                            info!("file capture materialized");
+                            Some(snapshot)
+                        }
+                        Err(_) => {
+                            reject_file_input(
+                                crate::clipboard::file_capture::FileReadError::ReadFailed,
+                            );
+                            return CaptureOutcome::InputRejected;
+                        }
+                    }
+                } else {
+                    None
+                };
                 *slot = Some(PendingCapture {
+                    file_snapshot,
                     capture,
                     created_at: copypaste_core::now_ms(),
                     privacy_epoch,
@@ -303,7 +358,34 @@ fn persist_pending(
     if let Some(outcome) = test_persist_outcome() {
         return outcome;
     }
-    match ingest_capture(state, &settings, &pending.capture, pending.created_at) {
+    let ingested = if let Some(snapshot) = &pending.file_snapshot {
+        let capture = &pending.capture;
+        snapshot
+            .publish(
+                &state.keyring.item_key(),
+                capture
+                    .file_metadata
+                    .clone()
+                    .expect("validated file metadata"),
+                pending.created_at,
+                capture.app_bundle_id.as_deref(),
+                capture.app_name.as_deref(),
+                capture_metadata(capture).as_ref(),
+                &settings,
+            )
+            .map_err(|error| match error {
+                copypaste_core::file_transfer::FileTransferError::Storage(error) => {
+                    IngestError::Storage(error)
+                }
+                copypaste_core::file_transfer::FileTransferError::TooLarge { .. } => {
+                    IngestError::TooLarge
+                }
+                _ => IngestError::InvalidMetadata,
+            })
+    } else {
+        ingest_capture(state, &settings, &pending.capture, pending.created_at)
+    };
+    match ingested {
         Ok(Ingested::Stored(item)) => {
             if pending.capture.content_type == copypaste_ipc::content_type::FILE {
                 info!("file capture stored");
@@ -405,6 +487,29 @@ pub(crate) fn ingest_capture(
         capture.file_path.as_ref(),
         capture.file_metadata.as_ref(),
     ) {
+        (copypaste_ipc::content_type::FILE, None, Some(path), Some(metadata))
+            if metadata.is_valid() =>
+        {
+            copypaste_core::file_transfer::import(
+                &state.store,
+                &state.keyring,
+                path,
+                metadata.clone(),
+                created_at,
+                capture.app_bundle_id.as_deref(),
+                capture.app_name.as_deref(),
+                payload_metadata.as_ref(),
+                settings,
+                false,
+            )
+            .map(Ingested::Stored)
+            .map_err(|error| match error {
+                copypaste_core::file_transfer::FileTransferError::TooLarge { .. } => {
+                    IngestError::TooLarge
+                }
+                _ => IngestError::InvalidMetadata,
+            })
+        }
         (content_type, None, None, None)
             if crate::clipboard::format::supports(content_type)
                 && copypaste_ipc::content_type::is_text(content_type) =>
@@ -500,13 +605,20 @@ fn normalize_file_capture(
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<(), crate::clipboard::file_capture::FileReadError> {
     if let Some(path) = capture.file_path.as_ref() {
-        let bytes = crate::clipboard::file_capture::read(
-            path,
-            settings.capture_limit_bytes(copypaste_ipc::content_type::FILE),
-        )?;
-        capture.binary_content = Some(bytes);
-        capture.file_path = None;
-        info!("file capture materialized");
+        #[cfg(test)]
+        crate::clipboard::file_capture::note_test_open();
+        use crate::clipboard::file_capture::FileReadError;
+        let metadata = std::fs::metadata(path).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => FileReadError::OpenNotFound,
+            std::io::ErrorKind::PermissionDenied => FileReadError::OpenPermissionDenied,
+            _ => FileReadError::OpenFailed,
+        })?;
+        if !metadata.is_file() {
+            return Err(FileReadError::NonRegular);
+        }
+        if metadata.len() > settings.capture_limit_bytes(copypaste_ipc::content_type::FILE) {
+            return Err(FileReadError::TooLarge);
+        }
     }
     Ok(())
 }
@@ -561,6 +673,40 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::AsyncWriteExt;
     use tokio_util::codec::{FramedRead, LinesCodec};
+
+    #[tokio::test(start_paused = true)]
+    async fn event_wakeup_retains_retry_and_failure_fallback() {
+        let signal = Arc::new(crate::clipboard::ChangeSignal {
+            notify: tokio::sync::Notify::new(),
+            available: std::sync::atomic::AtomicBool::new(true),
+        });
+        let listener = Arc::clone(&signal);
+        let idle = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), false, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(!idle.is_finished(), "an idle event source must not poll");
+        signal.notify.notify_one();
+        idle.await.unwrap();
+
+        let listener = Arc::clone(&signal);
+        let retry = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), true, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        retry.await.unwrap();
+
+        signal.available.store(false, Ordering::Release);
+        let listener = Arc::clone(&signal);
+        let fallback = tokio::spawn(async move {
+            wait_for_clipboard(Some(&listener), false, Duration::from_millis(50)).await;
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        fallback.await.unwrap();
+    }
 
     struct TestPersistGuard {
         _serial: std::sync::MutexGuard<'static, ()>,
@@ -804,6 +950,11 @@ mod tests {
             }),
         );
         let endpoint = _dir.path().join("daemon.sock");
+        let cwd = std::env::current_dir().unwrap();
+        let endpoint = endpoint
+            .strip_prefix(cwd)
+            .unwrap_or(&endpoint)
+            .to_path_buf();
         let listener = crate::server::bind(&endpoint).expect("bind");
         let server = tokio::spawn(crate::server::run(
             listener,
@@ -1209,16 +1360,26 @@ mod tests {
                     copypaste_ipc::content_type::FILE,
                 ))
                 .and_then(|metadata| metadata.file),
-            Some(metadata)
+            Some({
+                let mut metadata = metadata;
+                metadata.transfer =
+                    copypaste_core::file_transfer::row_offer(&stored, &state.keyring.item_key())
+                        .unwrap();
+                metadata
+            })
         );
         assert!(state.store.search("fixture", 10).unwrap().is_empty());
-        let opened = copypaste_core::open_binary(
-            &stored.content_ciphertext,
+        let saved = dir.path().join("captured-copy.bin");
+        copypaste_core::file_transfer::save_local(
+            &state.store,
             &state.keyring.item_key(),
             &stored.id,
+            &saved,
+            u64::MAX,
+            || false,
         )
         .unwrap();
-        assert_eq!(opened.as_slice(), bytes.as_slice());
+        assert_eq!(std::fs::read(saved).unwrap(), bytes);
     }
 
     #[test]
@@ -1451,8 +1612,21 @@ mod tests {
         assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
         let frozen = slot.as_ref().unwrap().capture.clone();
         let time = slot.as_ref().unwrap().created_at;
-        assert_eq!(frozen.binary_content.as_deref(), Some(original.as_slice()));
-        assert!(frozen.file_path.is_none());
+        assert!(
+            frozen.binary_content.is_none(),
+            "Pending files must not retain a file-sized plaintext vector"
+        );
+        let snapshot = slot.as_ref().unwrap().file_snapshot.as_ref().unwrap();
+        assert_eq!(snapshot.transfer.size_bytes, original.len() as u64);
+        assert_eq!(
+            snapshot.transfer.sha256,
+            copypaste_p2p::protocol::plaintext_content_hash(&original)
+        );
+        assert_eq!(
+            state.store.count().unwrap(),
+            0,
+            "An unpublished snapshot must not appear in History"
+        );
         assert!(events.try_recv().is_err());
         std::fs::write(&path, b"replacement token").unwrap();
         assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
@@ -1473,16 +1647,17 @@ mod tests {
             .unwrap();
         assert_eq!(stored.created_at, time);
         assert_eq!(stored.app_bundle_id.as_deref(), Some("SyntheticOwner"));
-        assert_eq!(
-            copypaste_core::open_binary(
-                &stored.content_ciphertext,
-                &state.keyring.item_key(),
-                &stored.id
-            )
-            .unwrap()
-            .as_slice(),
-            original
-        );
+        let recovered = dir.path().join("recovered");
+        copypaste_core::file_transfer::save_local(
+            &state.store,
+            &state.keyring.item_key(),
+            &stored.id,
+            &recovered,
+            u64::MAX,
+            || false,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(recovered).unwrap(), original);
         assert_eq!(
             stored
                 .payload_metadata
@@ -1492,7 +1667,12 @@ mod tests {
                     copypaste_ipc::content_type::FILE
                 ))
                 .and_then(|m| m.file),
-            frozen.file_metadata
+            frozen.file_metadata.map(|mut metadata| {
+                metadata.transfer =
+                    copypaste_core::file_transfer::row_offer(&stored, &state.keyring.item_key())
+                        .unwrap();
+                metadata
+            })
         );
         drop(guard);
     }

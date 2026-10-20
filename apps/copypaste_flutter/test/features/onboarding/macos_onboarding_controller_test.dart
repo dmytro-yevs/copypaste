@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/macos_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -49,7 +49,7 @@ void main() {
 
   test('completed onboarding reflects a missing Login Item record', () async {
     final controller = _controller(
-      store: MemoryMacosOnboardingStore(complete: true),
+      store: MemoryOnboardingStore(complete: true),
       setup: _FakeMacosSetupGateway(status: MacosLoginItemStatus.notFound),
     );
     addTearDown(controller.dispose);
@@ -79,7 +79,7 @@ void main() {
       failLaunchAtLoginUpdate: true,
     );
     final controller = _controller(
-      store: MemoryMacosOnboardingStore(complete: true),
+      store: MemoryOnboardingStore(complete: true),
       setup: setup,
     );
     addTearDown(controller.dispose);
@@ -97,7 +97,7 @@ void main() {
     () async {
       final setup = _FakeMacosSetupGateway();
       final controller = _controller(
-        store: MemoryMacosOnboardingStore(complete: true),
+        store: MemoryOnboardingStore(complete: true),
         setup: setup,
       );
       addTearDown(controller.dispose);
@@ -182,7 +182,7 @@ void main() {
   test(
     'completed onboarding stays complete when Accessibility is revoked',
     () async {
-      final store = MemoryMacosOnboardingStore(complete: true);
+      final store = MemoryOnboardingStore(complete: true);
       final controller = _controller(store: store);
       addTearDown(controller.dispose);
 
@@ -193,7 +193,7 @@ void main() {
   );
 
   test('finish persists completion after the Sync step', () async {
-    final store = MemoryMacosOnboardingStore();
+    final store = MemoryOnboardingStore();
     final setup = _FakeMacosSetupGateway(accessibility: true);
     final controller = _controller(store: store, setup: setup);
     addTearDown(controller.dispose);
@@ -240,11 +240,11 @@ void main() {
 }
 
 MacosOnboardingController _controller({
-  MacosOnboardingStore? store,
+  OnboardingStore? store,
   _FakeMacosSetupGateway? setup,
 }) {
   return MacosOnboardingController(
-    store: store ?? MemoryMacosOnboardingStore(),
+    store: store ?? MemoryOnboardingStore(),
     setup: setup ?? _FakeMacosSetupGateway(),
   );
 }

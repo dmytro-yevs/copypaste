@@ -4,10 +4,11 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -229,8 +230,18 @@ Future<Clip> copyClip({required String id}) =>
 Future<Clip> copyClipAsPlainText({required String id}) =>
     RustLib.instance.api.crateApiCopyClipAsPlainText(id: id);
 
-Future<void> saveClipFile({required String id, required String destPath}) =>
-    RustLib.instance.api.crateApiSaveClipFile(id: id, destPath: destPath);
+Future<void> saveClipFile({
+  required String id,
+  required String destPath,
+  String? downloadToken,
+}) => RustLib.instance.api.crateApiSaveClipFile(
+  id: id,
+  destPath: destPath,
+  downloadToken: downloadToken,
+);
+
+Future<void> cancelClipFileDownload({required String id}) =>
+    RustLib.instance.api.crateApiCancelClipFileDownload(id: id);
 
 Future<BigInt> historyFileImportMaxBytes() =>
     RustLib.instance.api.crateApiHistoryFileImportMaxBytes();
@@ -326,6 +337,9 @@ class BackupSummary {
 }
 
 class CaptureState {
+  final bool captureWatch;
+  final BigInt captureRevision;
+  final bool runtimeWatch;
   final RuntimeSyncStatus syncStatus;
   final bool running;
   final bool paused;
@@ -333,6 +347,9 @@ class CaptureState {
   final RuntimeSettingsHealth? settingsHealth;
 
   const CaptureState({
+    required this.captureWatch,
+    required this.captureRevision,
+    required this.runtimeWatch,
     required this.syncStatus,
     required this.running,
     required this.paused,
@@ -342,6 +359,9 @@ class CaptureState {
 
   @override
   int get hashCode =>
+      captureWatch.hashCode ^
+      captureRevision.hashCode ^
+      runtimeWatch.hashCode ^
       syncStatus.hashCode ^
       running.hashCode ^
       paused.hashCode ^
@@ -353,6 +373,9 @@ class CaptureState {
       identical(this, other) ||
       other is CaptureState &&
           runtimeType == other.runtimeType &&
+          captureWatch == other.captureWatch &&
+          captureRevision == other.captureRevision &&
+          runtimeWatch == other.runtimeWatch &&
           syncStatus == other.syncStatus &&
           running == other.running &&
           paused == other.paused &&
@@ -515,25 +538,25 @@ class ClipImageDetails {
 }
 
 class ClipImagePreview {
-  final String pngBase64;
+  final Uint8List pngBytes;
   final int width;
   final int height;
 
   const ClipImagePreview({
-    required this.pngBase64,
+    required this.pngBytes,
     required this.width,
     required this.height,
   });
 
   @override
-  int get hashCode => pngBase64.hashCode ^ width.hashCode ^ height.hashCode;
+  int get hashCode => pngBytes.hashCode ^ width.hashCode ^ height.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ClipImagePreview &&
           runtimeType == other.runtimeType &&
-          pngBase64 == other.pngBase64 &&
+          pngBytes == other.pngBytes &&
           width == other.width &&
           height == other.height;
 }
@@ -977,6 +1000,30 @@ class DiscoveredDevice {
           details == other.details;
 }
 
+class FileProgress {
+  final String token;
+  final BigInt written;
+  final BigInt total;
+
+  const FileProgress({
+    required this.token,
+    required this.written,
+    required this.total,
+  });
+
+  @override
+  int get hashCode => token.hashCode ^ written.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FileProgress &&
+          runtimeType == other.runtimeType &&
+          token == other.token &&
+          written == other.written &&
+          total == other.total;
+}
+
 class HistoryDeviceFacet {
   final String id;
   final String label;
@@ -1164,6 +1211,9 @@ class RuntimeEvent {
   final BigInt itemCount;
   final bool captured;
   final String? capturedItemId;
+  final FileProgress? progress;
+  final CaptureState? capture;
+  final bool runtimeWatch;
 
   const RuntimeEvent({
     this.syncStatus,
@@ -1171,6 +1221,9 @@ class RuntimeEvent {
     required this.itemCount,
     required this.captured,
     this.capturedItemId,
+    this.progress,
+    this.capture,
+    required this.runtimeWatch,
   });
 
   @override
@@ -1179,7 +1232,10 @@ class RuntimeEvent {
       kind.hashCode ^
       itemCount.hashCode ^
       captured.hashCode ^
-      capturedItemId.hashCode;
+      capturedItemId.hashCode ^
+      progress.hashCode ^
+      capture.hashCode ^
+      runtimeWatch.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1190,7 +1246,10 @@ class RuntimeEvent {
           kind == other.kind &&
           itemCount == other.itemCount &&
           captured == other.captured &&
-          capturedItemId == other.capturedItemId;
+          capturedItemId == other.capturedItemId &&
+          progress == other.progress &&
+          capture == other.capture &&
+          runtimeWatch == other.runtimeWatch;
 }
 
 class RuntimePeerSyncStatus {
@@ -1245,6 +1304,7 @@ class RuntimePeerSyncStatus {
 }
 
 class RuntimeSettingsData {
+  final BigInt maxFileSizeBytes;
   final bool skipSecret;
   final bool skipTransient;
   final int retentionDays;
@@ -1258,6 +1318,7 @@ class RuntimeSettingsData {
   final bool soundOnCopy;
 
   const RuntimeSettingsData({
+    required this.maxFileSizeBytes,
     required this.skipSecret,
     required this.skipTransient,
     required this.retentionDays,
@@ -1273,6 +1334,7 @@ class RuntimeSettingsData {
 
   @override
   int get hashCode =>
+      maxFileSizeBytes.hashCode ^
       skipSecret.hashCode ^
       skipTransient.hashCode ^
       retentionDays.hashCode ^
@@ -1290,6 +1352,7 @@ class RuntimeSettingsData {
       identical(this, other) ||
       other is RuntimeSettingsData &&
           runtimeType == other.runtimeType &&
+          maxFileSizeBytes == other.maxFileSizeBytes &&
           skipSecret == other.skipSecret &&
           skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&
@@ -1327,6 +1390,7 @@ class RuntimeSettingsHealth {
 }
 
 class RuntimeSettingsPatch {
+  final BigInt? maxFileSizeBytes;
   final bool? skipSecret;
   final bool? skipTransient;
   final int? retentionDays;
@@ -1340,6 +1404,7 @@ class RuntimeSettingsPatch {
   final bool? soundOnCopy;
 
   const RuntimeSettingsPatch({
+    this.maxFileSizeBytes,
     this.skipSecret,
     this.skipTransient,
     this.retentionDays,
@@ -1358,6 +1423,7 @@ class RuntimeSettingsPatch {
 
   @override
   int get hashCode =>
+      maxFileSizeBytes.hashCode ^
       skipSecret.hashCode ^
       skipTransient.hashCode ^
       retentionDays.hashCode ^
@@ -1375,6 +1441,7 @@ class RuntimeSettingsPatch {
       identical(this, other) ||
       other is RuntimeSettingsPatch &&
           runtimeType == other.runtimeType &&
+          maxFileSizeBytes == other.maxFileSizeBytes &&
           skipSecret == other.skipSecret &&
           skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&

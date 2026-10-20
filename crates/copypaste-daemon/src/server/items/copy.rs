@@ -1,149 +1,58 @@
-use copypaste_core::{ClipboardPayload, ClipboardWriteError};
-use copypaste_ipc::{ErrorCode, Response, ResponseData};
-use tracing::error;
-
-use super::wire::{is_oversized_text, to_wire_and_payload};
-use crate::server::messages::{
-    decrypt_error, storage_error, MSG_BACKUP_EXISTS, MSG_BACKUP_NO_DIR, MSG_BAD_PATH,
-    MSG_CLIPBOARD, MSG_CONTENT_TOO_LARGE, MSG_NOT_FOUND, MSG_SAVE_FILE_FAILED,
-    MSG_UNSUPPORTED_CONTENT,
-};
+//! Native clipboard transport over the shared History action policy.
 use crate::AppState;
+use copypaste_core::history_actions::{self, CopyOptions};
+use copypaste_ipc::{Response, ResponseData};
 
 pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
-    let (item, mut payload) = match fetch(state, id, item_id) {
-        Ok(opened) => opened,
-        Err(response) => return *response,
-    };
-    // A synchronized source path belongs to another device. Native clipboard
-    // backends must materialize the authenticated bytes instead of copying it.
-    if item
-        .file_details
-        .as_ref()
-        .is_some_and(|file| !file.source_available)
-    {
-        if let ClipboardPayload::File {
-            metadata: Some(metadata),
-            ..
-        } = &mut payload
-        {
-            metadata.source_reference = None;
-        }
-    }
-    if let Err(error) = state
-        .clipboard()
-        .write_payload(&item.id, &payload, &item.content_type)
-    {
-        return write_error(id, error);
-    }
-    state
-        .instant_clipboard
-        .note_local(&state.store, copypaste_core::now_ms());
-    Response::ok(id, ResponseData::Item(item))
+    copy_with(state, id, item_id, false)
 }
-
-/// Copy text only. Binary display labels are presentation, never content.
 pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
-    let (item, payload) = match fetch(state, id, item_id) {
-        Ok(opened) => opened,
-        Err(response) => return *response,
-    };
-    if !matches!(payload, ClipboardPayload::Text(_)) {
-        return unsupported(id);
-    }
-    if let Err(error) =
+    copy_with(state, id, item_id, true)
+}
+fn copy_with(state: &AppState, id: u64, item_id: &str, plain_text: bool) -> Response {
+    let key = state.keyring.item_key();
+    let result = (|| {
+        let opened = history_actions::open(&state.store, &key, item_id)?;
+        let origin = super::wire::origin_identity_for(state, opened.row());
+        let prepared = history_actions::prepare_copy(
+            &state.store,
+            &key,
+            opened,
+            CopyOptions {
+                origin: &origin,
+                local_device_id: state.meta.device_id(),
+                plain_text,
+                allow_content_uri: false,
+                max_file_size_bytes: state.settings.get().max_file_size_bytes,
+            },
+        )?;
         state
             .clipboard()
-            .write_payload(&item.id, &payload, copypaste_ipc::content_type::TEXT)
-    {
-        return write_error(id, error);
+            .write_payload(
+                &prepared.item.id,
+                prepared.payload(),
+                &prepared.content_type,
+            )
+            .map_err(copypaste_core::history_error::HistoryError::from)?;
+        state
+            .instant_clipboard
+            .note_local(&state.store, copypaste_core::now_ms());
+        Ok::<_, copypaste_core::history_error::HistoryError>(prepared.item)
+    })();
+    match result {
+        Ok(item) => Response::ok(id, ResponseData::Item(item)),
+        Err(error) => error.response(id),
     }
-    state
-        .instant_clipboard
-        .note_local(&state.store, copypaste_core::now_ms());
-    Response::ok(id, ResponseData::Item(item))
 }
-
-pub(crate) fn save_file(
-    state: &AppState,
-    id: u64,
-    item_id: &str,
-    raw_destination: &str,
-) -> Response {
-    let destination = raw_destination.trim();
-    if destination.is_empty() {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_PATH);
-    }
-    let path = std::path::Path::new(destination);
-    if path.exists() {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_EXISTS);
-    }
-    if path.parent().is_none_or(|parent| !parent.is_dir()) {
-        return Response::err(id, ErrorCode::NotFound, MSG_BACKUP_NO_DIR);
-    }
-    let (_, payload) = match fetch(state, id, item_id) {
-        Ok(opened) => opened,
-        Err(response) => return *response,
-    };
-    if !matches!(
-        payload,
-        ClipboardPayload::Image { .. } | ClipboardPayload::File { .. }
+pub(crate) fn save_file(state: &AppState, id: u64, item_id: &str, destination: &str) -> Response {
+    match history_actions::save_file(
+        &state.store,
+        &state.keyring.item_key(),
+        item_id,
+        destination,
+        state.settings.get().max_file_size_bytes,
     ) {
-        return unsupported(id);
-    }
-    match payload.save_file_to(path) {
         Ok(()) => Response::ok(id, ResponseData::Empty {}),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_EXISTS)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Response::err(id, ErrorCode::NotFound, MSG_BACKUP_NO_DIR)
-        }
-        Err(error) => {
-            error!(error = ?error, "file clip save failed");
-            Response::err(id, ErrorCode::Internal, MSG_SAVE_FILE_FAILED)
-        }
+        Err(error) => error.response(id),
     }
-}
-
-fn fetch(
-    state: &AppState,
-    id: u64,
-    item_id: &str,
-) -> Result<(copypaste_ipc::Item, ClipboardPayload), Box<Response>> {
-    let row = match state.store.get(item_id) {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return Err(Box::new(Response::err(
-                id,
-                ErrorCode::NotFound,
-                MSG_NOT_FOUND,
-            )));
-        }
-        Err(error) => return Err(Box::new(storage_error(id, "get", &error))),
-    };
-    let (item, payload) =
-        to_wire_and_payload(state, row).map_err(|error| Box::new(decrypt_error(id, &error)))?;
-    if is_oversized_text(&payload) {
-        return Err(Box::new(Response::err(
-            id,
-            ErrorCode::ContentTooLarge,
-            MSG_CONTENT_TOO_LARGE,
-        )));
-    }
-    Ok((item, payload))
-}
-
-fn write_error(id: u64, error: ClipboardWriteError) -> Response {
-    match error {
-        ClipboardWriteError::UnsupportedContent => unsupported(id),
-        ClipboardWriteError::Failed => {
-            error!("pasteboard write failed");
-            Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD)
-        }
-    }
-}
-
-fn unsupported(id: u64) -> Response {
-    Response::err(id, ErrorCode::UnsupportedContent, MSG_UNSUPPORTED_CONTENT)
 }

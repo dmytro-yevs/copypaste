@@ -23,6 +23,100 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets('reuses code spans when the row and inspector rebuild', (
+    tester,
+  ) async {
+    const code = 'fn main() { println!("hello"); }';
+    final repository = _ScreenRepository()
+      ..page = HistoryClipPage(
+        items: [
+          HistoryClip(
+            id: 'code-fixture',
+            contentType: 'text',
+            kind: HistoryClipKind.code,
+            preview: code,
+            body: code,
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          ),
+        ],
+      );
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await controller.initialize();
+    await controller.select('code-fixture');
+    Widget app() => ShadcnApp(
+      theme: AppTheme.light,
+      builder: AppTheme.builder,
+      home: Scaffold(child: HistoryScreen(controller: controller)),
+    );
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    final row = find.byWidgetPredicate(
+      (widget) => widget is Text && widget.textSpan?.toPlainText() == code,
+    );
+    final inspector = find.byWidgetPredicate(
+      (widget) =>
+          widget is SelectableText && widget.textSpan?.toPlainText() == code,
+    );
+    expect(row, findsOneWidget);
+    expect(inspector, findsOneWidget);
+    final rowSpan = tester.widget<Text>(row).textSpan;
+    final inspectorSpan = tester.widget<SelectableText>(inspector).textSpan;
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(identical(tester.widget<Text>(row).textSpan, rowSpan), isTrue);
+    expect(
+      identical(
+        tester.widget<SelectableText>(inspector).textSpan,
+        inspectorSpan,
+      ),
+      isTrue,
+    );
+  });
+
+  for (final width in [390.0, 1400.0]) {
+    testWidgets('Find opens and selects History search at $width', (
+      tester,
+    ) async {
+      final controller = HistoryController(_ScreenRepository());
+      final navigation = AppNavigationController();
+      addTearDown(controller.dispose);
+      addTearDown(navigation.dispose);
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: HistoryScreen(
+              controller: controller,
+              findRequests: navigation.historyFindRequests,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      navigation.findInHistory();
+      await tester.pumpAndSettle();
+      final search = find.byType(EditableText).first;
+      final editable = tester.widget<EditableText>(search);
+      expect(editable.focusNode.hasFocus, isTrue);
+      expect(navigation.historyFindRequests.value, isFalse);
+      await tester.enterText(search, 'clipboard');
+      await tester.pumpAndSettle();
+      navigation.findInHistory();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<EditableText>(search).controller.selection,
+        const TextSelection(baseOffset: 0, extentOffset: 9),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets(
     'bulk taps select confidential clips without revealing their spoiler',
     (tester) async {
@@ -412,7 +506,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        final list = find.byType(ListView);
+        final list = find.byType(CustomScrollView);
         await tester.drag(list, const Offset(0, -10000));
         await tester.pumpAndSettle();
         final position = navigation
@@ -1058,11 +1152,11 @@ void main() {
             )
             .style
             ?.fontSize,
-        theme.typography.xSmall.fontSize,
+        AppTypographySize.inspectorMetadata,
       );
       expect(
         tester.widget<SourceAppLabel>(sourceApp).style?.fontSize,
-        theme.typography.xSmall.fontSize,
+        AppTypographySize.inspectorMetadata,
       );
 
       final actionsTop = tester.getTopLeft(actions).dy;
@@ -1403,7 +1497,9 @@ void main() {
   testWidgets('keeps the mobile image fixed while its metadata table scrolls', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(480, 800));
+    // Exercise overflow on a compact viewport instead of relying on a larger
+    // metadata font to make short values scroll.
+    await tester.binding.setSurfaceSize(const Size(480, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _ScreenRepository()
       ..availableImagePreview = HistoryImagePreview(
@@ -2359,6 +2455,10 @@ void main() {
     final repository = _ScreenRepository()
       ..page = HistoryClipPage(items: [file]);
     final downloader = _ScreenFileDownloader();
+    final pendingSave = Completer<void>();
+    final pendingPresentation = Completer<void>();
+    repository.savePending = pendingSave.future;
+    downloader.presentPending = pendingPresentation.future;
     final controller = HistoryController(
       repository,
       fileDownloader: downloader,
@@ -2379,6 +2479,13 @@ void main() {
     );
     expect(_detailAction('Download'), findsOneWidget);
     await tester.tap(_detailAction('Download'));
+    await tester.pump();
+    expect(find.text('0%'), findsOneWidget);
+    pendingSave.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('100%'), findsOneWidget);
+    pendingPresentation.complete();
     await tester.pumpAndSettle();
 
     expect(repository.savedFiles, [('remote-file', '/tmp/report.pdf')]);
@@ -2420,6 +2527,7 @@ class _ScreenRepository implements HistoryRepository {
   HistoryClipPage page = const HistoryClipPage(items: []);
   HistoryFacets availableFacets = const HistoryFacets();
   final List<(String, String)> savedFiles = [];
+  Future<void>? savePending;
   final Map<String, HistorySourceAppIcon> sourceIcons = {};
   final List<String> requestedSourceIconIds = [];
   final List<String> copiedIds = [];
@@ -2495,6 +2603,7 @@ class _ScreenRepository implements HistoryRepository {
   @override
   Future<void> saveFile(String id, String destinationPath) async {
     savedFiles.add((id, destinationPath));
+    await savePending;
   }
 
   @override
@@ -2530,6 +2639,7 @@ class _ScreenRepository implements HistoryRepository {
 
 class _ScreenFileDownloader implements HistoryFileDownloader {
   final List<String> presented = [];
+  Future<void>? presentPending;
 
   @override
   Future<String?> chooseDestination(HistoryFileDetails file) async =>
@@ -2538,5 +2648,6 @@ class _ScreenFileDownloader implements HistoryFileDownloader {
   @override
   Future<void> presentSavedFile(String path, HistoryFileDetails file) async {
     presented.add(path);
+    await presentPending;
   }
 }

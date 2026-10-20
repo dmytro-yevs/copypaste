@@ -1,7 +1,9 @@
 //! All native loading and pointer ownership are confined to this boundary.
 use crate::ModuleError;
 use copypaste_module_sdk::{
-    native::{NativeApi, NativeBuffer, NativeHostApi, NativeReply, MAX_HOST_BYTES},
+    native::{
+        NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply, MAX_HOST_BYTES,
+    },
     ModuleEnvironment, ModuleInvocation, ModuleOutput, ModuleUnloadPolicy, MAX_INVOCATION_BYTES,
     MODULE_API_VERSION,
 };
@@ -21,6 +23,7 @@ use std::{
 /// first and wait for already running work before releasing code and assets.
 pub(crate) struct ModuleInstance {
     accepting: Arc<AtomicBool>,
+    lifetime: Arc<crate::host_lifetime::HostLifetime>,
     module: Mutex<Option<NativeModule>>,
 }
 
@@ -28,6 +31,7 @@ impl ModuleInstance {
     pub(crate) fn new() -> Self {
         Self {
             accepting: Arc::new(AtomicBool::new(true)),
+            lifetime: Arc::new(crate::host_lifetime::HostLifetime::default()),
             module: Mutex::new(None),
         }
     }
@@ -73,6 +77,7 @@ impl ModuleInstance {
                         id: id.into(),
                         services,
                         accepting: Arc::clone(&self.accepting),
+                        lifetime: Arc::clone(&self.lifetime),
                     })
                 }),
             )?);
@@ -82,6 +87,7 @@ impl ModuleInstance {
 
     pub(crate) fn stop(&self) {
         self.accepting.store(false, Ordering::Release);
+        self.lifetime.revoke();
         // Poison must not prevent teardown after a committed lifecycle change.
         self.module
             .lock()
@@ -132,11 +138,6 @@ impl NativeModule {
             let api = *api;
             let bytes = serde_json::to_vec(environment).map_err(|_| ModuleError::State)?;
             let context = if let Some(bridge) = host.as_deref() {
-                let create: libloading::Symbol<
-                    unsafe extern "C" fn(*const u8, usize, *const NativeHostApi) -> *mut c_void,
-                > = library
-                    .get(b"copypaste_module_with_host_v1\0")
-                    .map_err(|_| ModuleError::Load)?;
                 let host_api = NativeHostApi {
                     api_version: MODULE_API_VERSION,
                     struct_size: std::mem::size_of::<NativeHostApi>(),
@@ -144,7 +145,29 @@ impl NativeModule {
                     request: host_request,
                     release: host_release,
                 };
-                create(bytes.as_ptr(), bytes.len(), &host_api)
+                if let Ok(create) =
+                    library.get::<unsafe extern "C" fn(
+                        *const u8,
+                        usize,
+                        *const NativeHostApiV2,
+                    ) -> *mut c_void>(b"copypaste_module_with_host_v2\0")
+                {
+                    let host_v2 = NativeHostApiV2 {
+                        api_version: 2,
+                        struct_size: std::mem::size_of::<NativeHostApiV2>(),
+                        base: host_api,
+                        subscribe: host_subscribe,
+                        unsubscribe: host_unsubscribe,
+                    };
+                    create(bytes.as_ptr(), bytes.len(), &host_v2)
+                } else {
+                    let create: libloading::Symbol<
+                        unsafe extern "C" fn(*const u8, usize, *const NativeHostApi) -> *mut c_void,
+                    > = library
+                        .get(b"copypaste_module_with_host_v1\0")
+                        .map_err(|_| ModuleError::Load)?;
+                    create(bytes.as_ptr(), bytes.len(), &host_api)
+                }
             } else {
                 (api.create)(bytes.as_ptr(), bytes.len())
             };
@@ -260,6 +283,28 @@ struct HostBridge {
     id: String,
     services: Arc<crate::SyncServices>,
     accepting: Arc<AtomicBool>,
+    lifetime: Arc<crate::host_lifetime::HostLifetime>,
+}
+unsafe extern "C" fn host_subscribe(
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void),
+    callback_context: *mut c_void,
+) -> u64 {
+    if context.is_null() {
+        return 0;
+    }
+    // SAFETY: the bridge remains alive through module destruction.
+    unsafe { &*context.cast::<HostBridge>() }
+        .lifetime
+        .subscribe(callback, callback_context)
+}
+unsafe extern "C" fn host_unsubscribe(context: *mut c_void, id: u64) {
+    if !context.is_null() {
+        // SAFETY: subscriptions are dropped before module destruction returns.
+        unsafe { &*context.cast::<HostBridge>() }
+            .lifetime
+            .unsubscribe(id);
+    }
 }
 unsafe extern "C" fn host_request(
     context: *mut c_void,

@@ -499,6 +499,9 @@ mod tests {
                 let data = match reply {
                     AttachmentReply::Status { protocol_version } => {
                         copypaste_ipc::ResponseData::Status(copypaste_ipc::StatusData {
+                            runtime_watch: false,
+                            capture_watch: false,
+                            capture_revision: 0,
                             sync_status: Default::default(),
                             device_name: "Attached runtime".into(),
                             device_id: None,

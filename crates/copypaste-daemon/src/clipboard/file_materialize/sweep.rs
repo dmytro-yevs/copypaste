@@ -432,6 +432,7 @@ mod tests {
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
         FileMetadata {
+            transfer: None,
             filename: filename.into(),
             mime_type: "application/octet-stream".to_string(),
             source_reference: None,

@@ -32,3 +32,17 @@ abstract interface class HistoryRepository {
   Future<void> deleteAll();
   Future<void> reorderPinned(List<String> ids);
 }
+
+abstract interface class HistoryFileDownloadCancellation {
+  Future<void> cancelFileDownload(String id);
+}
+
+/// Uses native writer events when the backend supports them. Returns false
+/// without starting a save when the legacy filesystem fallback is required.
+abstract interface class HistoryFileProgressRepository {
+  Future<bool> saveFileWithProgress(
+    String id,
+    String destinationPath,
+    void Function(int written, int total) onProgress,
+  );
+}

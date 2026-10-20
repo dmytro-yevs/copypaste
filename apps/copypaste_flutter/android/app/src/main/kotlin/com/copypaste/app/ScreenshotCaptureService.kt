@@ -20,12 +20,14 @@ class ScreenshotCaptureService : Service() {
         }
         monitor?.refresh()
         active = this
+        ScreenshotCaptureSignals.changed()
         return START_STICKY
     }
     override fun onDestroy() {
         monitor?.close()
         monitor = null
         if (active === this) active = null
+        ScreenshotCaptureSignals.changed()
         super.onDestroy()
     }
     companion object {
@@ -46,6 +48,7 @@ class ScreenshotCaptureService : Service() {
         fun stop(context: Context, completion: (Boolean) -> Unit) {
             val service = active
             active = null
+            ScreenshotCaptureSignals.changed()
             val monitor = service?.monitor
             service?.monitor = null
             context.stopService(Intent(context, ScreenshotCaptureService::class.java))

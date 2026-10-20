@@ -51,6 +51,10 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   final MethodChannel _channel;
   VoidCallback? _openSettings;
   VoidCallback? _openMain;
+  VoidCallback? _findInHistory;
+
+  void setFindInHistoryHandler(VoidCallback? handler) =>
+      _findInHistory = handler;
 
   void setOpenMainHandler(VoidCallback? handler) => _openMain = handler;
 
@@ -94,6 +98,10 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   }
 
   Future<Object?> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'findInHistory') {
+      _findInHistory?.call();
+      return true;
+    }
     if (call.method == 'openMain') {
       _openMain?.call();
       return true;
@@ -111,6 +119,7 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   Future<void> dispose() async {
     _openSettings = null;
     _openMain = null;
+    _findInHistory = null;
     try {
       await _channel.invokeMethod<void>('dispose');
     } on MissingPluginException {
