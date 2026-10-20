@@ -23,6 +23,16 @@ def command(arguments: list[str]) -> None:
     subprocess.run(arguments, check=True)
 
 
+def kernel_packages(kernel: str) -> list[str]:
+    extra = f"linux-modules-extra-{kernel}"
+    result = subprocess.run(["apt-cache", "policy", extra], check=True, capture_output=True, text=True)
+    candidate = re.search(r"^\s*Candidate:\s*(\S+)", result.stdout, re.MULTILINE)
+    packages = [f"linux-headers-{kernel}"]
+    if candidate is not None and candidate[1] != "(none)":
+        packages.append(extra)
+    return [*packages, "v4l2loopback-dkms", "v4l-utils"]
+
+
 def require_ci() -> None:
     if platform.system() != "Linux" or os.environ.get("CI") != "true" or os.environ.get("COPYPASTE_QUALIFICATION_HEADLESS") != "1":
         raise RuntimeError("V4L2 loopback provisioning is limited to headless CI qualification")
@@ -145,7 +155,7 @@ def provision(state: Path, environment: Path) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._+-]+", kernel):
         raise RuntimeError("kernel release is unsafe")
     command(["sudo", "apt-get", "update"])
-    command(["sudo", "apt-get", "install", "--yes", "--no-install-recommends", f"linux-headers-{kernel}", f"linux-modules-extra-{kernel}", "v4l2loopback-dkms", "v4l-utils"])
+    command(["sudo", "apt-get", "install", "--yes", "--no-install-recommends", *kernel_packages(kernel)])
     uid = os.getuid(); gid = os.getgid()
     write_state(state, state_base(uid, gid, "prepared"))
     created = False

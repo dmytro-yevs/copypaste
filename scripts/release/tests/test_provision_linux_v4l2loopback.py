@@ -16,6 +16,22 @@ SPEC.loader.exec_module(tool)
 
 
 class ProvisionLinuxV4L2Test(unittest.TestCase):
+    def test_kernel_packages_require_headers_and_dkms_with_optional_published_extras(self):
+        for output, includes_extra in (("", False), ("  Candidate: (none)\n", False), ("  Candidate: 7.0.0-1017.17\n", True)):
+            with self.subTest(output=output), mock.patch.object(
+                tool.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=output),
+            ) as run:
+                packages = tool.kernel_packages("7.0.0-1017-azure")
+            self.assertEqual(packages[0], "linux-headers-7.0.0-1017-azure")
+            self.assertEqual(packages[-2:], ["v4l2loopback-dkms", "v4l-utils"])
+            self.assertEqual("linux-modules-extra-7.0.0-1017-azure" in packages, includes_extra)
+            run.assert_called_once_with(["apt-cache", "policy", "linux-modules-extra-7.0.0-1017-azure"], check=True, capture_output=True, text=True)
+
+    def test_package_metadata_failure_is_fatal_instead_of_becoming_an_absent_package(self):
+        with mock.patch.object(tool.subprocess, "run", side_effect=subprocess.CalledProcessError(100, "apt-cache")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                tool.kernel_packages("7.0.0-1017-azure")
+
     def scenario_reset(self, succeeds):
         script = (ROOT / "scripts/release/run-linux-native-scenarios.sh").read_text()
         start = script.index('if [[ -n "${COPYPASTE_QUALIFICATION_V4L2_STATE:-}" ]]')
@@ -190,6 +206,7 @@ class ProvisionLinuxV4L2Test(unittest.TestCase):
                  mock.patch.object(tool, "assert_unowned_target"), \
                  mock.patch.object(tool, "device_is_character", return_value=True), \
                  mock.patch.object(tool.platform, "release", return_value="6.8.0"), \
+                 mock.patch.object(tool, "kernel_packages", return_value=["linux-headers-6.8.0", "linux-modules-extra-6.8.0", "v4l2loopback-dkms", "v4l-utils"]), \
                  mock.patch.object(tool, "command", side_effect=run), \
                  mock.patch.object(tool, "read_live_device", side_effect=[root_live, job_live]), \
                  mock.patch.object(tool, "unwind_provision") as unwind:
