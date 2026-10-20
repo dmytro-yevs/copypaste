@@ -2600,7 +2600,7 @@ void main() {
     await controller.activateFocused();
 
     expect(repository.copied, ['recent']);
-    expect(host.pasteIds, [1]);
+    expect(host.pasteCalls, 1);
     expect(host.closeCalls, 0);
   });
 
@@ -2646,7 +2646,7 @@ void main() {
       invertAutoPaste: true,
     );
 
-    expect(host.pasteIds, [1]);
+    expect(host.pasteCalls, 1);
     expect(host.closeCalls, 0);
   });
 
@@ -2750,7 +2750,7 @@ void main() {
       repository.copyGate!.complete();
       await action;
       expect(repository.copied, ['recent']);
-      expect(host.pasteIds, [1]);
+      expect(host.pasteCalls, 1);
       expect(host.closeIds, [1]);
       expect(host.actualCloseIds, isEmpty);
       expect(host.nativeId, 2);
@@ -2782,7 +2782,7 @@ void main() {
         await controller.opened(1);
         await controller.activate(controller.history.items.last);
         expect(repository.copied, ['recent']);
-        expect(host.pasteIds, [1]);
+        expect(host.pasteCalls, 1);
         expect(host.closeIds, [1]);
         expect(controller.activating, isFalse);
       },
