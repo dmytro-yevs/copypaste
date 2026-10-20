@@ -19,6 +19,7 @@ import stat
 import hashlib
 import importlib.util
 import re
+import runpy
 import signal
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from urllib.parse import unquote, urlencode, urlparse
 
 
 PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py")
+PROTOCOL_VERSION = runpy.run_path(str(Path(__file__).with_name("runtime_protocol.py")))["PROTOCOL_VERSION"]
 X11_INPUT_TARGET = Path(__file__).with_name("linux-x11-input-target.c")
 MODULE_QUALIFICATION = Path(__file__).with_name("linux-module-qualification.py")
 DESKTOP_ACCEPTANCE = Path(__file__).with_name("linux-desktop-acceptance.py")
@@ -507,7 +509,7 @@ def response_variant(response, name):
 
 
 def ipc(socket_path, method, params=None):
-    request = {"id": 991, "protocol_version": 5, "method": method}
+    request = {"id": 991, "protocol_version": PROTOCOL_VERSION, "method": method}
     if params is not None:
         request["params"] = params
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
@@ -937,10 +939,15 @@ def require_locator_file_capture(cli, environment, workspace, evidence_dir, sess
         if saved.read_bytes() != payload:
             raise RuntimeError("captured file bytes did not survive the product save_file path")
         run([str(cli), "--json", "copy", item["id"]], env=environment)
-        locator = external_clipboard_bytes(session, "text/plain;charset=utf-8", environment)
-        if locator.stdout != str(original).encode("utf-8"):
-            raise RuntimeError("native backend did not preserve the file locator on copy")
-    return locator
+        copied = external_clipboard_bytes(session, "text/uri-list", environment)
+        parsed = urlparse(copied.stdout.decode("utf-8").strip())
+        snapshot = Path(unquote(parsed.path))
+        if parsed.scheme != "file" or snapshot.name != original.name or snapshot.read_bytes() != payload:
+            raise RuntimeError("native backend did not preserve the file name and snapshot bytes on copy")
+        original.write_bytes(b"Changed after the clipboard snapshot\n")
+        if snapshot.read_bytes() != payload:
+            raise RuntimeError("native file copy still depends on the mutable original instead of its snapshot")
+    return copied
 
 
 def require_reference_free_file_copy(cli, environment, workspace, session, socket_path):

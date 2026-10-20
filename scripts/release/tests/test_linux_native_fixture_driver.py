@@ -452,7 +452,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             )
         status.assert_called_once_with("cli", {})
 
-    def test_locator_file_capture_saves_bytes_and_copies_the_original_locator_as_text(self):
+    def test_locator_file_capture_saves_bytes_and_copies_an_independent_native_snapshot(self):
         captured = {
             "id": "captured", "content_type": "file",
             "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
@@ -464,7 +464,10 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             saved = workspace / "captured-file-roundtrip.txt"
-            copied = str(workspace / "fixture.txt").encode("utf-8")
+            snapshot = workspace / "clipboard-copy" / "fixture.txt"
+            snapshot.parent.mkdir()
+            snapshot.write_bytes(b"CopyPaste qualification file payload\n")
+            copied = (snapshot.as_uri() + "\r\n").encode("utf-8")
             def ipc(socket_path, method, params):
                 self.assertEqual(socket_path, workspace / "gui.sock")
                 self.assertEqual(method, "save_file")
@@ -483,6 +486,18 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 driver.require_locator_file_capture(
                     Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland", workspace / "gui.sock",
                 )
+            with mock.patch.object(driver, "clipboard_provider", provider), \
+                 mock.patch.object(driver, "status", side_effect=[{"item_count": 0}, {"item_count": 1}]), \
+                 mock.patch.object(driver, "list_items", side_effect=[[], [captured]]), \
+                 mock.patch.object(driver, "ipc", side_effect=ipc), \
+                 mock.patch.object(driver, "run", side_effect=[
+                     subprocess.CompletedProcess(["copypaste-cli", "copy"], 0),
+                     subprocess.CompletedProcess(["wl-paste"], 0, stdout=(workspace / "fixture.txt").as_uri().encode()),
+                 ]):
+                with self.assertRaisesRegex(RuntimeError, "mutable original"):
+                    driver.require_locator_file_capture(
+                        Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland", workspace / "gui.sock",
+                    )
 
     def test_reference_free_import_copies_a_materialized_uri_with_original_bytes(self):
         imported = {
