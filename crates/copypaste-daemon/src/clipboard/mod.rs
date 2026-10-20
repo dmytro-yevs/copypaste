@@ -1,9 +1,6 @@
 //! The clipboard source port — platform I/O ends at this seam.
 //!
-//! Port manifest 01 (`docs/rewrite/port-manifest/01-clipboard-capture.md`) is
-//! binding for the current text, image and single-file capture contract.
-//!
-//! The platform adapters do not own change state, so the invariants in §2 stay
+//! The platform adapters do not own change state, so the shared invariants stay
 //! testable without a real pasteboard — which is precisely why several
 //! of them regressed. This module is the fix: one trait ([`ClipboardSource`]),
 //! one real backend, one fake, and the change-detection state machine written

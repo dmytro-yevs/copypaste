@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every measurement behind docs/rewrite/performance.md, in order, into a log.
+# Run the profiling measurements in order and collect their logs.
 #
 # Sequential on purpose: two of these running at once measure each other.
 #

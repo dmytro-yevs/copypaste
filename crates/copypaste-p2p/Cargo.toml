@@ -60,7 +60,7 @@ tracing-subscriber.workspace = true
 # that really waits it out.
 tokio = { workspace = true, features = ["test-util"] }
 # Benchmark harness, configured exactly as `copypaste-core`'s is: no plotters,
-# no rayon, and the numbers land in `docs/rewrite/performance.md`.
+# no rayon; measurements are recorded separately from the harness.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 # `harness = false`: criterion parses its own arguments, and this keeps the

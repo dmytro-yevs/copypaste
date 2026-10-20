@@ -21,7 +21,7 @@ class RustsecPolicyTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temporary.name)
-        decision = self.root / "docs/adr/decision.md"
+        decision = self.root / "config/reviewed-decisions/decision.md"
         decision.parent.mkdir(parents=True)
         decision.write_text("accepted\n", encoding="utf-8")
         self.exception = {
@@ -34,7 +34,7 @@ class RustsecPolicyTest(unittest.TestCase):
             "expires": "2026-11-10",
             "affected_targets": ["x86_64-unknown-linux-gnu"],
             "unaffected_targets": ["x86_64-pc-windows-msvc"],
-            "decision": "docs/adr/decision.md",
+            "decision": "config/reviewed-decisions/decision.md",
         }
         self.today = datetime.date(2026, 8, 10)
 

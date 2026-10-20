@@ -10,7 +10,7 @@
 #
 #   scripts/profile/macos-keychain-preflight.sh
 #
-# docs/rewrite/macos-idle-measurement.md decides what to do with the answer.
+# Select the appropriate isolated measurement route from the report below.
 # Written for /bin/bash 3.2, which is what macOS ships.
 set -uo pipefail
 
@@ -216,6 +216,5 @@ else
     echo "  this build once by hand and use KEYCHAIN_ROUTE=signed."
 fi
 echo
-echo "  Every route, what each costs and what each would falsify:"
-echo "  docs/rewrite/macos-idle-measurement.md"
+echo "  Record the selected route with every measurement."
 exit 0
