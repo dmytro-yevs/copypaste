@@ -96,7 +96,7 @@ ordering is authenticated; the backend observes account, traffic, and synchroniz
 metadata, including producer privacy classification. Credentials and derived sync keys use application-owned encrypted
 state, not plaintext preference files. Never infer deployed row-level security
 from repository SQL or local stubs: the actual deployment requires separate
-qualification. See [cloud privacy](docs/cloud-privacy.md).
+qualification.
 
 ## Modules and updates
 

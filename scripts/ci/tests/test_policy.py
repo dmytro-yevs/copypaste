@@ -115,9 +115,9 @@ class PolicyTest(unittest.TestCase):
     def test_change_selection_fails_closed(self):
         for path in ["Cargo.lock", "crates/core/lib.rs", "apps/copypaste_flutter/lib/generated.dart",
                      "scripts/build.sh", "unregistered-platform/file", "../README.md",
-                     "docs/release-qualification.md", "docs/engineering/ci-standards.md"]:
+                     "config/runtime-resource-budgets.json", "packaging/linux/release-contract.json"]:
             self.assertTrue(select([path])["native"], path)
-        self.assertFalse(select(["README.md", "docs/cloud-privacy.md"])["native"])
+        self.assertFalse(select(["README.md", "LICENSE-MIT"])["native"])
         self.assertTrue(select(["README.md", "new-file"])["native"])
 
     def test_aggregate_rejects_failed_or_skipped_required_jobs(self):

@@ -1,8 +1,7 @@
 # Local development stack for `supabase start` / `supabase db reset`.
 #
 # This file configures the *local* stack only. A hosted project is configured in
-# its dashboard; the values that must match there are called out in
-# `docs/supabase-deployment.md`.
+# its dashboard and must match the maintained schema and authentication policy.
 
 project_id = "copypaste"
 
