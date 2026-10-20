@@ -1730,6 +1730,7 @@
       ],
       "source_references": [
         "crates/copypaste-core/src/storage/space.rs",
+        "crates/copypaste-fs/src/file_lock.rs",
         "crates/copypaste-core/src/storage/creation.rs",
         "crates/copypaste-core/src/storage/store.rs",
         "apps/copypaste_flutter/lib/platform/files/temporary_artifacts.dart",
@@ -1741,7 +1742,7 @@
         "crates/copypaste-modules/src/staging_cleanup.rs",
         "crates/copypaste-modules/src/manager.rs"
       ],
-      "invariant": "Preserve original History bytes, pins, retention settings and live clear boundaries. Current Android URI ownership survives restart and interrupted publication; stale inactive publications have one-day grace. Flutter staging is namespaced, leased across processes and protected across engines. No periodic cleanup timer or permanent cleanup executor. Recognized installed-version packages are removed offline; newer pending installers remain. Completed transfer paths identify actual bytes; only complete outputs are published. New databases reclaim incrementally after committed deletes; legacy full rebuild requires exclusive lifetime Store ownership before runtime publication. Module managers retain shared lifetime leases; exclusive startup maintenance removes only expired default temporary input/extraction/download directories, preserving installed models and completed pending module updates.",
+      "invariant": "Preserve original History bytes, pins, retention settings and live clear boundaries. Current Android URI ownership survives restart and interrupted publication; stale inactive publications have one-day grace. Flutter staging is namespaced, leased across processes and protected across engines. No periodic cleanup timer or permanent cleanup executor. Recognized installed-version packages are removed offline; newer pending installers remain. Completed transfer paths identify actual bytes; only complete outputs are published. New databases reclaim incrementally after committed deletes; legacy full rebuild requires exclusive lifetime Store ownership before runtime publication. Android, macOS and Windows storage/module cleanup use the shared advisory-lock adapter; Android uses flock because Rust std file locking is unsupported there. Module managers retain shared lifetime leases; exclusive startup maintenance removes only expired default temporary input/extraction/download directories, preserving installed models and completed pending module updates.",
       "next_step": "Measure equivalent native baseline/candidate cache and data growth, CPU, I/O, startup/action latency, process-family memory and low-space behavior on macOS, physical Android and installed Windows. A legacy file opened before a large deletion requires a later exclusive reopen; conversion admission requires 8 MiB and 25% free pages. Busy readers can defer WAL truncation. Unmarked generic legacy desktop staging is preserved because ownership is unknown. Recent/current/leased payloads and pending newer installers have no aggregate byte ceiling. Allocation policies are not resource budgets; unresolved non-memory thresholds remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2569,7 +2570,7 @@
         "crates/copypaste-core/src/sync/source.rs",
         "crates/copypaste-core/src/storage/summary_workspace.rs",
         "crates/copypaste-core/src/storage/summary_workspace_cleanup.rs",
-        "crates/copypaste-core/src/storage/file_lock.rs"
+        "crates/copypaste-fs/src/file_lock.rs"
       ],
       "invariant": "Separate immutable advertised authorization from page-bounded local comparison metadata; preserve every remote occurrence, exact conflict rules, deferred watermarks and complete persisted-cursor catch-up.",
       "allocation_lifetime": "One session-owned workspace; spill uses a random ephemeral SQLCipher key and owned directory/lease. Blocking work retains ownership until actual completion, including caller cancellation.",

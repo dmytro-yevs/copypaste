@@ -1,5 +1,6 @@
 //! Reap invocation/install/download leftovers without touching live module data.
 
+use copypaste_fs::file_lock::{lock_shared, try_lock_exclusive, unlock, TryLock};
 use std::{
     fs, io,
     path::Path,
@@ -15,14 +16,13 @@ pub(crate) fn open(root: &Path) -> io::Result<fs::File> {
         .create(true)
         .truncate(false)
         .open(root.join(".staging-owner"))?;
-    match file.try_lock() {
-        Ok(()) => {
+    match try_lock_exclusive(&file)? {
+        TryLock::Acquired => {
             cleanup(root, SystemTime::now());
-            file.unlock()?;
-            file.lock_shared()?;
+            unlock(&file)?;
+            lock_shared(&file)?;
         }
-        Err(fs::TryLockError::WouldBlock) => file.lock_shared()?,
-        Err(fs::TryLockError::Error(error)) => return Err(error),
+        TryLock::WouldBlock => lock_shared(&file)?,
     }
     Ok(file)
 }
@@ -132,12 +132,15 @@ mod tests {
             .open(root.path().join(".staging-owner"))
             .unwrap();
         assert!(matches!(
-            probe.try_lock(),
-            Err(fs::TryLockError::WouldBlock)
+            try_lock_exclusive(&probe).unwrap(),
+            TryLock::WouldBlock
         ));
         drop(first);
         drop(second);
-        probe.try_lock().unwrap();
+        assert!(matches!(
+            try_lock_exclusive(&probe).unwrap(),
+            TryLock::Acquired
+        ));
         cleanup(
             root.path(),
             SystemTime::now() + Duration::from_secs(2 * 24 * 60 * 60),

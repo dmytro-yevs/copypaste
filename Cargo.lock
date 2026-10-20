@@ -723,6 +723,7 @@ dependencies = [
  "base64",
  "chacha20poly1305",
  "copypaste-clock",
+ "copypaste-fs",
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-payload",
@@ -855,6 +856,7 @@ dependencies = [
 name = "copypaste-fs"
 version = "1.0.31"
 dependencies = [
+ "rustix",
  "tempfile",
 ]
 

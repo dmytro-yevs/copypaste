@@ -75,8 +75,8 @@ impl Store {
             if let Err(error) = super::space::prepare(&conn) {
                 tracing::warn!(%error, "deferred history space maintenance");
             }
-            space_lock.unlock()?;
-            space_lock.lock_shared()?;
+            copypaste_fs::file_lock::unlock(&space_lock)?;
+            copypaste_fs::file_lock::lock_shared(&space_lock)?;
         }
         let incremental_reclaim =
             conn.pragma_query_value(None, "auto_vacuum", |r| r.get::<_, u32>(0))? == 2;

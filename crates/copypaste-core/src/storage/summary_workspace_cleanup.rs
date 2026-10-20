@@ -4,7 +4,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 
-use super::file_lock::{lock_exclusive, try_lock_exclusive, TryLock};
+use copypaste_fs::file_lock::{lock_exclusive, try_lock_exclusive, TryLock};
 
 const ROOT: &str = ".copypaste-sync-workspaces";
 const PREFIX: &str = "session-";
