@@ -238,7 +238,12 @@ class FlutterDesktopWindowHost
         ..setTitle(Platform.isMacOS ? null : 'CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
-        ..setContextMenuTrigger(ContextMenuTrigger.rightClicked);
+        ..setContextMenuTrigger(
+          // Linux exports its D-Bus menu only with the primary menu trigger.
+          Platform.isLinux
+              ? ContextMenuTrigger.clicked
+              : ContextMenuTrigger.rightClicked,
+        );
       if (!icon.setVisible(visible)) {
         throw StateError('Unable to show the system tray controls.');
       }
