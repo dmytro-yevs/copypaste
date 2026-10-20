@@ -6,6 +6,7 @@ import importlib.util
 import json
 import math
 import os
+import runpy
 import shutil
 import socket
 import zipfile
@@ -13,6 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PROTOCOL_VERSION = runpy.run_path(str(Path(__file__).with_name("runtime_protocol.py")))["PROTOCOL_VERSION"]
 CATALOG_SPEC = importlib.util.spec_from_file_location(
     "copypaste_module_catalog", ROOT / "scripts/modules/catalog.py",
 )
@@ -194,7 +196,7 @@ def seed_semantic_model(fixtures, application_data, model):
 
 
 def rpc(socket_path, operation):
-    request = {"id": 992, "protocol_version": 5, "method": "modules", "params": {"operation": operation}}
+    request = {"id": 992, "protocol_version": PROTOCOL_VERSION, "method": "modules", "params": {"operation": operation}}
     request_bytes = json.dumps(request, separators=(",", ":")).encode() + b"\n"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
         channel.settimeout(30)
