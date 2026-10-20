@@ -3,6 +3,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use copypaste_fs::file_lock::{lock_shared, try_lock_exclusive, TryLock};
 use rusqlite::Connection;
 
 use super::{connection::run_pragma, Store};
@@ -25,16 +26,15 @@ pub(super) fn lock_store(path: &std::path::Path) -> std::io::Result<(std::fs::Fi
     // Fresh-file publication already has a concurrent-winner protocol. Both
     // creators can share this lease because new files need no VACUUM.
     if !path.try_exists()? {
-        file.lock_shared()?;
+        lock_shared(&file)?;
         return Ok((file, false));
     }
-    match file.try_lock() {
-        Ok(()) => Ok((file, true)),
-        Err(std::fs::TryLockError::WouldBlock) => {
-            file.lock_shared()?;
+    match try_lock_exclusive(&file)? {
+        TryLock::Acquired => Ok((file, true)),
+        TryLock::WouldBlock => {
+            lock_shared(&file)?;
             Ok((file, false))
         }
-        Err(std::fs::TryLockError::Error(error)) => Err(error),
     }
 }
 

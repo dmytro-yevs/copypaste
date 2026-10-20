@@ -13,6 +13,8 @@ use std::sync::Mutex;
 
 use tempfile::NamedTempFile;
 
+pub mod file_lock;
+
 static REPLACE: Mutex<()> = Mutex::new(());
 
 /// Mode [`Visibility::OwnerOnly`] applies on unix.
