@@ -77,6 +77,8 @@ jobs:
           original_target = g['x11_input_target']
           
           def run(argv, **kwargs):
+              if argv == ['xdotool', 'mousemove', '--sync', '16', '16']:
+                  original_run(['xdotool', 'mousemove', '32', '32'], **kwargs)
               print('DIAGNOSTIC COMMAND', [str(v) for v in argv], flush=True)
               result = original_run(argv, **kwargs)
               print('DIAGNOSTIC COMMAND DONE', result.returncode, flush=True)
