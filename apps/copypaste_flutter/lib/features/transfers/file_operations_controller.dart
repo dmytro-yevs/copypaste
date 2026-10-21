@@ -109,12 +109,14 @@ class FileOperationsController extends ChangeNotifier {
         continue;
       }
       final previous = _clipStates[record.itemId];
-      if (previous != null &&
-          previous.startedAt.isAfter(record.startedAt) &&
-          !record.active &&
-          !(record.phase == 'completed' && record.localPath != null)) {
-        continue;
+      if (previous != null) {
+        final order = previous.startedAt.compareTo(record.startedAt);
+        if (order > 0 || (order == 0 && previous.id.compareTo(record.id) > 0)) {
+          continue;
+        }
       }
+      // Saved-byte reuse belongs to the runtime's downloaded-file mapping;
+      // an older saved path must never replace a newer operation's status.
       _clipStates.remove(record.itemId);
       _clipStates[record.itemId] = record;
     }

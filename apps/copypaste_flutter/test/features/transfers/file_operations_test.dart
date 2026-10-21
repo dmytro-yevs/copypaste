@@ -15,9 +15,11 @@ FileOperation operation(
   String phase, {
   int written = 0,
   String? path,
+  String? itemId,
+  DateTime? startedAt,
 }) => FileOperation(
   id: id,
-  itemId: 'clip-$id',
+  itemId: itemId ?? 'clip-$id',
   name: '$id.pdf',
   kind: FileOperationKind.receive,
   phase: phase,
@@ -25,7 +27,7 @@ FileOperation operation(
   destinationDevice: 'MacBook Air',
   written: written,
   total: 1024 * 1024,
-  startedAt: DateTime(2026, 10, 21, 10),
+  startedAt: startedAt ?? DateTime(2026, 10, 21, 10),
   finishedAt: phase == 'running' ? null : DateTime(2026, 10, 21, 10, 1),
   localPath: path,
   error: phase == 'failed'
@@ -86,6 +88,45 @@ void main() {
       expect(reopened.items.single.id, 'another');
       expect(repository.cancelled, isEmpty);
       reopened.dispose();
+      second.dispose();
+      await repository.changes.close();
+    },
+  );
+
+  test(
+    'newest failure survives refresh, a second screen and reconnect',
+    () async {
+      final older = operation(
+        'older',
+        'completed',
+        itemId: 'same-file',
+        path: '/saved/report.pdf',
+        startedAt: DateTime(2026, 10, 20),
+      );
+      final failed = operation(
+        'newer',
+        'failed',
+        itemId: 'same-file',
+        path: '/saved/retry.pdf',
+        startedAt: DateTime(2026, 10, 21),
+      );
+      final repository = _Repository()..records = [older];
+      final first = FileOperationsController(repository);
+      await first.initialize();
+      expect(first.forClip('same-file')!.phase, 'completed');
+      repository.records = [failed, older];
+      await first.refresh();
+      expect(first.items.first.phase, 'failed');
+      expect(first.forClip('same-file')!.id, 'newer');
+      expect(first.forClip('same-file')!.error, contains('unavailable'));
+      final second = FileOperationsController(repository);
+      await second.initialize();
+      expect(second.forClip('same-file')!.phase, 'failed');
+      repository.changes.add(const FileOperationsChange());
+      await Future<void>.delayed(Duration.zero);
+      expect(first.forClip('same-file')!.phase, 'failed');
+      expect(second.forClip('same-file')!.phase, 'failed');
+      first.dispose();
       second.dispose();
       await repository.changes.close();
     },
