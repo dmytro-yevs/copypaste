@@ -14,8 +14,12 @@ ROOT = Path(__file__).resolve().parents[3]
 @unittest.skipUnless(sys.platform == "darwin", "requires native macOS code signing and Keychain")
 class MacosKeychainUpdateTest(unittest.TestCase):
     def run_command(self, *args, **kwargs):
-        return subprocess.run(args, check=True, capture_output=True, text=True,
-                              timeout=30, env=self.environment, **kwargs)
+        try:
+            return subprocess.run(args, check=True, capture_output=True, text=True,
+                                  timeout=30, env=self.environment, **kwargs)
+        except subprocess.CalledProcessError as error:
+            self.fail(f"Native fixture command {Path(args[0]).name} failed ({error.returncode}):\n"
+                      f"{error.stdout}\n{error.stderr}")
 
     def test_updated_daemon_reuses_one_key_and_one_helper_grant(self):
         with tempfile.TemporaryDirectory(prefix="keychain-update-") as directory:
