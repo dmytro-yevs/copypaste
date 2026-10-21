@@ -26,12 +26,23 @@ pub struct FileMetadata {
 pub struct FileTransfer {
     pub size_bytes: u64,
     pub sha256: String,
+    /// A deferred original is identified before any file bytes are read.
+    /// Its checksum is authenticated at the end of an explicit file session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_version: Option<String>,
 }
 
 impl FileTransfer {
     pub fn is_valid(&self) -> bool {
         self.size_bytes <= i64::MAX as u64
-            && self.sha256.len() == 64
+            && ((self.sha256.len() == 64 && self.source_version.is_none())
+                || (self.sha256.is_empty()
+                    && self.source_version.as_ref().is_some_and(|version| {
+                        version.len() == 32
+                            && version
+                                .bytes()
+                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    })))
             && self
                 .sha256
                 .bytes()

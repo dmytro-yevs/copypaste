@@ -174,7 +174,7 @@ fn protocol_gate(request: &Request) -> Option<Response> {
 fn requires_ready(method: &Method) -> bool {
     match method {
         Method::Status => false,
-        Method::Modules { .. } => true,
+        Method::Modules { .. } | Method::FileOperations { .. } | Method::ImportFileReference { .. } | Method::DownloadedFile { .. } | Method::StartFileDownload { .. } => true,
         // Settings live in the database, so reading them needs it open. There
         // is no degraded mode in v2 — a daemon whose database will not open
         // does not finish starting — so nothing is lost by gating them, and
@@ -349,6 +349,47 @@ pub(super) async fn dispatch_request(
 ) -> AdmittedResponse {
     let id = request.id;
     let response = match request.method {
+        Method::StartFileDownload {
+            id: item_id,
+            dest_path,
+            token,
+        } => {
+            if item_id.len() > 128 || token.len() > 128 || dest_path.len() > 4096 {
+                Response::err(
+                    id,
+                    ErrorCode::InvalidRequest,
+                    "The download request contains invalid file metadata.",
+                )
+            } else {
+                match state.file_downloads.reserve_background() {
+                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+                    Ok(slot) => {
+                        let state = Arc::clone(state);
+                        tokio::spawn(async move {
+                            let _slot = slot;
+                            let settings = state.settings.get().clone();
+                            let _ = state
+                                .file_downloads
+                                .save_with_progress(
+                                    &state.store,
+                                    &state.keyring,
+                                    state.p2p.node(),
+                                    state.meta.device_id(),
+                                    &settings,
+                                    copypaste_core::file_download::FileDownloadRequest {
+                                        id: &item_id,
+                                        destination: std::path::Path::new(&dest_path),
+                                        token: Some(&token),
+                                    },
+                                    Arc::new(|_, _| {}),
+                                )
+                                .await;
+                        });
+                        Response::ok(id, copypaste_ipc::ResponseData::Empty {})
+                    }
+                }
+            }
+        }
         Method::CancelFileDownload { id: item_id } => {
             state.file_downloads.cancel(&item_id);
             Response::ok(id, copypaste_ipc::ResponseData::Empty {})
@@ -396,6 +437,7 @@ pub(super) async fn dispatch_request(
                             {
                                 if let Some(token) = progress_token.as_ref() {
                                     let _ = sender.send(copypaste_ipc::RuntimeEventData {
+                                        file_operation: None,
                                         change: None,
                                         capture: None,
                                         progress: Some(copypaste_ipc::FileProgress {
@@ -550,6 +592,55 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             dest_path,
             ..
         } => items::save_file(state, id, &item_id, &dest_path),
+        Method::FileOperations {
+            clear,
+            before,
+            id: operation_id,
+        } => match state
+            .store
+            .file_operations(clear, before.as_deref(), operation_id.as_deref())
+        {
+            Ok(records) => Response::ok(id, copypaste_ipc::ResponseData::FileOperations(records)),
+            Err(_) => Response::err(
+                id,
+                ErrorCode::Internal,
+                "File operations could not be loaded.",
+            ),
+        },
+        Method::DownloadedFile { id: item_id } => {
+            let path = state
+                .store
+                .downloaded_file(&item_id)
+                .ok()
+                .flatten()
+                .filter(|path| std::path::Path::new(path).is_file());
+            Response::ok(id, copypaste_ipc::ResponseData::DownloadedFile(path))
+        }
+        Method::StartFileDownload { .. } => Response::err(
+            id,
+            ErrorCode::InvalidRequest,
+            "Use the asynchronous download dispatcher.",
+        ),
+        Method::ImportFileReference {
+            reference,
+            filename,
+            mime_type,
+            size_hint,
+        } => match copypaste_core::file_reference::import(
+            &state.store,
+            &state.keyring,
+            &reference,
+            &filename,
+            &mime_type,
+            &state.settings.get(),
+            size_hint,
+        ) {
+            Ok(_) => {
+                state.note_local_change();
+                Response::ok(id, copypaste_ipc::ResponseData::Empty {})
+            }
+            Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+        },
         Method::Add { content } => items::add(state, id, &content),
         Method::ImportFile {
             path,

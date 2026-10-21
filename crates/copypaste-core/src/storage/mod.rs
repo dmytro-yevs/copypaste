@@ -37,6 +37,7 @@
 mod connection;
 mod creation;
 mod dbfile;
+mod file_operations;
 mod file_payloads;
 mod file_transfers;
 mod fuzzy_search;

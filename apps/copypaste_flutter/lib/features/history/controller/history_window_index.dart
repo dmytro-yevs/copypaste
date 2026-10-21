@@ -196,8 +196,9 @@ class HistoryWindowIndex {
         if (rows == null ||
             (!independentPins && !page.hasExactExtent) ||
             i == activeIndex ||
-            (protected?.isNotEmpty == true && !protectedSurvives))
+            (protected?.isNotEmpty == true && !protectedSurvives)) {
           continue;
+        }
         if (trimPins && !rows.any((item) => item.pinned)) continue;
         if (trimRecent && !rows.any((item) => !item.pinned)) continue;
         final distance = (i - activeIndex).abs();

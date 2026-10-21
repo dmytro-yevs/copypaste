@@ -6,6 +6,7 @@ internal fun interface CaptureCallback {
 }
 
 internal object NativeRuntimeCapture {
+    @JvmStatic external fun fileSourceRetained(reference: String): Boolean
     @JvmStatic external fun openHost(explicit: Boolean): Long
     // Short metadata revocation; drain is worker-only.
     @JvmStatic external fun revokeHost(host: Long): Boolean

@@ -362,7 +362,47 @@ impl<S: SyncSource> ActiveSyncSource<'_, S> {
     }
 }
 
+struct ActiveDeferredFileSource {
+    source: Box<dyn crate::sync::DeferredFileSource>,
+    state: Arc<ActiveSyncState>,
+}
+impl crate::sync::DeferredFileSource for ActiveDeferredFileSource {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
+        let _operation = self
+            .state
+            .enter_operation()
+            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))?;
+        self.source.read_chunk()
+    }
+    fn verify(&mut self) -> Result<(), SyncError> {
+        let _operation = self
+            .state
+            .enter_operation()
+            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))?;
+        self.source.verify()
+    }
+}
+
 impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
+    fn deferred_file(
+        &self,
+        id: &str,
+    ) -> Result<Option<Box<dyn crate::sync::DeferredFileSource>>, SyncError> {
+        let _operation = self.operation()?;
+        Ok(self.source.deferred_file(id)?.map(|source| {
+            Box::new(ActiveDeferredFileSource {
+                source,
+                state: Arc::clone(&self.state),
+            }) as Box<dyn crate::sync::DeferredFileSource>
+        }))
+    }
+    fn observe_file_transfer(
+        &self,
+        id: &str,
+        peer: &str,
+    ) -> Option<Box<dyn crate::sync::FileTransferObserver>> {
+        self.source.observe_file_transfer(id, peer)
+    }
     fn summary_workspace(&self) -> Result<Box<dyn crate::sync::SummaryWorkspace>, SyncError> {
         let _operation = self.operation()?;
         self.source.summary_workspace()

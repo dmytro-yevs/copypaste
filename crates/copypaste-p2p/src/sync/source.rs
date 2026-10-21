@@ -64,7 +64,26 @@ impl SyncCursor {
 /// is the only place the true origins are known and the only layer that sees
 /// concurrent local writes, and re-checking is what makes replay a no-op rather
 /// than a resurrection. Return `false` when the local copy wins.
+pub trait DeferredFileSource: Send {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError>;
+    fn verify(&mut self) -> Result<(), SyncError>;
+}
+pub trait FileTransferObserver: Send {
+    fn progress(&mut self, written: u64);
+    fn finish(&mut self, error: Option<String>);
+}
+
 pub trait SyncSource {
+    fn deferred_file(&self, _id: &str) -> Result<Option<Box<dyn DeferredFileSource>>, SyncError> {
+        Ok(None)
+    }
+    fn observe_file_transfer(
+        &self,
+        _id: &str,
+        _peer: &str,
+    ) -> Option<Box<dyn FileTransferObserver>> {
+        None
+    }
     /// Create one isolated summary snapshot for this sync session.
     fn summary_workspace(&self) -> Result<Box<dyn super::SummaryWorkspace>, SyncError> {
         Ok(Box::new(super::MemorySummaryWorkspace::default()))

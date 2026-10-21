@@ -18,7 +18,7 @@ pub use codec::ProtocolError;
 /// Version of the message set. Bumped whenever two builds would disagree on a
 /// field. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
@@ -231,7 +231,12 @@ pub enum SyncMessage {
         index: u64,
         bytes: Vec<u8>,
     },
-    FileUnavailable,
+    FileUnavailable {
+        reason: String,
+    },
+    FileChecksum {
+        sha256: String,
+    },
     Done,
 }
 
@@ -249,7 +254,8 @@ impl SyncMessage {
             Self::Done => "done",
             Self::FileRequest { .. } => "file_request",
             Self::FileChunk { .. } => "file_chunk",
-            Self::FileUnavailable => "file_unavailable",
+            Self::FileUnavailable { .. } => "file_unavailable",
+            Self::FileChecksum { .. } => "file_checksum",
         }
     }
 }

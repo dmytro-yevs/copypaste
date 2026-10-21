@@ -20,7 +20,8 @@ class HistoryFileTransfer {
   HistoryFileTransfer(
     this._repository, {
     Future<Directory> Function()? temporaryDirectory,
-  }) : _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory;
+  }) : _temporaryDirectory =
+           temporaryDirectory ?? getApplicationSupportDirectory;
 
   final HistoryRepository _repository;
   final Future<Directory> Function() _temporaryDirectory;
@@ -46,6 +47,28 @@ class HistoryFileTransfer {
   ) async {
     final details = clip.file;
     if (details == null) throw StateError('The clip is not a file.');
+    if (_repository case final HistoryDownloadedFileRepository repository) {
+      final existing = await repository.downloadedFile(clip.id);
+      if (existing != null && await File(existing).exists()) {
+        onProgress(1);
+        return existing;
+      }
+      final root = await _temporaryDirectory();
+      final downloads = Directory('${root.path}/copypaste-downloads');
+      await downloads.create(recursive: true);
+      final destination = await downloads.createTemp('file-');
+      final name = _safeFileName(details.name);
+      final path = '${destination.path}/${name.isEmpty ? 'file' : name}';
+      try {
+        await saveTo(clip, path, onProgress: onProgress);
+        return path;
+      } catch (_) {
+        if (await destination.exists()) {
+          await destination.delete(recursive: true);
+        }
+        rethrow;
+      }
+    }
     final root = await _temporaryDirectory();
     final directory = Directory('${root.path}/copypaste-file-transfers');
     await directory.create(recursive: true);
@@ -80,17 +103,7 @@ class HistoryFileTransfer {
           .convert(utf8.encode(clip.id))
           .toString()
           .substring(0, 16);
-      var name = (details.name ?? 'file')
-          .split(RegExp(r'[/\\]'))
-          .last
-          .replaceAll(RegExp('[^A-Za-z0-9._ -]'), '_');
-      if (name.length > 100) {
-        final dot = name.lastIndexOf('.');
-        final extension = dot > 0 && name.length - dot <= 16
-            ? name.substring(dot)
-            : '';
-        name = '${name.substring(0, 100 - extension.length)}$extension';
-      }
+      final name = _safeFileName(details.name);
       var destination = File(
         '${directory.path}/$id-$digest-${name.isEmpty ? 'file' : name}',
       );
@@ -191,6 +204,21 @@ class HistoryFileTransfer {
       finished = true;
       timer.cancel();
     }
+  }
+
+  String _safeFileName(String? value) {
+    var name = (value ?? 'file')
+        .split(RegExp(r'[/\\]'))
+        .last
+        .replaceAll(RegExp('[^A-Za-z0-9._ -]'), '_');
+    if (name.length > 100) {
+      final dot = name.lastIndexOf('.');
+      final extension = dot > 0 && name.length - dot <= 16
+          ? name.substring(dot)
+          : '';
+      name = '${name.substring(0, 100 - extension.length)}$extension';
+    }
+    return name.isEmpty ? 'file' : name;
   }
 
   Future<void> discard(String path) async {

@@ -69,7 +69,26 @@ impl Store {
              content_bytes = LENGTH(content_ciphertext) + LENGTH(?2) WHERE id = ?1",
             params![id, json, stamp, fts_rowid],
         )?;
+        let file_operations = tx.execute(
+            "UPDATE file_operations SET record=json_set(record,'$.name',?2) WHERE item_id=?1",
+            params![
+                id,
+                if secret {
+                    "Hidden file"
+                } else {
+                    metadata
+                        .file
+                        .as_ref()
+                        .map_or("File", |file| file.filename.as_str())
+                }
+            ],
+        )?;
         tx.commit()?;
+        if file_operations > 0 {
+            let _ = self
+                .file_operation_changes
+                .send(copypaste_ipc::FileOperationUpdate::default());
+        }
         Ok(true)
     }
 }

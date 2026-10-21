@@ -13,6 +13,7 @@ pub(super) const SCHEMA: &str = concat!(
     include_str!("migrations/005_file_transfers.sql"),
     include_str!("migrations/006_resource_revisions.sql"),
     include_str!("migrations/007_history_preview_cache.sql"),
+    include_str!("migrations/008_file_operations.sql"),
 );
 
 pub(super) fn create(conn: &mut Connection) -> Result<(), StoreError> {

@@ -635,6 +635,22 @@ mod tests {
                 "copypaste-cli-test-{}-{name}.sock",
                 std::process::id()
             ));
+            // Keep fixture sockets inside the configured artifact directory
+            // while avoiding Unix's small absolute endpoint-name limit.
+            let cwd = std::env::current_dir().expect("current directory");
+            let path = cwd
+                .ancestors()
+                .enumerate()
+                .find_map(|(depth, ancestor)| {
+                    path.strip_prefix(ancestor).ok().map(|tail| {
+                        let mut relative = PathBuf::new();
+                        for _ in 0..depth {
+                            relative.push("..");
+                        }
+                        relative.join(tail)
+                    })
+                })
+                .unwrap_or(path);
             let _ = std::fs::remove_file(&path);
             let listener = UnixListener::bind(&path).expect("bind stub socket");
             let request_ids = Arc::new(Mutex::new(Vec::new()));

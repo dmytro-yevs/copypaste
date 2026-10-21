@@ -12,12 +12,16 @@ pub mod sync_status;
 pub use semantic_kind::SemanticKind;
 pub use sync_status::{PeerSyncStatus, SyncPhase, SyncStatus};
 pub mod error;
+mod file_operations;
 pub mod health;
 pub mod limits;
 pub mod paths;
 pub mod payload;
 pub mod redact;
 mod response;
+pub use file_operations::{
+    FileOperation, FileOperationKind, FileOperationPhase, FileOperationUpdate,
+};
 pub mod transport;
 
 pub use paths::{data_dir, database_path, socket_path};
@@ -74,6 +78,28 @@ pub enum Method {
     },
     /// Liveness plus daemon state.
     Status,
+    FileOperations {
+        clear: bool,
+        #[serde(default)]
+        before: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+    },
+    StartFileDownload {
+        id: String,
+        dest_path: String,
+        token: String,
+    },
+    DownloadedFile {
+        id: String,
+    },
+    ImportFileReference {
+        reference: String,
+        filename: String,
+        mime_type: String,
+        #[serde(default)]
+        size_hint: Option<u64>,
+    },
     /// Persist this device's peer-visible display name.
     SetDeviceName {
         name: String,

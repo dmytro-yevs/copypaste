@@ -4,12 +4,14 @@ class HistoryImportFile {
     required this.name,
     required this.mimeType,
     this.sourceReference,
+    this.sizeBytes,
     required this.prepare,
     required this.dispose,
   });
   final String name;
   final String mimeType;
   final String? sourceReference;
+  final int? sizeBytes;
   final Future<String> Function(int maxBytes) prepare;
   final Future<void> Function() dispose;
 }

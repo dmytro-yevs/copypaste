@@ -9,6 +9,7 @@ import '../repository/history_file_transfer.dart';
 import '../repository/history_repository.dart';
 import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
+import '../../transfers/file_operations_controller.dart';
 import 'history_resource_limits.dart';
 import 'history_summary.dart';
 import 'history_window_index.dart';
@@ -44,11 +45,15 @@ class HistoryController extends ChangeNotifier {
     HistoryFileDownloader? fileDownloader,
     this.ocr,
     HistoryFilePicker? filePicker,
-  }) : _filePicker = filePicker,
+    this.fileOperations,
+    HistoryFileTransfer? fileTransfer,
+  }) : _fileTransfer = fileTransfer ?? HistoryFileTransfer(_repository),
+       _filePicker = filePicker,
        _fileDownloader = fileDownloader,
        _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250) {
     spoilers.addListener(notifyListeners);
     ocr?.addListener(notifyListeners);
+    fileOperations?.addListener(_fileOperationsChanged);
   }
 
   final HistoryOcrController? ocr;
@@ -82,9 +87,21 @@ class HistoryController extends ChangeNotifier {
   final bool separatePinnedWindow;
   final Duration _searchDebounce;
   final HistoryFileDownloader? _fileDownloader;
-  late final HistoryFileTransfer _fileTransfer = HistoryFileTransfer(
-    _repository,
-  );
+  final HistoryFileTransfer _fileTransfer;
+  final FileOperationsController? fileOperations;
+  final Map<String, String> _downloadErrors = {};
+  String? _selectedTransferState;
+  void _fileOperationsChanged() {
+    if (_disposed) return;
+    _downloadProgressChanges.value++;
+    final operation = fileOperations?.forClip(_selectedId ?? "");
+    final state = "${operation?.id}/${operation?.phase}";
+    if (state != _selectedTransferState) {
+      _selectedTransferState = state;
+      notifyListeners();
+    }
+  }
+
   final HistoryFilePicker? _filePicker;
   bool _isImportingFiles = false;
   bool _refreshAfterFileImport = false;
@@ -456,10 +473,23 @@ class HistoryController extends ChangeNotifier {
       _isReorderingPinned || _pinMutations.contains(id);
   bool isDeletePending(String id) =>
       _isReorderingPinned || _deleteMutations.contains(id);
-  bool isDownloadPending(String id) => _downloadMutations.contains(id);
-  bool downloadFailedFor(String id) => _failedDownloads.contains(id);
+  bool isDownloadPending(String id) =>
+      _downloadMutations.contains(id) ||
+      (fileOperations?.forClip(id)?.active ?? false);
+  bool downloadFailedFor(String id) =>
+      fileOperations?.forClip(id)?.failed ?? _failedDownloads.contains(id);
+  String? downloadErrorFor(String id) {
+    final operation = fileOperations?.forClip(id);
+    return operation == null ? _downloadErrors[id] : operation.error;
+  }
+
   bool isDownloadCancelling(String id) => _cancelledDownloads.contains(id);
   void cancelDownload(String id) {
+    final operation = fileOperations?.forClip(id);
+    if (operation?.active == true) {
+      unawaited(fileOperations!.cancel(operation!));
+      return;
+    }
     if (!_downloadMutations.contains(id) || !_cancelledDownloads.add(id)) {
       return;
     }
@@ -467,15 +497,17 @@ class HistoryController extends ChangeNotifier {
     if (repository is HistoryFileDownloadCancellation) {
       final cancellation = repository as HistoryFileDownloadCancellation;
       unawaited(
-        Future<void>.sync(
-          () => cancellation.cancelFileDownload(id),
-        ).catchError((Object _) {}),
+        Future<void>.sync(() => cancellation.cancelFileDownload(id))
+            .catchError((Object _) {}),
       );
     }
     notifyListeners();
   }
 
-  double? downloadProgressFor(String id) => _downloadProgress[id];
+  double? downloadProgressFor(String id) =>
+      fileOperations?.forClip(id)?.active == true
+      ? fileOperations!.forClip(id)!.progress
+      : _downloadProgress[id];
   Listenable get downloadProgressChanges => _downloadProgressChanges;
   bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
 
@@ -696,6 +728,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    unawaited(fileOperations?.initialize());
     if (_disposed) return;
     _suspended = false;
     spoilers.disconnected();
@@ -840,13 +873,12 @@ class HistoryController extends ChangeNotifier {
   Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
     late final Future<void> refresh;
     refresh =
-        _refreshVisibleItemsAndFacets(
-          resetWatchBackoff: resetWatchBackoff,
-        ).whenComplete(() {
-          if (identical(_visibleItemsRefresh, refresh)) {
-            _visibleItemsRefresh = null;
-          }
-        });
+        _refreshVisibleItemsAndFacets(resetWatchBackoff: resetWatchBackoff)
+            .whenComplete(() {
+              if (identical(_visibleItemsRefresh, refresh)) {
+                _visibleItemsRefresh = null;
+              }
+            });
     _visibleItemsRefresh = refresh;
     return refresh;
   }
@@ -886,8 +918,9 @@ class HistoryController extends ChangeNotifier {
 
   bool _samePageBoundary(HistoryWindowPage ref, HistoryClipPage page) {
     if (page.nextCursor != ref.nextCursor ||
-        !listEquals(ref.ids, page.items.map((item) => item.id).toList()))
+        !listEquals(ref.ids, page.items.map((item) => item.id).toList())) {
       return false;
+    }
     return page.items.every(
       (item) => ref.pinnedIds.contains(item.id) == item.pinned,
     );
@@ -1107,8 +1140,9 @@ class HistoryController extends ChangeNotifier {
       (page) =>
           page.items != null && (wanted == null || page.ids.contains(wanted)),
     );
-    if (active >= 0)
-      rebuilt.retainAround(active, protectedIds: {if (wanted != null) wanted});
+    if (active >= 0) {
+      rebuilt.retainAround(active, protectedIds: {?wanted});
+    }
     _window = rebuilt;
     if (_window.pages.isNotEmpty && _window.pages.last.nextCursor == null) {
       _pruneBulkSelection();
@@ -1328,8 +1362,9 @@ class HistoryController extends ChangeNotifier {
     if (_isLoadingMore ||
         _isBulkMutating ||
         _isReorderingPinned ||
-        _state != HistoryLoadState.ready)
+        _state != HistoryLoadState.ready) {
       return;
+    }
     final epoch = _queryEpoch;
     _isLoadingMore = true;
     notifyListeners();
@@ -1363,8 +1398,9 @@ class HistoryController extends ChangeNotifier {
       _window.retainAround(index, protectedIds: anchors);
       _publishWindow();
     } catch (_) {
-      if (_isCurrent(epoch))
+      if (_isCurrent(epoch)) {
         _errorMessage = 'Earlier history could not be loaded.';
+      }
     } finally {
       if (_isCurrent(epoch)) {
         _isLoadingMore = false;
@@ -1470,6 +1506,40 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
+  Future<String?> prepareFileForCopy(HistoryClip clip) async {
+    if (!_downloadMutations.add(clip.id)) return null;
+    _failedDownloads.remove(clip.id);
+    _downloadErrors.remove(clip.id);
+    notifyListeners();
+    try {
+      return await _fileTransfer.prepare(
+        clip,
+        onProgress: (progress) {
+          if (_disposed) return;
+          _downloadProgress[clip.id] = progress;
+          _downloadProgressChanges.value++;
+        },
+      );
+    } catch (error) {
+      if (!_disposed) {
+        _failedDownloads
+          ..clear()
+          ..add(clip.id);
+        _downloadErrors
+          ..clear()
+          ..[clip.id] = _fileFailure(
+            error,
+            'This file could not be downloaded. Check the source device and try again.',
+          );
+      }
+      return null;
+    } finally {
+      _downloadMutations.remove(clip.id);
+      _downloadProgress.remove(clip.id);
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   Future<HistoryFileDownloadResult> downloadSelected() async {
     final clip = _selectedClip;
     final file = clip?.file;
@@ -1482,6 +1552,7 @@ class HistoryController extends ChangeNotifier {
       return HistoryFileDownloadResult.failed;
     }
     _failedDownloads.remove(clip.id);
+    _downloadErrors.remove(clip.id);
     notifyListeners();
     try {
       final destination = await downloader.chooseDestination(file);
@@ -1516,6 +1587,9 @@ class HistoryController extends ChangeNotifier {
       );
       _failedDownloads.clear();
       _failedDownloads.add(clip.id);
+      _downloadErrors
+        ..clear()
+        ..[clip.id] = _fileFailure(error, 'This file could not be downloaded.');
       notifyListeners();
       return HistoryFileDownloadResult.failed;
     } finally {
@@ -2047,6 +2121,8 @@ class HistoryController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    fileOperations?.removeListener(_fileOperationsChanged);
+    fileOperations?.dispose();
     _spoilerContent.clear();
     spoilers.removeListener(notifyListeners);
     spoilers.dispose();

@@ -30,7 +30,7 @@ use settings::{RuntimeSettings, SettingsError};
 
 /// Storage and direct peer networking shared by daemon and in-process hosts.
 pub struct Runtime {
-    file_downloads: copypaste_core::file_download::FileDownloads,
+    file_downloads: Arc<copypaste_core::file_download::FileDownloads>,
     peer_sync: Arc<peer_sync::PeerSyncDriver>,
     modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
@@ -312,6 +312,7 @@ impl Runtime {
                 | Method::SetSecret { .. }
                 | Method::ReorderPinned { .. }
                 | Method::ImportFile { .. }
+                | Method::ImportFileReference { .. }
         );
         let peer_mutation = matches!(
             &method,
@@ -437,6 +438,7 @@ impl Runtime {
                                 {
                                     if let Some(token) = progress_token.as_ref() {
                                         let _ = sender.send(copypaste_ipc::RuntimeEventData {
+                                            file_operation: None,
                                             change: None,
                                             capture: None,
                                             progress: Some(copypaste_ipc::FileProgress {
@@ -459,6 +461,98 @@ impl Runtime {
                 } else {
                     self.save_file(id, &item_id, &dest_path)
                 }
+            }
+            Method::FileOperations {
+                clear,
+                before,
+                id: operation_id,
+            } => match self
+                .store
+                .file_operations(clear, before.as_deref(), operation_id.as_deref())
+            {
+                Ok(records) => Response::ok(id, ResponseData::FileOperations(records)),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::Internal,
+                    "File operations could not be loaded.",
+                ),
+            },
+            Method::DownloadedFile { id: item_id } => {
+                let path = self
+                    .store
+                    .downloaded_file(&item_id)
+                    .ok()
+                    .flatten()
+                    .filter(|path| std::path::Path::new(path).is_file());
+                Response::ok(id, ResponseData::DownloadedFile(path))
+            }
+            Method::ImportFileReference {
+                reference,
+                filename,
+                mime_type,
+                size_hint,
+            } => {
+                match copypaste_core::file_reference::import(
+                    &self.store,
+                    &self.keyring,
+                    &reference,
+                    &filename,
+                    &mime_type,
+                    &self.settings.config(),
+                    size_hint,
+                ) {
+                    Ok(_) => {
+                        self.node.note_local_version(now_ms());
+                        self.peer_sync.wake();
+                        Response::ok(id, ResponseData::Empty {})
+                    }
+                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+                }
+            }
+            Method::StartFileDownload {
+                id: item_id,
+                dest_path,
+                token,
+            } => {
+                if item_id.len() > 128 || token.len() > 128 || dest_path.len() > 4096 {
+                    return Response::err(
+                        id,
+                        ErrorCode::InvalidRequest,
+                        "The download request contains invalid file metadata.",
+                    );
+                }
+                let slot = match self.file_downloads.reserve_background() {
+                    Ok(slot) => slot,
+                    Err(error) => {
+                        return Response::err(id, ErrorCode::InvalidRequest, error.to_string())
+                    }
+                };
+
+                let downloads = Arc::clone(&self.file_downloads);
+                let store = self.store.clone();
+                let keyring = Arc::clone(&self.keyring);
+                let node = Arc::clone(&self.node);
+                let device = self.device_id.clone();
+                let settings = self.settings.config();
+                tokio::spawn(async move {
+                    let _slot = slot;
+                    let _ = downloads
+                        .save_with_progress(
+                            &store,
+                            &keyring,
+                            &node,
+                            &device,
+                            &settings,
+                            copypaste_core::file_download::FileDownloadRequest {
+                                id: &item_id,
+                                destination: Path::new(&dest_path),
+                                token: Some(&token),
+                            },
+                            Arc::new(|_, _| {}),
+                        )
+                        .await;
+                });
+                Response::ok(id, ResponseData::Empty {})
             }
             Method::CancelFileDownload { id: item_id } => {
                 self.file_downloads.cancel(&item_id);
@@ -832,6 +926,7 @@ impl Runtime {
             return;
         }
         let _ = self.runtime_events.send(copypaste_ipc::RuntimeEventData {
+            file_operation: None,
             change: None,
             progress: None,
             capture: Some(self.status_data()),
@@ -1245,6 +1340,7 @@ impl Runtime {
                         &capture_revision,
                     );
                     let _ = runtime_events.send(copypaste_ipc::RuntimeEventData {
+                        file_operation: None,
                         change: None,
                         progress: None,
                         capture: Some(status),

@@ -46,3 +46,8 @@ abstract interface class HistoryFileProgressRepository {
     void Function(int written, int total) onProgress,
   );
 }
+
+/// Reuses native-verified downloads by clip version across UI engines.
+abstract interface class HistoryDownloadedFileRepository {
+  Future<String?> downloadedFile(String id);
+}

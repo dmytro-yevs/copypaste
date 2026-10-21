@@ -7,6 +7,10 @@ fn wire_name(method: &Method) -> &'static str {
     match method {
         Method::Modules { .. } => "modules",
         Method::Status => "status",
+        Method::FileOperations { .. } => "file_operations",
+        Method::ImportFileReference { .. } => "import_file_reference",
+        Method::DownloadedFile { .. } => "downloaded_file",
+        Method::StartFileDownload { .. } => "start_file_download",
         Method::SetDeviceName { .. } => "set_device_name",
         Method::List { .. } => "list",
         Method::Search { .. } => "search",
@@ -80,6 +84,10 @@ fn catalog() -> Vec<Value> {
     vec![
         json!({"method":"modules","params":{"operation":{"operation":"list"}}}),
         json!({"method":"status"}),
+        json!({"method":"file_operations","params":{"clear":false,"before":null,"id":null}}),
+        json!({"method":"import_file_reference","params":{"reference":"/source/file.bin","filename":"file.bin","mime_type":"application/octet-stream","size_hint":null}}),
+        json!({"method":"downloaded_file","params":{"id":"item"}}),
+        json!({"method":"start_file_download","params":{"id":"item","dest_path":"/save/file.bin","token":"operation"}}),
         json!({"method":"set_device_name","params":{"name":"Kitchen Mac"}}),
         json!({"method":"list","params":{"limit":10,"cursor":null}}),
         json!({"method":"search","params":{"query":"needle","limit":10}}),
@@ -146,7 +154,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        51,
+        55,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }
