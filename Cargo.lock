@@ -727,6 +727,7 @@ dependencies = [
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-payload",
+ "core-foundation",
  "criterion",
  "csscolorparser",
  "hex",

@@ -40,6 +40,13 @@ hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$mount" >/dev/null
 [[ -d "$mount/CopyPaste.app" ]]
 ditto "$mount/CopyPaste.app" "$installed"
 /bin/bash "$installed/Contents/Resources/selfsign.sh" "$installed"
+keychain_support="$("$installed/Contents/MacOS/copypaste-keychain" support-directory)"
+keychain_helper="$keychain_support/signing/copypaste-keychain-v1"
+[[ -x "$keychain_helper" ]]
+helper_before="$(shasum -a 256 "$keychain_helper")"
+mkdir -p "$root/upgrade-home"
+HOME="$root/upgrade-home" /bin/bash "$installed/Contents/Resources/selfsign.sh" "$installed"
+[[ "$(shasum -a 256 "$keychain_helper")" == "$helper_before" ]]
 /usr/bin/codesign --verify --deep --strict "$installed"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$installed/Contents/Info.plist")" == "$VERSION" ]]
 
@@ -81,5 +88,8 @@ for _ in $(seq 1 20); do
     kill -0 "$daemon_pid" 2>/dev/null || break
     sleep 0.25
 done
-! kill -0 "$daemon_pid" 2>/dev/null
+if kill -0 "$daemon_pid" 2>/dev/null; then
+    echo "ERROR: the app-owned daemon did not exit." >&2
+    exit 1
+fi
 echo "verified macOS production bundle and app-owned daemon lifecycle"

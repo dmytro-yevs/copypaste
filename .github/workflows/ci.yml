@@ -143,6 +143,8 @@ jobs:
           security delete-generic-password -s copypaste-ci-probe -a probe "$keychain"
           echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
           echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
+      - name: Preserve Keychain identity across application updates
+        run: python3 -m unittest scripts.release.tests.test_macos_keychain_helper -v
       - name: Keychain and pasteboard Rust tests
         run: |
           set -euo pipefail
@@ -155,6 +157,7 @@ jobs:
           printf '%s\n' "$out"
           grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
           if grep -q 'SKIPPED' <<<"$out"; then exit 1; fi
+          cargo +1.96 test -p copypaste-core --locked --release --target aarch64-apple-darwin --lib macos_helper
       - name: Restore keychain state
         if: always()
         run: |
