@@ -52,6 +52,10 @@ install -m 755 "$ROOT/target/release/copypaste" \
 
 install -m 755 "$ROOT/packaging/macos/selfsign.sh" \
     "$SOURCE_APP/Contents/Resources/selfsign.sh"
+/bin/bash "$ROOT/scripts/release/build-macos-keychain-helper.sh" \
+    "$SOURCE_APP/Contents/MacOS/copypaste-keychain"
+/usr/bin/codesign --force --sign - --timestamp=none \
+    "$SOURCE_APP/Contents/MacOS/copypaste-keychain"
 /usr/bin/codesign --force --sign - --timestamp=none \
     --entitlements "$APP_ROOT/macos/Runner/Daemon.entitlements" \
     "$SOURCE_APP/Contents/MacOS/copypaste-daemon"

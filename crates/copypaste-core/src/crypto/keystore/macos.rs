@@ -13,6 +13,8 @@ use zeroize::Zeroizing;
 use super::super::keys::random_secret;
 use super::{CryptoError, DeviceSecret, Lookup, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, KEY_LEN};
 
+use super::macos_helper as helper;
+
 /// `errSecItemNotFound`. The *only* status that means "no entry exists" and so
 /// the only one that can lead to a fresh device secret (port manifest 02,
 /// I-20). Locked (-25308), auth-failed (-25293), missing entitlement (-34018),
@@ -25,6 +27,9 @@ const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 /// what I-10's frozen service/account pair requires, since scoping the account
 /// name to a path would rename it.
 pub(super) fn load(_data_dir: &Path) -> Result<Lookup, CryptoError> {
+    if let Some(path) = helper::path()? {
+        return helper::load(&path);
+    }
     let options = PasswordOptions::new_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT);
     match generic_password(options) {
         Ok(bytes) => {
@@ -45,6 +50,9 @@ pub(super) fn load(_data_dir: &Path) -> Result<Lookup, CryptoError> {
 
 pub(super) fn create(_data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     let secret = Zeroizing::new(random_secret());
+    if let Some(path) = helper::path()? {
+        return helper::create(&path, secret);
+    }
     store_device_secret(&secret)
         .map_err(|_| CryptoError::KeystoreUnavailable("could not write to the keychain"))?;
     Ok(secret)
