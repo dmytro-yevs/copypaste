@@ -27,6 +27,11 @@ class MacosKeychainUpdateTest(unittest.TestCase):
             self.environment = dict(os.environ, TMPDIR=str(root))
             search_before = self.run_command("security", "list-keychains", "-d", "user").stdout
             default_before = self.run_command("security", "default-keychain", "-d", "user").stdout
+            def assert_preferences_unchanged():
+                for arguments, expected in ((["list-keychains", "-d", "user"], search_before),
+                                            (["default-keychain", "-d", "user"], default_before)):
+                    self.assertEqual(subprocess.check_output(["security", *arguments],
+                                                            env=os.environ, text=True), expected)
             app = root / "CopyPaste.app"
             binaries = app / "Contents/MacOS"
             binaries.mkdir(parents=True)
@@ -60,6 +65,7 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                     self.environment["COPYPASTE_SIGN_MODE"] = "selfsigned"
                     self.run_command("/bin/bash", str(ROOT / "packaging/macos/selfsign.sh"), str(app))
                     self.assertFalse((temporary_home / "Library").exists())
+                    assert_preferences_unchanged()
 
                 compile_parent(1)
                 compile_helper("-Os")
@@ -68,6 +74,9 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 import pwd
                 self.assertEqual(resolved, str(Path(pwd.getpwuid(os.getuid()).pw_dir) /
                                                "Library/Application Support/com.copypaste.CopyPaste"))
+                self.assertEqual(self.run_command(str(binaries / "copypaste-keychain"),
+                                                 "home-directory").stdout.strip(),
+                                 pwd.getpwuid(os.getuid()).pw_dir)
                 self.environment["COPYPASTE_KEYCHAIN_TEST_SUPPORT_DIR"] = str(support)
                 self.run_command("xattr", "-w", "com.apple.quarantine", "0081;00000000;CopyPasteFixture;",
                                  str(binaries / "copypaste-keychain"))
@@ -93,6 +102,17 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                                            env=self.environment, capture_output=True, timeout=10)
                 self.assertEqual(duplicate.returncode, 2)
                 self.run_command(str(binaries / "copypaste-daemon"), str(helper), "load")
+                # A failed codesign must also restore the user's search list.
+                daemon_binary = binaries / "copypaste-daemon"
+                daemon_binary.chmod(0o000)
+                failed_signing = subprocess.run(["/bin/bash", str(ROOT / "packaging/macos/selfsign.sh"),
+                                                str(app)], env=self.environment,
+                                               capture_output=True, timeout=30)
+                self.assertEqual(failed_signing.returncode, 1,
+                                 (failed_signing.stdout, failed_signing.stderr))
+                self.assertIn(b"codesign rejected the certificate", failed_signing.stderr)
+                assert_preferences_unchanged()
+                daemon_binary.chmod(0o755)
                 # Same executable/id, wrong signer: reject before Keychain access.
                 self.run_command("codesign", "--force", "--sign", "-", "--identifier",
                                  "com.copypaste.copypaste-daemon", str(binaries / "copypaste-daemon"))
