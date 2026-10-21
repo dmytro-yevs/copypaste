@@ -41,9 +41,16 @@ fn designated_requirement(executable: &std::path::Path) -> Result<String, Crypto
     if status != 0 || signature.len() > 4096 {
         return Err(unavailable());
     }
-    let text = String::from_utf8_lossy(&signature);
+    requirement_text(&signature)
+}
+
+fn requirement_text(signature: &[u8]) -> Result<String, CryptoError> {
+    let text = String::from_utf8_lossy(signature);
     text.lines()
-        .find_map(|line| line.strip_prefix("designated => "))
+        .find_map(|line| {
+            line.strip_prefix("designated => ")
+                .or_else(|| line.strip_prefix("# designated => "))
+        })
         .map(str::to_owned)
         .ok_or_else(unavailable)
 }
@@ -209,6 +216,16 @@ mod tests {
         let text = designated_requirement(std::path::Path::new("/usr/bin/codesign")).unwrap();
         let _: SecRequirement = text.parse().unwrap();
         assert!(text.contains("identifier"));
+    }
+
+    #[test]
+    fn commented_adhoc_requirements_preserve_the_standalone_fallback() {
+        let requirement = requirement_text(
+            b"# designated => cdhash H\"0123456789012345678901234567890123456789\"\n",
+        )
+        .unwrap();
+        assert!(requirement.starts_with("cdhash "));
+        let _: SecRequirement = requirement.parse().unwrap();
     }
 
     #[test]

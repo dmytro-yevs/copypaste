@@ -102,13 +102,27 @@ impl Node {
         channel: &mut NoiseChannel,
         mut request: SyncMessage,
     ) -> Result<(), SyncError> {
-        let _permit = self
-            .file_transfers
-            .try_acquire()
-            .map_err(|_| SyncError::Source("Another file transfer is in progress.".into()))?;
-        let active = self
-            .begin_active_sync(pairing_id)
-            .ok_or_else(|| SyncError::Source("The device is no longer paired.".into()))?;
+        let mut permit = match self.file_transfers.try_acquire() {
+            Ok(permit) => Some(permit),
+            Err(_) => {
+                let reason = "Another file transfer is in progress. Wait for it to finish.";
+                let _ = channel
+                    .send(SyncMessage::FileUnavailable {
+                        reason: reason.into(),
+                    })
+                    .await;
+                return Err(SyncError::Source(reason.into()));
+            }
+        };
+        let Some(active) = self.begin_active_sync(pairing_id) else {
+            let reason = "The device is no longer paired.";
+            let _ = channel
+                .send(SyncMessage::FileUnavailable {
+                    reason: reason.into(),
+                })
+                .await;
+            return Err(SyncError::Source(reason.into()));
+        };
         let source = ActiveSyncSource {
             source,
             state: std::sync::Arc::clone(&active.state),
@@ -180,19 +194,24 @@ impl Node {
                 next_index += 1;
                 request = channel.recv().await?;
                 if matches!(request, SyncMessage::Done) {
-                    if let Some(input) = deferred.as_mut() {
+                    let checksum = if let Some(mut input) = deferred.take() {
                         input.verify()?;
-                        channel
-                            .send(SyncMessage::FileChecksum {
-                                sha256: format!("{:x}", digest.finalize()),
-                            })
-                            .await?;
+                        Some(format!("{:x}", digest.finalize()))
+                    } else {
+                        None
+                    };
+                    // All file I/O is done. Release admission before the terminal
+                    // reply so a new transfer does not wait for history bookkeeping.
+                    drop(permit.take());
+                    if let Some(sha256) = checksum {
+                        channel.send(SyncMessage::FileChecksum { sha256 }).await?;
                     }
                     return Ok(());
                 }
             }
         };
         let result = tokio::select! { biased; _ = cancel.cancelled() => Err(SyncError::Source("File transfer was cancelled.".into())), result = operation => result };
+        drop(permit.take());
         if let Some(observer) = observer.as_mut() {
             observer.finish(result.as_ref().err().map(ToString::to_string));
         }
