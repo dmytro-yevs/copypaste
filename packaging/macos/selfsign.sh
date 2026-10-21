@@ -444,7 +444,7 @@ SIGN_OUTPUT="$(sign_bundle "$IDENTITY_SHA1" "$KEYCHAIN")" || {
 # reset of the signing directory, and both mean permissions have to be granted
 # again — much less confusing when the installer says so.
 if [ -x "$SOURCE_KEYCHAIN_HELPER" ]; then
-    HELPER_REQUIREMENT="$(/usr/bin/codesign -d -r- "$SOURCE_KEYCHAIN_HELPER" 2>&1 | sed -n 's/^designated => //p')"
+    HELPER_REQUIREMENT="$(/usr/bin/codesign -d -r- "$SOURCE_KEYCHAIN_HELPER" 2>&1 | sed -n -e 's/^# //' -e 's/^designated => //p')"
     if [ -z "$HELPER_REQUIREMENT" ]; then
         say "ERROR: the Keychain helper has no signing requirement."
         exit 1
