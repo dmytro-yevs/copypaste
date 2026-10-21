@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../capture/capture_control_state.dart';
+
 import 'desktop_window_geometry.dart';
 import 'desktop_visibility_controller.dart';
 import 'desktop_visibility_preferences.dart';
 
 export 'desktop_window_geometry.dart';
+export '../capture/capture_control_state.dart';
 
 enum DesktopWindowSetupIssue {
   windowUnavailable,
@@ -49,10 +52,7 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
     required Future<void> Function() onQuitRequested,
   });
 
-  Future<void> updateCaptureMenu({
-    required bool available,
-    required bool paused,
-  });
+  Future<void> updateCaptureMenu({required CaptureControlState state});
 
   Future<void> hide();
 
@@ -129,8 +129,7 @@ class DesktopWindowController {
   Future<void> Function()? _beforeQuit;
   VoidCallback? _openSettings;
   Future<void> Function()? _toggleCapture;
-  bool _captureAvailable = false;
-  bool _capturePaused = true;
+  CaptureControlState _captureState = CaptureControlState.unavailable;
   Future<void>? _initialization;
   Future<void>? _disposal;
   Future<void>? _taskbarRestoration;
@@ -231,10 +230,7 @@ class DesktopWindowController {
         return;
       }
       _trayReady = true;
-      await _host.updateCaptureMenu(
-        available: _captureAvailable,
-        paused: _capturePaused,
-      );
+      await _host.updateCaptureMenu(state: _captureState);
       _clearIssue();
     } catch (_) {
       _setIssue(DesktopWindowSetupIssue.trayUnavailable);
@@ -346,14 +342,10 @@ class DesktopWindowController {
     _toggleCapture = callback;
   }
 
-  Future<void> updateCaptureState({
-    required bool available,
-    required bool paused,
-  }) async {
-    _captureAvailable = available;
-    _capturePaused = paused;
+  Future<void> updateCaptureState({required CaptureControlState state}) async {
+    _captureState = state;
     if (_trayReady && !_disposed) {
-      await _host.updateCaptureMenu(available: available, paused: paused);
+      await _host.updateCaptureMenu(state: state);
     }
   }
 

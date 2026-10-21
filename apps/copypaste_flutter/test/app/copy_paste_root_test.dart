@@ -527,10 +527,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   }
 
   @override
-  Future<void> updateCaptureMenu({
-    required bool available,
-    required bool paused,
-  }) async {}
+  Future<void> updateCaptureMenu({required CaptureControlState state}) async {}
 
   @override
   Future<void> initializeWindow(

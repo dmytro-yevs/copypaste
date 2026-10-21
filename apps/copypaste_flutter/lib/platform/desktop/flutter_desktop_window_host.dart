@@ -332,16 +332,16 @@ class FlutterDesktopWindowHost
   }
 
   @override
-  Future<void> updateCaptureMenu({
-    required bool available,
-    required bool paused,
-  }) async {
+  Future<void> updateCaptureMenu({required CaptureControlState state}) async {
     final item = _captureMenuItem;
     if (item == null) return;
     item
-      ..label = paused ? 'Resume capture' : 'Pause capture'
-      ..icon = _trayMenuImages[paused ? LucideIcons.play : LucideIcons.pause]
-      ..isEnabled = available;
+      ..label = state.actionLabel
+      ..icon =
+          _trayMenuImages[state.canResume
+              ? LucideIcons.play
+              : LucideIcons.pause]
+      ..isEnabled = state != CaptureControlState.unavailable;
   }
 
   @override

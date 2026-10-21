@@ -1496,9 +1496,10 @@
         "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
         "crates/copypaste-core/src/spoiler.rs",
         "crates/copypaste-daemon/src/server/items.rs",
-        "crates/copypaste-runtime/src/lib.rs"
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/lib/features/history/controller/history_ocr_controller.dart"
       ],
-      "invariant": "Quick Paste reuses its initial watched page for its first presentation and omits unused facets. Preference reads overlap safely, and module metadata starts only when the inspector needs it; pending metadata never blocks showing or closing the inspector. An unchanged spoiler update neither advances the revision nor wakes clients, while actual changes retain the existing shared-state notifications. Engine creation remains on demand with the existing acknowledged retirement; no persistent engine or new cache is introduced.",
+      "invariant": "Quick Paste reuses its initial watched page for its first presentation and omits unused facets. Preference reads overlap safely, and module metadata starts only when the inspector needs it; pending metadata never blocks showing or closing the inspector. An unchanged spoiler update neither advances the revision nor wakes clients, while actual changes retain the existing shared-state notifications. Engine creation remains on demand with the existing acknowledged retirement; no persistent engine or new cache is introduced. Completed inspector metadata is refreshed on each inspector opening; simultaneous openings share one pending read. OCR revalidates module metadata before preparing image bytes or invoking a worker. No timer or idle metadata polling is introduced.",
       "next_step": "Compare baseline and candidate native click-to-window, first-frame, and preview latency with equivalent debug/AOT builds and cache state. Measure process-family memory, CPU, wakeups, and I/O on macOS, physical Android, and installed Windows. Native interaction measurement was not authorized in this task; non-memory budgets remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -1541,10 +1542,18 @@
           "sha256": "8859f5b9f0701b385172d7dda5505750b19d9e9b58ffb935b3ccf24429b8feca",
           "source_state": "dirty_workspace",
           "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-regression-tests.jsonl",
+          "sha256": "31b91b2204da23abbff47801427844d312a2db301727812be27e5a80002e4373",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
         }
       ],
       "supersedes": [],
-      "functional_validation": "168 targeted Flutter tests, 6 Rust tests, Dart analysis, and macOS Dev debug build passed. A deterministic first-open regression observed two History queries before the change and one after it, with zero unused facet queries. Slow inspector metadata never blocks presentation. Actual spoiler changes still notify both clients. Native click-to-frame latency and resource savings remain unmeasured."
+      "functional_validation": "168 targeted Flutter tests, 6 Rust tests, Dart analysis, and macOS Dev debug build passed. A deterministic first-open regression observed two History queries before the change and one after it, with zero unused facet queries. Slow inspector metadata never blocks presentation. Actual spoiler changes still notify both clients. Native click-to-frame latency and resource savings remain unmeasured. Status freshness follow-up: 1162 Flutter unit/widget tests and static analysis passed in the isolated mocked harness; native behavior and resource qualification remain unestablished.",
+      "tradeoffs": "Freshness adds one module-metadata read per inspector opening and one before explicit OCR recognition. Reads replace the existing snapshot and do not retain additional module lists or start inference. Pending metadata never blocks popup presentation. Native memory, CPU, I/O and latency effects remain unmeasured; no resource saving or qualification is claimed."
     },
     {
       "id": "RUN-033",

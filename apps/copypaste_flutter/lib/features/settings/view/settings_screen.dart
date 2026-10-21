@@ -942,6 +942,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('Allow access'),
               ),
             ),
+          if (widget.controller.screenshotCapture.enabled &&
+              !widget.controller.screenshotCapture.needsPermission &&
+              !widget.controller.screenshotCapture.running)
+            StateView.error(
+              title: 'Screenshot capture is not running',
+              message:
+                  'New screenshots are not being saved. Resume capture to start the service again.',
+              actionLabel: widget.controller.busy ? null : 'Resume capture',
+              onAction: widget.controller.busy
+                  ? null
+                  : () => widget.controller.setScreenshotCaptureEnabled(true),
+            ),
         ],
         _SettingRow(
           key: _clipboardCaptureKey,
@@ -952,7 +964,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: !(capture?.paused ?? true),
             onChanged: widget.controller.busy || capture == null
                 ? null
-                : (_) => widget.controller.toggleCapture(),
+                : (enabled) => widget.controller.setCapturePaused(!enabled),
           ),
         ),
         if (capture != null && !capture.running && !capture.paused) ...[

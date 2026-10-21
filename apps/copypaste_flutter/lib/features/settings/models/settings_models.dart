@@ -1,4 +1,5 @@
 import 'sync_status.dart';
+import '../../../platform/capture/capture_control_state.dart';
 
 enum SettingsLoadState { loading, ready, error }
 
@@ -21,11 +22,13 @@ class CaptureSettingsState {
   final SyncStatus syncStatus;
   final RuntimeSettingsHealth? settingsHealth;
 
-  String get label {
-    if (paused) return 'Paused';
-    if (running) return 'Capturing';
-    return 'Not running';
-  }
+  CaptureControlState get controlState => paused
+      ? CaptureControlState.paused
+      : running
+      ? CaptureControlState.running
+      : CaptureControlState.stopped;
+
+  String get label => controlState.label;
 }
 
 class RuntimeSettingsHealth {

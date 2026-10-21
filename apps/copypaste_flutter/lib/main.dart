@@ -554,7 +554,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     settingsController?.dispose();
     _desktopWindow?.setCaptureToggle(null);
     unawaited(
-      _desktopWindow?.updateCaptureState(available: false, paused: true),
+      _desktopWindow?.updateCaptureState(
+        state: CaptureControlState.unavailable,
+      ),
     );
     if (widget.runtimeEnabled &&
         (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
@@ -590,7 +592,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     settingsController?.dispose();
     _desktopWindow?.setCaptureToggle(null);
     unawaited(
-      _desktopWindow?.updateCaptureState(available: false, paused: true),
+      _desktopWindow?.updateCaptureState(
+        state: CaptureControlState.unavailable,
+      ),
     );
     await historyRepository?.dispose();
     await devicesGateway?.dispose();
@@ -762,8 +766,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     final capture = _settingsController?.capture;
     unawaited(
       _desktopWindow?.updateCaptureState(
-        available: capture != null,
-        paused: capture?.paused ?? true,
+        state: capture?.controlState ?? CaptureControlState.unavailable,
       ),
     );
   }
