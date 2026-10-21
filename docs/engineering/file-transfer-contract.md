@@ -54,7 +54,10 @@ handling. Legacy decryption uses the previous 4 MiB ceiling.
 
 Download workers belong to the shared runtime/daemon, not the initiating UI
 engine or its request connection. Closing Quick Paste, an inspector or the
-manager only releases presentation subscriptions. Other Quick Paste clipboard
+manager only releases presentation subscriptions. A presentation or RPC failure
+never removes the worker's destination directory; it remains usable for retry.
+Native completion is authoritative: a late UI cancellation flag cannot delete an
+already committed file. Other Quick Paste clipboard
 actions remain usable while a file is downloading, and a superseded file action
 cannot copy or paste after another activation. Explicit Cancel stops the
 operation. Application shutdown interrupts work and leaves a durable interrupted

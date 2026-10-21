@@ -451,7 +451,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
       name: device.name,
       details: device.details,
       statusLabel: 'This device',
-      statusTone: AppStatusTone.muted,
       selected:
           controller.deviceDetailsTarget ==
           const DeviceDetailsTarget.thisDevice(),
@@ -516,7 +515,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     required String name,
     required DeviceDetails? details,
     required String statusLabel,
-    required AppStatusTone statusTone,
+    AppStatusTone? statusTone,
     String? ping,
     required bool selected,
     required VoidCallback? onPressed,
@@ -530,6 +529,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           )
         : const ButtonStyle.card();
     return Semantics(
+      label: statusTone == null ? statusLabel : null,
       selected: selected,
       button: true,
       child: Button.card(
@@ -538,49 +538,72 @@ class _DevicesScreenState extends State<DevicesScreen> {
         enabled: onPressed != null,
         alignment: Alignment.centerLeft,
         style: style,
-        child: Row(
-          children: [
-            _deviceIconTile(context, details?.profile?.deviceClass),
-            const Gap(AppSpacing.md),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final stackedPing =
+                constraints.maxWidth <
+                AppLayoutSize.deviceCardInlinePingMinWidth *
+                    MediaQuery.textScalerOf(context).scale(1);
+            return Row(
+              children: [
+                _deviceIconTile(context, details?.profile?.deviceClass),
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Semantics(
-                        label: statusLabel,
-                        child: AvatarBadge(
-                          size: AppIconSize.statusIndicator,
-                          borderRadius: AppRadius.full,
-                          color: AppTheme.statusColor(context, statusTone),
-                        ),
+                      Row(
+                        children: [
+                          if (statusTone != null) ...[
+                            Semantics(
+                              label: statusLabel,
+                              child: AvatarBadge(
+                                size: AppIconSize.statusIndicator,
+                                borderRadius: AppRadius.full,
+                                color: AppTheme.statusColor(
+                                  context,
+                                  statusTone,
+                                ),
+                              ),
+                            ),
+                            const Gap(AppSpacing.xs),
+                          ],
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: AppTheme.deviceCardTextStyle(context),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ).semiBold(),
+                          ),
+                        ],
                       ),
                       const Gap(AppSpacing.xs),
-                      Expanded(
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ).semiBold(),
+                      Text(
+                        DevicePresentation.summary(details),
+                        style: AppTheme.deviceCardTextStyle(
+                          context,
+                          muted: true,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
-                  const Gap(AppSpacing.xs),
+                ),
+                if (ping != null) ...[
+                  const Gap(AppSpacing.md),
                   Text(
-                    DevicePresentation.summary(details),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ).muted(),
-                  if (ping != null) ...[
-                    const Gap(AppSpacing.sm),
-                    Text('Ping: $ping').small().muted(),
-                  ],
+                    stackedPing ? 'Ping:\n$ping' : 'Ping: $ping',
+                    style: AppTheme.deviceCardTextStyle(context, muted: true),
+                    maxLines: 2,
+                    textAlign: TextAlign.end,
+                  ),
                 ],
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
