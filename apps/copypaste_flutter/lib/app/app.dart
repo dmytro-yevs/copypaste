@@ -3,6 +3,8 @@ import 'dart:io';
 
 import '../features/modules/controller/modules_controller.dart';
 
+import '../features/transfers/file_operations_view.dart';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -108,6 +110,12 @@ class CopyPasteApp extends StatelessWidget {
               headerActions: {
                 if (settingsController != null)
                   AppDestination.history: [
+                    if (historyController?.fileOperations case final transfers?)
+                      FileOperationsHeaderAction(
+                        controller: transfers,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     SyncHeaderAction(
                       controller: settingsController!,
                       devices: devicesController,
@@ -118,6 +126,12 @@ class CopyPasteApp extends StatelessWidget {
                   ],
                 if (devicesController != null || settingsController != null)
                   AppDestination.devices: [
+                    if (historyController?.fileOperations case final transfers?)
+                      FileOperationsHeaderAction(
+                        controller: transfers,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     if (devicesController != null)
                       DevicesHeaderActions(controller: devicesController!),
                     if (settingsController != null)
@@ -132,6 +146,12 @@ class CopyPasteApp extends StatelessWidget {
                   ],
                 if (settingsController != null)
                   AppDestination.settings: [
+                    if (historyController?.fileOperations case final transfers?)
+                      FileOperationsHeaderAction(
+                        controller: transfers,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     SyncHeaderAction(
                       controller: settingsController!,
                       devices: devicesController,

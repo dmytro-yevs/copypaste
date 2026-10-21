@@ -23,6 +23,8 @@ type BeforeRetentionHook = Box<dyn FnOnce() + Send>;
 #[derive(Clone)]
 pub struct Store {
     pool: Pool<SqliteConnectionManager>,
+    pub(super) file_operation_changes:
+        tokio::sync::broadcast::Sender<copypaste_ipc::FileOperationUpdate>,
     pub(super) path: Option<Arc<PathBuf>>,
     retention: Arc<Mutex<()>>,
     pub(super) semantic_cache: Arc<Mutex<super::semantic_index::SemanticCache>>,
@@ -72,6 +74,7 @@ impl Store {
         // Full legacy-file conversion is confined to opening a store, before
         // this runtime can issue rowid-based clear/undo boundaries.
         if exclusive {
+            conn.execute("UPDATE file_operations SET phase='finished',record=json_set(record,'$.phase','interrupted','$.finished_at',?1,'$.error','The operation was interrupted by application shutdown. Try again.') WHERE phase='running'", [crate::now_ms()])?;
             if let Err(error) = super::space::prepare(&conn) {
                 tracing::warn!(%error, "deferred history space maintenance");
             }
@@ -86,6 +89,7 @@ impl Store {
         let pool = build_pool(manager, db_key, false)?;
         Ok(Self {
             pool,
+            file_operation_changes: tokio::sync::broadcast::channel(16).0,
             path: Some(Arc::new(path.to_owned())),
             incremental_reclaim,
             _space_lock: Some(Arc::new(space_lock)),
@@ -121,6 +125,7 @@ impl Store {
         drop(conn);
         Ok(Self {
             pool,
+            file_operation_changes: tokio::sync::broadcast::channel(16).0,
             path: None,
             incremental_reclaim: false,
             _space_lock: None,

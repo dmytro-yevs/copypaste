@@ -29,6 +29,7 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
               name: file['name']! as String,
               mimeType: file['mimeType']! as String,
               sourceReference: file['uri']! as String,
+              sizeBytes: (file['sizeBytes'] as num?)?.toInt(),
               prepare: (maxBytes) async =>
                   (await androidChannel.invokeMethod<String>('materialize', {
                     'token': token,

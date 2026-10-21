@@ -17,6 +17,8 @@ const CURRENT_TABLES: &[&str] = &[
     "file_transfer_files",
     "downloaded_files",
     "file_transfer_staging",
+    "file_references",
+    "file_operations",
     "copypaste_schema_migrations",
     "module_search_documents",
     "module_search_vectors",

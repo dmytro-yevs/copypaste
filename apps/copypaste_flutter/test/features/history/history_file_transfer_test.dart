@@ -17,6 +17,35 @@ HistoryClip clip({String name = 'original.bin'}) => HistoryClip(
 
 void main() {
   test(
+    'new presentations reuse the durable native-recorded file without saving again',
+    () async {
+      final root = await Directory.systemTemp.createTemp('durable-file-link-');
+      addTearDown(() => root.delete(recursive: true));
+      final existing = File('${root.path}/already-downloaded.bin');
+      await existing.writeAsBytes([1, 2, 3, 4]);
+      final repository = _DownloadedRepository(existing.path);
+      final first = HistoryFileTransfer(
+        repository,
+        temporaryDirectory: () async => root,
+      );
+      final second = HistoryFileTransfer(
+        repository,
+        temporaryDirectory: () async => root,
+      );
+      expect(await first.prepare(clip(), onProgress: (_) {}), existing.path);
+      expect(await second.prepare(clip(), onProgress: (_) {}), existing.path);
+      expect(repository.saves, 0);
+      await existing.delete();
+      await second.prepare(clip(), onProgress: (_) {});
+      expect(
+        repository.saves,
+        1,
+        reason: 'A deleted local copy must be downloaded again',
+      );
+    },
+  );
+
+  test(
     'uses writer progress and confirms completion from the save result',
     () async {
       final repository = _ProgressRepository();
@@ -232,4 +261,13 @@ class _LegacyFallbackRepository extends _Repository
     String path,
     void Function(int, int) progress,
   ) async => false;
+}
+
+class _DownloadedRepository extends _Repository
+    implements HistoryDownloadedFileRepository {
+  _DownloadedRepository(this.path);
+  final String path;
+  @override
+  Future<String?> downloadedFile(String id) async =>
+      await File(path).exists() ? path : null;
 }

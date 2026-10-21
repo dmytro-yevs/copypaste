@@ -17,6 +17,8 @@ pub mod file_download;
 #[cfg(test)]
 mod file_download_tests;
 pub mod file_import;
+pub mod file_operation;
+pub mod file_reference;
 pub mod file_transfer;
 pub mod history_actions;
 pub mod history_backup;

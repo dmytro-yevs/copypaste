@@ -36,6 +36,16 @@ class MainActivity : FlutterActivity() {
         @JvmStatic
         private external fun initializeNdkContext(context: Context)
 
+        /** Opens the original only during an explicit transfer; Rust owns the fd. */
+        @JvmStatic
+        fun openFileSource(reference: String): Int = runCatching {
+            val context = applicationContextForSources ?: error("File source host unavailable")
+            context.contentResolver.openFileDescriptor(android.net.Uri.parse(reference), "r")?.detachFd() ?: -1
+        }.getOrDefault(-1)
+
+        @Volatile
+        private var applicationContextForSources: Context? = null
+
         @JvmStatic
         private external fun initializeRuntime(
             dataDir: String,
@@ -86,6 +96,7 @@ class MainActivity : FlutterActivity() {
         internal fun ensureRuntime(context: Context) {
             instance = context.applicationContext
             InferenceWorkerHost.initialize(context)
+            applicationContextForSources = context.applicationContext
             initializeNdkContext(context.applicationContext)
             initializeRuntime(context.filesDir.resolve("runtime").absolutePath,
                 Build.MODEL, Build.MODEL, Build.VERSION.RELEASE,
@@ -243,7 +254,7 @@ class MainActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, settingsFilesChannelName)
             .setMethodCallHandler { call, result ->
-                if (call.method != "shareFile") {
+                if (call.method != "shareFile" && call.method != "openFile") {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
@@ -254,10 +265,10 @@ class MainActivity : FlutterActivity() {
                     return@setMethodCallHandler
                 }
                 runCatching {
-                    val root = File(cacheDir, "clipboard").canonicalFile
+                    val roots = listOf(File(cacheDir, "clipboard").canonicalFile, File(filesDir, "copypaste-downloads").canonicalFile)
                     val file = File(path).canonicalFile
                     require(file.isFile)
-                    require(file.path.startsWith(root.path + File.separator))
+                    require(roots.any { file.path.startsWith(it.path + File.separator) })
                     val uri = FileProvider.getUriForFile(
                         this,
                         "${packageName}.clipboard",
@@ -269,12 +280,15 @@ class MainActivity : FlutterActivity() {
                         ?: "application/octet-stream"
                     startActivity(
                         Intent.createChooser(
-                            Intent(Intent.ACTION_SEND).apply {
+                            if (call.method == "openFile") Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, mimeType)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            } else Intent(Intent.ACTION_SEND).apply {
                                 type = mimeType
                                 putExtra(Intent.EXTRA_STREAM, uri)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             },
-                            "Save CopyPaste file",
+                            if (call.method == "openFile") "Open CopyPaste file" else "Save CopyPaste file",
                         ),
                     )
                 }.onSuccess {

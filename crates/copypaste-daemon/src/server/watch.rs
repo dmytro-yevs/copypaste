@@ -86,6 +86,7 @@ pub(super) async fn pump_runtime(
     writer: &mut OwnedWriteHalf,
     shutdown: &mut watch::Receiver<bool>,
 ) {
+    let mut transfers = state.store.subscribe_file_operations();
     if !send_capture_snapshot(&state, id, writer).await {
         return;
     }
@@ -98,12 +99,16 @@ pub(super) async fn pump_runtime(
                 Some(Ok(_)) => continue,
             },
             received = events.recv() => match received {
-                Ok(change) => copypaste_ipc::RuntimeEventData { change: Some(change), progress: None, capture: None },
+                Ok(change) => copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(change), progress: None, capture: None },
                 Err(RecvError::Lagged(_)) => {
                     if !send_recovery(&state, id, writer).await { break; }
                     continue;
                 },
                 Err(RecvError::Closed) => break,
+            },
+            changed = transfers.recv() => {
+                if matches!(changed, Err(RecvError::Closed)) { break; }
+                copypaste_ipc::RuntimeEventData { file_operation: Some(changed.unwrap_or_default()), change: None, capture: None, progress: None }
             },
             received = runtime_events.recv() => match received {
                 Ok(event) => event,
@@ -135,6 +140,7 @@ async fn send_capture_snapshot(
         return false;
     };
     let event = copypaste_ipc::RuntimeEventData {
+        file_operation: None,
         change: None,
         progress: None,
         capture: Some(status),
@@ -178,6 +184,7 @@ async fn send_recovery(
             sync_status: (kind == copypaste_ipc::EventKind::Peers).then(|| sync_status.clone()),
         };
         let event = copypaste_ipc::RuntimeEventData {
+            file_operation: None,
             change: Some(change),
             progress: None,
             capture: None,

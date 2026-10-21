@@ -314,6 +314,7 @@ impl AppState {
             crate::server::items::status(self, 0).data
         {
             let _ = self.runtime_events.send(copypaste_ipc::RuntimeEventData {
+                file_operation: None,
                 change: None,
                 progress: None,
                 capture: Some(status),

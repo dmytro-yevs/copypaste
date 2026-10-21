@@ -12,6 +12,9 @@ import 'features/modules/repository/github_module_marketplace_repository.dart';
 import 'platform/modules/module_marketplace_platform.dart';
 import 'platform/modules/android_module_access.dart';
 
+import 'features/transfers/file_operations_controller.dart';
+import 'features/transfers/runtime_file_operations_repository.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -123,6 +126,9 @@ Future<void> quickPasteMain() async {
     QuickPasteApp(
       controller: QuickPasteController(
         repository: repository,
+        fileOperations: FileOperationsController(
+          const RuntimeFileOperationsRepository(),
+        ),
         disposeRepository: () async {
           modules.dispose();
           await repository.dispose();
@@ -424,6 +430,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         );
         _historyController = HistoryController(
           _historyRepository!,
+          fileOperations: FileOperationsController(
+            const RuntimeFileOperationsRepository(),
+          ),
           fileDownloader: const FileSelectorHistoryFileDownloader(),
           filePicker: const SystemHistoryFilePicker(),
           ocr: HistoryOcrController(

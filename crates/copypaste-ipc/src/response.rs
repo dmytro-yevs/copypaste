@@ -66,6 +66,8 @@ pub struct FileProgress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeEventData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_operation: Option<crate::FileOperationUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change: Option<EventData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<FileProgress>,
@@ -294,6 +296,8 @@ pub enum ResponseData {
     Modules {
         json: String,
     },
+    FileOperations(Vec<crate::FileOperation>),
+    DownloadedFile(Option<String>),
     Status(StatusData),
     Export(ExportData),
     Import(ImportData),

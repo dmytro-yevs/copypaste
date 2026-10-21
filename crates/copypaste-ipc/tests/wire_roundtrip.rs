@@ -72,6 +72,9 @@ fn variant_tag(data: &ResponseData) -> &'static str {
     match data {
         ResponseData::Modules { .. } => "modules",
         ResponseData::Status(_) => "status",
+        ResponseData::RuntimeEvent(_) => "runtime_event",
+        ResponseData::FileOperations(_) => "file_operations",
+        ResponseData::DownloadedFile(_) => "downloaded_file",
         ResponseData::Export(_) => "export",
         ResponseData::Import(_) => "import",
         ResponseData::Backup(_) => "backup",
@@ -115,6 +118,19 @@ fn assert_tagged_round_trip(data: ResponseData) {
 fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Modules { json: "[]".into() },
+        ResponseData::FileOperations(vec![]),
+        ResponseData::DownloadedFile(Some("/saved/file.bin".into())),
+        ResponseData::RuntimeEvent(copypaste_ipc::RuntimeEventData {
+            file_operation: Some(copypaste_ipc::FileOperationUpdate {
+                id: Some("transfer".into()),
+                phase: Some(copypaste_ipc::FileOperationPhase::Running),
+                written: 1,
+                total: 2,
+            }),
+            change: None,
+            progress: None,
+            capture: None,
+        }),
         ResponseData::Status(StatusData {
             runtime_watch: false,
             capture_watch: false,
@@ -250,7 +266,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 23);
+    assert_eq!(variants.len(), 26);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

@@ -461,6 +461,7 @@ pub struct RuntimeEvent {
     pub captured: bool,
     pub captured_item_id: Option<String>,
     pub progress: Option<FileProgress>,
+    pub file_operation: Option<FileOperationUpdate>,
     pub capture: Option<CaptureState>,
     pub runtime_watch: bool,
 }
@@ -1748,4 +1749,61 @@ mod tests {
         assert!(mapped.too_large_to_sync);
         assert_eq!(mapped.origin_device_class, DeviceClass::Phone);
     }
+}
+
+/// Persistent local transfer records shared by every UI engine.
+pub async fn file_operations(
+    clear: bool,
+    before: Option<String>,
+    id: Option<String>,
+) -> Result<String, RuntimeError> {
+    match client::request(Method::FileOperations { clear, before, id })
+        .await?
+        .data
+    {
+        Some(ResponseData::FileOperations(records)) => {
+            serde_json::to_string(&records).map_err(|_| RuntimeError::internal())
+        }
+        _ => Err(RuntimeError::internal()),
+    }
+}
+pub async fn add_file_reference(
+    reference: String,
+    filename: String,
+    mime_type: String,
+    size_hint: Option<u64>,
+) -> Result<(), RuntimeError> {
+    empty_response(Method::ImportFileReference {
+        reference,
+        filename,
+        mime_type,
+        size_hint,
+    })
+    .await
+}
+pub async fn start_file_download(
+    id: String,
+    dest_path: String,
+    token: String,
+) -> Result<(), RuntimeError> {
+    empty_response(Method::StartFileDownload {
+        id,
+        dest_path,
+        token,
+    })
+    .await
+}
+pub async fn downloaded_clip_file(id: String) -> Result<Option<String>, RuntimeError> {
+    match client::request(Method::DownloadedFile { id }).await?.data {
+        Some(ResponseData::DownloadedFile(path)) => Ok(path),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileOperationUpdate {
+    pub id: Option<String>,
+    pub phase: Option<String>,
+    pub written: u64,
+    pub total: u64,
 }

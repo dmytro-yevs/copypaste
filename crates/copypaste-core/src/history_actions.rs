@@ -75,7 +75,13 @@ pub fn prepare_copy(
         options.local_device_id,
         false,
     );
-    let staged = if options.plain_text || crate::file_transfer::offer(&payload).is_none() {
+    let staged = if options.plain_text
+        || crate::file_transfer::offer(&payload).is_none()
+        || store
+            .file_reference(&row.id)
+            .map_err(crate::file_transfer::FileTransferError::from)?
+            .is_some()
+    {
         None
     } else {
         crate::file_transfer::prepare_copy(store, key, &row, options.max_file_size_bytes)?

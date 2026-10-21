@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../platform/desktop/quick_paste_host.dart';
 import '../history/controller/history_controller.dart';
+import '../transfers/file_operations_controller.dart';
 import '../history/controller/history_ocr_controller.dart';
 import '../history/models/history_models.dart';
 import '../history/repository/history_file_downloader.dart';
@@ -23,10 +24,10 @@ class QuickPasteController extends ChangeNotifier {
     required QuickPasteContextHost host,
     HistoryFileDownloader? fileDownloader,
     HistoryFileTransfer? fileTransfer,
+    FileOperationsController? fileOperations,
     HistoryOcrController? ocr,
     Future<void> Function()? initializeInspector,
-  }) : _fileTransfer = fileTransfer ?? HistoryFileTransfer(repository),
-       _disposeRepository = disposeRepository,
+  }) : _disposeRepository = disposeRepository,
        _initializeInspector = initializeInspector,
        _preferencesStore = preferencesStore,
        _host = host,
@@ -37,6 +38,8 @@ class QuickPasteController extends ChangeNotifier {
          separatePinnedWindow: true,
          searchDebounce: Duration.zero,
          fileDownloader: fileDownloader,
+         fileTransfer: fileTransfer,
+         fileOperations: fileOperations,
          ocr: ocr,
        ),
        _preferences = QuickPastePreferences.defaults() {
@@ -51,7 +54,6 @@ class QuickPasteController extends ChangeNotifier {
   final QuickPastePreferencesStore _preferencesStore;
   final QuickPasteContextHost _host;
   final HistoryController history;
-  final HistoryFileTransfer _fileTransfer;
 
   QuickPastePreferences _preferences;
   HistoryClip? _focusedClip;
@@ -60,9 +62,8 @@ class QuickPasteController extends ChangeNotifier {
   bool _initialized = false;
   bool _initialHistoryReady = false;
   bool _activating = false;
-  String? _transferringClipId;
-  String? _failedTransferClipId;
-  double _transferProgress = 0;
+  int _activationGeneration = 0;
+  bool _historyDisposed = false;
   int _presentationGeneration = 0;
   int? _presentationId;
   int? _renderablePresentationId;
@@ -92,9 +93,8 @@ class QuickPasteController extends ChangeNotifier {
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get activating => _activating;
-  double? transferProgressFor(String id) =>
-      _transferringClipId == id ? _transferProgress : null;
-  bool transferFailedFor(String id) => _failedTransferClipId == id;
+  double? transferProgressFor(String id) => history.downloadProgressFor(id);
+  bool transferFailedFor(String id) => history.downloadFailedFor(id);
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
   bool get inspectorOpen => _inspectorOpen;
@@ -483,44 +483,43 @@ class QuickPasteController extends ChangeNotifier {
     bool forcePaste = false,
   }) async {
     final presentationId = _presentationId;
-    if (_disposed || _activating || presentationId == null) return;
+    if (_disposed ||
+        _activating ||
+        presentationId == null ||
+        history.isDownloadPending(clip.id)) {
+      return;
+    }
+    final generation = ++_activationGeneration;
+    final focusGeneration = _focusGeneration;
+    final focusedId = _focusedClip?.id;
+    bool current() =>
+        _isCurrent(presentationId) && generation == _activationGeneration;
     _cancelInspectorHover();
     _activating = true;
     notifyListeners();
     try {
       await history.select(clip.id);
-      if (!_isCurrent(presentationId)) return;
+      if (!current()) return;
       final selected = history.selectedClip;
       if (selected?.contentKind == HistoryClipKind.file &&
           selected?.file != null &&
           !selected!.file!.sourceAvailable) {
-        _failedTransferClipId = null;
-        _transferringClipId = clip.id;
-        _transferProgress = 0;
+        // The runtime owns file I/O; other clipboard actions remain available.
+        _activating = false;
         notifyListeners();
-        try {
-          await _fileTransfer.prepare(
-            selected,
-            onProgress: (progress) {
-              if (!_isCurrent(presentationId)) return;
-              _transferProgress = progress;
-              notifyListeners();
-            },
-          );
-        } catch (_) {
-          if (_isCurrent(presentationId)) {
-            _failedTransferClipId = clip.id;
-            notifyListeners();
-          }
+        final path = await history.prepareFileForCopy(selected);
+        if (path == null ||
+            !current() ||
+            focusGeneration != _focusGeneration ||
+            focusedId != _focusedClip?.id) {
           return;
-        } finally {
-          _transferringClipId = null;
-          if (_isCurrent(presentationId)) notifyListeners();
         }
-        if (!_isCurrent(presentationId)) return;
+        _activating = true;
+        await history.select(clip.id);
+        if (!current()) return;
       }
       final copied = await history.copySelected(plainText: plainText);
-      if (!copied || !_isCurrent(presentationId)) return;
+      if (!copied || !current()) return;
       final shouldPaste = forcePaste
           ? true
           : invertAutoPaste
@@ -532,7 +531,7 @@ class QuickPasteController extends ChangeNotifier {
         } catch (_) {
           // A permission or preference failure still leaves a completed Copy.
         }
-        if (!_isCurrent(presentationId)) return;
+        if (!current()) return;
       }
       if (shouldPaste && _accessibilityGranted) {
         var pasted = false;
@@ -543,12 +542,14 @@ class QuickPasteController extends ChangeNotifier {
         } on MissingPluginException {
           // A disappearing native context cannot undo the completed Copy.
         }
-        if (!_isCurrent(presentationId) || pasted) return;
+        if (!current() || pasted) return;
       }
       await _closePresentation(presentationId);
     } finally {
-      _activating = false;
-      if (_disposed) history.dispose();
+      if (generation == _activationGeneration) {
+        _activating = false;
+      }
+      if (_disposed) _disposeHistory();
       if (!_disposed) notifyListeners();
     }
   }
@@ -741,6 +742,12 @@ class QuickPasteController extends ChangeNotifier {
     return _repositoryDisposal ?? Future<void>.value();
   }
 
+  void _disposeHistory() {
+    if (_historyDisposed) return;
+    _historyDisposed = true;
+    history.dispose();
+  }
+
   @override
   void dispose() {
     if (_disposed) return;
@@ -750,7 +757,7 @@ class QuickPasteController extends ChangeNotifier {
     _host.setOpenedHandler(null);
     _host.setShutdownHandler(null);
     history.removeListener(_historyChanged);
-    if (!_activating) history.dispose();
+    if (!_activating) _disposeHistory();
     final disposeRepository = _disposeRepository;
     if (disposeRepository != null) {
       _repositoryDisposal = disposeRepository();

@@ -35,7 +35,7 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
                                 addCategory(Intent.CATEGORY_OPENABLE)
                                 type = "*/*"
                                 putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                             }, REQUEST)
                         } catch (_: Exception) {
                             activity.failedToOpenHistoryFilePicker()
@@ -114,14 +114,26 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
         }
         worker.execute {
             try {
+                // Reclaim grants only for sources no live clip or pending selection owns.
+                val protectedUris = uris.toSet() + selections.values
+                activity.contentResolver.persistedUriPermissions.forEach { permission ->
+                    if (permission.uri !in protectedUris && !NativeRuntimeCapture.fileSourceRetained(permission.uri.toString())) {
+                        runCatching { activity.contentResolver.releasePersistableUriPermission(permission.uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                    }
+                }
                 val files = uris.map { uri ->
+                    activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     var name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-                    activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst() && !cursor.isNull(0)) name = cursor.getString(0)
+                    var size: Long? = null
+                    activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            if (!cursor.isNull(0)) name = cursor.getString(0)
+                            if (!cursor.isNull(1)) size = cursor.getLong(1).takeIf { it >= 0 }
+                        }
                     }
                     val token = UUID.randomUUID().toString()
                     selections[token] = uri
-                    mapOf("token" to token, "name" to name, "mimeType" to (activity.contentResolver.getType(uri) ?: "application/octet-stream"), "uri" to uri.toString())
+                    mapOf("token" to token, "name" to name, "mimeType" to (activity.contentResolver.getType(uri) ?: "application/octet-stream"), "uri" to uri.toString(), "sizeBytes" to size)
                 }
                 reply { result.success(files) }
             } catch (_: Exception) {

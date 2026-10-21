@@ -19,6 +19,19 @@ struct ObservedSource {
     reads: AtomicUsize,
 }
 impl SyncSource for ObservedSource {
+    fn deferred_file(
+        &self,
+        id: &str,
+    ) -> Result<Option<Box<dyn copypaste_p2p::sync::DeferredFileSource>>, SyncError> {
+        self.source.deferred_file(id)
+    }
+    fn observe_file_transfer(
+        &self,
+        id: &str,
+        peer: &str,
+    ) -> Option<Box<dyn copypaste_p2p::sync::FileTransferObserver>> {
+        self.source.observe_file_transfer(id, peer)
+    }
     fn device_id(&self) -> String {
         self.source.device_id()
     }
@@ -51,6 +64,13 @@ impl SyncSource for ObservedSource {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copies() {
+    exercise_download(false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reference_offer_downloads_original_on_demand_and_records_both_directions() {
+    exercise_download(true).await;
+}
+async fn exercise_download(deferred: bool) {
     let dir = tempfile::tempdir().unwrap();
     let source_key = Arc::new(Keyring::from_secret(&[41; 32]));
     let target_key = Arc::new(Keyring::from_secret(&[42; 32]));
@@ -70,16 +90,29 @@ async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copi
         }
     }
     let config = copypaste_ipc::ConfigData::default();
-    let row = file_import::import_file(
-        &source,
-        &source_key,
-        &original,
-        "Hail-v1.10.0.apk",
-        "application/vnd.android.package-archive",
-        original.to_str(),
-        &config,
-    )
-    .unwrap();
+    let row = if deferred {
+        crate::file_reference::import(
+            &source,
+            &source_key,
+            original.to_str().unwrap(),
+            "Hail-v1.10.0.apk",
+            "application/vnd.android.package-archive",
+            &config,
+            None,
+        )
+        .unwrap()
+    } else {
+        file_import::import_file(
+            &source,
+            &source_key,
+            &original,
+            "Hail-v1.10.0.apk",
+            "application/vnd.android.package-archive",
+            original.to_str(),
+            &config,
+        )
+        .unwrap()
+    };
     let expected = file_transfer::row_offer(&row, &source_key.item_key())
         .unwrap()
         .unwrap();
@@ -216,17 +249,36 @@ async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copi
     );
     assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
     drop(progress);
-    assert_eq!(
-        source_view.reads.load(Ordering::SeqCst) as u64,
-        expected
-            .size_bytes
-            .div_ceil(file_transfer::CHUNK_BYTES as u64)
-    );
+    if !deferred {
+        assert_eq!(
+            source_view.reads.load(Ordering::SeqCst) as u64,
+            expected
+                .size_bytes
+                .div_ceil(file_transfer::CHUNK_BYTES as u64)
+        );
+    }
     let mut saved = std::fs::File::open(&destination).unwrap();
+    let actual = file_transfer::digest(&mut saved, u64::MAX).unwrap();
+    assert_eq!(actual.size_bytes, expected.size_bytes);
+    if !deferred {
+        assert_eq!(actual.sha256, expected.sha256);
+    }
     assert_eq!(
-        file_transfer::digest(&mut saved, u64::MAX).unwrap(),
-        expected
+        std::fs::read(&destination).unwrap(),
+        std::fs::read(&original).unwrap()
     );
+    let records = target.file_operations(false, None, None).unwrap();
+    assert!(records.iter().any(|record| record.phase
+        == copypaste_ipc::FileOperationPhase::Completed
+        && record.local_path.as_deref() == destination.to_str()));
+    assert!(source
+        .file_operations(false, None, None)
+        .unwrap()
+        .iter()
+        .any(
+            |record| record.kind == copypaste_ipc::FileOperationKind::Send
+                && record.phase == copypaste_ipc::FileOperationPhase::Completed
+        ));
     let copy = file_transfer::prepare_copy(&target, &target_key.item_key(), &remote, u64::MAX)
         .unwrap()
         .unwrap();
@@ -288,6 +340,41 @@ async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copi
         "Cancelled downloads remove their partial destination"
     );
 
+    if deferred {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&original)
+            .unwrap()
+            .set_len(expected.size_bytes + 1)
+            .unwrap();
+        let changed = dir.path().join("changed.apk");
+        let error = downloads
+            .save(
+                &target,
+                &target_key,
+                &receiver,
+                "receiver",
+                &row.id,
+                &changed,
+                &config,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("original file changed"),
+            "{error}"
+        );
+        assert!(!changed.exists());
+        assert!(target
+            .file_operations(false, None, None)
+            .unwrap()
+            .iter()
+            .any(|record| record
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("original file changed"))));
+    }
+
     stop.send(true).unwrap();
     server.await.unwrap();
     let offline = dir.path().join("offline.apk");
@@ -305,4 +392,22 @@ async fn six_megabyte_file_syncs_only_its_offer_then_downloads_verifies_and_copi
         .unwrap_err();
     assert!(error.to_string().contains("unavailable"));
     assert!(!offline.exists());
+}
+
+#[test]
+fn detached_admission_is_bounded_released_and_closed_on_shutdown() {
+    let downloads = FileDownloads::default();
+    let slot = downloads.reserve_background().unwrap();
+    assert!(matches!(
+        downloads.reserve_background(),
+        Err(file_transfer::FileTransferError::Busy)
+    ));
+    drop(slot);
+    let slot = downloads.reserve_background().unwrap();
+    downloads.cancel_all();
+    drop(slot);
+    assert!(matches!(
+        downloads.reserve_background(),
+        Err(file_transfer::FileTransferError::Cancelled)
+    ));
 }

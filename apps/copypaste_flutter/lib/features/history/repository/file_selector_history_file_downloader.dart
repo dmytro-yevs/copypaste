@@ -19,7 +19,7 @@ class FileSelectorHistoryFileDownloader implements HistoryFileDownloader {
         ? file.name!.trim()
         : 'copypaste-file';
     if (Platform.isAndroid) {
-      return fileGateway.androidStagingPath(suggestedName);
+      return fileGateway.androidStagingPath(suggestedName, persistent: true);
     }
     return (await getSaveLocation(suggestedName: suggestedName))?.path;
   }

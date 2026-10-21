@@ -80,6 +80,38 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
         return;
     };
     let _ = JAVA_VM.set(Arc::new(java_vm));
+    copypaste_core::file_reference::set_uri_resolver(Arc::new(|reference| {
+        use std::os::fd::FromRawFd;
+        let open = || -> Result<std::fs::File, jni::errors::Error> {
+            let vm = JAVA_VM
+                .get()
+                .ok_or(jni::errors::Error::NullPtr("Java VM"))?;
+            let mut env = vm.attach_current_thread()?;
+            let class = CLIPBOARD_HOST_CLASS
+                .get()
+                .ok_or(jni::errors::Error::NullPtr("source host"))?;
+            let value = env.new_string(reference)?;
+            let fd = env
+                .call_static_method(
+                    class,
+                    "openFileSource",
+                    "(Ljava/lang/String;)I",
+                    &[(&value).into()],
+                )?
+                .i()?;
+            if fd < 0 {
+                return Err(jni::errors::Error::NullPtr("file source"));
+            }
+            // Kotlin detached this descriptor; ownership transfers exactly once.
+            Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+        };
+        open().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "The source file could not be opened.",
+            )
+        })
+    }));
 
     if APPLICATION_CONTEXT.set(application_context).is_ok() {
         let application_context = APPLICATION_CONTEXT
@@ -895,6 +927,7 @@ async fn push_capture_snapshot(
     Ok(sink
         .add(crate::client::typed_runtime_event(
             copypaste_ipc::RuntimeEventData {
+                file_operation: None,
                 change: None,
                 capture: Some(status),
                 progress: None,
@@ -916,6 +949,7 @@ pub(crate) async fn watch(
         .map_err(|_| crate::api::RuntimeError::internal())?;
     let mut events = runtime.subscribe_events();
     let mut runtime_events = runtime.subscribe_runtime_events();
+    let mut transfers = runtime.store.subscribe_file_operations();
     if sink.add(crate::client::runtime_ready(true)).is_err() {
         return Ok(());
     }
@@ -930,7 +964,7 @@ pub(crate) async fn watch(
                 return Ok(());
             }
             event = events.recv() => match event {
-                Ok(event) => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { change: Some(event), capture: None, progress: None }),
+                Ok(event) => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(event), capture: None, progress: None }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
                     if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
@@ -938,6 +972,7 @@ pub(crate) async fn watch(
                 },
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
             },
+            changed = transfers.recv() => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { file_operation: Some(changed.unwrap_or_default()), change: None, capture: None, progress: None }),
             event = runtime_events.recv() => match event {
                 Ok(event) => crate::client::typed_runtime_event(event),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
@@ -951,5 +986,30 @@ pub(crate) async fn watch(
         if sink.add(event).is_err() {
             return Ok(());
         }
+    }
+}
+
+/// Only discard Android grants after the durable store has released the source.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_fileSourceRetained(
+    mut env: JNIEnv,
+    _class: JClass,
+    reference: JString,
+) -> jboolean {
+    let Some(runtime) = RUNTIME.get() else {
+        return JNI_TRUE;
+    };
+    let Ok(reference) = env.get_string(&reference) else {
+        return JNI_TRUE;
+    };
+    let retained = runtime
+        .store
+        .retains_file_reference(&reference.to_string_lossy())
+        .unwrap_or(true);
+    if retained {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
     }
 }

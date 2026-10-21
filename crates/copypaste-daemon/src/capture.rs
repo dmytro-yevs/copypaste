@@ -949,12 +949,7 @@ mod tests {
                 polls: Arc::clone(&polls),
             }),
         );
-        let endpoint = _dir.path().join("daemon.sock");
-        let cwd = std::env::current_dir().unwrap();
-        let endpoint = endpoint
-            .strip_prefix(cwd)
-            .unwrap_or(&endpoint)
-            .to_path_buf();
+        let endpoint = crate::testutil::test_socket_path(&_dir, "daemon.sock");
         let listener = crate::server::bind(&endpoint).expect("bind");
         let server = tokio::spawn(crate::server::run(
             listener,

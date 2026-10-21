@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:mime/mime.dart';
 
 /// Shared native presentation for files created by CopyPaste.
 class PlatformFileGateway {
@@ -11,11 +12,20 @@ class PlatformFileGateway {
     'com.copypaste.app/settings_files',
   );
 
-  Future<String> androidStagingPath(String suggestedName) async {
-    final root = await getTemporaryDirectory();
-    final directory = Directory('${root.path}/clipboard');
+  Future<String> androidStagingPath(
+    String suggestedName, {
+    bool persistent = false,
+  }) async {
+    final root = persistent
+        ? await getApplicationSupportDirectory()
+        : await getTemporaryDirectory();
+    final directory = Directory(
+      '${root.path}/${persistent ? "copypaste-downloads" : "clipboard"}',
+    );
     await directory.create(recursive: true);
-    await _removeExpiredStagingFiles(directory);
+    if (!persistent) {
+      await _removeExpiredStagingFiles(directory);
+    }
     final safeName = suggestedName
         .split(RegExp(r'[/\\]'))
         .last
@@ -34,6 +44,24 @@ class PlatformFileGateway {
       'path': path,
       'mimeType': mimeType,
     });
+  }
+
+  Future<void> openFile(String path) async {
+    if (Platform.isAndroid) {
+      await _androidChannel.invokeMethod<void>('openFile', {
+        'path': path,
+        'mimeType': lookupMimeType(path) ?? 'application/octet-stream',
+      });
+      return;
+    }
+    final result = Platform.isMacOS
+        ? await Process.run('open', ['-R', path])
+        : Platform.isWindows
+        ? await Process.run('explorer.exe', ['/select,', path])
+        : await Process.run('xdg-open', [File(path).parent.path]);
+    if (result.exitCode != 0) {
+      throw const FileSystemException('File could not be opened');
+    }
   }
 
   Future<void> _removeExpiredStagingFiles(Directory directory) async {
