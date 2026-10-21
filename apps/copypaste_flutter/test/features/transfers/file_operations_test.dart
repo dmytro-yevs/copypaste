@@ -157,8 +157,13 @@ void main() {
       expect(find.text('Show saved file'), findsOneWidget);
       expect(find.textContaining('Bring it online'), findsOneWidget);
       expect(find.text('Clear completed history'), findsOneWidget);
+      await tester.ensureVisible(find.text('Retry'));
+      await tester.pump();
       await tester.tap(find.text('Retry'));
+      await tester.pump();
       expect(repository.retried, ['presentation']);
+      await tester.ensureVisible(find.text('Show saved file'));
+      await tester.pump();
       await tester.tap(find.text('Show saved file'));
       expect(repository.opened, ['/saved/invoice.pdf']);
       await tester.pump();

@@ -41,8 +41,10 @@ void main() {
       expect(states, everyElement(HistoryLoadState.ready));
       expect(repository.requests.last.$2, isNull);
       await controller.loadMore();
-      expect(_ids(controller.items), ['b', 'a', 'c', 'd']);
-      expect(repository.requests.last.$2, '2');
+      // The queued authoritative refresh rebuilds the reordered boundary and
+      // prefetches its neighbor before this explicit continuation is consumed.
+      expect(_ids(controller.items), ['b', 'a', 'c', 'd', 'loose']);
+      expect(repository.requests.last.$2, '4');
     },
   );
 
