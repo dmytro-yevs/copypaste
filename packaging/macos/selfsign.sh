@@ -124,6 +124,13 @@ esac
 
 # Resolve the real account home only after the downloaded helper can execute.
 if [ -x "$SOURCE_KEYCHAIN_HELPER" ]; then
+    # Security tools also use HOME for their search-list preferences. Merely
+    # moving the signing material leaves codesign in Homebrew's empty domain.
+    ACCOUNT_HOME="$("$SOURCE_KEYCHAIN_HELPER" home-directory)" || exit 1
+    case "$ACCOUNT_HOME" in
+        /*) export HOME="$ACCOUNT_HOME" ;;
+        *) echo "ERROR: the account home must be absolute." >&2; exit 2 ;;
+    esac
     DATA_DIR="$("$SOURCE_KEYCHAIN_HELPER" support-directory)" || exit 1
 else
     DATA_DIR="${HOME}/Library/Application Support/com.copypaste.CopyPaste"
@@ -152,7 +159,7 @@ FINGERPRINT_FILE="${SUPPORT}/certificate-sha1"
 #
 # Writes codesign's own output to stdout so the caller can inspect it; the
 # caller decides what, if anything, the user sees.
-sign_bundle() {
+sign_bundle() (
     local identity="$1"
     local keychain="${2:-}"
     local bin
@@ -160,6 +167,30 @@ sign_bundle() {
     keychain_args=()
     if [ -n "$keychain" ]; then
         keychain_args=(--keychain "$keychain")
+        # --keychain limits identity lookup; codesign still requires the
+        # identity's certificate chain on the user's search list on macOS 14.
+        # Scope the addition to this signing call and restore it on every exit.
+        local listing entry present
+        local -a original_search
+        original_search=()
+        present=false
+        listing="$(/usr/bin/security list-keychains -d user)" || return 1
+        while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -n "$entry" ] || continue
+            case "$entry" in
+                \"*\") entry="${entry#\"}"; entry="${entry%\"}" ;;
+                *) echo "ERROR: cannot parse the Keychain search list."; return 1 ;;
+            esac
+            original_search+=("$entry")
+            if [ "$entry" = "$keychain" ]; then present=true; fi
+        done <<< "$listing"
+        [ "${#original_search[@]}" -gt 0 ] || return 1
+        if [ "$present" = false ]; then
+            trap '/usr/bin/security list-keychains -d user -s "${original_search[@]}" || exit 1' EXIT
+            /usr/bin/security list-keychains -d user -s "${original_search[@]}" "$keychain" || return 1
+        fi
     fi
 
     for bin in $INNER_BINARIES; do
@@ -183,7 +214,7 @@ sign_bundle() {
 
     /usr/bin/codesign --verify --strict "$APP" 2>&1 || return 1
     return 0
-}
+)
 
 sign_adhoc() {
     sign_bundle - >/dev/null 2>&1

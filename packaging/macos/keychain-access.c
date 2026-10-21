@@ -112,6 +112,12 @@ int main(int argc, char **argv) {
     // Bound an OS-mediated prompt even if the daemon exits during the call.
     alarm(8);
     if (argc != 2) return 2;
+    if (!strcmp(argv[1], "home-directory")) {
+        struct passwd *user = getpwuid(getuid());
+        if (!user || !user->pw_dir || user->pw_dir[0] != '/') return 2;
+        printf("%s\n", user->pw_dir);
+        return 0;
+    }
     if (!strcmp(argv[1], "support-directory")) {
 #ifdef COPYPASTE_KEYCHAIN_TESTING
         const char *fixture = getenv("COPYPASTE_KEYCHAIN_TEST_SUPPORT_DIR");
