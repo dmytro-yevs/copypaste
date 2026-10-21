@@ -1,4 +1,5 @@
 import '../../support/temporary_payloads.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -83,6 +84,20 @@ _fixture() async {
 }
 
 void main() {
+  test('OCR rereads module availability before preparing image data', () async {
+    final f = await _fixture();
+    addTearDown(f.modules.dispose);
+    addTearDown(f.ocr.dispose);
+    expect(f.ocr.available, isTrue);
+    // Simulate another engine disabling the module after this inspector opened.
+    f.repository.modules = [_ocrModule(enabled: false)];
+    await f.ocr.recognize(_image);
+    expect(f.ocr.available, isFalse);
+    expect(f.input.prepared, isEmpty);
+    expect(f.repository.invocations, isEmpty);
+    expect(f.ocr.errorMessage, contains('OCR is unavailable'));
+  });
+
   for (final width in [320.0, 448.0, 816.0, 1400.0]) {
     for (final scale in [1.0, 2.0]) {
       testWidgets(

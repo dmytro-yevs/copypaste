@@ -115,7 +115,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (revision != _operationErrorRevision) {
       _operationErrorRevision = revision;
       final message = widget.controller.operationError;
-      if (message != null) {
+      final action = widget.controller.failedAction;
+      // Pin/delete failures already appear in this screen's attention state.
+      if (message != null &&
+          action != HistoryAction.pin &&
+          action != HistoryAction.delete) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             AppToast.show(

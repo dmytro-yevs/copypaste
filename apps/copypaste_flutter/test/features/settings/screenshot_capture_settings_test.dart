@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
+import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
+import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
 import 'package:copypaste_flutter/platform/android/screenshot_capture.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +23,78 @@ void main() {
     screenshotCapture: capture,
     captureRefreshInterval: Duration.zero,
   );
+
+  testWidgets('stopped screenshot capture reacts to native state and resumes', (
+    tester,
+  ) async {
+    final port = _CaptureEvents()
+      ..current = const ScreenshotCaptureStatus(
+        enabled: true,
+        mediaGranted: true,
+        notificationGranted: true,
+        running: false,
+      );
+    final repository = _CaptureEventsRepository();
+    final settings = SettingsController(
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      screenshotProtection: FakeScreenshotProtection(),
+      screenshotCapture: port,
+      captureRefreshInterval: Duration.zero,
+    );
+    addTearDown(settings.dispose);
+    addTearDown(port.events.close);
+    addTearDown(repository.events.close);
+    await settings.initialize();
+    repository.events.add(null);
+    await tester.pump();
+    repository.events.add(
+      const CaptureSettingsState(
+        running: true,
+        paused: false,
+        epoch: 0,
+        captureWatch: true,
+        captureRevision: 1,
+      ),
+    );
+    await tester.pump();
+    expect(port.events.hasListener, isTrue);
+    await tester.binding.setSurfaceSize(const Size(390, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: SettingsScreen(controller: settings)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('mobile-settings-section-clipboard')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Screenshot capture is not running'), findsOneWidget);
+    port.events.add(
+      const ScreenshotCaptureStatus(
+        enabled: true,
+        mediaGranted: true,
+        notificationGranted: true,
+        running: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Screenshot capture is not running'), findsNothing);
+    port.events.add(port.current);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Resume capture'));
+    await tester.tap(find.text('Resume capture'));
+    await tester.pumpAndSettle();
+    expect(port.current.running, isTrue);
+    expect(find.text('Screenshot capture is not running'), findsNothing);
+    expect(settings.screenshotCapture.enabled, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   test('enabled default and native changes survive a new controller', () async {
     final port = _Capture();
@@ -174,6 +248,30 @@ void main() {
     expect(calls.last.method, 'setScreenshotCaptureEnabled');
     expect(calls.last.arguments, {'enabled': false});
   });
+}
+
+class _CaptureEventsRepository extends FakeSettingsRepository
+    implements CaptureEventsRepository {
+  final events = StreamController<CaptureSettingsState?>.broadcast();
+  @override
+  Stream<CaptureSettingsState?> captureEvents() => events.stream;
+}
+
+class _CaptureEvents extends _Capture implements ScreenshotCaptureEvents {
+  final events = StreamController<ScreenshotCaptureStatus>.broadcast();
+  @override
+  Stream<ScreenshotCaptureStatus> get changes => events.stream;
+
+  @override
+  Future<ScreenshotCaptureStatus> setEnabled(bool enabled) async {
+    current = ScreenshotCaptureStatus(
+      enabled: enabled,
+      mediaGranted: current.mediaGranted,
+      notificationGranted: current.notificationGranted,
+      running: enabled && !current.needsPermission,
+    );
+    return current;
+  }
 }
 
 class _Capture implements ScreenshotCapture {

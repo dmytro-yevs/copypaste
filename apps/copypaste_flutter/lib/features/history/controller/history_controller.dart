@@ -19,6 +19,8 @@ enum HistoryLoadState { initial, loading, ready, empty, error }
 
 enum HistoryFileDownloadResult { saved, cancelled, failed }
 
+enum HistoryAction { copy, download, importFiles, pin, delete }
+
 enum _HistoryBulkMutation { delete, pin, unpin }
 
 typedef _ImagePreviewKey = ({String id, int? edge, int? width, int? height});
@@ -269,13 +271,16 @@ class HistoryController extends ChangeNotifier {
   int? _selectedDetailLoadEpoch;
   String? _errorMessage;
   String? _operationError;
+  HistoryAction? _failedAction;
   int _operationErrorRevision = 0;
   String? get operationError => _operationError;
+  HistoryAction? get failedAction => _failedAction;
   int get operationErrorRevision => _operationErrorRevision;
 
-  void _reportOperationError(String message) {
+  void _reportOperationError(String message, {required HistoryAction action}) {
     _errorMessage = message;
     _operationError = message;
+    _failedAction = action;
     _operationErrorRevision++;
   }
 
@@ -497,8 +502,9 @@ class HistoryController extends ChangeNotifier {
     if (repository is HistoryFileDownloadCancellation) {
       final cancellation = repository as HistoryFileDownloadCancellation;
       unawaited(
-        Future<void>.sync(() => cancellation.cancelFileDownload(id))
-            .catchError((Object _) {}),
+        Future<void>.sync(
+          () => cancellation.cancelFileDownload(id),
+        ).catchError((Object _) {}),
       );
     }
     notifyListeners();
@@ -873,12 +879,13 @@ class HistoryController extends ChangeNotifier {
   Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
     late final Future<void> refresh;
     refresh =
-        _refreshVisibleItemsAndFacets(resetWatchBackoff: resetWatchBackoff)
-            .whenComplete(() {
-              if (identical(_visibleItemsRefresh, refresh)) {
-                _visibleItemsRefresh = null;
-              }
-            });
+        _refreshVisibleItemsAndFacets(
+          resetWatchBackoff: resetWatchBackoff,
+        ).whenComplete(() {
+          if (identical(_visibleItemsRefresh, refresh)) {
+            _visibleItemsRefresh = null;
+          }
+        });
     _visibleItemsRefresh = refresh;
     return refresh;
   }
@@ -1500,6 +1507,7 @@ class HistoryController extends ChangeNotifier {
               ? 'Plain text could not be copied.'
               : 'This clip could not be copied.',
         ),
+        action: HistoryAction.copy,
       );
       notifyListeners();
       return false;
@@ -1584,6 +1592,7 @@ class HistoryController extends ChangeNotifier {
       }
       _reportOperationError(
         _fileFailure(error, 'This file could not be downloaded.'),
+        action: HistoryAction.download,
       );
       _failedDownloads.clear();
       _failedDownloads.add(clip.id);
@@ -1680,7 +1689,9 @@ class HistoryController extends ChangeNotifier {
       }
     }
     if (_disposed) return;
-    if (failure != null) _reportOperationError(failure);
+    if (failure != null) {
+      _reportOperationError(failure, action: HistoryAction.importFiles);
+    }
     notifyListeners();
   }
 
@@ -1744,7 +1755,10 @@ class HistoryController extends ChangeNotifier {
       if (_selectedId == clip.id) {
         _selectedClip = _selectedClip?.copyWith(pinned: clip.pinned);
       }
-      _errorMessage = 'The pin could not be updated.';
+      _reportOperationError(
+        'The pin could not be updated.',
+        action: HistoryAction.pin,
+      );
       notifyListeners();
       return false;
     } finally {
@@ -1906,7 +1920,10 @@ class HistoryController extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (_) {
-      _errorMessage = 'This clip could not be deleted.';
+      _reportOperationError(
+        'This clip could not be deleted.',
+        action: HistoryAction.delete,
+      );
       notifyListeners();
       return false;
     } finally {

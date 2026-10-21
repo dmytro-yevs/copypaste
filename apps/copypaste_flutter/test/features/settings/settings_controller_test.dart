@@ -10,6 +10,8 @@ import 'package:copypaste_flutter/features/settings/models/settings_models.dart'
 import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
 import 'package:copypaste_flutter/platform/android/screenshot_capture.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
+import 'package:copypaste_flutter/features/settings/view/capture_header_action.dart';
+import 'package:copypaste_flutter/platform/capture/capture_control_state.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/capture/capture_service_control.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
@@ -25,6 +27,60 @@ import 'package:copypaste_flutter/features/modules/controller/modules_controller
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 
 void main() {
+  testWidgets(
+    'stopped capture offers recovery in the shared header',
+    (tester) async {
+      final repository = FakeSettingsRepository()
+        ..capture = const CaptureSettingsState(
+          running: false,
+          paused: false,
+          epoch: 1,
+        );
+      final controller = SettingsController(
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        screenshotProtection: FakeScreenshotProtection(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: CaptureHeaderAction(controller: controller)),
+        ),
+      );
+      expect(controller.capture!.controlState, CaptureControlState.stopped);
+      expect(
+        find.bySemanticsLabel('Resume capture (not running)'),
+        findsOneWidget,
+      );
+      expect(find.byIcon(LucideIcons.circleAlert), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('capture-header-toggle')));
+      await tester.pumpAndSettle();
+      expect(controller.capture!.running, isTrue);
+      expect(repository.capture.paused, isFalse);
+      expect(find.bySemanticsLabel('Pause capture'), findsOneWidget);
+      // The settings switch can still explicitly disable an enabled, stopped service.
+      repository.capture = const CaptureSettingsState(
+        running: false,
+        paused: false,
+        epoch: 3,
+      );
+      await controller.retry();
+      expect(await controller.setCapturePaused(true), isTrue);
+      expect(repository.capture.paused, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   testWidgets('capture polling notifies only for exposed value changes', (
     tester,
   ) async {

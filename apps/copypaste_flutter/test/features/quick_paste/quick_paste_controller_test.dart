@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -32,6 +33,95 @@ import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import '../modules/modules_test_support.dart';
 
 void main() {
+  test(
+    'inspector refreshes completed metadata on each opening, not in the background',
+    () async {
+      var loads = 0;
+      final repository = MemoryModulesRepository();
+      final modules = ModulesController(
+        repository: repository,
+        marketplace: MemoryModuleMarketplace(),
+      );
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+        initializeInspector: () {
+          loads++;
+          return modules.initialize();
+        },
+      );
+      addTearDown(controller.dispose);
+      addTearDown(modules.dispose);
+      await controller.initialize();
+      await controller.opened(1, inspectorVisible: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(loads, 1);
+      expect(modules.modules, isEmpty);
+      // Another engine installs/enables a module while the popup is closed.
+      repository.modules = [testModule];
+      await controller.opened(2, inspectorVisible: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(loads, 2);
+      expect(modules.modules.single.id, testModule.id);
+      await controller.toggleInspector();
+      repository.modules = [];
+      await controller.toggleInspector();
+      await Future<void>.delayed(Duration.zero);
+      expect(loads, 3);
+      expect(modules.modules, isEmpty);
+      await controller.close();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(loads, 3);
+    },
+  );
+
+  testWidgets('Quick Paste exposes repeated copy, pin and delete failures', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await controller.initialize();
+    await controller.opened(1);
+    await tester.binding.setSurfaceSize(const Size(448, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    controller.focus(controller.items.first);
+    repository.failCopy = true;
+    await controller.activateFocused();
+    await tester.pumpAndSettle();
+    expect(find.text('Action failed'), findsOneWidget);
+    expect(find.text('This clip could not be copied.'), findsOneWidget);
+    expect(host.closeIds, isEmpty);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    repository.failPin = true;
+    await controller.toggleFocusedPin();
+    await tester.pumpAndSettle();
+    expect(find.text('The pin could not be updated.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    repository.failDelete = true;
+    await controller.deleteFocused();
+    await tester.pumpAndSettle();
+    expect(find.text('This clip could not be deleted.'), findsOneWidget);
+    expect(controller.items, hasLength(2));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    await controller.deleteFocused();
+    await tester.pumpAndSettle();
+    expect(find.text('This clip could not be deleted.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final platform in [
     TargetPlatform.macOS,
     TargetPlatform.windows,
@@ -3043,6 +3133,7 @@ class _Repository implements HistoryRepository {
   final plainCopied = <String>[];
   final saved = <(String, String)>[];
   bool failSave = false;
+  bool failCopy = false, failPin = false, failDelete = false;
   List<int>? savedBytes;
   Completer<void>? saveGate;
   final saveStarted = Completer<void>();
@@ -3059,6 +3150,7 @@ class _Repository implements HistoryRepository {
 
   @override
   Future<void> copy(String id) async {
+    if (failCopy) throw StateError('Copy failed');
     copied.add(id);
     if (!copyStarted.isCompleted) copyStarted.complete();
     await copyGate?.future;
@@ -3092,6 +3184,7 @@ class _Repository implements HistoryRepository {
 
   @override
   Future<void> delete(String id) async {
+    if (failDelete) throw StateError('Delete failed');
     clips.removeWhere((clip) => clip.id == id);
   }
 
@@ -3154,7 +3247,9 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<void> setPinned(String id, bool pinned) async {}
+  Future<void> setPinned(String id, bool pinned) async {
+    if (failPin) throw StateError('Pin failed');
+  }
 
   @override
   Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {

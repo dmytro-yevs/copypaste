@@ -404,12 +404,16 @@ void main() {
       });
 
       await controller.initialize();
-      await controller.updateCaptureState(available: true, paused: false);
+      await controller.updateCaptureState(state: CaptureControlState.running);
       await host.requestCapture();
 
-      expect(host.captureAvailable, isTrue);
-      expect(host.capturePaused, isFalse);
+      expect(host.captureState, CaptureControlState.running);
       expect(toggleCalls, 1);
+      await controller.updateCaptureState(state: CaptureControlState.stopped);
+      expect(host.captureState, CaptureControlState.stopped);
+      expect(host.captureState.actionLabel, 'Resume capture (not running)');
+      await host.requestCapture();
+      expect(toggleCalls, 2);
     });
 
     test('persists geometry and exits from the explicit quit action', () async {
@@ -744,16 +748,11 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
     settingsHandler = onSettingsRequested;
   }
 
-  bool captureAvailable = false;
-  bool capturePaused = true;
+  CaptureControlState captureState = CaptureControlState.unavailable;
 
   @override
-  Future<void> updateCaptureMenu({
-    required bool available,
-    required bool paused,
-  }) async {
-    captureAvailable = available;
-    capturePaused = paused;
+  Future<void> updateCaptureMenu({required CaptureControlState state}) async {
+    captureState = state;
   }
 
   @override
