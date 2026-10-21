@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
         private external fun initializeNdkContext(context: Context)
 
         /** Opens the original only during an explicit transfer; Rust owns the fd. */
+        @Keep
         @JvmStatic
         fun openFileSource(reference: String): Int = runCatching {
             val context = applicationContextForSources ?: error("File source host unavailable")
