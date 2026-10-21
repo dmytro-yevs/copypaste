@@ -456,7 +456,7 @@
         "crates/copypaste-daemon/src/p2p/poll.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2673,6 +2673,31 @@
       "evidence_refs": [],
       "next_step": "Measure application, daemon and worker peaks, steady state and growth on macOS, physical Android and installed Windows; resolve runtime budgets before resource qualification.",
       "supersedes": []
+    },
+    {
+      "id": "RUN-057",
+      "title": "Stable short-lived macOS Keychain accessor",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "macOS device-secret backend",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "packaging/macos/keychain-access.c",
+        "crates/copypaste-core/src/crypto/keystore/macos_helper.rs",
+        "packaging/macos/selfsign.sh"
+      ],
+      "invariant": "Preserve one Keychain item and one accessor identity across app upgrades; authenticate both caller and accessor; reap the one-request process within the existing startup deadline. No resident helper or periodic work.",
+      "next_step": "Collect same-artifact app, daemon and accessor physical footprint, CPU, startup peaks and repeated-start growth. Isolated functional fixtures do not qualify resource behavior; CPU, wakeup and recovery budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "native_update_fixture_passed_installed_adoption_and_resource_evidence_pending"
     }
   ]
 }

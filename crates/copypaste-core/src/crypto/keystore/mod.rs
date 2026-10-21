@@ -71,6 +71,10 @@ pub(super) enum Lookup {
 #[path = "macos.rs"]
 mod backend;
 
+#[cfg(all(target_os = "macos", any(not(debug_assertions), test)))]
+#[cfg_attr(all(test, debug_assertions), allow(dead_code))]
+mod macos_helper;
+
 // Debug Linux uses the durable development file backend, as debug macOS does.
 // A release Linux build must have a session Secret Service: falling back to a
 // plaintext file would silently weaken a package installed by the user.

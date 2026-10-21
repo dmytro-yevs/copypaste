@@ -99,6 +99,7 @@ sha2 = { workspace = true, features = ["asm"] }
 # was never passed by any release script — so every shipped macOS binary wrote
 # the secret to a 0600 file instead.
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
 objc2.workspace = true
 security-framework.workspace = true
 sysctl = "0.7"

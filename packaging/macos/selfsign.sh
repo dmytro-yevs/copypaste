@@ -57,7 +57,7 @@ set -uo pipefail
 CERT_CN="CopyPaste Local Signing"
 BUNDLE_ID="com.copypaste.app"
 CERT_DAYS=3650
-INNER_BINARIES="copypaste-cli copypaste-daemon"
+INNER_BINARIES="copypaste-cli copypaste-daemon copypaste-keychain"
 
 APP="${1:-}"
 if [ -z "$APP" ]; then
@@ -72,11 +72,7 @@ fi
 # product data under `com.copypaste.app`. Existing installations already hold
 # the per-machine certificate here; moving it would rotate the code-signing
 # identity and make Keychain and Accessibility ask again during the 1.0 upgrade.
-DATA_DIR="${HOME}/Library/Application Support/com.copypaste.CopyPaste"
-SUPPORT="${DATA_DIR}/signing"
-KEYCHAIN_STEM="${SUPPORT}/copypaste-signing.keychain"
-PASSFILE="${SUPPORT}/keychain-password"
-FINGERPRINT_FILE="${SUPPORT}/certificate-sha1"
+SOURCE_KEYCHAIN_HELPER="${APP}/Contents/MacOS/copypaste-keychain"
 
 # AGENTS.md rule 4: nothing shown to the user may contain a path that discloses
 # the local username. Everything printed goes through this.
@@ -126,6 +122,22 @@ esac
 # would abort an otherwise fine install. The cask carried this call unguarded.
 /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
+# Resolve the real account home only after the downloaded helper can execute.
+if [ -x "$SOURCE_KEYCHAIN_HELPER" ]; then
+    DATA_DIR="$("$SOURCE_KEYCHAIN_HELPER" support-directory)" || exit 1
+else
+    DATA_DIR="${HOME}/Library/Application Support/com.copypaste.CopyPaste"
+fi
+case "$DATA_DIR" in
+    /*) ;;
+    *) echo "ERROR: the signing support directory must be absolute." >&2; exit 2 ;;
+esac
+SUPPORT="${DATA_DIR}/signing"
+PERSISTENT_KEYCHAIN_HELPER="${SUPPORT}/copypaste-keychain-v1"
+KEYCHAIN_STEM="${SUPPORT}/copypaste-signing.keychain"
+PASSFILE="${SUPPORT}/keychain-password"
+FINGERPRINT_FILE="${SUPPORT}/certificate-sha1"
+
 # ---------------------------------------------------------------------------
 # 2. Signing
 # ---------------------------------------------------------------------------
@@ -152,9 +164,13 @@ sign_bundle() {
 
     for bin in $INNER_BINARIES; do
         [ -f "${APP}/Contents/MacOS/${bin}" ] || continue
+        local -a options
+        options=()
+        if [ "$bin" = copypaste-keychain ]; then options=(--options runtime); fi
         /usr/bin/codesign --force --sign "$identity" \
             --identifier "com.copypaste.${bin}" \
             --timestamp=none \
+            ${options[@]+"${options[@]}"} \
             ${keychain_args[@]+"${keychain_args[@]}"} \
             "${APP}/Contents/MacOS/${bin}" 2>&1 || return 1
     done
@@ -427,6 +443,33 @@ SIGN_OUTPUT="$(sign_bundle "$IDENTITY_SHA1" "$KEYCHAIN")" || {
 # Report a changed certificate. The only ways this happens are expiry and a
 # reset of the signing directory, and both mean permissions have to be granted
 # again — much less confusing when the installer says so.
+if [ -x "$SOURCE_KEYCHAIN_HELPER" ]; then
+    HELPER_REQUIREMENT="$(/usr/bin/codesign -d -r- "$SOURCE_KEYCHAIN_HELPER" 2>&1 | sed -n 's/^designated => //p')"
+    if [ -z "$HELPER_REQUIREMENT" ]; then
+        say "ERROR: the Keychain helper has no signing requirement."
+        exit 1
+    fi
+    if [ -e "$PERSISTENT_KEYCHAIN_HELPER" ] || [ -L "$PERSISTENT_KEYCHAIN_HELPER" ]; then
+        if [ ! -x "$PERSISTENT_KEYCHAIN_HELPER" ] || [ -L "$PERSISTENT_KEYCHAIN_HELPER" ] || ! /usr/bin/codesign --verify --strict \
+            --test-requirement "=$HELPER_REQUIREMENT" "$PERSISTENT_KEYCHAIN_HELPER" >/dev/null 2>&1; then
+            say "ERROR: the persistent Keychain helper does not match the local signing identity."
+            say "       Installation stopped without replacing the helper or the history key."
+            exit 1
+        fi
+    else
+        # Never replace v1 on an ordinary upgrade: its cdhash owns the grant.
+        HELPER_STAGE="$(mktemp "${SUPPORT}/.keychain-helper.XXXXXX")" || exit 1
+        if ! install -m 700 "$SOURCE_KEYCHAIN_HELPER" "$HELPER_STAGE" || \
+            ! mv -n "$HELPER_STAGE" "$PERSISTENT_KEYCHAIN_HELPER"; then
+            rm -f "$HELPER_STAGE"
+            exit 1
+        fi
+        rm -f "$HELPER_STAGE"
+    fi
+    /usr/bin/codesign --verify --strict --test-requirement "=$HELPER_REQUIREMENT" \
+        "$PERSISTENT_KEYCHAIN_HELPER" >/dev/null 2>&1 || exit 1
+fi
+
 PREVIOUS_SHA1=""
 if [ -f "$FINGERPRINT_FILE" ]; then
     PREVIOUS_SHA1="$(cat "$FINGERPRINT_FILE" 2>/dev/null)" || PREVIOUS_SHA1=""

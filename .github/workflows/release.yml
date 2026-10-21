@@ -378,6 +378,8 @@ jobs:
           profile: release
       - name: Create disposable release keychain
         run: bash scripts/ci/macos-test-keychain.sh create
+      - name: Preserve Keychain identity across application updates
+        run: python3 -m unittest scripts.release.tests.test_macos_keychain_helper -v
       - name: Build production macOS artifacts
         run: |
           chmod +x packaging/macos/selfsign.sh scripts/release/*.sh
