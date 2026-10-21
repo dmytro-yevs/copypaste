@@ -1,4 +1,5 @@
 import '../transfers/file_operations_view.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import '../history/presentation/secret_spoiler.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
+import '../../app/theme/app_toast.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
 import '../../platform/desktop/desktop_shortcuts.dart';
@@ -51,6 +53,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   bool _paginationCheckScheduled = false;
   bool _pinnedIsActive = false;
   int _generation = 0;
+  int _operationErrorRevision = 0;
   HistoryQuery _query = const HistoryQuery();
   int? _preparingFrame;
   int? _presentedFrame;
@@ -145,6 +148,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   void initState() {
     super.initState();
     _generation = controller.presentationGeneration;
+    _operationErrorRevision = controller.history.operationErrorRevision;
     _query = controller.history.query;
     controller.addListener(_presentationChanged);
     _scroll.addListener(_recentScrolled);
@@ -154,6 +158,24 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   }
 
   void _presentationChanged() {
+    final revision = controller.history.operationErrorRevision;
+    if (_operationErrorRevision != revision) {
+      _operationErrorRevision = revision;
+      final message = controller.history.operationError;
+      final presentation = controller.presentationGeneration;
+      if (message != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && controller.presentationGeneration == presentation) {
+            AppToast.show(
+              context,
+              title: 'Action failed',
+              message: message,
+              tone: AppToastTone.error,
+            );
+          }
+        });
+      }
+    }
     final presentationChanged =
         _generation != controller.presentationGeneration;
     final queryChanged = !identical(_query, controller.history.query);

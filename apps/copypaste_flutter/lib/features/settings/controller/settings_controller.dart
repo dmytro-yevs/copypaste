@@ -180,8 +180,12 @@ class SettingsController extends ChangeNotifier {
   Future<bool> toggleCapture() async {
     final capture = _capture;
     if (capture == null || _busy) return false;
+    return setCapturePaused(!capture.controlState.canResume);
+  }
+
+  Future<bool> setCapturePaused(bool paused) async {
+    if (_capture == null || _busy) return false;
     return _run(() async {
-      final paused = !capture.paused;
       _setCapture(await _repository.setCapturePaused(paused));
       try {
         await _captureControl.setPaused(paused);

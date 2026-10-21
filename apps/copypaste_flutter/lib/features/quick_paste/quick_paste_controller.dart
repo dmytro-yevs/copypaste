@@ -277,7 +277,13 @@ class QuickPasteController extends ChangeNotifier {
     if (_disposed || initialize == null || _inspectorInitialization != null) {
       return;
     }
-    _inspectorInitialization = initialize().catchError((Object _) {});
+    late final Future<void> pending;
+    pending = initialize().catchError((Object _) {}).whenComplete(() {
+      if (identical(_inspectorInitialization, pending)) {
+        _inspectorInitialization = null;
+      }
+    });
+    _inspectorInitialization = pending;
   }
 
   bool _isCurrent(int presentationId) =>

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../platform/clipboard/clipboard_writer.dart';
 import '../../modules/controller/modules_controller.dart';
+import '../../modules/models/module_models.dart';
 import '../models/history_models.dart';
 import '../repository/history_image_input.dart';
 
@@ -27,7 +28,8 @@ class HistoryOcrController extends ChangeNotifier {
 
   bool get available {
     final module = _modules.installedModule('copypaste.ocr');
-    return module != null &&
+    return _modules.state == ModulesLoadState.ready &&
+        module != null &&
         module.enabled &&
         module.error == null &&
         !module.restartRequired &&
@@ -46,6 +48,14 @@ class HistoryOcrController extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
+      await _modules.initialize();
+      if (_disposed) return;
+      if (!available) {
+        _error =
+            _modules.errorMessage ??
+            'OCR is unavailable. Check the module in Settings and try again.';
+        return;
+      }
       final input = await _imageInput.prepare(clip);
       try {
         if (_disposed) return;
