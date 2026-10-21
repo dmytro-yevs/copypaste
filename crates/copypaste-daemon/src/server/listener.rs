@@ -678,11 +678,7 @@ async fn send_in(
 }
 
 #[cfg(all(test, unix))]
-pub(super) fn test_socket_path(dir: &tempfile::TempDir, name: impl AsRef<Path>) -> PathBuf {
-    let path = dir.path().join(name);
-    let cwd = std::env::current_dir().expect("current directory");
-    path.strip_prefix(&cwd).unwrap_or(&path).to_path_buf()
-}
+pub(super) use crate::testutil::test_socket_path;
 
 // Every test here binds a real endpoint, which only Unix has one of yet.
 #[cfg(test)]
@@ -776,6 +772,9 @@ mod tests {
         let (read, _) = server.into_split();
         let (_, mut write) = client.into_split();
         let mut reader = Reader::new(read);
+        // Isolate this parser contract from concurrent response-budget tests.
+        static TEST_BUDGET: OnceLock<WireBudget> = OnceLock::new();
+        reader.budget = TEST_BUDGET.get_or_init(WireBudget::default);
         let task = tokio::spawn(async move {
             let prefix = br#"{"id":1,"protocol_version":6,"method":"status","unknown":""#;
             let suffix = br#""}"#;
@@ -1327,10 +1326,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_watch_sends_snapshot_and_capture_transitions() {
         let (state, dir) = test_state("runtime-capture-watch");
-        // Keep Unix socket names short when the fixture lives beneath the cwd.
-        let cwd = std::env::current_dir().unwrap();
-        let socket_dir = dir.path().strip_prefix(&cwd).unwrap_or(dir.path());
-        let path = socket_dir.join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -1402,12 +1398,7 @@ mod tests {
     }
 
     fn progress_socket_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
-        let absolute = dir.path().join("daemon.sock");
-        let cwd = std::env::current_dir().unwrap();
-        absolute
-            .strip_prefix(cwd)
-            .unwrap_or(&absolute)
-            .to_path_buf()
+        test_socket_path(dir, "daemon.sock")
     }
 
     #[tokio::test]
@@ -1467,6 +1458,83 @@ mod tests {
         let _ = server.await;
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn managed_download_outlives_request_connection_and_keeps_its_file_link() {
+        use std::io::Write;
+        let (state, dir) = test_state("managed-download");
+        let original = dir.path().join("original.bin");
+        let mut source = std::fs::File::create(&original).unwrap();
+        for _ in 0..512 {
+            source.write_all(&[11; 64 * 1024]).unwrap();
+        }
+        drop(source);
+        let row = copypaste_core::file_reference::import(
+            &state.store,
+            &state.keyring,
+            original.to_str().unwrap(),
+            "original.bin",
+            "application/octet-stream",
+            &state.settings.get(),
+            None,
+        )
+        .unwrap();
+        let path = progress_socket_path(&dir);
+        let listener = bind(&path).unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let mut changes = state.store.subscribe_file_operations();
+        let destination = dir.path().join("downloaded.bin");
+        let mut client = Client::new(transport::connect(&path).await.unwrap());
+        let response = client
+            .call(request(
+                1,
+                Method::StartFileDownload {
+                    id: row.id.clone(),
+                    dest_path: destination.to_string_lossy().into_owned(),
+                    token: "detached-operation".into(),
+                },
+            ))
+            .await;
+        assert!(response.ok, "{response:?}");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let records = state
+                    .store
+                    .file_operations(false, None, Some("detached-operation"))
+                    .unwrap();
+                if let Some(record) = records.first() {
+                    if record.phase != copypaste_ipc::FileOperationPhase::Running {
+                        assert_eq!(
+                            record.phase,
+                            copypaste_ipc::FileOperationPhase::Completed,
+                            "{record:?}"
+                        );
+                        assert_eq!(record.local_path.as_deref(), destination.to_str());
+                        break;
+                    }
+                }
+                changes.recv().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::metadata(&destination).unwrap().len(),
+            32 * 1024 * 1024
+        );
+        let mut reopened = Client::new(transport::connect(&path).await.unwrap());
+        let link = reopened
+            .call(request(2, Method::DownloadedFile { id: row.id }))
+            .await;
+        assert!(
+            matches!(link.data, Some(ResponseData::DownloadedFile(Some(value))) if value == destination.to_string_lossy())
+        );
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
     #[tokio::test]
     async fn progress_only_reaches_opted_in_watchers() {
         let (state, dir) = test_state("progress-watch");
@@ -1481,6 +1549,7 @@ mod tests {
         state
             .runtime_event_sender()
             .send(copypaste_ipc::RuntimeEventData {
+                file_operation: None,
                 change: None,
                 capture: None,
                 progress: Some(copypaste_ipc::FileProgress {
@@ -1530,6 +1599,7 @@ mod tests {
         let (_legacy_tx, legacy) = tokio::sync::broadcast::channel(1);
         let (runtime_tx, events) = tokio::sync::broadcast::channel(1);
         let empty = copypaste_ipc::RuntimeEventData {
+            file_operation: None,
             change: None,
             progress: None,
             capture: None,
@@ -1538,7 +1608,7 @@ mod tests {
         runtime_tx.send(empty).unwrap();
         let (server_stream, client_stream) = Stream::pair().expect("socket pair");
         let (reader, mut writer) = server_stream.into_split();
-        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let mut reader = Reader::new(reader);
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let pump = tokio::spawn(async move {
             crate::server::watch::pump_runtime(

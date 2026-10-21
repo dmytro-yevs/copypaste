@@ -15,14 +15,30 @@ struct DownloadState {
     active: Option<(String, CancellationToken)>,
     cancelled_before_start: Option<String>,
 }
-#[derive(Default)]
-pub struct FileDownloads(Mutex<DownloadState>);
+pub struct FileDownloads(Mutex<DownloadState>, Arc<tokio::sync::Semaphore>);
+impl Default for FileDownloads {
+    fn default() -> Self {
+        Self(Mutex::default(), Arc::new(tokio::sync::Semaphore::new(1)))
+    }
+}
 pub struct FileDownloadRequest<'a> {
     pub id: &'a str,
     pub destination: &'a Path,
     pub token: Option<&'a str>,
 }
 impl FileDownloads {
+    /// Admission belongs to the worker, so detached requests cannot queue tasks.
+    pub fn reserve_background(
+        &self,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, FileTransferError> {
+        Arc::clone(&self.1).try_acquire_owned().map_err(|_| {
+            if self.1.is_closed() {
+                FileTransferError::Cancelled
+            } else {
+                FileTransferError::Busy
+            }
+        })
+    }
     pub fn cancel(&self, id: &str) {
         if id.len() > 128 {
             return;
@@ -37,6 +53,7 @@ impl FileDownloads {
         state.cancelled_before_start = Some(id.into());
     }
     pub fn cancel_all(&self) {
+        self.1.close();
         if let Some((_, token)) = self
             .0
             .lock()
@@ -104,6 +121,94 @@ impl FileDownloads {
         request: FileDownloadRequest<'_>,
         progress: Arc<dyn Fn(u64, u64) + Send + Sync>,
     ) -> Result<(), FileTransferError> {
+        if request.id.len() > 128
+            || request.destination.as_os_str().len() > 4096
+            || request.token.is_some_and(|token| token.len() > 128)
+        {
+            return Err(FileTransferError::Integrity);
+        }
+        let row = store.get(request.id)?.filter(|row| !row.deleted);
+        let metadata = row
+            .as_ref()
+            .and_then(|row| row.payload_metadata.as_deref())
+            .and_then(|value| crate::PayloadMetadata::from_json(value, "file"))
+            .and_then(|value| value.file);
+        let total = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.transfer.as_ref())
+            .map_or(0, |offer| offer.size_bytes);
+        let name = metadata
+            .as_ref()
+            .map_or("File", |metadata| metadata.filename.as_str());
+        let origin = row
+            .as_ref()
+            .map(|row| crate::origin_or(&row.origin_device_id, local_device).to_owned())
+            .unwrap_or_else(|| "Unknown source".into());
+        let source = store
+            .device_names(&[origin.clone()])
+            .ok()
+            .and_then(|names| names.get(&origin).cloned())
+            .unwrap_or(origin);
+        let destination = store
+            .current_device_name()
+            .unwrap_or_else(|_| "This device".into());
+        let operation = Arc::new(Mutex::new(
+            crate::file_operation::FileOperationGuard::start(
+                store,
+                request.id,
+                name,
+                copypaste_ipc::FileOperationKind::Receive,
+                source,
+                destination,
+                total,
+                request.token,
+            ),
+        ));
+        let tracked = Arc::clone(&operation);
+        let progress = Arc::new(move |written, total| {
+            crate::sync::blocking(|| {
+                tracked
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .progress(written, total)
+            });
+            progress(written, total);
+        });
+        let path = request.destination.to_string_lossy().into_owned();
+        let result = self
+            .save_inner(
+                store,
+                keyring,
+                node,
+                local_device,
+                settings,
+                request,
+                progress,
+            )
+            .await;
+        crate::sync::blocking(|| {
+            operation.lock().unwrap_or_else(|e| e.into_inner()).finish(
+                result.as_ref().err().map(ToString::to_string),
+                matches!(&result, Err(FileTransferError::Cancelled)),
+                Some(path),
+            )
+        });
+        result
+    }
+
+    async fn save_inner(
+        &self,
+        store: &Store,
+        keyring: &Arc<Keyring>,
+        node: &copypaste_p2p::Node,
+        local_device: &str,
+        settings: &copypaste_ipc::ConfigData,
+        request: FileDownloadRequest<'_>,
+        progress: Arc<dyn Fn(u64, u64) + Send + Sync>,
+    ) -> Result<(), FileTransferError> {
+        if self.1.is_closed() {
+            return Err(FileTransferError::Cancelled);
+        }
         let FileDownloadRequest {
             id,
             destination,
@@ -141,12 +246,46 @@ impl FileDownloads {
             .ok_or(FileTransferError::Unavailable)?;
         let limit = settings.capture_limit_bytes(copypaste_ipc::content_type::FILE);
         file_transfer::check_limit(&offer, limit)?;
+        if let Some(mut source) =
+            crate::sync::blocking(|| crate::file_reference::source(store, id))?
+        {
+            let mut output = Destination::create(destination)?;
+            let mut digest = Sha256::new();
+            let mut written = 0;
+            for _ in 0..offer
+                .size_bytes
+                .div_ceil(file_transfer::CHUNK_BYTES as u64)
+                .max(1)
+            {
+                if token.is_cancelled() {
+                    return Err(FileTransferError::Cancelled);
+                }
+                let bytes = crate::sync::blocking(|| source.read_chunk())
+                    .map_err(|_| FileTransferError::Read)?;
+                digest.update(&bytes);
+                crate::sync::blocking(|| output.write_all(&bytes))
+                    .map_err(file_transfer::destination_error)?;
+                written += bytes.len() as u64;
+                progress(written, offer.size_bytes);
+            }
+            source.verify().map_err(|_| FileTransferError::Read)?;
+            output.finish()?;
+            store.set_downloaded_file_checksum(
+                id,
+                &destination.to_string_lossy(),
+                &hex::encode(digest.finalize()),
+            )?;
+            return Ok(());
+        }
         if store.has_file_transfer(id)? {
+            let saved_store = store;
+            let saved_id = id.to_owned();
+            let saved_path = destination.to_string_lossy().into_owned();
             let store = store.clone();
             let keyring = Arc::clone(keyring);
             let id = id.to_owned();
             let destination = destination.to_owned();
-            return tokio::task::spawn_blocking(move || {
+            let saved = tokio::task::spawn_blocking(move || {
                 file_transfer::save_local_with_progress(
                     &store,
                     &keyring.item_key(),
@@ -159,6 +298,9 @@ impl FileDownloads {
             })
             .await
             .map_err(|_| FileTransferError::Write)?;
+            saved?;
+            saved_store.set_downloaded_file_checksum(&saved_id, &saved_path, &offer.sha256)?;
+            return Ok(());
         }
         if !settings.sync_enabled {
             return Err(FileTransferError::Remote(
@@ -190,16 +332,18 @@ impl FileDownloads {
             progress(written, offer.size_bytes);
             Ok(())
         });
-        tokio::select! {
+        let expected_hash = tokio::select! {
             biased;
             _ = token.cancelled() => return Err(FileTransferError::Cancelled),
             result = operation => {
-                if let Err(error) = result {
-                    return Err(write_error.unwrap_or_else(|| FileTransferError::Remote(error.to_string())));
+                match result {
+                    Ok(checksum) => checksum,
+                    Err(error) => return Err(write_error.unwrap_or_else(|| FileTransferError::Remote(error.to_string()))),
                 }
             }
-        }
-        if written != offer.size_bytes || hex::encode(hash.finalize()) != offer.sha256 {
+        };
+        let actual_hash = hex::encode(hash.finalize());
+        if written != offer.size_bytes || actual_hash != expected_hash {
             return Err(FileTransferError::Integrity);
         }
         if token.is_cancelled() {
@@ -208,7 +352,7 @@ impl FileDownloads {
         output.finish()?;
         // The explicit destination is the user's local copy. It is not added
         // to a second hidden byte cache or advertised as a new content version.
-        store.set_downloaded_file(id, &destination.to_string_lossy())?;
+        store.set_downloaded_file_checksum(id, &destination.to_string_lossy(), &actual_hash)?;
         Ok(())
     }
 }

@@ -1,13 +1,12 @@
-Improve file transfers, desktop controls, and clipboard lifecycle in CopyPaste 1.0.31.
+Manage file imports and device transfers consistently in CopyPaste 1.0.32.
 
-- Synchronize file metadata and download original file bytes on demand, with progress, cancellation, retry, and encrypted backup support.
-- Keep History and device inspector actions visible while long metadata scrolls, including compact layouts and larger text.
-- Share desktop keyboard, window-menu, Quick Paste, dialog, and onboarding behavior through the platform adapters and common controls.
-- Reclaim owned temporary clipboard, import, installer, and module staging files while preserving current payloads and pending updates.
-- Keep dialog keyboard motion in the shared motion policy and isolate Android clipboard provider state in tests.
-- Refresh OCR, Semantic Search, and Supabase packages to 0.1.22 for CopyPaste 1.0.31.
-- Restore Android storage and module lifecycle leases with supported native file locks.
+- Keep file transfers running when Quick Paste closes, with shared progress and errors across History, inspectors, and Quick Paste.
+- Add a downloads manager with byte progress, source and destination devices, timestamps, persistent history, retry, cancellation, and saved-file links.
+- Reuse completed downloads when a clip is activated again. Clearing transfer history preserves files, clips, and active transfers.
+- Make selected files available immediately by registering their original location and streaming bytes only on request. An unavailable or changed original produces an actionable error.
+- Separate Quick Paste status from keyboard shortcuts and display the failure reason above clip metadata.
+- Refresh OCR, Semantic Search, and Supabase packages to 0.1.23 for CopyPaste 1.0.32.
 
-Optional modules remain available from Settings. OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
+Paired devices must use this release's file-transfer protocol to exchange files. Optional modules remain available from Settings; OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
 
 Linux retains the qualified Ubuntu 24.04 GNOME 46 X11 x86_64 scope. The signed RPM has Fedora 44 installation evidence; ARM64, KDE, Wayland, and full RPM desktop parity remain experimental.

@@ -23,7 +23,8 @@ class RuntimeHistoryRepository
         HistoryRepository,
         HistorySpoilerRepository,
         HistoryFileDownloadCancellation,
-        HistoryFileProgressRepository {
+        HistoryFileProgressRepository,
+        HistoryDownloadedFileRepository {
   RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
     : _watchLease = watchLease;
 
@@ -180,6 +181,10 @@ class RuntimeHistoryRepository
   }
 
   @override
+  Future<String?> downloadedFile(String id) =>
+      runtime.downloadedClipFile(id: id);
+
+  @override
   Future<bool> saveFileWithProgress(
     String id,
     String destinationPath,
@@ -187,34 +192,82 @@ class RuntimeHistoryRepository
   ) async {
     _ensureActive();
     final service = RuntimeEventService.instance;
-    final random = Random.secure();
     final token = base64UrlEncode(
-      List<int>.generate(16, (_) => random.nextInt(256)),
+      List<int>.generate(16, (_) => Random.secure().nextInt(256)),
     );
+    final finished = Completer<void>();
+    finished.future.ignore();
+    var checkAgain = false;
+    var checking = false;
+    Future<void> reconcile() async {
+      if (finished.isCompleted) return;
+      if (checking) {
+        checkAgain = true;
+        return;
+      }
+      checking = true;
+      try {
+        do {
+          checkAgain = false;
+          final records =
+              jsonDecode(await runtime.fileOperations(clear: false, id: token))
+                  as List;
+          final record = records.cast<Map>().firstOrNull;
+          if (record == null) continue;
+          onProgress(record['written'] as int, record['total'] as int);
+          if (record['phase'] == 'completed') {
+            finished.complete();
+          } else if (record['phase'] != 'running') {
+            finished.completeError(
+              HistoryFileOperationException(
+                record['error'] as String? ??
+                    'The file download was cancelled.',
+              ),
+            );
+          }
+        } while (checkAgain && !finished.isCompleted);
+      } catch (error, trace) {
+        if (!finished.isCompleted) finished.completeError(error, trace);
+      } finally {
+        checking = false;
+      }
+    }
+
     final subscription = service.events.listen(
       (event) {
-        final progress = event.progress;
-        if (progress != null && progress.token == token) {
-          onProgress(progress.written.toInt(), progress.total.toInt());
+        final progress = event.fileOperation;
+        if (progress?.id == token && progress?.phase == 'running') {
+          onProgress(progress!.written.toInt(), progress.total.toInt());
+        } else if (event.kind == 'ready' || progress?.id == token) {
+          unawaited(reconcile());
         }
       },
       onError: (Object _, StackTrace _) {
-        // The save response remains authoritative if progress disconnects.
+        // The runtime owns the operation; reconnect reconciles its durable result.
       },
     );
     _downloadTokens[id] = token;
     try {
-      // Match the runtime's ordinary request budget when a reconnect stalls.
-      if (!await service.ready.timeout(const Duration(seconds: 5))) {
-        return false;
+      try {
+        if (!await service.ready.timeout(const Duration(seconds: 5))) {
+          throw const HistoryFileOperationException(
+            'The download service is unavailable. Reopen CopyPaste and try again.',
+          );
+        }
+      } on TimeoutException {
+        throw const HistoryFileOperationException(
+          'The download service did not connect. Try again.',
+        );
       }
       await _fileOperation(
-        () => runtime.saveClipFile(
+        () => runtime.startFileDownload(
           id: id,
           destPath: destinationPath,
-          downloadToken: token,
+          token: token,
         ),
       );
+      await reconcile();
+      await finished.future;
       return true;
     } finally {
       if (_downloadTokens[id] == token) _downloadTokens.remove(id);
@@ -244,6 +297,18 @@ class RuntimeHistoryRepository
   Future<void> importFile(HistoryImportFile file) async {
     _ensureActive();
     await _fileOperation(() async {
+      final reference = file.sourceReference;
+      if (reference != null) {
+        await runtime.addFileReference(
+          reference: reference,
+          filename: file.name,
+          mimeType: file.mimeType,
+          sizeHint: file.sizeBytes == null
+              ? null
+              : BigInt.from(file.sizeBytes!),
+        );
+        return;
+      }
       final maxBytes = (await runtime.historyFileImportMaxBytes()).toInt();
       final path = await file.prepare(maxBytes);
       await runtime.importClipFile(

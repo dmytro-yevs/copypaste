@@ -198,6 +198,12 @@ mod tests {
         assert_eq!(capture.private_mode_epoch, 1);
         assert_eq!(capture.capture_revision, 1);
         assert!(set_private_mode(&state, 2, true).ok);
+        // Every explicit command advances the authoritative epoch, even when
+        // its value is unchanged; subscribers must acknowledge that epoch.
+        let repeated = events.try_recv().unwrap().capture.unwrap();
+        assert!(repeated.private_mode);
+        assert_eq!(repeated.private_mode_epoch, 2);
+        assert_eq!(repeated.capture_revision, 2);
         assert!(events.try_recv().is_err());
     }
 

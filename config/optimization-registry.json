@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-20",
+  "date": "2026-10-21",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -456,7 +456,7 @@
         "crates/copypaste-daemon/src/p2p/poll.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -1676,7 +1676,7 @@
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
         "crates/copypaste-daemon/src/clipboard/file_materialize/mod.rs"
       ],
-      "invariant": "File bytes are materialized only on an explicit action. One Quick Paste controller starts at most one transfer per clip; the temporary copy is reused while fresh and stale copies are removed on the next file action. File-size polling and its timer exist only during the save operation, and progress follows bytes on disk rather than elapsed time.",
+      "invariant": "File bytes are materialized only on an explicit action. Production Quick Paste reuses native-recorded, verified durable downloaded paths across engines and presentations; a missing path triggers a new transfer. Legacy repository adapters retain the bounded temporary preparation cache and polling fallback.",
       "next_step": "Measure temporary disk use and transfer CPU, I/O, peak memory, and cleanup across supported platforms. Confirm behavior on installed macOS, Windows, and Android builds; native resource qualification is not established.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -1686,7 +1686,9 @@
       "measured_saving": null,
       "evidence_refs": [],
       "supersedes": [],
-      "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending."
+      "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending.",
+      "allocation_lifetime": "Production downloads are user-kept destinations with recorded links, not expiring staging copies. Legacy preparation retains one fresh cached reference and scoped staging leases; byte buffers remain bounded.",
+      "tradeoffs": "RUN-056 supersedes production temporary-copy expiry with persistent user-visible downloads. Native process-family and disk/resource qualification remain pending."
     },
     {
       "id": "DISK-001",
@@ -2071,7 +2073,7 @@
         "apps/copypaste_flutter/test/features/history/history_controller_test.dart",
         "apps/copypaste_flutter/test/features/history/history_screen_test.dart"
       ],
-      "invariant": "Progress changes notify only the dedicated progress signal consumed by the Download button; start, cancel, failure and finish retain general state notifications and existing accessibility/labels.",
+      "invariant": "Byte progress uses dedicated feature signals consumed by the transfer manager, Quick Paste status and selected inspector controls. It does not rebuild History or requery durable history per percentage; terminal state changes remain general notifications.",
       "allocation_lifetime": "One progress signal per controller and existing active-download progress values; values are removed after completion and signal is disposed with the controller.",
       "bounds": {
         "progress_notifiers_per_controller": 1,
@@ -2508,7 +2510,7 @@
         "progress_events_per_transfer_maximum": 101
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Typed backend removes 40 ms filesystem progress polling; old capability keeps existing fallback. Real Flutter-to-FRB-to-daemon save interaction remains unverified.",
+      "tradeoffs": "Production background file jobs publish typed operation updates through the existing shared runtime connection. Legacy token writer events remain compatible, and non-runtime repository adapters retain their polling fallback. RUN-056 defines durable ownership and cross-engine presentation; native resource qualification remains unestablished.",
       "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2620,6 +2622,48 @@
       ],
       "supersedes": [],
       "next_step": "Retain production defaults; no further experiment is scheduled automatically."
+    },
+    {
+      "id": "RUN-056",
+      "title": "Runtime-owned file operations and deferred selected sources",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Core file operations and Flutter transfer presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/file_reference.rs",
+        "crates/copypaste-core/src/file_operation.rs",
+        "crates/copypaste-core/src/storage/file_operations.rs",
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart"
+      ],
+      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only.",
+      "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history.",
+      "bounds": {
+        "file_block_bytes": 65536,
+        "history_page_records": 50,
+        "recent_clip_states": 64,
+        "active_downloads_per_host": 1,
+        "byte_progress_updates_per_operation_maximum": 101,
+        "concurrent_changed_record_reads": 4,
+        "detached_download_workers_per_host": 1
+      },
+      "cancellation": "Explicit Cancel and runtime shutdown stop active workers; closing a UI does not. Interrupted operations retain their terminal reason. Android discards unused persisted source grants on the next selection, preserving live and pending references.",
+      "tradeoffs": "Deferred selected files depend on original availability rather than an independent encrypted snapshot. Existing snapshot capture remains supported. Persistent operation history and completed Quick Paste downloads consume user-cleared disk space. No measured resource saving or native qualification is claimed. Updates the production contracts of RUN-035, RUN-041 and RUN-053 while preserving non-runtime compatibility paths.",
+      "functional_validation": "Portable core, runtime, P2P, IPC and Flutter tests; daemon detached-transfer test; Android ARM64 bridge cross-check and Kotlin compilation. Native device and resource evidence are not established.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "next_step": "Measure application, daemon and worker peaks, steady state and growth on macOS, physical Android and installed Windows; resolve runtime budgets before resource qualification.",
+      "supersedes": []
     }
   ]
 }

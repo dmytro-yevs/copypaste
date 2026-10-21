@@ -250,8 +250,13 @@ void main() {
     final activation = controller.activate(clip);
     await repository.saveStarted.future;
     expect(repository.copied, isEmpty);
-    expect(controller.activating, isTrue);
+    expect(controller.activating, isFalse);
     expect(controller.transferProgressFor(clip.id), isNotNull);
+    expect(controller.history.isDownloadPending(clip.id), isTrue);
+    expect(
+      controller.history.downloadProgressFor(clip.id),
+      controller.transferProgressFor(clip.id),
+    );
     await controller.activate(clip);
     expect(repository.saved.length, 1);
     repository.saveGate!.complete();
@@ -294,6 +299,7 @@ void main() {
       await controller.opened(1);
       await controller.activate(clip);
       expect(controller.transferFailedFor(clip.id), isTrue);
+      expect(controller.history.downloadErrorFor(clip.id), isNotEmpty);
       expect(repository.copied, isEmpty);
       repository.failSave = false;
       await controller.activate(clip);
@@ -301,6 +307,109 @@ void main() {
       expect(repository.copied, [clip.id]);
       controller.dispose();
     },
+  );
+
+  test(
+    'background file transfer leaves other clips usable and cannot paste after another action',
+    () async {
+      final repository = _Repository();
+      final file = HistoryClip(
+        id: 'background-file',
+        contentType: 'file',
+        preview: 'file.bin',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        file: const HistoryFileDetails(name: 'file.bin', sizeBytes: 4),
+      );
+      final text = HistoryClip(
+        id: 'other-text',
+        contentType: 'text',
+        preview: 'Other text',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+      );
+      repository.clips
+        ..clear()
+        ..addAll([file, text]);
+      final transfer = _WaitingFileTransfer(repository);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+        fileTransfer: transfer,
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      final pending = controller.activate(file);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.activating, isFalse);
+      expect(controller.history.isDownloadPending(file.id), isTrue);
+      await controller.activate(text);
+      expect(repository.copied, [text.id]);
+      transfer.finish.complete('/downloaded/file.bin');
+      await pending;
+      expect(repository.copied, [text.id]);
+      controller.dispose();
+    },
+  );
+
+  testWidgets(
+    'Quick Paste explains transfer failure above metadata and separates the shortcut',
+    (tester) async {
+      final repository = _Repository();
+      final clip = HistoryClip(
+        id: 'failed-file',
+        contentType: 'file',
+        preview: '/source/report.bin',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        file: const HistoryFileDetails(name: 'report.bin', sizeBytes: 4),
+      );
+      repository.clips
+        ..clear()
+        ..add(clip);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+        fileTransfer: _FailedFileTransfer(repository),
+        fileDownloader: _Downloader(),
+      );
+      await tester.binding.setSurfaceSize(const Size(960, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.opened(1, inspectorVisible: true);
+      await tester.pumpAndSettle();
+      await controller.activate(clip);
+      await tester.pumpAndSettle();
+      final reason = find.text(
+        'The source device is offline. Bring it online and retry.',
+      );
+      expect(reason, findsOneWidget);
+      expect(
+        tester.getTopLeft(reason).dy,
+        lessThan(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('history-detail-metadata')))
+              .dy,
+        ),
+      );
+      final row = find.byKey(const ValueKey('quick-paste-failed-file'));
+      final shortcut = find.descendant(
+        of: row,
+        matching: find.byType(MenuShortcut),
+      );
+      expect(
+        tester.getRect(shortcut).left -
+            tester.getRect(find.text('Failed')).right,
+        greaterThanOrEqualTo(AppSpacing.sm),
+      );
+      expect(find.text('Retry'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+    variant: TargetPlatformVariant({TargetPlatform.macOS}),
   );
 
   testWidgets('file clip shows its name and a one-line middle-ellipsized path', (
@@ -3308,5 +3417,29 @@ class _CountingPreferences extends MemoryQuickPastePreferencesStore {
     if (started case final value? when !value.isCompleted) value.complete();
     await gate?.future;
     await super.writePinnedShortcuts(shortcuts);
+  }
+}
+
+class _FailedFileTransfer extends HistoryFileTransfer {
+  _FailedFileTransfer(super.repository);
+  @override
+  Future<String> prepare(
+    HistoryClip clip, {
+    required void Function(double) onProgress,
+  }) async => throw const HistoryFileOperationException(
+    'The source device is offline. Bring it online and retry.',
+  );
+}
+
+class _WaitingFileTransfer extends HistoryFileTransfer {
+  _WaitingFileTransfer(super.repository);
+  final finish = Completer<String>();
+  @override
+  Future<String> prepare(
+    HistoryClip clip, {
+    required void Function(double) onProgress,
+  }) {
+    onProgress(0.25);
+    return finish.future;
   }
 }

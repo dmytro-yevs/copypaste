@@ -197,6 +197,7 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
         item_count: event.item_count,
         captured: event.captured,
         captured_item_id: event.captured_item_id,
+        file_operation: None,
         progress: None,
         capture: None,
         runtime_watch: false,
@@ -210,6 +211,7 @@ pub(crate) fn runtime_ready(typed: bool) -> RuntimeEvent {
         item_count: 0,
         captured: false,
         captured_item_id: None,
+        file_operation: None,
         progress: None,
         capture: None,
         runtime_watch: typed,
@@ -226,6 +228,7 @@ pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> Run
             item_count: 0,
             captured: false,
             captured_item_id: None,
+            file_operation: None,
             progress: None,
             capture: None,
             runtime_watch: true,
@@ -239,6 +242,26 @@ pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> Run
         written: p.written,
         total: p.total,
     });
+    mapped.file_operation = event
+        .file_operation
+        .map(|value| crate::api::FileOperationUpdate {
+            id: value.id,
+            written: value.written,
+            total: value.total,
+            phase: value.phase.map(|phase| {
+                match phase {
+                    copypaste_ipc::FileOperationPhase::Running => "running",
+                    copypaste_ipc::FileOperationPhase::Completed => "completed",
+                    copypaste_ipc::FileOperationPhase::Failed => "failed",
+                    copypaste_ipc::FileOperationPhase::Cancelled => "cancelled",
+                    copypaste_ipc::FileOperationPhase::Interrupted => "interrupted",
+                }
+                .into()
+            }),
+        });
+    if mapped.file_operation.is_some() {
+        mapped.kind = "file_operations".into();
+    }
     mapped.runtime_watch = true;
     mapped
 }
@@ -266,6 +289,7 @@ mod tests {
     #[test]
     fn progress_does_not_look_like_a_history_change() {
         let mapped = typed_runtime_event(copypaste_ipc::RuntimeEventData {
+            file_operation: None,
             change: None,
             capture: None,
             progress: Some(copypaste_ipc::FileProgress {

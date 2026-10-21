@@ -123,7 +123,7 @@ impl Store {
         self.path.as_ref().and_then(|path| path.parent())
     }
     pub fn set_downloaded_file(&self, id: &str, path: &str) -> Result<(), StoreError> {
-        self.conn()?.execute("INSERT INTO downloaded_files VALUES (?1,?2) ON CONFLICT(item_id) DO UPDATE SET destination=excluded.destination",params![id,path])?;
+        self.conn()?.execute("INSERT INTO downloaded_files (item_id,destination) VALUES (?1,?2) ON CONFLICT(item_id) DO UPDATE SET destination=excluded.destination",params![id,path])?;
         Ok(())
     }
     pub fn downloaded_file(&self, id: &str) -> Result<Option<String>, StoreError> {

@@ -1,3 +1,4 @@
+import '../transfers/file_operations_view.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -333,7 +334,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         children: [
           Button.ghost(
             key: const ValueKey('quick-paste-home'),
-            style: const ButtonStyle.ghostIcon(),
+            style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             onPressed: controller.openMainWindow,
             child: const Image(
               key: ValueKey('quick-paste-logo'),
@@ -348,7 +349,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             child: Theme(
               data: AppTheme.clipboardSearchTheme(context),
               child: SizedBox(
-                height: AppControlSize.compact,
+                height: AppTheme.controlHeight(context),
                 child: TextField(
                   theme: AppTheme.clipboardSearchFieldTheme,
                   textAlignVertical: TextAlignVertical.center,
@@ -372,8 +373,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             ),
           ),
           const Gap(AppSpacing.xs),
+          if (controller.history.fileOperations case final transfers?) ...[
+            FileOperationsHeaderAction(controller: transfers),
+            const Gap(AppSpacing.xs),
+          ],
           Button.ghost(
-            style: const ButtonStyle.ghostIcon(),
+            style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             key: const ValueKey('quick-paste-inspector-toggle'),
             onPressed: controller.toggleInspector,
             child: const Icon(LucideIcons.panelsLeftBottom),
@@ -753,32 +758,49 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   child: _ClipContent(clip: clip, controller: controller),
                 ),
                 const Gap(AppSpacing.sm),
-                if (controller.transferProgressFor(clip.id)
-                    case final progress?)
-                  SizedBox(
-                    width: AppLayoutSize.quickPasteTransferStatusWidth,
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: AppIconSize.xs,
-                          height: AppIconSize.xs,
-                          child: CircularProgressIndicator(
-                            value: progress,
-                            animated: !MediaQuery.disableAnimationsOf(context),
-                          ),
-                        ),
-                        const Gap(AppSpacing.xs),
-                        Text('${(progress * 100).floor()}%'),
-                      ],
-                    ),
-                  )
-                else if (controller.transferFailedFor(clip.id))
-                  Text(
-                    'Failed · Retry',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.destructive,
-                    ),
-                  ),
+                ListenableBuilder(
+                  listenable: controller.history.downloadProgressChanges,
+                  builder: (context, _) {
+                    final progress = controller.transferProgressFor(clip.id);
+                    final status = progress != null
+                        ? SizedBox(
+                            width: AppLayoutSize.quickPasteTransferStatusWidth,
+                            child: Row(
+                              children: [
+                                CircularProgressIndicator(
+                                  value: progress,
+                                  theme: const CircularProgressIndicatorTheme(
+                                    size: AppIconSize.xs,
+                                  ),
+                                  animated: !MediaQuery.disableAnimationsOf(
+                                    context,
+                                  ),
+                                ),
+                                const Gap(AppSpacing.xs),
+                                Text('${(progress * 100).floor()}%'),
+                              ],
+                            ),
+                          )
+                        : controller.transferFailedFor(clip.id)
+                        ? Text(
+                            'Failed',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.destructive,
+                            ),
+                          )
+                        : const SizedBox.shrink();
+                    return shortcut != null &&
+                            (progress != null ||
+                                controller.transferFailedFor(clip.id))
+                        ? Padding(
+                            padding: const EdgeInsets.only(
+                              right: AppSpacing.sm,
+                            ),
+                            child: status,
+                          )
+                        : status;
+                  },
+                ),
                 if (shortcut != null)
                   MenuShortcut(
                     activator: desktopShortcut(shortcut),

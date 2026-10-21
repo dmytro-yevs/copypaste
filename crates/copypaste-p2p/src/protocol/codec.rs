@@ -207,7 +207,7 @@ impl SyncMessage {
             } => {
                 check_protocol_version(*protocol_version)?;
                 check_id("item_id", item_id)?;
-                if sha256.len() != 64
+                if (!sha256.is_empty() && sha256.len() != 64)
                     || !sha256
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -224,7 +224,20 @@ impl SyncMessage {
                     });
                 }
             }
-            Self::FileUnavailable => {}
+            Self::FileUnavailable { reason } => {
+                if reason.is_empty() || reason.len() > 512 || reason.chars().any(char::is_control) {
+                    return Err(ProtocolError::Decode("invalid file failure reason".into()));
+                }
+            }
+            Self::FileChecksum { sha256 } => {
+                if sha256.len() != 64
+                    || !sha256
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err(ProtocolError::Decode("invalid file checksum".into()));
+                }
+            }
         }
         Ok(())
     }

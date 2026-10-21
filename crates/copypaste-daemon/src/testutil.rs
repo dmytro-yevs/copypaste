@@ -258,3 +258,22 @@ pub fn peer_at(state: &Arc<AppState>, name: &str, addr: &str) -> copypaste_p2p::
         .expect("store a peer");
     peer
 }
+
+pub fn test_socket_path(
+    dir: &tempfile::TempDir,
+    name: impl AsRef<std::path::Path>,
+) -> std::path::PathBuf {
+    let path = dir.path().join(name);
+    let cwd = std::env::current_dir().expect("current directory");
+    // Relative endpoints keep task-owned evidence directories under SUN_LEN.
+    for (depth, ancestor) in cwd.ancestors().enumerate() {
+        if let Ok(tail) = path.strip_prefix(ancestor) {
+            let mut relative = std::path::PathBuf::new();
+            for _ in 0..depth {
+                relative.push("..");
+            }
+            return relative.join(tail);
+        }
+    }
+    path
+}

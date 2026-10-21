@@ -29,6 +29,16 @@ fn expected(method: &Method) -> Expected {
             }
         }
         Method::Status => Expected::Data(|data| matches!(data, ResponseData::Status(_))),
+        Method::FileOperations { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::FileOperations(_)))
+        }
+        Method::DownloadedFile { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::DownloadedFile(_)))
+        }
+        Method::StartFileDownload { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
+        }
+        Method::ImportFileReference { .. } => Expected::Error(ErrorCode::InvalidRequest),
         Method::SetDeviceName { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
@@ -281,6 +291,9 @@ async fn start(
     tokio::task::JoinHandle<()>,
 ) {
     let (state, dir) = test_state(name);
+    #[cfg(unix)]
+    let endpoint = super::listener::test_socket_path(&dir, "daemon.sock");
+    #[cfg(not(unix))]
     let endpoint = dir.path().join("daemon.sock");
     let listener = bind(&endpoint).expect("bind the platform IPC endpoint");
     let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));

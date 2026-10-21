@@ -19,6 +19,8 @@ pub enum FileTransferError {
     Read,
     #[error("The selected file no longer exists.")]
     SourceMissing,
+    #[error("The original file changed after it was added. Add it again before downloading.")]
+    SourceChanged,
     #[error("Permission to access this file was denied.")]
     PermissionDenied,
     #[error("A file already exists at the selected destination. Choose another name.")]
@@ -131,6 +133,7 @@ pub fn upgrade_legacy(store: &Store, key: &ItemKey) -> Result<u64, FileTransferE
             continue;
         };
         let transfer = FileTransfer {
+            source_version: None,
             size_bytes: bytes.len() as u64,
             sha256: crate::binary::content_hash(&crate::binary::content_digest(&bytes)),
         };
@@ -188,6 +191,7 @@ pub fn digest(reader: &mut impl Read, limit: u64) -> Result<FileTransfer, FileTr
         hash.update(&buffer[..n]);
     }
     Ok(FileTransfer {
+        source_version: None,
         size_bytes: size,
         sha256: hex::encode(hash.finalize()),
     })
@@ -410,7 +414,17 @@ pub fn prepare_copy(
     }
     .map_err(|_| FileTransferError::Write)?;
     let path = directory.path().join("payload");
-    if store.has_file_transfer(&row.id)? {
+    if let Some(mut source) = crate::file_reference::source(store, &row.id)? {
+        let mut output = Destination::create(&path)?;
+        for _ in 0..transfer.size_bytes.div_ceil(CHUNK_BYTES as u64).max(1) {
+            let bytes = source.read_chunk().map_err(|_| FileTransferError::Read)?;
+            output
+                .write_all(&bytes)
+                .map_err(|_| FileTransferError::Write)?;
+        }
+        source.verify().map_err(|_| FileTransferError::Read)?;
+        output.finish()?;
+    } else if store.has_file_transfer(&row.id)? {
         save_local(store, key, &row.id, &path, limit, || false)?;
     } else {
         let downloaded = store
@@ -438,7 +452,14 @@ pub fn prepare_copy(
                 .write_all(&buffer[..n])
                 .map_err(|_| FileTransferError::Write)?;
         }
-        if total != transfer.size_bytes || hex::encode(hash.finalize()) != transfer.sha256 {
+        let expected = if transfer.sha256.is_empty() {
+            store
+                .downloaded_file_checksum(&row.id)?
+                .ok_or(FileTransferError::Integrity)?
+        } else {
+            transfer.sha256.clone()
+        };
+        if total != transfer.size_bytes || hex::encode(hash.finalize()) != expected {
             return Err(FileTransferError::Integrity);
         }
         target.finish()?;
@@ -558,7 +579,7 @@ impl Drop for Destination {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn offer_item(
+pub(crate) fn offer_item(
     transfer: &FileTransfer,
     key: &ItemKey,
     mut metadata: FileMetadata,

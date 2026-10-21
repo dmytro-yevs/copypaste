@@ -12,25 +12,49 @@ pub fn import_file(
     source_reference: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<StoredItem, FileImportError> {
-    let metadata = match source_reference {
-        Some(reference) => {
-            crate::FileMetadata::with_source_reference(filename, mime_type, reference)
-        }
-        None => crate::FileMetadata::new(filename, mime_type),
-    }
-    .ok_or(FileImportError::InvalidMetadata)?;
-    crate::file_transfer::import(
+    let local = store
+        .current_device_name()
+        .unwrap_or_else(|_| "This device".into());
+    let mut job = crate::file_operation::FileOperationGuard::start(
         store,
-        keyring,
-        path,
-        metadata,
-        crate::now_ms(),
+        "",
+        filename,
+        copypaste_ipc::FileOperationKind::Import,
+        local.clone(),
+        local,
+        0,
         None,
-        None,
-        None,
-        settings,
-        true,
-    )
+    );
+    let result = (|| {
+        let metadata = match source_reference {
+            Some(reference) => {
+                crate::FileMetadata::with_source_reference(filename, mime_type, reference)
+            }
+            None => crate::FileMetadata::new(filename, mime_type),
+        }
+        .ok_or(FileImportError::InvalidMetadata)?;
+        crate::file_transfer::import(
+            store,
+            keyring,
+            path,
+            metadata,
+            crate::now_ms(),
+            None,
+            None,
+            None,
+            settings,
+            true,
+        )
+    })();
+    if let Ok(row) = &result {
+        let total = crate::file_transfer::row_offer(row, &keyring.item_key())
+            .ok()
+            .flatten()
+            .map_or(0, |offer| offer.size_bytes);
+        job.item(&row.id, total);
+    }
+    job.finish(result.as_ref().err().map(ToString::to_string), false, None);
+    result
 }
 
 #[cfg(test)]

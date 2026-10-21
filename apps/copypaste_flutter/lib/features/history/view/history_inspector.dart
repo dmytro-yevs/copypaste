@@ -1,3 +1,4 @@
+import '../../transfers/file_operations_view.dart';
 import '../../../shared/format_bytes.dart';
 
 import 'dart:async';
@@ -606,6 +607,9 @@ class _DownloadButtonState extends State<_DownloadButton> {
     final failed = controller.downloadFailedFor(id);
     final cancelling = controller.isDownloadCancelling(id);
     final progress = controller.downloadProgressFor(id);
+    final operation = controller.fileOperations?.forClip(id);
+    final saved =
+        operation?.phase == 'completed' && operation?.localPath != null;
     final percentage = ((progress ?? 0) * 100).floor();
     final showCancel = pending && _hovered && !cancelling;
     final label = cancelling
@@ -614,6 +618,10 @@ class _DownloadButtonState extends State<_DownloadButton> {
         ? 'Cancel'
         : pending && progress != null
         ? '$percentage%'
+        : pending
+        ? 'Downloading…'
+        : saved
+        ? 'Show file'
         : failed
         ? 'Retry'
         : 'Download';
@@ -633,7 +641,8 @@ class _DownloadButtonState extends State<_DownloadButton> {
                 : pending
                 ? 'Downloading $percentage% · Click to cancel'
                 : failed
-                ? 'Download failed · Click to retry'
+                ? controller.downloadErrorFor(id) ??
+                      'Download failed · Click to retry'
                 : 'Download',
           ),
         ),
@@ -660,6 +669,8 @@ class _DownloadButtonState extends State<_DownloadButton> {
                   ? null
                   : pending
                   ? () => controller.cancelDownload(id)
+                  : saved
+                  ? () => controller.fileOperations!.openFile(operation!)
                   : widget.onDownload,
               leading: widget.iconOnly
                   ? null
@@ -890,7 +901,7 @@ class _HistoryMetadataTable extends StatelessWidget {
       revealConfidential: revealConfidential,
     );
     final textStyle = AppTheme.inspectorTextStyle(context, compact: compact);
-    return InspectorTable(
+    final table = InspectorTable(
       tableKey: const ValueKey<String>('history-detail-metadata'),
       compact: compact,
       rows: [
@@ -912,6 +923,36 @@ class _HistoryMetadataTable extends StatelessWidget {
                   ),
           ),
       ],
+    );
+    if (clip.contentKind != HistoryClipKind.file) return table;
+    return ListenableBuilder(
+      listenable: controller.downloadProgressChanges,
+      child: table,
+      builder: (context, child) {
+        final operation = controller.fileOperations?.forClip(clip.id);
+        final error = controller.downloadErrorFor(clip.id);
+        final progress = controller.downloadProgressFor(clip.id);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (operation != null) ...[
+              FileOperationStatus(operation: operation),
+              const Gap(AppSpacing.md),
+            ] else if (error != null) ...[
+              StateView.error(title: 'Download failed', message: error),
+              const Gap(AppSpacing.md),
+            ] else if (controller.isDownloadPending(clip.id)) ...[
+              Text(
+                progress == null
+                    ? 'Downloading…'
+                    : 'Downloading ${(progress * 100).floor()}%',
+              ),
+              const Gap(AppSpacing.md),
+            ],
+            child!,
+          ],
+        );
+      },
     );
   }
 }

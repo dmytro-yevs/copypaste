@@ -4,11 +4,10 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -319,6 +318,42 @@ Future<ThisDevice> thisDeviceName() =>
 
 Future<void> setThisDeviceName({required String name}) =>
     RustLib.instance.api.crateApiSetThisDeviceName(name: name);
+
+/// Persistent local transfer records shared by every UI engine.
+Future<String> fileOperations({
+  required bool clear,
+  String? before,
+  String? id,
+}) => RustLib.instance.api.crateApiFileOperations(
+  clear: clear,
+  before: before,
+  id: id,
+);
+
+Future<void> addFileReference({
+  required String reference,
+  required String filename,
+  required String mimeType,
+  BigInt? sizeHint,
+}) => RustLib.instance.api.crateApiAddFileReference(
+  reference: reference,
+  filename: filename,
+  mimeType: mimeType,
+  sizeHint: sizeHint,
+);
+
+Future<void> startFileDownload({
+  required String id,
+  required String destPath,
+  required String token,
+}) => RustLib.instance.api.crateApiStartFileDownload(
+  id: id,
+  destPath: destPath,
+  token: token,
+);
+
+Future<String?> downloadedClipFile({required String id}) =>
+    RustLib.instance.api.crateApiDownloadedClipFile(id: id);
 
 class BackupSummary {
   final BigInt sizeBytes;
@@ -1000,6 +1035,34 @@ class DiscoveredDevice {
           details == other.details;
 }
 
+class FileOperationUpdate {
+  final String? id;
+  final String? phase;
+  final BigInt written;
+  final BigInt total;
+
+  const FileOperationUpdate({
+    this.id,
+    this.phase,
+    required this.written,
+    required this.total,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ phase.hashCode ^ written.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FileOperationUpdate &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          phase == other.phase &&
+          written == other.written &&
+          total == other.total;
+}
+
 class FileProgress {
   final String token;
   final BigInt written;
@@ -1212,6 +1275,7 @@ class RuntimeEvent {
   final bool captured;
   final String? capturedItemId;
   final FileProgress? progress;
+  final FileOperationUpdate? fileOperation;
   final CaptureState? capture;
   final bool runtimeWatch;
 
@@ -1222,6 +1286,7 @@ class RuntimeEvent {
     required this.captured,
     this.capturedItemId,
     this.progress,
+    this.fileOperation,
     this.capture,
     required this.runtimeWatch,
   });
@@ -1234,6 +1299,7 @@ class RuntimeEvent {
       captured.hashCode ^
       capturedItemId.hashCode ^
       progress.hashCode ^
+      fileOperation.hashCode ^
       capture.hashCode ^
       runtimeWatch.hashCode;
 
@@ -1248,6 +1314,7 @@ class RuntimeEvent {
           captured == other.captured &&
           capturedItemId == other.capturedItemId &&
           progress == other.progress &&
+          fileOperation == other.fileOperation &&
           capture == other.capture &&
           runtimeWatch == other.runtimeWatch;
 }
