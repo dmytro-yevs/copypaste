@@ -59,15 +59,10 @@ class HistoryFileTransfer {
       final destination = await downloads.createTemp('file-');
       final name = _safeFileName(details.name);
       final path = '${destination.path}/${name.isEmpty ? 'file' : name}';
-      try {
-        await saveTo(clip, path, onProgress: onProgress);
-        return path;
-      } catch (_) {
-        if (await destination.exists()) {
-          await destination.delete(recursive: true);
-        }
-        rethrow;
-      }
+      // The runtime may still be writing after a request or presentation fails.
+      // It owns partial-file cleanup; keep its directory available for retry.
+      await saveTo(clip, path, onProgress: onProgress);
+      return path;
     }
     final root = await _temporaryDirectory();
     final directory = Directory('${root.path}/copypaste-file-transfers');
@@ -163,7 +158,10 @@ class HistoryFileTransfer {
         },
       );
       if (handled) {
-        if (isCancelled?.call() ?? false) {
+        // A backend with native cancellation owns the terminal outcome and
+        // cleanup. A late UI flag must not delete its committed destination.
+        if (_repository is! HistoryFileDownloadCancellation &&
+            (isCancelled?.call() ?? false)) {
           if (await destination.exists()) await destination.delete();
           throw const HistoryFileTransferCancelled();
         }

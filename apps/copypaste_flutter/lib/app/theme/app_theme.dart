@@ -303,6 +303,16 @@ abstract final class AppTheme {
         context,
       ).copyWith(fontSize: AppTypographySize.menuMetadata);
 
+  static TextStyle deviceCardTextStyle(
+    BuildContext context, {
+    bool muted = false,
+  }) {
+    final theme = Theme.of(context);
+    return theme.typography.xSmall.copyWith(
+      color: muted ? theme.colorScheme.mutedForeground : null,
+    );
+  }
+
   static TextStyle inspectorTextStyle(
     BuildContext context, {
     bool compact = false,

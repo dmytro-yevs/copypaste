@@ -2650,8 +2650,8 @@
         "crates/copypaste-core/src/storage/file_operations.rs",
         "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart"
       ],
-      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only.",
-      "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history.",
+      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative.",
+      "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history. Small attempt directories remain available for retry alongside durable history; the runtime removes incomplete files on orderly failure.",
       "bounds": {
         "file_block_bytes": 65536,
         "history_page_records": 50,

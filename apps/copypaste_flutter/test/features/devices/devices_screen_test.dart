@@ -21,7 +21,7 @@ void main() {
           final fresh = now.add(const Duration(seconds: 5));
           final cases = [
             (
-              'online',
+              'online device with a very long name that must stay on one line',
               DevicePresence.online,
               true,
               fresh,
@@ -92,7 +92,7 @@ void main() {
               online: false,
             ),
           ];
-          tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+          tester.platformDispatcher.textScaleFactorTestValue = 2;
           addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
           final controller = DevicesController(
             gateway: _ScreenGateway(peers: peers, discovered: const []),
@@ -107,6 +107,16 @@ void main() {
               dark: dark,
             );
             await tester.pumpAndSettle();
+            final local = find.byKey(const ValueKey('this-device-card'));
+            final cardSize = tester.getSize(local);
+            for (final peer in peers) {
+              expect(
+                tester.getSize(
+                  find.byKey(ValueKey('peer-device-card-${peer.id}')),
+                ),
+                cardSize,
+              );
+            }
             for (final (id, _, _, _, label, tone, ping) in cases) {
               final card = find.byKey(ValueKey('peer-device-card-$id'));
               expect(
@@ -124,6 +134,10 @@ void main() {
               );
               final name = find.descendant(of: card, matching: find.text(id));
               expect(
+                tester.widget<Text>(name).style?.fontSize,
+                Theme.of(tester.element(card)).typography.xSmall.fontSize,
+              );
+              expect(
                 tester.getRect(dot).right,
                 lessThan(tester.getRect(name).left),
               );
@@ -136,9 +150,22 @@ void main() {
                 ping == null ? findsNothing : findsOneWidget,
               );
               if (ping != null) {
+                final pingText = find.descendant(
+                  of: card,
+                  matching: find.textContaining('Ping:'),
+                );
+                expect(pingText, findsOneWidget);
                 expect(
-                  find.descendant(of: card, matching: find.text(ping)),
-                  findsOneWidget,
+                  tester.widget<Text>(pingText).data!.replaceAll('\n', ' '),
+                  ping,
+                );
+                expect(
+                  tester.getRect(pingText).left,
+                  greaterThan(tester.getRect(name).right),
+                );
+                expect(
+                  tester.getCenter(pingText).dy,
+                  tester.getCenter(card).dy,
                 );
               }
             }
@@ -146,12 +173,12 @@ void main() {
               expect(
                 find.descendant(
                   of: find.byKey(ValueKey('peer-device-card-$id')),
-                  matching: find.text('Ping: — ms'),
+                  matching: find.textContaining('— ms'),
                 ),
                 findsOneWidget,
               );
             }
-            expect(find.text('Ping: <1 ms'), findsOneWidget);
+            expect(find.textContaining('<1 ms'), findsOneWidget);
             for (final (id, label) in [
               ('legacy-visible', 'Visible'),
               ('legacy-unseen', 'Not seen'),
@@ -169,7 +196,10 @@ void main() {
                 findsNothing,
               );
             }
-            final local = find.byKey(const ValueKey('this-device-card'));
+            expect(
+              find.descendant(of: local, matching: find.byType(AvatarBadge)),
+              findsNothing,
+            );
             expect(
               find.descendant(of: local, matching: find.text('This device')),
               findsNothing,
