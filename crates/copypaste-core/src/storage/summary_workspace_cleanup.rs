@@ -230,12 +230,16 @@ mod tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        cleanup(parent.path()).unwrap();
+        // cleanup() may deliberately defer under another process-local sweep.
+        // Creating a session waits for coordination and guarantees a real sweep.
+        let concurrent = create(Some(parent.path())).unwrap();
         assert!(path.exists());
+        drop(concurrent);
         fs::write(path.join("release"), b"").unwrap();
         assert!(child.wait().unwrap().success());
-        cleanup(parent.path()).unwrap();
+        let next = create(Some(parent.path())).unwrap();
         assert!(!path.exists());
+        drop(next);
         drop(directory);
     }
 

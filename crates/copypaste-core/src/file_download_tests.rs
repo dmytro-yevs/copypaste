@@ -224,6 +224,7 @@ async fn exercise_download(deferred: bool) {
     ));
     assert!(!early.exists());
 
+    let source_completed = source.subscribe_file_operations();
     let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = Arc::clone(&progress);
     downloads
@@ -267,6 +268,7 @@ async fn exercise_download(deferred: bool) {
         std::fs::read(&destination).unwrap(),
         std::fs::read(&original).unwrap()
     );
+    wait_source_terminal(source_completed).await;
     let records = target.file_operations(false, None, None).unwrap();
     assert!(records.iter().any(|record| record.phase
         == copypaste_ipc::FileOperationPhase::Completed
@@ -310,6 +312,7 @@ async fn exercise_download(deferred: bool) {
     assert!(error.to_string().contains("4194304"));
     assert!(!refused.exists());
 
+    let source_cancelled = source.subscribe_file_operations();
     let cancelled = dir.path().join("cancelled.apk");
     let transfer = downloads.save(
         &target,
@@ -339,6 +342,10 @@ async fn exercise_download(deferred: bool) {
         !cancelled.exists(),
         "Cancelled downloads remove their partial destination"
     );
+
+    // Source bookkeeping is asynchronous; its terminal event also confirms
+    // file admission has been released before testing a different failure.
+    wait_source_terminal(source_cancelled).await;
 
     if deferred {
         std::fs::OpenOptions::new()
@@ -410,4 +417,26 @@ fn detached_admission_is_bounded_released_and_closed_on_shutdown() {
         downloads.reserve_background(),
         Err(file_transfer::FileTransferError::Cancelled)
     ));
+}
+
+async fn wait_source_terminal(
+    mut events: tokio::sync::broadcast::Receiver<copypaste_ipc::FileOperationUpdate>,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match events.recv().await {
+                Ok(event)
+                    if event.phase.as_ref().is_some_and(|phase| {
+                        *phase != copypaste_ipc::FileOperationPhase::Running
+                    }) =>
+                {
+                    break
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(error) => panic!("Source operation events closed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("The sender must publish its terminal operation state");
 }
