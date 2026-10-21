@@ -427,6 +427,7 @@ fi
 # certificate with a similar common name, and it does not go through the
 # name-and-policy lookup that may decline an identity whose root is untrusted.
 SIGN_OUTPUT="$(sign_bundle "$IDENTITY_SHA1" "$KEYCHAIN")" || {
+    say "$SIGN_OUTPUT"
     # If codesign declined the identity for trust reasons, say so precisely and
     # print the one command that would fix it — user trust domain, the user's own
     # password, no admin rights. Do not run it here: it prompts, and a postflight
