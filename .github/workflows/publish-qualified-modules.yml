@@ -1,0 +1,98 @@
+name: Publish application-qualified modules
+
+on:
+  workflow_dispatch:
+    inputs:
+      application_tag:
+        description: Published stable application release tag
+        required: true
+        type: string
+      qualified_run_id:
+        description: Successful exact-source production qualification run
+        required: true
+        type: string
+
+concurrency:
+  group: application-qualified-modules
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLICATION_TAG: ${{ inputs.application_tag }}
+          QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$APPLICATION_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          [[ "$APPLICATION_TAG" == "v$version" ]]
+          commit="$(git rev-list -n 1 "$APPLICATION_TAG")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$APPLICATION_TAG" > "$RUNNER_TEMP/application-release.json"
+          jq -e --arg tag "$APPLICATION_TAG" '.tag_name == $tag and .draft == false and .prerelease == false' "$RUNNER_TEMP/application-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          python3 scripts/release/github_inventory.py --run-id "$QUALIFIED_RUN_ID" --kind jobs > "$RUNNER_TEMP/source-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$QUALIFIED_RUN_ID" --kind artifacts > "$RUNNER_TEMP/source-artifacts.json"
+          python3 scripts/release/verify-qualified-run.py \
+            --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" \
+            --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" \
+            --commit "$commit" --require-linux --require-compositor-runtime
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {module: supabase, artifact_pattern: 'provider-supabase-*'}
+          - {module: semantic-search, artifact_pattern: 'provider-semantic-search-*'}
+          - {module: ocr, artifact_pattern: 'ocr-*'}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          pattern: ${{ matrix.artifact_pattern }}
+          merge-multiple: true
+          path: dist
+          run-id: ${{ inputs.qualified_run_id }}
+          expected-commit: ${{ needs.preflight.outputs.commit }}
+          github-token: ${{ github.token }}
+      - name: Test module publication safety
+        run: python3 -m unittest scripts/modules/tests/test_publish_qualified_release.py
+      - name: Publish exact signed and native-qualified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE: ${{ matrix.module }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          SOURCE_RUN_ID: ${{ inputs.qualified_run_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/modules/publish-qualified-release.py \
+            --repository "$GITHUB_REPOSITORY" --directory dist \
+            --manifest "modules/$MODULE/module.json" \
+            --commit "$SOURCE_COMMIT" --run-id "$SOURCE_RUN_ID"

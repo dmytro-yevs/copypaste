@@ -54,6 +54,7 @@ struct PublicState {
     active: bool,
     dirty: bool,
     sequence: u64,
+    protocol_unsupported: bool,
 }
 
 enum Command {
@@ -142,6 +143,36 @@ pub(in crate::clipboard) struct WaylandClipboard {
 }
 
 impl WaylandClipboard {
+    pub(super) fn protocol_unsupported(&self) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|state| state.protocol_unsupported)
+    }
+
+    /// Probe protocol and seat availability without observing a selection or
+    /// requesting clipboard data. Worker connection remains the final check.
+    pub(super) fn probe_data_control() -> bool {
+        let Ok(connection) = Connection::connect_to_env() else {
+            return false;
+        };
+        let Ok((globals, queue)) = registry_queue_init::<Worker>(&connection) else {
+            return false;
+        };
+        let qh = queue.handle();
+        let manager = globals
+            .bind::<ExtDataControlManagerV1, _, _>(&qh, 1..=1, ())
+            .is_ok()
+            || globals
+                .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
+                .is_ok();
+        manager
+            && globals.contents().with_list(|contents| {
+                contents
+                    .iter()
+                    .any(|global| global.interface == WlSeat::interface().name)
+            })
+    }
+
     pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
         let (read, write) = UnixStream::pair()?;
@@ -544,6 +575,9 @@ struct Session {
 
 impl Session {
     fn connect(public: Arc<Mutex<PublicState>>) -> Option<Self> {
+        if let Ok(mut state) = public.lock() {
+            state.protocol_unsupported = false;
+        }
         let connection = Connection::connect_to_env().ok()?;
         let (globals, mut queue) = registry_queue_init::<Worker>(&connection).ok()?;
         let qh = queue.handle();
@@ -556,7 +590,13 @@ impl Session {
                     .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
                     .ok()
                     .map(Manager::Wlr)
-            })?;
+            });
+        let Some(manager) = manager else {
+            if let Ok(mut state) = public.lock() {
+                state.protocol_unsupported = true;
+            }
+            return None;
+        };
         let registry = globals.registry();
         let seats: Vec<_> = globals.contents().with_list(|contents| {
             contents
@@ -566,6 +606,9 @@ impl Session {
                 .collect()
         });
         if seats.is_empty() {
+            if let Ok(mut state) = public.lock() {
+                state.protocol_unsupported = true;
+            }
             return None;
         }
         let mut state = Worker::new(public);
@@ -582,6 +625,7 @@ impl Session {
             public.active = !state.lost;
             public.dirty = false;
             public.sequence = state.sequence;
+            public.protocol_unsupported = false;
         }
         Some(Self { queue, state })
     }

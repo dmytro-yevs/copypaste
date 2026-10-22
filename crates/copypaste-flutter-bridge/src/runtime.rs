@@ -508,6 +508,7 @@ mod tests {
                             runtime_watch: false,
                             capture_watch: false,
                             capture_revision: 0,
+                            platform_capabilities: Default::default(),
                             sync_status: Default::default(),
                             device_name: "Attached runtime".into(),
                             device_id: None,

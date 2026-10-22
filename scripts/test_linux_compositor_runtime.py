@@ -368,8 +368,27 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("COPYPASTE_QUALIFICATION_V4L2_DEVICE", workflow)
         self.assertIn("--previous-artifacts previous-artifacts/all", workflow)
         self.assertIn("--previous-version \"${{ needs.source.outputs.previous_version }}\"", workflow)
-        for name in ("gnome-46-ubuntu24.04",):
-            self.assertIn(name, workflow)
+        self.assertIn("platform_manifest.py matrix --tier stable --purpose qualification", workflow)
+        self.assertIn("matrix.compositor_artifact", workflow)
+        manifest = json.loads((ROOT / "packaging/linux/release-contract.json").read_text(encoding="utf-8"))
+        stable_artifacts = {
+            target["compositor_artifact"] for target in manifest["targets"]
+            if target["tier"] == "stable" and target["native_qualification"]
+        }
+        stable_environments = {
+            (target["desktop"], target["architecture"], target["distribution"], target["version"])
+            for target in manifest["targets"]
+            if target["tier"] == "stable" and target["native_qualification"]
+        }
+        runtime_contract = json.loads((ROOT / "packaging/linux/compositor-runtime/release-contract.json").read_text(encoding="utf-8"))
+        expected_artifacts = {
+            baseline["artifact"] for baseline in runtime_contract["baselines"]
+            if (baseline["desktop"], baseline["architecture"],
+                baseline["distribution"]["id"], baseline["distribution"]["version"])
+            in stable_environments
+        }
+        self.assertTrue(stable_artifacts)
+        self.assertEqual(stable_artifacts, expected_artifacts)
         for name in ("run-linux-native-desktop-session.sh", "run-fedora-plasma6-session.sh"):
             script = (ROOT / "scripts/release" / name).read_text(encoding="utf-8")
             self.assertIn("verify-linux-compositor-runtime.py", script)

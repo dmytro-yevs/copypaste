@@ -269,7 +269,10 @@ class FlutterDesktopWindowHost
         }
       });
       trayListener = icon.addListener((event) {
-        if (event is TrayIconClickedEvent && !_nativeTrayActivationBound) {
+        if (Platform.isLinux && event is TrayIconClickedEvent) {
+          unawaited(onOpenRequested());
+        } else if (event is TrayIconClickedEvent &&
+            !_nativeTrayActivationBound) {
           unawaited(_openQuickPasteFromTray(icon));
         }
       });

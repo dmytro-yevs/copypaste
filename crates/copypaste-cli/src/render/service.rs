@@ -258,6 +258,7 @@ mod tests {
             runtime_watch: false,
             capture_watch: false,
             capture_revision: 0,
+            platform_capabilities: Default::default(),
             sync_status: Default::default(),
             device_name: "Test device".into(),
             device_id: None,
