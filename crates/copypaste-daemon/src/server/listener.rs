@@ -1513,7 +1513,15 @@ mod tests {
                         break;
                     }
                 }
-                changes.recv().await.unwrap();
+                match changes.recv().await {
+                    // The durable operation record is the assertion source;
+                    // broadcast only wakes this loop. A faster transfer can
+                    // legitimately overwrite its bounded notification buffer.
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        panic!("file-operation updates closed before completion")
+                    }
+                }
             }
         })
         .await

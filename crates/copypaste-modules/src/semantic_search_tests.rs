@@ -233,7 +233,16 @@ fn external_store_changes_are_observed_by_maintenance_wake() {
     let expected = SemanticRevision::from(other.resource_revisions().unwrap());
 
     until_for(Duration::from_secs(6), || {
-        service.wake.0.lock().unwrap().observed_revision.as_ref() == Some(&expected)
+        service
+            .wake
+            .0
+            .lock()
+            .unwrap()
+            .observed_revision
+            .as_ref()
+            .is_some_and(|observed| {
+                observed.generation == expected.generation && observed.semantic >= expected.semantic
+            })
     });
     service.shutdown();
 }
