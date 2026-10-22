@@ -9,7 +9,6 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "application_instance.cpp"
   "app_update_channel.cpp"
-  "app_update_helper.cpp"
   "app_update_verifier.cpp"
   "flutter_window.cpp"
   "screenshot_protection.cpp"
@@ -51,3 +50,17 @@ target_include_directories(${BINARY_NAME} PRIVATE
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# The updater must run outside the bundle while its files are replaced. Keep it
+# independent of Flutter and ship the CRT statically so a temporary copy starts.
+add_executable(copypaste-update-helper WIN32
+  "app_update_helper.cpp"
+  "app_update_verifier.cpp"
+)
+apply_standard_settings(copypaste-update-helper)
+target_compile_definitions(copypaste-update-helper PRIVATE "NOMINMAX")
+set_property(TARGET copypaste-update-helper PROPERTY MSVC_RUNTIME_LIBRARY
+  "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_link_libraries(copypaste-update-helper PRIVATE
+  "shell32.lib" "bcrypt.lib" "crypt32.lib" "wintrust.lib")
+add_dependencies(${BINARY_NAME} copypaste-update-helper)

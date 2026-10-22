@@ -21,6 +21,24 @@ try {
     if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode)" }
     if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw "installed application is missing" }
     if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { throw "installed CLI is missing" }
+    $helper = Join-Path $installDirectory "copypaste-update-helper.exe"
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        throw "installed update helper is missing"
+    }
+    $probeDirectory = Join-Path ([IO.Path]::GetTempPath()) ("copypaste-update-probe-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $probeDirectory | Out-Null
+    try {
+        $probeHelper = Join-Path $probeDirectory "update-helper.exe"
+        Copy-Item -LiteralPath $helper -Destination $probeHelper
+        $probe = Start-Process -FilePath $probeHelper -WorkingDirectory $probeDirectory -Wait -PassThru
+        # Invalid arguments deliberately return 1. A loader failure means that
+        # the updater still depends on files in the application bundle.
+        if ($probe.ExitCode -ne 1) {
+            throw "standalone update helper failed its isolated launch: $($probe.ExitCode)"
+        }
+    } finally {
+        Remove-Item -LiteralPath $probeDirectory -Recurse -Force
+    }
     $cliVersion = & $cli --version
     if ($LASTEXITCODE -ne 0 -or $cliVersion -cne "copypaste $Version") {
         throw "installed CLI did not report the release version"

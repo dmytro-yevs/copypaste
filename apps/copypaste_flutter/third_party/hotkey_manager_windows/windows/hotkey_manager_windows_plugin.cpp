@@ -176,6 +176,12 @@ void HotkeyManagerWindowsPlugin::Register(
     }
     modifiers.push_back(*modifier);
   }
+  const UINT flags = GetFsModifiersFromString(modifiers);
+  if ((*key == 'C' && (flags == MOD_CONTROL || flags == MOD_WIN)) ||
+      (*key == VK_INSERT && flags == MOD_CONTROL)) {
+    result->Error("reserved_hotkey", "The system copy shortcut cannot be registered globally.");
+    return;
+  }
   DWORD error = ERROR_SUCCESS;
   if (!Release(*identifier, &error)) {
     result->Error("hotkey_unregistration_failed", "Windows could not release the global shortcut.", ErrorDetails(error));
@@ -191,7 +197,7 @@ void HotkeyManagerWindowsPlugin::Register(
     result->Error("hotkey_registration_failed", "No hotkey identifier is available.");
     return;
   }
-  if (!api_.register_hot_key(window, id, GetFsModifiersFromString(modifiers), *key)) {
+  if (!api_.register_hot_key(window, id, flags, *key)) {
     error = api_.get_last_error();
     allocated_ids.erase(id);
     result->Error("hotkey_registration_failed", "Windows rejected the global shortcut registration.", ErrorDetails(error));
