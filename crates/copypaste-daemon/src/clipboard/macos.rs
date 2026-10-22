@@ -828,11 +828,13 @@ mod tests {
         ]);
         let capture = clipboard.poll().expect("the file URL must win");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert!(capture.file_path.is_none());
-        assert_eq!(
-            capture.binary_content.as_deref(),
-            Some(b"file bytes".as_slice())
-        );
+        assert!(capture.binary_content.is_none());
+        let source = capture
+            .file_path
+            .as_deref()
+            .expect("a deferred local source");
+        assert_eq!(source.canonicalize().unwrap(), path.canonicalize().unwrap());
+        assert_eq!(std::fs::read(source).unwrap(), b"file bytes");
     }
 
     #[test]
@@ -869,7 +871,7 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn one_local_file_url_freezes_its_bytes_and_metadata() {
+    fn one_local_file_url_defers_its_bytes_and_preserves_metadata() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         let fixture_dir = tempfile::tempdir().unwrap();
@@ -884,7 +886,12 @@ mod tests {
         );
         let capture = clipboard.poll().expect("a local file URL must be captured");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert!(capture.file_path.is_none());
+        assert!(capture.binary_content.is_none());
+        let source = capture
+            .file_path
+            .as_deref()
+            .expect("a deferred local source");
+        assert_eq!(source.canonicalize().unwrap(), path.canonicalize().unwrap());
         assert_eq!(
             capture.file_metadata,
             copypaste_core::FileMetadata::with_source_reference(
@@ -893,10 +900,9 @@ mod tests {
                 path.to_string_lossy(),
             )
         );
-        assert_eq!(
-            capture.binary_content.as_deref(),
-            Some(b"synthetic file fixture".as_slice())
-        );
+        assert_eq!(std::fs::read(source).unwrap(), b"synthetic file fixture");
+        std::fs::write(&path, b"changed after capture").unwrap();
+        assert_eq!(std::fs::read(source).unwrap(), b"changed after capture");
 
         write_types(&[(UTI_FILE_URL, b"https://example.invalid/fixture.bin")]);
         assert!(
