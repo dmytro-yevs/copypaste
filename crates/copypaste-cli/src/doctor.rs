@@ -17,6 +17,8 @@ fn capability(state: &str, backend: Option<&str>, guarantee: &str, reason: Optio
 
 fn transport(backend: &str) -> Option<&'static str> {
     match backend {
+        "windows-system-clipboard" => Some("windows_clipboard"),
+        "nspasteboard" | "macos-pasteboard" => Some("nspasteboard"),
         "linux-x11-system-clipboard" => Some("x11"),
         "linux-gnome-wayland-clipboard" => Some("gnome_bridge"),
         "linux-kwin-wayland-clipboard" => Some("kwin_bridge"),
@@ -30,7 +32,10 @@ pub(crate) fn diagnostics(status: &StatusData) -> Value {
         .clipboard_available
         .then(|| transport(&status.clipboard_backend))
         .flatten();
-    let source = matches!(backend, Some("x11" | "gnome_bridge" | "kwin_bridge"));
+    let source = matches!(
+        backend,
+        Some("windows_clipboard" | "nspasteboard" | "x11" | "gnome_bridge" | "kwin_bridge")
+    );
     let clipboard = if backend.is_some() {
         capability("available", backend, "verified", None)
     } else {
@@ -225,6 +230,110 @@ mod tests {
             private_mode_epoch: 0,
             counters: Default::default(),
             settings_health: None,
+        }
+    }
+
+    const NATIVE_BACKENDS: [(&str, &str); 3] = [
+        ("windows-system-clipboard", "windows_clipboard"),
+        ("nspasteboard", "nspasteboard"),
+        ("macos-pasteboard", "nspasteboard"),
+    ];
+
+    #[test]
+    fn native_clipboards_report_available_with_best_effort_attribution() {
+        for (backend, descriptor) in NATIVE_BACKENDS {
+            let report = diagnostics(&status(backend, true));
+            for name in [
+                "clipboard_capture",
+                "clipboard_read_write",
+                "privacy_enforcement",
+            ] {
+                let value = &report["capabilities"][name];
+                assert_eq!(value["state"], "available", "{backend}: {name}");
+                assert_eq!(value["backend"], descriptor);
+                assert_eq!(value["guarantee"], "verified");
+            }
+            let attribution = &report["capabilities"]["source_attribution"];
+            assert_eq!(attribution["state"], "available");
+            assert_eq!(attribution["backend"], descriptor);
+            assert_eq!(attribution["guarantee"], "best_effort");
+            for name in [
+                "global_shortcuts",
+                "quick_paste",
+                "secure_storage",
+                "desktop_integration",
+                "updates",
+            ] {
+                assert_eq!(
+                    report["capabilities"][name],
+                    capability("error", None, "none", Some(UNPROBED)),
+                    "{backend}: {name} must remain unprobed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_native_clipboards_do_not_claim_supported_capabilities() {
+        for (backend, _) in NATIVE_BACKENDS {
+            let report = diagnostics(&status(backend, false));
+            for name in [
+                "clipboard_capture",
+                "clipboard_read_write",
+                "source_attribution",
+                "privacy_enforcement",
+            ] {
+                assert_eq!(
+                    report["capabilities"][name],
+                    capability(
+                        "error",
+                        None,
+                        "none",
+                        Some("Clipboard transport unavailable.")
+                    ),
+                    "{backend}: {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stopped_native_capture_does_not_hide_available_transport() {
+        for (backend, descriptor) in NATIVE_BACKENDS {
+            let mut status = status(backend, true);
+            status.capture_running = false;
+            let report = diagnostics(&status);
+            assert_eq!(
+                report["capabilities"]["clipboard_capture"],
+                capability(
+                    "error",
+                    Some(descriptor),
+                    "none",
+                    Some("Capture loop is stopped.")
+                )
+            );
+            assert_eq!(
+                report["capabilities"]["clipboard_read_write"]["state"],
+                "available"
+            );
+        }
+    }
+
+    #[test]
+    fn private_mode_keeps_native_capture_pause_reason() {
+        for (backend, descriptor) in NATIVE_BACKENDS {
+            let mut status = status(backend, true);
+            status.private_mode = true;
+            let report = diagnostics(&status);
+            assert_eq!(
+                report["capabilities"]["clipboard_capture"],
+                capability(
+                    "available",
+                    Some(descriptor),
+                    "verified",
+                    Some("Capture is paused by private mode.")
+                )
+            );
         }
     }
 
