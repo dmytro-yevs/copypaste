@@ -597,6 +597,61 @@ impl SyncSource for StoreSource {
     }
 }
 
+struct OutgoingOperation {
+    total: u64,
+    operation: crate::file_operation::FileOperationGuard,
+}
+impl copypaste_p2p::sync::FileTransferObserver for OutgoingOperation {
+    fn progress(&mut self, written: u64) {
+        super::blocking(|| self.operation.progress(written, self.total));
+    }
+    fn finish(&mut self, error: Option<String>) {
+        super::blocking(|| self.operation.finish(error, false, None));
+    }
+}
+
+/// Re-check sharing and clip privacy on every deferred-source block.
+struct SharedFileSource {
+    source: Box<dyn copypaste_p2p::sync::DeferredFileSource>,
+    store: Store,
+    id: String,
+    settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
+}
+impl SharedFileSource {
+    fn check_access(&self) -> Result<(), SyncError> {
+        super::blocking(|| {
+            let settings = (self.settings)();
+            if !settings.sync_enabled {
+                return Err(SyncError::Source(MSG_SYNC_DISABLED.into()));
+            }
+            self.store
+                .get(&self.id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
+                .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
+            if self
+                .store
+                .file_reference(&self.id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .is_none()
+            {
+                return Err(SyncError::Source("The source file changed.".into()));
+            }
+            Ok(())
+        })
+    }
+}
+impl copypaste_p2p::sync::DeferredFileSource for SharedFileSource {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
+        self.check_access()?;
+        self.source.read_chunk()
+    }
+    fn verify(&mut self) -> Result<(), SyncError> {
+        self.check_access()?;
+        self.source.verify()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,60 +1223,5 @@ mod tests {
         row.content_ciphertext.push(1);
         row.nonce.clear();
         assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
-    }
-}
-
-struct OutgoingOperation {
-    total: u64,
-    operation: crate::file_operation::FileOperationGuard,
-}
-impl copypaste_p2p::sync::FileTransferObserver for OutgoingOperation {
-    fn progress(&mut self, written: u64) {
-        super::blocking(|| self.operation.progress(written, self.total));
-    }
-    fn finish(&mut self, error: Option<String>) {
-        super::blocking(|| self.operation.finish(error, false, None));
-    }
-}
-
-/// Re-check sharing and clip privacy on every deferred-source block.
-struct SharedFileSource {
-    source: Box<dyn copypaste_p2p::sync::DeferredFileSource>,
-    store: Store,
-    id: String,
-    settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
-}
-impl SharedFileSource {
-    fn check_access(&self) -> Result<(), SyncError> {
-        super::blocking(|| {
-            let settings = (self.settings)();
-            if !settings.sync_enabled {
-                return Err(SyncError::Source(MSG_SYNC_DISABLED.into()));
-            }
-            self.store
-                .get(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
-                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
-                .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
-            if self
-                .store
-                .file_reference(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
-                .is_none()
-            {
-                return Err(SyncError::Source("The source file changed.".into()));
-            }
-            Ok(())
-        })
-    }
-}
-impl copypaste_p2p::sync::DeferredFileSource for SharedFileSource {
-    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
-        self.check_access()?;
-        self.source.read_chunk()
-    }
-    fn verify(&mut self) -> Result<(), SyncError> {
-        self.check_access()?;
-        self.source.verify()
     }
 }

@@ -187,8 +187,7 @@ pub(super) fn history_query(
         limit,
         MAX_PAGE_CONTENT_BYTES,
         Some(state.meta.device_id()),
-        &state.keyring.item_key(),
-        &state.keyring.preview_key(),
+        (&state.keyring.item_key(), &state.keyring.preview_key()),
     ) {
         Ok(page) => page,
         Err(StoreError::InvalidCursor) => {
