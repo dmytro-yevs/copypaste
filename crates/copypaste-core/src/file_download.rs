@@ -145,7 +145,7 @@ impl FileDownloads {
             .map(|row| crate::origin_or(&row.origin_device_id, local_device).to_owned())
             .unwrap_or_else(|| "Unknown source".into());
         let source = store
-            .device_names(&[origin.clone()])
+            .device_names(std::slice::from_ref(&origin))
             .ok()
             .and_then(|names| names.get(&origin).cloned())
             .unwrap_or(origin);
