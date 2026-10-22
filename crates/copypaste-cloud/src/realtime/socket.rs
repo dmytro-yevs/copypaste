@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use super::channel::{open_channel, WsStream};
+use super::channel::{open_channel_scoped, WsStream};
 use super::event::{RealtimeError, RealtimeEvent};
 use super::frame::{dispatch, Dispatch};
 use super::{JOIN_TIMEOUT, TOPIC};
@@ -65,6 +65,7 @@ pub(super) async fn run(
     user_id: String,
     tx: mpsc::Sender<Result<RealtimeEvent, RealtimeError>>,
     shutdown: CancellationToken,
+    groups: bool,
 ) {
     let mut schedule = reconnect_policy().build();
     let mut stream = Some(first);
@@ -98,7 +99,7 @@ pub(super) async fn run(
 
         // Read the token at each attempt, not once at startup.
         let current = token.borrow_and_update().clone();
-        match open_channel(endpoint.clone(), &anon_key, &current, &user_id).await {
+        match open_channel_scoped(endpoint.clone(), &anon_key, &current, &user_id, groups).await {
             Ok(ws) => {
                 stream = Some(ws);
                 // The gap is not replayed. Say so, so the subscriber polls

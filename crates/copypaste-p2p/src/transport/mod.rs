@@ -21,6 +21,7 @@
 
 mod error;
 mod handshake;
+mod membership;
 mod nearby;
 mod pairing_bootstrap;
 mod pairing_code;

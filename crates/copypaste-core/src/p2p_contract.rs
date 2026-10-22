@@ -423,6 +423,7 @@ mod tests {
 
     fn discovered(last_seen_ms: i64) -> DiscoveredPeer {
         DiscoveredPeer {
+            group_identity: None,
             discovery_id: "discovery-1".to_string(),
             pairing_ids: vec!["peer-1".to_string()],
             name: "Phone".to_string(),

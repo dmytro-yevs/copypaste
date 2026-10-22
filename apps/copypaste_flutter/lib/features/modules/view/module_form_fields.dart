@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
@@ -79,7 +80,10 @@ class ModuleFormFields extends StatelessWidget {
                 onPressed: !enabled || draft.busy
                     ? null
                     : () => draft.chooseFile(field),
-                leading: const Icon(LucideIcons.file, size: AppIconSize.sm),
+                leading: const AppIconFrame(
+                  size: AppIconSize.sm,
+                  child: Icon(LucideIcons.file, size: AppIconSize.sm),
+                ),
                 child: Text(draft.fileName(field.id) ?? 'Choose file'),
               )
             else if (field.secret)

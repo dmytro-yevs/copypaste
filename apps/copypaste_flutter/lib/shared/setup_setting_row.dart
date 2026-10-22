@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../app/theme/app_tokens.dart';
@@ -26,12 +27,18 @@ class SetupSettingRow extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(icon, size: AppIconSize.md),
+            AppIconFrame(
+              size: AppIconSize.md,
+              child: Icon(icon, size: AppIconSize.md),
+            ),
             const Gap(AppSpacing.md),
             Expanded(child: Text(title).medium()),
             if (statusIcon != null) ...[
               const Gap(AppSpacing.md),
-              Icon(statusIcon, size: AppIconSize.md),
+              AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(statusIcon, size: AppIconSize.md),
+              ),
             ],
           ],
         ),

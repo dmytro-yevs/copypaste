@@ -2110,8 +2110,8 @@ void main() {
     expect(kindIcon, findsOneWidget);
     expect(tester.widget<Icon>(kindIcon).size, AppIconSize.xs);
     expect(meta.style?.fontSize, AppTypographySize.historyMetadata);
-    expect(meta.style?.height, 1);
-    expect(tester.getSize(metaFinder).height, 12);
+    expect(meta.style?.height, 4 / 3);
+    expect(tester.getSize(metaFinder).height, 16);
     expect(
       tester.getSize(find.byType(Avatar)),
       const Size.square(AppIconSize.xs),
@@ -2164,8 +2164,8 @@ void main() {
     );
     final meta = tester.widget<Text>(metaFinder);
     expect(meta.style?.fontSize, 12);
-    expect(meta.style?.height, 1);
-    expect(tester.getSize(metaFinder).height, 12);
+    expect(meta.style?.height, 4 / 3);
+    expect(tester.getSize(metaFinder).height, 16);
     expect(
       tester.widget<SourceAppLabel>(find.byType(SourceAppLabel)).iconSize,
       AppIconSize.xs,
@@ -2481,6 +2481,18 @@ void main() {
     await tester.tap(_detailAction('Download'));
     await tester.pump();
     expect(find.text('0%'), findsOneWidget);
+    final indicator = find.descendant(
+      of: find.byKey(const ValueKey('history-detail-download')),
+      matching: find.byType(CircularProgressIndicator),
+    );
+    final indicatorSize = tester.getSize(indicator);
+    expect(indicatorSize.width, greaterThan(0));
+    expect(indicatorSize.width, indicatorSize.height);
+    expect(
+      find.ancestor(of: indicator, matching: find.byType(AspectRatio)),
+      findsOneWidget,
+    );
+
     pendingSave.complete();
     await tester.pump();
     await tester.pump();

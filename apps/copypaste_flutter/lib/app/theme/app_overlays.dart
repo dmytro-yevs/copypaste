@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -167,7 +168,9 @@ abstract final class AppOverlays {
                                 case final message?) ...[
                               if (content != null) const Gap(AppSpacing.md),
                               Alert.destructive(
-                                leading: const Icon(LucideIcons.circleAlert),
+                                leading: const AppIconFrame(
+                                  child: Icon(LucideIcons.circleAlert),
+                                ),
                                 title: const Text('Action failed'),
                                 content: Text(message),
                               ),
@@ -196,7 +199,10 @@ abstract final class AppOverlays {
                       leading: submitting
                           ? const SizedBox.square(
                               dimension: AppIconSize.sm,
-                              child: CircularProgressIndicator(),
+                              child: AppIconFrame(
+                                size: AppIconSize.sm,
+                                child: CircularProgressIndicator(),
+                              ),
                             )
                           : null,
                       child: Text(actionLabel),
@@ -228,7 +234,10 @@ abstract final class AppOverlays {
             children: [
               Row(
                 children: [
-                  Icon(icon, size: AppIconSize.sm).iconMutedForeground(),
+                  AppIconFrame(
+                    size: AppIconSize.sm,
+                    child: Icon(icon, size: AppIconSize.sm),
+                  ).iconMutedForeground(),
                   const Gap(AppSpacing.lg),
                   Flexible(child: title),
                 ],

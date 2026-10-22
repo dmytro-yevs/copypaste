@@ -73,8 +73,12 @@ void main() {
       if (layout.size.width >= 800) {
         expect(drawerRect.width, closeTo(AppOverlaySize.drawerPanelWidth, 2));
         expect(drawerRect.right, closeTo(layout.size.width, 2));
-        expect(drawerRect.top, closeTo(0, 2));
-        expect(drawerRect.height, closeTo(layout.size.height, 2));
+        final bodyRect = tester.getRect(
+          find.byKey(const ValueKey('app-body-drawer-overlay')),
+        );
+        expect(drawerRect.top, closeTo(bodyRect.top, 2));
+        expect(drawerRect.height, closeTo(bodyRect.height, 2));
+        expect(open.hitTestable(), findsOneWidget);
       } else {
         expect(drawerRect.width, closeTo(layout.size.width, 2));
         expect(drawerRect.bottom, closeTo(layout.size.height, 2));

@@ -42,6 +42,33 @@ fn classify_rest(err: crate::rest::RestError) -> TransportFault {
 }
 
 impl RestApi for crate::rest::SupabaseRest {
+    async fn fetch_group_catalog(
+        &self,
+        token: &str,
+        after_device: Option<&str>,
+    ) -> Result<Vec<crate::rest::group::GroupVersion>, TransportFault> {
+        crate::rest::SupabaseRest::fetch_group_catalog(self, token, after_device)
+            .await
+            .map_err(classify_rest)
+    }
+    async fn fetch_groups(
+        &self,
+        token: &str,
+        device_ids: &[String],
+    ) -> Result<Vec<crate::rest::GroupRow>, TransportFault> {
+        crate::rest::SupabaseRest::fetch_groups(self, token, device_ids)
+            .await
+            .map_err(classify_rest)
+    }
+    async fn upsert_group(
+        &self,
+        token: &str,
+        row: &crate::rest::GroupRow,
+    ) -> Result<(), TransportFault> {
+        crate::rest::SupabaseRest::upsert_group(self, token, row)
+            .await
+            .map_err(classify_rest)
+    }
     async fn fetch_since(
         &self,
         token: &str,

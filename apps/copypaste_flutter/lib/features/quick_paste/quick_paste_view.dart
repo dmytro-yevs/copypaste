@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import '../transfers/file_operations_view.dart';
 
 import 'dart:async';
@@ -386,7 +387,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   ),
                   features: const [
                     InputFeature.leading(
-                      Icon(LucideIcons.search, size: AppIconSize.sm),
+                      AppIconFrame(
+                        size: AppIconSize.sm,
+                        child: Icon(LucideIcons.search, size: AppIconSize.sm),
+                      ),
                     ),
                   ],
                   onChanged: (value) => unawaited(controller.search(value)),
@@ -403,7 +407,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             key: const ValueKey('quick-paste-inspector-toggle'),
             onPressed: controller.toggleInspector,
-            child: const Icon(LucideIcons.panelsLeftBottom),
+            child: const AppIconFrame(
+              child: Icon(LucideIcons.panelsLeftBottom),
+            ),
           ),
         ],
       ),
@@ -571,7 +577,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           if (history.isLoadingMore) {
             return const Padding(
               padding: EdgeInsets.all(AppSpacing.sm),
-              child: Center(child: CircularProgressIndicator()),
+              child: Center(
+                child: AppIconFrame(
+                  size: AppIconSize.sm,
+                  child: CircularProgressIndicator(),
+                ),
+              ),
             );
           }
           return Button.ghost(
@@ -770,9 +781,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                           ),
                           showName: false,
                         )
-                      : Icon(
-                          HistoryClipPresentation.icon(clip.contentKind),
+                      : AppIconFrame(
                           size: AppIconSize.sm,
+                          child: Icon(
+                            HistoryClipPresentation.icon(clip.contentKind),
+                            size: AppIconSize.sm,
+                          ),
                         ),
                 ),
                 const Gap(AppSpacing.sm),
@@ -789,13 +803,16 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                             width: AppLayoutSize.quickPasteTransferStatusWidth,
                             child: Row(
                               children: [
-                                CircularProgressIndicator(
-                                  value: progress,
-                                  theme: const CircularProgressIndicatorTheme(
-                                    size: AppIconSize.xs,
-                                  ),
-                                  animated: !MediaQuery.disableAnimationsOf(
-                                    context,
+                                AppIconFrame(
+                                  size: AppIconSize.xs,
+                                  child: CircularProgressIndicator(
+                                    value: progress,
+                                    theme: const CircularProgressIndicatorTheme(
+                                      size: AppIconSize.xs,
+                                    ),
+                                    animated: !MediaQuery.disableAnimationsOf(
+                                      context,
+                                    ),
                                   ),
                                 ),
                                 const Gap(AppSpacing.xs),
@@ -981,7 +998,10 @@ class _ClipContent extends StatelessWidget {
         final image = ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 240, maxHeight: 120),
           child: preview == null
-              ? const SizedBox(height: 120, child: Icon(LucideIcons.image))
+              ? const SizedBox(
+                  height: 120,
+                  child: AppIconFrame(child: Icon(LucideIcons.image)),
+                )
               : ClipRRect(
                   borderRadius: const BorderRadius.all(
                     Radius.circular(AppRadius.sm),
@@ -994,7 +1014,7 @@ class _ClipContent extends StatelessWidget {
                       cacheWidth: bounds.width,
                       cacheHeight: bounds.height,
                       errorBuilder: (context, error, stackTrace) =>
-                          const Icon(LucideIcons.imageOff),
+                          const AppIconFrame(child: Icon(LucideIcons.imageOff)),
                     ),
                   ),
                 ),

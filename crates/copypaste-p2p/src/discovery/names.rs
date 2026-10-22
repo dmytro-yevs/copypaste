@@ -14,7 +14,7 @@ pub(super) const MAX_NAME_LEN: usize = 128;
 /// Longest DNS label, per RFC 1035 §2.3.4.
 pub(super) const MAX_LABEL_LEN: usize = 63;
 
-pub(super) fn is_valid_pairing_id(s: &str) -> bool {
+pub(crate) fn is_valid_pairing_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= MAX_PAIRING_ID_LEN
         && s.bytes()

@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -155,7 +156,9 @@ class _AppShellState extends State<AppShell> {
                       key: const ValueKey<String>('navigation-rail-toggle'),
                       style: AppTheme.navigationIconButtonStyle,
                       onPressed: _toggleDesktopRail,
-                      child: const Icon(LucideIcons.panelLeft),
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.panelLeft),
+                      ),
                     ),
                   )
                 : null;
@@ -373,9 +376,7 @@ class _AppShellState extends State<AppShell> {
             label: ExcludeSemantics(
               child: Text(
                 destination.label,
-                style: theme.typography.large
-                    .merge(theme.typography.medium)
-                    .copyWith(height: 1),
+                style: AppTheme.navigationTextStyle(context),
               ),
             ),
             child: Semantics(
@@ -391,7 +392,10 @@ class _AppShellState extends State<AppShell> {
                   ),
                   dimension: AppIconSize.xl,
                   child: Center(
-                    child: Icon(destination.icon, size: AppIconSize.md),
+                    child: AppIconFrame(
+                      size: AppIconSize.md,
+                      child: Icon(destination.icon, size: AppIconSize.md),
+                    ),
                   ),
                 ),
               ),
@@ -411,10 +415,11 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _navigationBrand(ThemeData theme, bool expanded) {
-    return SizedBox(
+    return ConstrainedBox(
       key: const ValueKey<String>('navigation-brand'),
-      height: AppIconSize.xl,
+      constraints: const BoxConstraints(minHeight: AppIconSize.xl),
       child: Align(
+        heightFactor: 1,
         alignment: expanded ? Alignment.centerLeft : Alignment.center,
         child: Button.ghost(
           style: AppTheme.brandButtonStyle,
@@ -434,9 +439,9 @@ class _AppShellState extends State<AppShell> {
                 const Gap(AppSpacing.sm),
                 Text(
                   'CopyPaste',
-                  style: theme.typography.large
-                      .merge(theme.typography.medium)
-                      .copyWith(color: theme.colorScheme.foreground, height: 1),
+                  style: AppTheme.navigationTextStyle(
+                    context,
+                  ).copyWith(color: theme.colorScheme.foreground),
                 ),
               ],
             ],

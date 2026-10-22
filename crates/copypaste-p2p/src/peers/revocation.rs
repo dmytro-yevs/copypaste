@@ -27,19 +27,41 @@ impl PeerStore {
         // write a file this store then refuses to open.
         validate_pairing_id(pairing_id)?;
         let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
+        let previous_group = guard.group.clone();
+        let previous_certificate = guard.pair_admissions.get(pairing_id).copied();
+        let previous_admission = guard.group_admissions.contains(pairing_id);
         if !guard.revoked.contains_key(pairing_id) && guard.revoked.len() >= MAX_REVOCATIONS {
             return Err(PeerStoreError::TooManyRevocations);
         }
+        if let Some(id) = guard
+            .peers
+            .get(pairing_id)
+            .and_then(|peer| peer.device_id.clone())
+        {
+            if let Some(group) = &mut guard.group {
+                group.remove(&id)?;
+            }
+        }
         let removed = guard.peers.remove(pairing_id);
+        guard.pair_admissions.remove(pairing_id);
+        guard.group_admissions.remove(pairing_id);
         let previous_revocation = guard.revoked.insert(pairing_id.to_string(), now_ms);
 
         match self.persist(&guard) {
             Ok(()) => {
+                self.group_changed();
                 tentative::bump(&mut guard, pairing_id);
                 tracing::info!(%pairing_id, "revoked a paired device");
                 Ok(removed.is_some())
             }
             Err(err) => {
+                if let Some(value) = previous_certificate {
+                    guard.pair_admissions.insert(pairing_id.into(), value);
+                }
+                guard.group = previous_group;
+                if previous_admission {
+                    guard.group_admissions.insert(pairing_id.into());
+                }
                 if let Some(peer) = removed {
                     guard.peers.insert(pairing_id.to_string(), peer);
                 }
@@ -63,13 +85,30 @@ impl PeerStore {
         if guard.peers.is_empty() {
             return Ok(0);
         }
+        let previous = guard.clone();
+        let device_ids: Vec<_> = guard
+            .peers
+            .values()
+            .filter_map(|peer| peer.device_id.clone())
+            .collect();
+        if let Some(group) = &mut guard.group {
+            for id in device_ids {
+                if let Err(error) = group.remove(&id) {
+                    *guard = previous;
+                    return Err(error);
+                }
+            }
+        }
         let peers = std::mem::take(&mut guard.peers);
+        guard.group_admissions.clear();
+        guard.pair_admissions.clear();
         for pairing_id in peers.keys() {
             guard.revoked.insert(pairing_id.clone(), now_ms);
         }
 
         match self.persist(&guard) {
             Ok(()) => {
+                self.group_changed();
                 for pairing_id in peers.keys() {
                     tentative::bump(&mut guard, pairing_id);
                 }
@@ -77,10 +116,7 @@ impl PeerStore {
                 Ok(peers.len())
             }
             Err(err) => {
-                for pairing_id in peers.keys() {
-                    guard.revoked.remove(pairing_id);
-                }
-                guard.peers = peers;
+                *guard = previous;
                 Err(err)
             }
         }

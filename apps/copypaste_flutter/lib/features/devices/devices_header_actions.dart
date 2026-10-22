@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../app/theme/app_theme.dart';
 
@@ -43,7 +44,7 @@ class DevicesHeaderActions extends StatelessWidget {
         onPressed: controller.canChangePairingMode
             ? controller.openInvitation
             : null,
-        leading: const Icon(LucideIcons.plus),
+        leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
         child: const Text('Add device'),
       ),
       Button.secondary(
@@ -51,8 +52,10 @@ class DevicesHeaderActions extends StatelessWidget {
         onPressed: controller.canChangePairingMode
             ? controller.openQrScanner
             : null,
-        leading: Icon(
-          DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
+        leading: AppIconFrame(
+          child: Icon(
+            DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
+          ),
         ),
         child: const Text('Scan QR'),
       ),
@@ -61,8 +64,10 @@ class DevicesHeaderActions extends StatelessWidget {
         onPressed: controller.canChangePairingMode
             ? controller.openCodeEntry
             : null,
-        leading: Icon(
-          DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
+        leading: AppIconFrame(
+          child: Icon(
+            DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
+          ),
         ),
         child: const Text('Enter code'),
       ),
@@ -115,7 +120,7 @@ class DevicesHeaderActions extends StatelessWidget {
             key: key,
             style: AppTheme.controlButtonStyle(const ButtonStyle.primaryIcon()),
             onPressed: onPressed,
-            child: Icon(icon),
+            child: AppIconFrame(child: Icon(icon)),
           )
         : Button.secondary(
             key: key,
@@ -123,7 +128,7 @@ class DevicesHeaderActions extends StatelessWidget {
               const ButtonStyle.secondaryIcon(),
             ),
             onPressed: onPressed,
-            child: Icon(icon),
+            child: AppIconFrame(child: Icon(icon)),
           );
     return Tooltip(
       showDuration: AppMotion.resolve(context, AppMotion.standard),

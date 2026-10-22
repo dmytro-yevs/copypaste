@@ -12,11 +12,18 @@ use serde_json::Value;
 use std::{collections::BTreeMap, sync::Mutex};
 
 pub struct SyncServices {
+    group: Option<GroupServices>,
     store: Store,
     view: StoreView,
     enabled: Box<dyn Fn() -> bool + Send + Sync>,
     remote_change: Box<dyn Fn(i64) + Send + Sync>,
     progress: Mutex<BTreeMap<String, Progress>>,
+}
+type ApplyGroup = dyn Fn(&str, &str) -> Result<(), String> + Send + Sync;
+struct GroupServices {
+    revision: Box<dyn Fn() -> u64 + Send + Sync>,
+    snapshot: Box<dyn Fn() -> Result<Option<String>, String> + Send + Sync>,
+    apply: Box<ApplyGroup>,
 }
 #[derive(Default)]
 struct Progress {
@@ -31,12 +38,26 @@ impl SyncServices {
         remote_change: impl Fn(i64) + Send + Sync + 'static,
     ) -> Self {
         Self {
+            group: None,
             store,
             view,
             enabled: Box::new(enabled),
             remote_change: Box::new(remote_change),
             progress: Mutex::default(),
         }
+    }
+    pub fn with_group(
+        mut self,
+        snapshot: impl Fn() -> Result<Option<String>, String> + Send + Sync + 'static,
+        apply: impl Fn(&str, &str) -> Result<(), String> + Send + Sync + 'static,
+        revision: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Self {
+        self.group = Some(GroupServices {
+            snapshot: Box::new(snapshot),
+            apply: Box::new(apply),
+            revision: Box::new(revision),
+        });
+        self
     }
     pub fn enabled(&self) -> bool {
         (self.enabled)()
@@ -129,6 +150,29 @@ impl SyncServices {
         let request: SyncHostRequest =
             serde_json::from_value(input).map_err(|_| ModuleError::State)?;
         match request {
+            SyncHostRequest::GroupSnapshot => {
+                self.require_enabled()?;
+                let snapshot = self
+                    .group
+                    .as_ref()
+                    .map(|group| (group.snapshot)())
+                    .transpose()
+                    .map_err(|_| ModuleError::State)?
+                    .flatten();
+                serde_json::to_value(snapshot).map_err(|_| ModuleError::State)
+            }
+            SyncHostRequest::GroupApply {
+                device_id,
+                snapshot,
+            } => {
+                self.require_enabled()?;
+                if device_id.len() > 128 || snapshot.len() > 768 * 1024 {
+                    return Err(ModuleError::State);
+                }
+                let group = self.group.as_ref().ok_or(ModuleError::State)?;
+                (group.apply)(&device_id, &snapshot).map_err(|_| ModuleError::State)?;
+                Ok(Value::Null)
+            }
             SyncHostRequest::Active => Ok(Value::Null),
             SyncHostRequest::DeviceId => Ok(Value::String(self.view.device_id().into())),
             SyncHostRequest::SyncEnabled => Ok(Value::Bool(self.enabled())),
@@ -137,7 +181,8 @@ impl SyncServices {
                 .lock()
                 .map_err(|_| ModuleError::State)?
                 .get(id)
-                .map_or(0, |entry| entry.epoch))),
+                .map_or(0, |entry| entry.epoch)
+                .wrapping_add(self.group.as_ref().map_or(0, |group| (group.revision)())))),
             SyncHostRequest::ReadState { keys } => {
                 if keys.len() > 64 {
                     return Err(ModuleError::State);

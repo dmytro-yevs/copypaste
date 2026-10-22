@@ -655,13 +655,19 @@ dependencies = [
 
 [[package]]
 name = "const-oid"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "backon",
  "clap",
@@ -678,11 +684,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.33"
+version = "1.0.34"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "argon2",
  "backon",
@@ -717,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -765,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "anyhow",
  "backon",
@@ -821,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "tracing",
  "winsafe",
@@ -829,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -855,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "rustix",
  "tempfile",
@@ -863,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -913,12 +919,13 @@ dependencies = [
 
 [[package]]
 name = "copypaste-modules"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "copypaste-core",
  "copypaste-fs",
  "copypaste-ipc",
  "copypaste-module-sdk",
+ "copypaste-p2p",
  "copypaste-sync",
  "hex",
  "jni",
@@ -940,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
@@ -949,8 +956,10 @@ dependencies = [
  "copypaste-payload",
  "criterion",
  "data-encoding",
+ "ed25519-dalek",
  "futures-util",
  "hex",
+ "hkdf 0.12.4",
  "if-addrs",
  "image",
  "mdns-sd",
@@ -972,12 +981,13 @@ dependencies = [
  "url",
  "uuid",
  "winreg",
+ "x25519-dalek",
  "zeroize",
 ]
 
 [[package]]
 name = "copypaste-payload"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "base64",
  "copypaste-ipc",
@@ -988,14 +998,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -1012,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -1027,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "base64",
  "hex",
@@ -1045,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "1.0.33"
+version = "1.0.34"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -1249,10 +1259,12 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "curve25519-dalek-derive",
+ "digest 0.10.7",
  "fiat-crypto",
  "rand_core 0.6.4",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -1341,6 +1353,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "der"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
+dependencies = [
+ "const-oid 0.9.6",
+ "zeroize",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1364,7 +1386,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
- "const-oid",
+ "const-oid 0.10.2",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -1431,6 +1453,30 @@ name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
+name = "ed25519"
+version = "2.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+dependencies = [
+ "pkcs8",
+ "signature",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "serde",
+ "sha2 0.10.9",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "either"
@@ -3230,6 +3276,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pkcs8"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+dependencies = [
+ "der",
+ "spki",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3998,6 +4054,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "signature"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+dependencies = [
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4087,6 +4152,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 dependencies = [
  "lock_api",
+]
+
+[[package]]
+name = "spki"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
+dependencies = [
+ "base64ct",
+ "der",
 ]
 
 [[package]]
@@ -5382,6 +5457,17 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "x25519-dalek"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
+dependencies = [
+ "curve25519-dalek",
+ "rand_core 0.6.4",
+ "zeroize",
+]
 
 [[package]]
 name = "yoke"

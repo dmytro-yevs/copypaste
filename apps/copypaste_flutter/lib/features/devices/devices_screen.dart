@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -199,7 +200,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
       children: [
         if (controller.errorMessage case final errorMessage?) ...[
           Alert.destructive(
-            leading: const Icon(LucideIcons.circleAlert),
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: Text(controller.errorTitle),
             content: Text(errorMessage),
           ),
@@ -236,7 +237,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     controller.rescanInFlight || controller.actionInFlight
                     ? null
                     : controller.rescan,
-                leading: const Icon(LucideIcons.radar),
+                leading: const AppIconFrame(child: Icon(LucideIcons.radar)),
                 child: Text(controller.rescanInFlight ? 'Scanning…' : 'Scan'),
               ),
             ],
@@ -626,9 +627,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
           borderWidth: AppSpacing.zero,
         ),
         child: Center(
-          child: Icon(
-            DevicePresentation.icon(deviceClass),
+          child: AppIconFrame(
             size: compact ? AppIconSize.md : AppIconSize.lg,
+            child: Icon(
+              DevicePresentation.icon(deviceClass),
+              size: compact ? AppIconSize.md : AppIconSize.lg,
+            ),
           ),
         ),
       ),
@@ -679,8 +683,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
       title: Text(revoke ? 'Revoke ${peer.name}?' : 'Unpair ${peer.name}?'),
       content: Text(
         revoke
-            ? 'This permanently prevents this pairing from being used again.'
-            : 'This removes the local pairing key from this device.',
+            ? 'This removes the device from your group and permanently blocks this pairing. Other devices apply the removal when they reconnect.'
+            : 'This removes the device from your group. Other devices apply the removal when they reconnect. Adding it again requires a new confirmation.',
       ),
       actionLabel: revoke ? 'Revoke' : 'Unpair',
       changes: controller,
@@ -726,9 +730,12 @@ class _DeviceDetailsInspector extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                DevicePresentation.icon(device.details?.profile?.deviceClass),
+              AppIconFrame(
                 size: AppIconSize.xl,
+                child: Icon(
+                  DevicePresentation.icon(device.details?.profile?.deviceClass),
+                  size: AppIconSize.xl,
+                ),
               ),
               const Gap(AppSpacing.md),
               Expanded(
@@ -761,7 +768,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                       const ButtonStyle.ghostIcon(),
                     ),
                     onPressed: onClose,
-                    child: const Icon(LucideIcons.x),
+                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
                 ),
               ),
@@ -784,7 +791,9 @@ class _DeviceDetailsInspector extends StatelessWidget {
                       key: const ValueKey<String>(
                         'device-details-action-error',
                       ),
-                      leading: const Icon(LucideIcons.circleAlert),
+                      leading: const AppIconFrame(
+                        child: Icon(LucideIcons.circleAlert),
+                      ),
                       title: Text(controller.errorTitle),
                       content: Text(errorMessage),
                     ),
@@ -897,7 +906,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 onPressed: controller.actionInFlight
                     ? null
                     : () => onRename(device.name),
-                leading: const Icon(LucideIcons.pencil),
+                leading: const AppIconFrame(child: Icon(LucideIcons.pencil)),
                 child: const Text('Rename device'),
               ),
             ]
@@ -909,7 +918,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 onPressed: controller.actionInFlight
                     ? null
                     : () => controller.sync(peerId: device.id),
-                leading: const Icon(LucideIcons.refreshCw),
+                leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
                 child: const Text('Sync now'),
               ),
               Button.secondary(
@@ -919,7 +928,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 onPressed: controller.actionInFlight
                     ? null
                     : () => onRemove(device.peer!, false),
-                leading: const Icon(LucideIcons.unlink),
+                leading: const AppIconFrame(child: Icon(LucideIcons.unlink)),
                 child: const Text('Unpair'),
               ),
               Button.destructive(
@@ -929,7 +938,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 onPressed: controller.actionInFlight
                     ? null
                     : () => onRemove(device.peer!, true),
-                leading: const Icon(LucideIcons.ban),
+                leading: const AppIconFrame(child: Icon(LucideIcons.ban)),
                 child: const Text('Revoke pairing'),
               ),
             ],
@@ -1090,7 +1099,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
         children: [
           Row(
             children: [
-              Icon(DevicePresentation.pairingEntryIcon(mode)),
+              AppIconFrame(
+                child: Icon(DevicePresentation.pairingEntryIcon(mode)),
+              ),
               const Gap(AppSpacing.md),
               Expanded(
                 child: Text(
@@ -1107,7 +1118,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
                 onPressed: widget.controller.canClosePairing
                     ? widget.onClose
                     : null,
-                child: const Icon(LucideIcons.x),
+                child: const AppIconFrame(child: Icon(LucideIcons.x)),
               ),
             ],
           ),
@@ -1218,7 +1229,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         if (_validationMessage != null) ...[
           const Gap(AppSpacing.md),
           Alert.destructive(
-            leading: const Icon(LucideIcons.circleAlert),
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: const Text('Check pairing details'),
             content: Text(_validationMessage!),
           ),
@@ -1263,7 +1274,13 @@ class _PairingInspectorState extends State<_PairingInspector> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(LucideIcons.scanLine, size: AppIconSize.state),
+                    const AppIconFrame(
+                      size: AppIconSize.state,
+                      child: Icon(
+                        LucideIcons.scanLine,
+                        size: AppIconSize.state,
+                      ),
+                    ),
                     const Gap(AppSpacing.md),
                     const Text('QR scanner').h4(),
                     const Gap(AppSpacing.xs),
@@ -1276,7 +1293,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         if (_validationMessage != null) ...[
           const Gap(AppSpacing.md),
           Alert.destructive(
-            leading: const Icon(LucideIcons.circleAlert),
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: const Text('Scanner needs attention'),
             content: Text(_validationMessage!),
           ),
@@ -1344,7 +1361,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         if (_pairingTitle(ceremony.state) case final title?) ...[
           Row(
             children: [
-              Icon(_pairingIcon(ceremony.state)),
+              AppIconFrame(child: Icon(_pairingIcon(ceremony.state))),
               const Gap(AppSpacing.md),
               Expanded(
                 child: Text(
@@ -1375,7 +1392,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.lg),
           const AppBar(
             title: Text('Pairing details'),
-            leading: [Icon(LucideIcons.info)],
+            leading: [AppIconFrame(child: Icon(LucideIcons.info))],
           ),
           const Gap(AppSpacing.md),
           InspectorTable(
@@ -1501,9 +1518,12 @@ class _PairingInspectorState extends State<_PairingInspector> {
             leading: widget.controller.pairingInFlight
                 ? const SizedBox.square(
                     dimension: AppIconSize.sm,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: AppIconFrame(
+                      size: AppIconSize.sm,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   )
-                : const Icon(LucideIcons.link),
+                : const AppIconFrame(child: Icon(LucideIcons.link)),
             child: const Text('Join device'),
           ),
         );
@@ -1515,7 +1535,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
             style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             key: const ValueKey<String>('start-pairing-scanner'),
             onPressed: _startScanner,
-            leading: const Icon(LucideIcons.camera),
+            leading: const AppIconFrame(child: Icon(LucideIcons.camera)),
             child: const Text('Start scanner'),
           ),
         );
@@ -1527,7 +1547,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
   }
 
   Widget _pairingError() => Alert.destructive(
-    leading: const Icon(LucideIcons.circleAlert),
+    leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
     title: const Text('Pairing action failed'),
     content: Text(
       widget.controller.errorMessage ??
@@ -1571,7 +1591,8 @@ class _PairingInspectorState extends State<_PairingInspector> {
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>
       'Compare the protected verification code, then confirm on both devices.',
-    PairingState.confirmed => 'The trusted device is now available for sync.',
+    PairingState.confirmed =>
+      'The device is connected. Your group membership will sync automatically.',
     PairingState.rejected ||
     PairingState.cancelled ||
     PairingState.failed => 'No device was added.',

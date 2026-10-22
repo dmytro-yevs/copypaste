@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -41,7 +42,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       final action = find.byKey(const ValueKey('history-detail-secret'));
-      expect(tester.widget<Button>(action).child, isA<Icon>());
+      expect(
+        tester.widget<Button>(action).child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
       expect(find.text('Synthetic private text').hitTestable(), findsOneWidget);
       final contentRect = tester.getRect(
         find.byKey(const ValueKey('history-detail-scroll-content')),

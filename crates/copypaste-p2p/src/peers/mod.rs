@@ -12,6 +12,7 @@ mod crypto;
 mod cursor;
 mod error;
 mod file;
+mod group;
 mod peer;
 mod revocation;
 mod store;

@@ -21,6 +21,7 @@
 
 mod error;
 mod names;
+pub(crate) use names::is_valid_pairing_id;
 mod record;
 mod service;
 mod table;

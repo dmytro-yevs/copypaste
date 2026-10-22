@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import '../../transfers/file_operations_view.dart';
 import '../../../shared/format_bytes.dart';
 
@@ -112,9 +113,12 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                       borderWidth: AppSpacing.zero,
                     ),
                     child: Center(
-                      child: Icon(
-                        HistoryClipPresentation.icon(clip.contentKind),
+                      child: AppIconFrame(
                         size: AppIconSize.sm,
+                        child: Icon(
+                          HistoryClipPresentation.icon(clip.contentKind),
+                          size: AppIconSize.sm,
+                        ),
                       ),
                     ),
                   ),
@@ -160,7 +164,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                           const ButtonStyle.ghostIcon(),
                         ),
                         onPressed: onClose ?? controller.clearSelection,
-                        child: const Icon(LucideIcons.x),
+                        child: const AppIconFrame(child: Icon(LucideIcons.x)),
                       ),
                     ),
                   ),
@@ -194,8 +198,10 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                   context,
                   constraints.maxWidth,
                 );
-                final pinIcon = Icon(
-                  clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
+                final pinIcon = AppIconFrame(
+                  child: Icon(
+                    clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
+                  ),
                 );
                 final secretIconOnly =
                     iconOnly ||
@@ -229,9 +235,13 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                               onPressed: () => _copy(context, plainText: false),
                               leading: iconOnly
                                   ? null
-                                  : const Icon(LucideIcons.copy),
+                                  : const AppIconFrame(
+                                      child: Icon(LucideIcons.copy),
+                                    ),
                               child: iconOnly
-                                  ? const Icon(LucideIcons.copy)
+                                  ? const AppIconFrame(
+                                      child: Icon(LucideIcons.copy),
+                                    )
                                   : const Text('Copy'),
                             ),
                           ),
@@ -251,11 +261,13 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 ),
                                 value: false,
                                 expandIcon: null,
-                                itemBuilder: (context, _) => Icon(
-                                  LucideIcons.chevronDown,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.primaryForeground,
+                                itemBuilder: (context, _) => AppIconFrame(
+                                  child: Icon(
+                                    LucideIcons.chevronDown,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primaryForeground,
+                                  ),
                                 ),
                                 onChanged: (plainText) {
                                   if (plainText == true) {
@@ -270,9 +282,12 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(
-                                              LucideIcons.alignLeft,
+                                            AppIconFrame(
                                               size: AppIconSize.sm,
+                                              child: Icon(
+                                                LucideIcons.alignLeft,
+                                                size: AppIconSize.sm,
+                                              ),
                                             ),
                                             Gap(AppSpacing.sm),
                                             Text('Copy plain text'),
@@ -359,16 +374,20 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 },
                           leading: secretIconOnly
                               ? null
-                              : Icon(
-                                  clip.secret
-                                      ? LucideIcons.lockOpen
-                                      : LucideIcons.lockKeyhole,
+                              : AppIconFrame(
+                                  child: Icon(
+                                    clip.secret
+                                        ? LucideIcons.lockOpen
+                                        : LucideIcons.lockKeyhole,
+                                  ),
                                 ),
                           child: secretIconOnly
-                              ? Icon(
-                                  clip.secret
-                                      ? LucideIcons.lockOpen
-                                      : LucideIcons.lockKeyhole,
+                              ? AppIconFrame(
+                                  child: Icon(
+                                    clip.secret
+                                        ? LucideIcons.lockOpen
+                                        : LucideIcons.lockKeyhole,
+                                  ),
                                 )
                               : Text(
                                   clip.secret
@@ -399,7 +418,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                     clip: clip,
                                   )
                                 : null,
-                            child: const Icon(LucideIcons.scanText),
+                            child: const AppIconFrame(
+                              child: Icon(LucideIcons.scanText),
+                            ),
                           ),
                         ),
                       ),
@@ -423,9 +444,13 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                           ),
                           leading: iconOnly
                               ? null
-                              : const Icon(LucideIcons.trash2),
+                              : const AppIconFrame(
+                                  child: Icon(LucideIcons.trash2),
+                                ),
                           child: iconOnly
-                              ? const Icon(LucideIcons.trash2)
+                              ? const AppIconFrame(
+                                  child: Icon(LucideIcons.trash2),
+                                )
                               : const Text('Delete'),
                         ),
                       ),
@@ -487,7 +512,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
               key: const ValueKey<String>('history-detail-drawer-close'),
               style: AppTheme.actionButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () => closeDrawer(context),
-              child: const Icon(LucideIcons.x),
+              child: const AppIconFrame(child: Icon(LucideIcons.x)),
             ),
           ),
           const Gap(AppSpacing.xs),
@@ -625,10 +650,13 @@ class _DownloadButtonState extends State<_DownloadButton> {
         : failed
         ? 'Retry'
         : 'Download';
-    final indicator = CircularProgressIndicator(
-      value: progress,
-      animated: !MediaQuery.disableAnimationsOf(context),
-      theme: const CircularProgressIndicatorTheme(size: AppIconSize.sm),
+    final indicator = AppIconFrame(
+      size: AppIconSize.sm,
+      child: CircularProgressIndicator(
+        value: progress,
+        animated: !MediaQuery.disableAnimationsOf(context),
+        theme: const CircularProgressIndicatorTheme(size: AppIconSize.sm),
+      ),
     );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -675,26 +703,29 @@ class _DownloadButtonState extends State<_DownloadButton> {
               leading: widget.iconOnly
                   ? null
                   : showCancel
-                  ? const Icon(LucideIcons.x)
+                  ? const AppIconFrame(child: Icon(LucideIcons.x))
                   : pending
                   ? indicator
                   : failed
-                  ? const Icon(LucideIcons.rotateCcw)
-                  : const Icon(LucideIcons.download),
+                  ? const AppIconFrame(child: Icon(LucideIcons.rotateCcw))
+                  : const AppIconFrame(child: Icon(LucideIcons.download)),
               child: widget.iconOnly
                   ? showCancel
-                        ? const Icon(LucideIcons.x)
+                        ? const AppIconFrame(child: Icon(LucideIcons.x))
                         : pending
                         ? Stack(
                             alignment: Alignment.center,
                             children: [
-                              CircularProgressIndicator(
-                                value: progress,
-                                animated: !MediaQuery.disableAnimationsOf(
-                                  context,
-                                ),
-                                theme: const CircularProgressIndicatorTheme(
-                                  size: AppIconSize.lg,
+                              AppIconFrame(
+                                size: AppIconSize.lg,
+                                child: CircularProgressIndicator(
+                                  value: progress,
+                                  animated: !MediaQuery.disableAnimationsOf(
+                                    context,
+                                  ),
+                                  theme: const CircularProgressIndicatorTheme(
+                                    size: AppIconSize.lg,
+                                  ),
                                 ),
                               ),
                               if (progress != null)
@@ -705,8 +736,8 @@ class _DownloadButtonState extends State<_DownloadButton> {
                             ],
                           )
                         : failed
-                        ? const Icon(LucideIcons.rotateCcw)
-                        : const Icon(LucideIcons.download)
+                        ? const AppIconFrame(child: Icon(LucideIcons.rotateCcw))
+                        : const AppIconFrame(child: Icon(LucideIcons.download))
                   : Text(label),
             ),
           ),
@@ -1054,12 +1085,18 @@ class _DetailImagePreview extends StatelessWidget {
             return const SizedBox.square(
               dimension: AppIconSize.hero,
               child: Center(
-                child: Icon(LucideIcons.image, size: AppIconSize.hero),
+                child: AppIconFrame(
+                  size: AppIconSize.hero,
+                  child: Icon(LucideIcons.image, size: AppIconSize.hero),
+                ),
               ),
             );
           }
           if (preview.width <= 0 || preview.height <= 0) {
-            return const Icon(LucideIcons.imageOff, size: AppIconSize.hero);
+            return const AppIconFrame(
+              size: AppIconSize.hero,
+              child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
+            );
           }
           final sourceWidth = preview.width.toDouble();
           final sourceHeight = preview.height.toDouble();
@@ -1100,7 +1137,10 @@ class _DetailImagePreview extends StatelessWidget {
                     .clamp(1, preview.height),
               ),
               errorBuilder: (context, error, stackTrace) => const Center(
-                child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
+                child: AppIconFrame(
+                  size: AppIconSize.hero,
+                  child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
+                ),
               ),
             ),
           );

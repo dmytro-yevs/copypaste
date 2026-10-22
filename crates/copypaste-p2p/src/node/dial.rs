@@ -52,21 +52,17 @@ impl Node {
         cycle: &SyncCycle,
     ) -> Result<SyncOutcome, NodeError> {
         let cancel = cycle.cancel_token();
-        let candidates = self.dial_candidates_with_sources(peer, true);
+        let peer = self.current_peer(peer).unwrap_or_else(|| peer.clone());
+        let candidates = self.dial_candidates_with_sources(&peer, true);
         if candidates.is_empty() {
             return Err(NodeError::NoAddress);
         }
-        let active = self
-            .begin_active_sync(&peer.pairing_id)
-            .ok_or(NodeError::NoPeer)?;
-        let active_cancel = active.cancelled();
-
         let mut session = None;
         let mut addr = None;
         for candidate in candidates {
             let connected = tokio::select! {
-                _ = active_cancel.cancelled() => return Err(NodeError::Session),
-                result = Session::connect(candidate.addr, &peer.psk) => result,
+                _ = cancel.cancelled() => return Err(NodeError::Session),
+                result = self.connect_peer(candidate.addr, &peer) => result,
             };
             match connected {
                 Ok(connected) => {
@@ -87,10 +83,13 @@ impl Node {
                 }
             }
         }
-        let (session, addr) = match (session, addr) {
-            (Some(session), Some(addr)) => (session, addr),
+        let (session, peer, addr) = match (session, addr) {
+            (Some((session, peer)), Some(addr)) => (session, peer, addr),
             _ => return Err(NodeError::Handshake),
         };
+        let active = self
+            .begin_active_sync(&peer.pairing_id)
+            .ok_or(NodeError::NoPeer)?;
 
         let cursor = self.cursors().get(&peer.pairing_id);
         let outcome = self.run_session(session, source, cursor, &active).await?;
@@ -109,7 +108,7 @@ impl Node {
                 self.record_cursor(&peer.pairing_id, &outcome);
                 self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
                 self.touch_peer(
-                    peer,
+                    &peer,
                     Some(&outcome.peer_device_id),
                     outcome
                         .peer_listen_addr
@@ -157,10 +156,12 @@ impl Node {
         let outcome = tokio::select! {
             _ = active_cancel.cancelled() => None,
             outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
+                self.initiate_group(&mut channel, source, &active.pairing_id, false)
+                    .await?;
                 let outcome =
-                    run_initiator(&mut channel, &guarded_source, listen_addr.as_deref(), cursor).await?;
+                    run_initiator(&mut channel, &guarded_source, listen_addr.as_deref(), cursor).await.map_err(session_error)?;
                 channel.wait_for_close().await;
-                Ok::<_, SyncError>(outcome)
+                Ok::<_, NodeError>(outcome)
             }) => Some(outcome),
         };
         channel.close().await;
@@ -173,14 +174,14 @@ impl Node {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(e)) => {
                 warn!(error = %e, "sync session failed");
-                Err(session_error(&e))
+                Err(e)
             }
             Err(_) => Err(NodeError::Timeout),
         }
     }
 }
 
-fn session_error(e: &SyncError) -> NodeError {
+pub(super) fn session_error(e: SyncError) -> NodeError {
     match e {
         SyncError::Protocol(ProtocolError::VersionMismatch { .. }) => NodeError::PeerVersion,
         _ => NodeError::Session,
@@ -312,6 +313,7 @@ mod tests {
             .discovery()
             .unwrap()
             .observe_for_test(DiscoveredPeer {
+                group_identity: None,
                 discovery_id: "server-new-address".into(),
                 pairing_ids: vec![pairing_id.clone()],
                 name: "server".into(),

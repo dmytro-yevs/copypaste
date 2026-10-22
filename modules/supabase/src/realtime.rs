@@ -23,7 +23,7 @@ pub async fn run(driver: Arc<Driver>, wake: Arc<Notify>, cancel: CancellationTok
                 if changed.is_err() { break; }
                 continue;
             },
-            result = RealtimeSubscription::connect(driver.config(), &token) => result,
+            result = RealtimeSubscription::connect_with_groups(driver.config(), &token) => result,
         };
         if let Ok(mut subscription) = connected {
             schedule = policy.build();

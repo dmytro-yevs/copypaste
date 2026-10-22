@@ -17,8 +17,8 @@ use reqwest::Client;
 /// PostgREST client for one Supabase project.
 #[derive(Clone)]
 pub struct SupabaseRest {
-    config: CloudConfig,
-    http: Client,
+    pub(super) config: CloudConfig,
+    pub(super) http: Client,
     retry: ExponentialBuilder,
 }
 
@@ -181,7 +181,7 @@ impl SupabaseRest {
     /// call site can forget one: the `apikey` gets the request past the API
     /// gateway, and the user's JWT is what RLS pivots on — the anon key alone
     /// is refused outright by the policies in the module docs.
-    async fn send<F>(&self, token: &str, build: F) -> Result<String, RestError>
+    pub(super) async fn send<F>(&self, token: &str, build: F) -> Result<String, RestError>
     where
         F: Fn() -> reqwest::RequestBuilder,
     {

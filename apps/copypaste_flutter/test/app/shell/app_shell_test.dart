@@ -750,7 +750,7 @@ void main() {
       final text = tester.widget<Text>(labelFinder);
       expect(text.style?.fontSize, theme.typography.large.fontSize);
       expect(text.style?.fontWeight, theme.typography.medium.fontWeight);
-      expect(text.style?.height, 1);
+      expect(text.style?.height, theme.typography.large.height);
       if (label == 'CopyPaste') {
         expect(text.style?.color, theme.colorScheme.foreground);
       }
@@ -1021,7 +1021,10 @@ void main() {
         tester.getCenter(headerTitle).dy,
         closeTo(tester.getCenter(header).dy, 0.5),
       );
-      expect(DefaultTextStyle.of(tester.element(headerTitle)).style.height, 1);
+      expect(
+        DefaultTextStyle.of(tester.element(headerTitle)).style.height,
+        AppTheme.light.typography.large.height,
+      );
       expect(
         find.byKey(const ValueKey<String>('navigation-rail-toggle')),
         findsOneWidget,
@@ -1050,6 +1053,30 @@ void main() {
       find.ancestor(of: find.text('History'), matching: find.byType(AppBar)),
       findsOneWidget,
     );
+  });
+
+  testWidgets('desktop brand grows with enlarged text', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 720));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: _testShell(),
+        ),
+      ),
+    );
+    // Scaled rail labels can animate their horizontal overflow continuously.
+    await tester.pump();
+    final brand = find.byKey(const ValueKey<String>('navigation-brand'));
+    final label = find.descendant(of: brand, matching: find.text('CopyPaste'));
+    final brandRect = tester.getRect(brand);
+    final labelRect = tester.getRect(label);
+    expect(labelRect.top, greaterThanOrEqualTo(brandRect.top));
+    expect(labelRect.bottom, lessThanOrEqualTo(brandRect.bottom));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

@@ -448,6 +448,15 @@ impl PairingManager {
             PairingState::Invited(_) | PairingState::Active(_)
         )
     }
+    pub(super) fn is_pending_pairing(&self, pairing_id: &str) -> bool {
+        match &*self.lock() {
+            PairingState::Invited(invite) => {
+                invite.status.pairing_id.as_deref() == Some(pairing_id)
+            }
+            PairingState::Active(active) => active.status.pairing_id.as_deref() == Some(pairing_id),
+            _ => false,
+        }
+    }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, PairingState> {
         self.state

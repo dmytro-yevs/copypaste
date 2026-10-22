@@ -257,10 +257,7 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
             // Resolved locally rather than taken from the advertisement:
             // anyone on the LAN can claim any pairing id, and `paired` decides
             // whether the UI offers "pair" or "sync" (`CopyPaste-vgpy`).
-            let paired = found
-                .pairing_ids
-                .iter()
-                .any(|id| state.p2p.peers().get(id).is_some());
+            let paired = state.p2p.node().is_paired_discovery(&found);
             p2p_contract::discovered_device(found, paired)
         })
         .collect();

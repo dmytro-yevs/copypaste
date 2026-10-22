@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
@@ -337,7 +338,13 @@ class _AppMobileNavigationState extends State<AppMobileNavigation>
                           child: AppMotion.navigationIconResponse(
                             context,
                             selected: weights[index] >= 0.5,
-                            child: Icon(destination.icon, size: AppIconSize.lg),
+                            child: AppIconFrame(
+                              size: AppIconSize.lg,
+                              child: Icon(
+                                destination.icon,
+                                size: AppIconSize.lg,
+                              ),
+                            ),
                           ),
                         ),
                       ),

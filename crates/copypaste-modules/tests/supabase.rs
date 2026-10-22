@@ -13,11 +13,10 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{Cursor, Write},
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -33,54 +32,12 @@ fn target() -> ModuleTarget {
         architecture: ModuleArchitecture::X86_64,
     })
 }
-fn library() -> &'static Path {
-    static LIBRARY: OnceLock<PathBuf> = OnceLock::new();
-    LIBRARY
-        .get_or_init(|| {
-            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap();
-            let output = Command::new(env!("CARGO"))
-                .current_dir(root)
-                .args([
-                    "build",
-                    "--manifest-path",
-                    "modules/supabase/Cargo.toml",
-                    "--locked",
-                    "--features",
-                    "test-endpoints",
-                    "--message-format=json",
-                ])
-                .output()
-                .expect("build the independent sync package");
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            String::from_utf8(output.stdout)
-                .unwrap()
-                .lines()
-                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .filter(|event| {
-                    event["reason"] == "compiler-artifact"
-                        && event["target"]["name"] == "copypaste_module_supabase"
-                })
-                .flat_map(|event| event["filenames"].as_array().unwrap().clone())
-                .filter_map(|name| name.as_str().map(PathBuf::from))
-                .find(|path| {
-                    matches!(
-                        path.extension().and_then(|e| e.to_str()),
-                        Some("dylib" | "dll" | "so")
-                    )
-                })
-                .expect("native library artifact")
-        })
-        .as_path()
-}
+#[path = "support/native_supabase.rs"]
+mod native_supabase;
+use native_supabase::library;
+
 struct Device {
+    group: Option<Arc<copypaste_p2p::Node>>,
     _directory: tempfile::TempDir,
     manager: Arc<ModuleManager>,
     store: Store,
@@ -90,11 +47,34 @@ struct Device {
 }
 impl Device {
     fn new(endpoint: &str) -> Self {
+        Self::with_group(endpoint, false)
+    }
+    fn with_group(endpoint: &str, grouped: bool) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let secret: [u8; 32] = Sha256::digest(directory.path().to_string_lossy().as_bytes()).into();
         let keyring = Arc::new(Keyring::from_secret(&secret));
         let store = Store::open(&directory.path().join("history.db"), &keyring.db_key()).unwrap();
         let identity = store.device_identity("sync test").unwrap();
+        let group = grouped.then(|| {
+            Arc::new(copypaste_p2p::Node::new(
+                copypaste_p2p::PeerStore::open(&directory.path().join("peers.json"), &secret)
+                    .unwrap(),
+                None,
+                0,
+                true,
+            ))
+        });
+        if let Some(node) = &group {
+            node.peers()
+                .group_snapshot(
+                    &identity.device_id,
+                    "sync test",
+                    copypaste_p2p::DeviceProfile::current(),
+                    None,
+                )
+                .unwrap();
+        }
+        let group_id = identity.device_id.clone();
         let enabled = Arc::new(AtomicBool::new(true));
         let gate = Arc::clone(&enabled);
         let source = StoreSource::new(
@@ -104,12 +84,44 @@ impl Device {
             identity.device_name,
             Default::default(),
         );
-        let services = Arc::new(SyncServices::new(
+        let group_gate = group.clone();
+        let mut services = SyncServices::new(
             store.clone(),
             StoreView::new(source, identity.device_id),
-            move || gate.load(Ordering::Acquire),
+            move || {
+                gate.load(Ordering::Acquire)
+                    && group_gate
+                        .as_ref()
+                        .is_none_or(|node| node.peers().group_active())
+            },
             |_| {},
-        ));
+        );
+        if let Some(node) = &group {
+            let export = Arc::clone(node);
+            let import = Arc::clone(node);
+            let revision = Arc::clone(node);
+            services = services.with_group(
+                move || {
+                    export
+                        .peers()
+                        .group_snapshot(
+                            &group_id,
+                            "sync test",
+                            copypaste_p2p::DeviceProfile::current(),
+                            None,
+                        )
+                        .and_then(|snapshot| snapshot.encode())
+                        .map(Some)
+                        .map_err(|error| error.to_string())
+                },
+                move |id, json| match import.import_cloud_group(id, json) {
+                    Ok(_) | Err(copypaste_p2p::group::GroupImportError::Rejected) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                },
+                move || revision.peers().group_revision(),
+            );
+        }
+        let services = Arc::new(services);
         let signer = KeyPair::generate_unencrypted_keypair().unwrap();
         let manager = Arc::new(
             ModuleManager::open(
@@ -181,6 +193,7 @@ impl Device {
             .unwrap();
         manager.set_enabled("copypaste.supabase", true).unwrap();
         Self {
+            group,
             _directory: directory,
             manager,
             store,
@@ -284,6 +297,90 @@ async fn backend(delay: Option<Duration>) -> (MockServer, Rows) {
             .await;
     }
     (server, rows)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn signed_native_provider_synchronizes_the_group_through_host_callbacks_without_lan() {
+    #[derive(Clone, Default)]
+    struct GroupRows(Arc<Mutex<BTreeMap<String, Value>>>);
+    impl Respond for GroupRows {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let mut rows = self.0.lock().unwrap();
+            if request.method.as_str() == "POST" {
+                let row: Value = serde_json::from_slice(&request.body).unwrap();
+                rows.insert(row["device_id"].as_str().unwrap().into(), row);
+                ResponseTemplate::new(201)
+            } else {
+                let catalog = request
+                    .url
+                    .query_pairs()
+                    .any(|(key, value)| key == "select" && value == "device_id,ciphertext_digest");
+                let filter = request
+                    .url
+                    .query_pairs()
+                    .find(|(key, _)| key == "device_id")
+                    .map(|(_, value)| value.into_owned());
+                let ids = filter
+                    .as_deref()
+                    .and_then(|value| value.strip_prefix("in.("))
+                    .and_then(|value| value.strip_suffix(')'));
+                let page: Vec<Value> = rows
+                    .values()
+                    .filter(|row| {
+                        ids.is_none_or(|ids| ids.split(',').any(|id| row["device_id"] == id))
+                    })
+                    .map(|row| {
+                        if catalog {
+                            {
+                                let mut hash = Sha256::new();
+                                hash.update(row["nonce"].as_str().unwrap().as_bytes());
+                                hash.update(row["ciphertext"].as_str().unwrap().as_bytes());
+                                json!({"device_id":row["device_id"],"ciphertext_digest":hex::encode(hash.finalize())})
+                            }
+                        } else {
+                            row.clone()
+                        }
+                    })
+                    .collect();
+                ResponseTemplate::new(200).set_body_json(page)
+            }
+        }
+    }
+    let (server, clipboard) = backend(None).await;
+    let groups = GroupRows::default();
+    Mock::given(path("/rest/v1/device_group_states"))
+        .respond_with(groups.clone())
+        .mount(&server)
+        .await;
+    let a = Device::with_group(&server.uri(), true);
+    let b = Device::with_group(&server.uri(), true);
+    let c = Device::with_group(&server.uri(), true);
+    for device in [&a, &b, &c] {
+        device.invoke("sign-in");
+        device.invoke("sync-now");
+    }
+    for device in [&a, &b, &c] {
+        device.invoke("sync-now");
+    }
+    for device in [&a, &b, &c] {
+        assert_eq!(device.group.as_ref().unwrap().peers().len(), 2);
+        assert_eq!(
+            device.store.count().unwrap(),
+            0,
+            "membership must not appear in clipboard history"
+        );
+    }
+    assert_eq!(groups.0.lock().unwrap().len(), 3);
+    assert!(clipboard.0.lock().unwrap().is_empty());
+    a.put(
+        "group-text",
+        b"group history still works",
+        "text",
+        copypaste_core::now_ms() - 1000,
+    );
+    a.invoke("sync-now");
+    c.invoke("sync-now");
+    assert!(c.store.get("group-text").unwrap().is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -17,6 +17,7 @@ use super::{DialCandidateSource, Node, NodeError};
 use crate::peers::Peer;
 use crate::protocol::{SyncMessage, PROTOCOL_VERSION};
 use crate::sync::SyncChannel;
+#[cfg(test)]
 use crate::transport::Session;
 use crate::DeviceProfile;
 
@@ -228,20 +229,21 @@ impl Node {
     }
 
     async fn probe(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
-        let candidates = self.dial_candidates_with_sources(peer, true);
+        let peer = self.current_peer(peer).unwrap_or_else(|| peer.clone());
+        let candidates = self.dial_candidates_with_sources(&peer, true);
         if candidates.is_empty() {
             return Err(NodeError::NoAddress);
         }
         let mut last_error = NodeError::Handshake;
         for candidate in candidates {
-            let result = timeout(PROBE_TIMEOUT, probe_session(candidate.addr, &peer.psk)).await;
-            if let Ok(Ok((latency_ms, profile))) = result {
+            let result = timeout(PROBE_TIMEOUT, probe_session(self, candidate.addr, &peer)).await;
+            if let Ok(Ok((latency_ms, profile, current))) = result {
                 let observation =
                     AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
-                self.record_reachability(&peer.pairing_id, observation.clone());
-                self.record_authenticated_profile(&peer.pairing_id, profile.as_ref());
+                self.record_reachability(&current.pairing_id, observation.clone());
+                self.record_authenticated_profile(&current.pairing_id, profile.as_ref());
                 self.touch_peer(
-                    peer,
+                    &current,
                     None,
                     Some(super::ListenerEndpoint::dialled(candidate.addr)),
                     None,
@@ -286,12 +288,11 @@ pub(super) async fn respond(
 }
 
 async fn probe_session(
+    node: &Node,
     addr: std::net::SocketAddr,
-    psk: &[u8; crate::transport::TOKEN_LEN],
-) -> Result<(u64, Option<crate::DeviceProfile>), NodeError> {
-    let session = Session::connect(addr, psk)
-        .await
-        .map_err(|_| NodeError::Handshake)?;
+    peer: &Peer,
+) -> Result<(u64, Option<crate::DeviceProfile>, Peer), NodeError> {
+    let (session, current) = node.connect_peer(addr, peer).await?;
     let mut channel = NoiseChannel::new(session);
     let nonce = random::<u64>();
     let profile = DeviceProfile::current();
@@ -313,6 +314,7 @@ async fn probe_session(
             } if protocol_version == PROTOCOL_VERSION && received == nonce => Ok((
                 u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 profile,
+                current,
             )),
             SyncMessage::ProbeAck { .. } => Err(NodeError::Session),
             _ => Err(NodeError::Session),
@@ -626,6 +628,7 @@ mod tests {
             .discovery()
             .unwrap()
             .observe_for_test(DiscoveredPeer {
+                group_identity: None,
                 discovery_id: "spoofed-peer".into(),
                 pairing_ids: vec![pairing_id],
                 name: "spoofed".into(),
@@ -687,6 +690,7 @@ mod tests {
                 profile_observed_at_ms: 0,
             };
             node.discovery().unwrap().observe_for_test(DiscoveredPeer {
+                group_identity: None,
                 discovery_id: format!("spoof-{index}"),
                 pairing_ids: vec![pairing_id],
                 name: "spoofed".into(),
@@ -746,6 +750,7 @@ mod tests {
             .discovery()
             .unwrap()
             .observe_for_test(DiscoveredPeer {
+                group_identity: None,
                 discovery_id: "server-new-address".into(),
                 pairing_ids: vec![pairing_id.clone()],
                 name: "server".into(),

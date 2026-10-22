@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-21",
+  "date": "2026-10-22",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -2887,6 +2887,75 @@
         }
       ],
       "next_step": "Measure final installed app, daemon and workers on macOS, physical Android and Windows. Probe RSS and one-off CPU samples do not establish released native memory or resource qualification; runtime budgets remain unchanged."
+    },
+    {
+      "id": "RUN-062",
+      "title": "Bound personal-group reconciliation inside existing sync lifetimes",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p group and copypaste-cloud group transport",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/group.rs",
+        "crates/copypaste-p2p/src/peers/group.rs",
+        "crates/copypaste-cloud/src/sync/group.rs",
+        "crates/copypaste-cloud/src/rest/group.rs",
+        "supabase/migrations/20261022120000_device_group_states.sql",
+        "crates/copypaste-p2p/GROUP.md",
+        "crates/copypaste-modules/src/host.rs"
+      ],
+      "invariant": "At most 17 active members including self, 4096 removal identities, 768 KiB per signed snapshot, eight ciphertext rows or 64 catalog entries per page, and 4096 cloud writers/digests per account. Reuse existing workers, adaptive cadence, watch notifications and one Realtime socket. Unchanged local exports avoid cloning state; unchanged imports avoid key derivation and disk writes; unchanged catalogs avoid ciphertext downloads; unchanged cloud snapshots avoid upserts. Derived pairing ids are not retained in the tentative SAS generation index. Membership-only credentials use a separate transport scope and a lazy zeroizing cache of at most 16 entries, invalidated on membership changes; content keys remain bound to certified admission generations. The database maintains a ciphertext digest over nonce plus ciphertext; unchanged catalog digests suppress payload reads while missing or altered own rows force repair. Digest caches hold at most 4096 64-byte hex tokens and are released with the account. An exclusion wake revokes native providers even while a provider command is queued behind network work.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "supersedes": [],
+      "functional_validation": "684 Rust tests passed, including 336 P2P unit tests, two full-stream tests, three signed native Supabase integration tests and a signed-provider exclusion regression cancelling an active HTTP request. Five focused regressions cover the four independent-review findings, including same-nonce ciphertext tampering and pre-persistence admission bounds. Four local PostgreSQL assertion suites, Clippy with warnings denied, rustfmt and whitespace checks passed. One pre-existing semantic-model test remains ignored pending staged ONNX assets. Earlier Flutter Devices validation passed 165 tests before these Rust/SQL fixes; no UI code changed in this fix pass. Installed-platform UI and native resource qualification remain not established.",
+      "evidence_refs": [
+        {
+          "kind": "functional_validation",
+          "name": "review-fixes-final-tests.log",
+          "sha256": "412c945312c11f949dab1cb7d165e4d54ad84a8448d1ea0e7606abd466644956",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation",
+          "name": "review-fixes-final-clippy.log",
+          "sha256": "50349c3124f27551253c13e2cf52561582ba6c238fb149ea6e76a5c9a703e071",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation",
+          "name": "review-fixes-sql-verified.log",
+          "sha256": "010e930b4f3744f0dc9fa974aad0ca102a749a75bee81a1a842d81b953b9a705",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation",
+          "name": "review-fixes-format-final.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation",
+          "name": "review-fixes-diff-final.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "next_step": "Measure candidate application, daemon and module workers separately and together on macOS, physical Android and installed Windows, including peak, steady state, repeated reconciliation and growth. Existing CPU/wakeup/I/O/network/growth budgets remain unresolved; no resource qualification is claimed."
     }
   ]
 }

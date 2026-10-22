@@ -40,11 +40,22 @@ pub(super) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// the caller uses "realtime is live" to slow its poll loop, and a joined
 /// channel whose replication subscription is still starting delivers nothing
 /// (manifest 05 §4.8).
+#[cfg(test)]
 pub(super) async fn open_channel(
+    url: Url,
+    anon_key: &str,
+    access_token: &str,
+    user_id: &str,
+) -> Result<WsStream, RealtimeError> {
+    open_channel_scoped(url, anon_key, access_token, user_id, false).await
+}
+
+pub(super) async fn open_channel_scoped(
     mut url: Url,
     anon_key: &str,
     access_token: &str,
     user_id: &str,
+    groups: bool,
 ) -> Result<WsStream, RealtimeError> {
     url.query_pairs_mut()
         .append_pair("apikey", anon_key)
@@ -67,24 +78,48 @@ pub(super) async fn open_channel(
             .await
             .map_err(|_| RealtimeError::Connect("the websocket could not be opened"))?;
 
-        ws.send(Message::Text(join_frame(access_token, user_id).to_string()))
+        let mut join = join_frame(access_token, user_id);
+        if groups {
+            join[4]["config"]["postgres_changes"]
+                .as_array_mut()
+                .unwrap()
+                .push(group_subscription(user_id));
+        }
+        ws.send(Message::Text(join.to_string()))
             .await
             .map_err(|_| RealtimeError::Connect("the join could not be sent"))?;
 
         let mut joined = false;
         let mut postgres_ready = false;
+        let mut group_ready = !groups;
         loop {
             match ws.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    if let Some(result) = join_reply(&text, user_id) {
+                    if let Some(result) = join_reply_scoped(&text, user_id, groups) {
                         result?;
                         joined = true;
                     }
-                    if let Some(result) = postgres_ready_reply(&text) {
+                    let frame = parse_frame(&text).ok();
+                    if groups
+                        && frame.as_ref().is_some_and(|frame| {
+                            frame.event == "system"
+                                && frame.topic == TOPIC
+                                && frame.payload.get("channel").and_then(Value::as_str)
+                                    == Some(crate::rest::group::GROUP_TABLE)
+                        })
+                    {
+                        let frame = frame.unwrap();
+                        if frame.payload["status"] != "ok"
+                            || frame.payload["extension"] != "postgres_changes"
+                        {
+                            return Err(RealtimeError::JoinRefused);
+                        }
+                        group_ready = true;
+                    } else if let Some(result) = postgres_ready_reply(&text) {
                         result?;
                         postgres_ready = true;
                     }
-                    if joined && postgres_ready {
+                    if joined && postgres_ready && group_ready {
                         return Ok(ws);
                     }
                 }
@@ -141,6 +176,44 @@ fn subscription(user_id: &str) -> Value {
         "table": TABLE,
         "filter": format!("user_id=eq.{user_id}"),
     })
+}
+
+fn group_subscription(user_id: &str) -> Value {
+    let mut value = subscription(user_id);
+    value["table"] = Value::String(crate::rest::group::GROUP_TABLE.into());
+    value
+}
+
+fn join_reply_scoped(text: &str, user_id: &str, groups: bool) -> Option<Result<(), RealtimeError>> {
+    if !groups {
+        return join_reply(text, user_id);
+    }
+    let frame = parse_frame(text).ok()?;
+    if frame.event != "phx_reply" || frame.topic != TOPIC {
+        return None;
+    }
+    if frame.payload["status"] != "ok" {
+        return Some(Err(RealtimeError::JoinRefused));
+    }
+    let result = (|| {
+        let entries = frame.payload["response"]["postgres_changes"]
+            .as_array()
+            .ok_or(RealtimeError::JoinMismatch)?;
+        if entries.len() != 2 {
+            return Err(RealtimeError::JoinMismatch);
+        }
+        for expected in [subscription(user_id), group_subscription(user_id)] {
+            if !entries.iter().any(|entry| {
+                ["event", "schema", "table", "filter"]
+                    .iter()
+                    .all(|field| entry.get(field) == expected.get(field))
+            }) {
+                return Err(RealtimeError::JoinMismatch);
+            }
+        }
+        Ok(())
+    })();
+    Some(result)
 }
 
 /// `Some(Ok(()))` for a confirmed join of the subscription we asked for,
@@ -353,6 +426,68 @@ mod tests {
             None
         );
         assert_eq!(join_reply("garbage", USER), None);
+    }
+
+    #[tokio::test]
+    async fn group_feed_requires_both_filtered_registrations_and_readiness_signals() {
+        let expected = json!([subscription(USER), group_subscription(USER)]).to_string();
+        assert_eq!(
+            join_reply_scoped(&reply("ok", &expected), USER, true),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            join_reply_scoped(&reply("ok", &echo(USER)), USER, true),
+            Some(Err(RealtimeError::JoinMismatch))
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (history_tx, history_rx) = oneshot::channel();
+        let (group_tx, group_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let Message::Text(text) = ws.next().await.unwrap().unwrap() else {
+                panic!("missing join");
+            };
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(
+                frame[4]["config"]["postgres_changes"],
+                json!([subscription(USER), group_subscription(USER)])
+            );
+            ws.send(Message::Text(reply("ok", &expected)))
+                .await
+                .unwrap();
+            ws.send(Message::Text(postgres_ready("ok", TABLE)))
+                .await
+                .unwrap();
+            history_tx.send(()).unwrap();
+            group_rx.await.unwrap();
+            ws.send(Message::Text(postgres_ready(
+                "ok",
+                crate::rest::group::GROUP_TABLE,
+            )))
+            .await
+            .unwrap();
+        });
+        let client = tokio::spawn(async move {
+            open_channel_scoped(
+                Url::parse(&format!("ws://{address}/realtime/v1/websocket")).unwrap(),
+                "anon",
+                &token_for(USER),
+                USER,
+                true,
+            )
+            .await
+        });
+        history_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !client.is_finished(),
+            "history readiness cannot qualify a missing group feed"
+        );
+        group_tx.send(()).unwrap();
+        drop(client.await.unwrap().unwrap());
+        server.await.unwrap();
     }
 
     #[test]

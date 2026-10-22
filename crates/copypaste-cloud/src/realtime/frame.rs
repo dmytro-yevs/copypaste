@@ -108,6 +108,15 @@ fn change_event(payload: &Value) -> Result<Option<RealtimeEvent>, RealtimeError>
         .ok_or(RealtimeError::Protocol("change payload has no data"))?;
 
     if let Some(table) = data.get("table").and_then(Value::as_str) {
+        if table == crate::rest::group::GROUP_TABLE {
+            return Ok(data
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| {
+                    kind.eq_ignore_ascii_case("INSERT") || kind.eq_ignore_ascii_case("UPDATE")
+                })
+                .then_some(RealtimeEvent::GroupChanged));
+        }
         if table != TABLE {
             return Ok(None);
         }

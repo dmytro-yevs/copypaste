@@ -57,6 +57,13 @@ impl HostStore {
     }
 }
 impl CloudSource for HostStore {
+    fn group_snapshot(&self) -> Result<Option<String>, SyncError> {
+        self.0.request(&SyncHostRequest::GroupSnapshot).map_err(source_error)
+    }
+    fn apply_group(&self, device_id: &str, snapshot: &str) -> Result<(), SyncError> {
+        self.0.request(&SyncHostRequest::GroupApply { device_id: device_id.into(), snapshot: snapshot.into() }).map_err(source_error)
+    }
+    fn group_sync_allowed(&self) -> bool { self.enabled() }
     fn device_id(&self) -> String {
         self.0
             .request(&SyncHostRequest::DeviceId)

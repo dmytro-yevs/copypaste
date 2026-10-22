@@ -220,19 +220,21 @@ impl ModuleHost {
             let host = Arc::clone(self);
             let fence = Arc::clone(&stopping);
             let mut work = tokio::task::spawn_blocking(move || -> Result<(), ModuleError> {
-                if !host
+                let enabled = host
                     .sync_services
                     .lock()
                     .map_err(|_| ModuleError::State)?
                     .as_ref()
-                    .is_some_and(|service| service.enabled())
-                {
-                    return Ok(());
-                }
+                    .is_some_and(|service| service.enabled());
                 if !host.root.join("registry.json").exists() {
                     return Ok(());
                 }
                 let manager = host.manager()?;
+                if !enabled {
+                    // Membership exclusion changes the effective gate without
+                    // a settings action. A wake must release existing providers.
+                    return manager.stop_sync_providers();
+                }
                 let mut first_error = None;
                 for (id, command) in manager.sync_providers(true)? {
                     if fence.load(std::sync::atomic::Ordering::Acquire) {
@@ -248,16 +250,36 @@ impl ModuleHost {
                 }
                 first_error.map_or(Ok(()), Err)
             });
-            let retry_after_failure = tokio::select! {
-                biased;
-                _ = shutdown.changed() => {
-                    stopping.store(true, std::sync::atomic::Ordering::Release);
-                    self.stop_sync_workers().await;
-                    let _ = work.await;
-                    return;
-                },
-                result = &mut work => !matches!(result, Ok(Ok(()))),
+            let mut pending_wake = false;
+            let retry_after_failure = loop {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => {
+                        stopping.store(true, std::sync::atomic::Ordering::Release);
+                        self.stop_sync_workers().await;
+                        let _ = work.await;
+                        return;
+                    },
+                    _ = self.wake.notified() => {
+                        let enabled = self.sync_services.lock()
+                            .ok()
+                            .and_then(|services| services.as_ref().map(|service| service.enabled()))
+                            .unwrap_or(false);
+                        if !enabled {
+                            // A provider command may be queued behind its own
+                            // network round. Revoke it before awaiting that command.
+                            self.stop_sync_workers().await;
+                            let _ = work.await;
+                            break false;
+                        }
+                        pending_wake = true;
+                    },
+                    result = &mut work => break !matches!(result, Ok(Ok(()))),
+                }
             };
+            if pending_wake {
+                self.wake.notify_one();
+            }
             // Providers own their network, session-refresh and reconnect deadlines.
             // The host starts once and then reacts to durable local/configuration
             // wakes. A failed provider startup gets a bounded retry so a transient
@@ -416,6 +438,10 @@ impl Drop for ModuleHost {
 }
 
 #[cfg(test)]
+#[path = "../tests/support/native_supabase.rs"]
+mod native_supabase;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::SyncServices;
@@ -477,6 +503,26 @@ mod tests {
             manifest["schema_version"] = json!(5);
             manifest["supported_platforms"] = json!(["linux"]);
         }
+        package_with_manifest(directory, key, manifest, library)
+    }
+
+    fn package_with_manifest(
+        directory: &Path,
+        key: &KeyPair,
+        mut manifest: serde_json::Value,
+        library: &[u8],
+    ) -> PathBuf {
+        let extension = if cfg!(windows) {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let entrypoint = format!("bin/module.{extension}");
+        manifest["target"] = serde_json::to_value(target()).unwrap();
+        manifest["entrypoint"] = json!(entrypoint);
+        manifest["files"] = json!([{"path":entrypoint, "sha256":hex::encode(Sha256::digest(library)), "size_bytes":library.len()}]);
         let bytes = serde_json::to_vec(&manifest).unwrap();
         let signature = minisign::sign(
             Some(&key.pk),
@@ -492,7 +538,7 @@ mod tests {
         for (name, contents) in [
             ("manifest.json", bytes.as_slice()),
             ("manifest.json.sig", signature.as_bytes()),
-            (entrypoint.as_str(), library.as_slice()),
+            (entrypoint.as_str(), library),
         ] {
             archive
                 .start_file(name, SimpleFileOptions::default())
@@ -501,6 +547,174 @@ mod tests {
         }
         archive.finish().unwrap();
         path
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn group_exclusion_releases_a_running_native_sync_provider() {
+        use copypaste_p2p::{DeviceProfile, Node, PeerStore};
+        use std::time::{Duration, Instant};
+        use wiremock::{
+            matchers::{method, path},
+            Mock, MockServer, ResponseTemplate,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let node = Arc::new(Node::new(
+            PeerStore::open(&directory.path().join("peers.json"), &[9; 32]).unwrap(),
+            None,
+            0,
+            true,
+        ));
+        let sponsor = Node::new(
+            PeerStore::open(&directory.path().join("sponsor.json"), &[8; 32]).unwrap(),
+            None,
+            0,
+            true,
+        );
+        let local = node
+            .peers()
+            .group_snapshot("excluded", "excluded", DeviceProfile::current(), None)
+            .unwrap()
+            .encode()
+            .unwrap();
+        let remote = sponsor
+            .peers()
+            .group_snapshot("sponsor", "sponsor", DeviceProfile::current(), None)
+            .unwrap()
+            .encode()
+            .unwrap();
+        node.import_cloud_group("sponsor", &remote).unwrap();
+        sponsor.import_cloud_group("excluded", &local).unwrap();
+        sponsor
+            .unpair(&sponsor.peers().list()[0].pairing_id)
+            .unwrap();
+        let removal = sponsor
+            .peers()
+            .group_snapshot("sponsor", "sponsor", DeviceProfile::current(), None)
+            .unwrap()
+            .encode()
+            .unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/auth/v1/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"access_token":"test-access-token", "refresh_token":"test-refresh-token", "expires_in":3600, "user":{"id":"test-user"}})))
+            .mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/rest/v1/clipboard_items"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!([]))
+                    .set_delay(Duration::from_secs(30)),
+            )
+            .mount(&server)
+            .await;
+        let keyring = Arc::new(Keyring::from_secret(&[7; 32]));
+        let store = Store::open_in_memory(&keyring.db_key()).unwrap();
+        let source = StoreSource::new(
+            store.clone(),
+            keyring,
+            "excluded".into(),
+            "excluded".into(),
+            Default::default(),
+        );
+        let gate = Arc::clone(&node);
+        let services = Arc::new(SyncServices::new(
+            store.clone(),
+            StoreView::new(source, "excluded".into()),
+            move || gate.peers().group_active(),
+            |_| {},
+        ));
+        let signer = KeyPair::generate_unencrypted_keypair().unwrap();
+        let manager = Arc::new(
+            ModuleManager::open(
+                &directory.path().join("modules"),
+                env!("CARGO_PKG_VERSION"),
+                target(),
+                &signer.pk.to_base64(),
+            )
+            .unwrap(),
+        );
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let manifest = serde_json::from_slice(
+            &fs::read(repository.join("modules/supabase/module.json")).unwrap(),
+        )
+        .unwrap();
+        let library = fs::read(super::native_supabase::library()).unwrap();
+        manager
+            .install(&package_with_manifest(
+                directory.path(),
+                &signer,
+                manifest,
+                &library,
+            ))
+            .unwrap();
+        manager
+            .set_preferences(
+                "copypaste.supabase",
+                std::collections::BTreeMap::from([
+                    ("url".into(), json!(server.uri())),
+                    ("anon_key".into(), json!("test-publishable-key")),
+                ]),
+            )
+            .unwrap();
+        manager.set_enabled("copypaste.supabase", true).unwrap();
+        let host = Arc::new(ModuleHost::new(directory.path()));
+        *host.manager.lock().unwrap() = Some(Arc::clone(&manager));
+        host.set_sync_services(Arc::clone(&services)).unwrap();
+        let idle_leases = Arc::strong_count(&services);
+        manager
+            .invoke(
+                "copypaste.supabase",
+                "sign-in",
+                std::collections::BTreeMap::from([
+                    ("email".into(), json!("module@example.com")),
+                    ("password".into(), json!("account-password")),
+                    ("passphrase".into(), json!("shared sync passphrase")),
+                ]),
+            )
+            .unwrap();
+        let (stop, shutdown) = tokio::sync::watch::channel(false);
+        let running_host = Arc::clone(&host);
+        let runner = tokio::spawn(async move { running_host.run_sync(shutdown).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .any(|request| request.url.path() == "/rest/v1/clipboard_items")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("native provider must have an active data request");
+        assert!(Arc::strong_count(&services) > idle_leases);
+        let started = Instant::now();
+        node.import_cloud_group("sponsor", &removal).unwrap();
+        assert!(!services.enabled());
+        host.wake_sync();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while Arc::strong_count(&services) != idle_leases {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("exclusion must stop native work and release its host lease");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(
+            store
+                .state("module:copypaste.supabase:cloud_refresh_token")
+                .unwrap()
+                .is_some(),
+            "stopping preserves encrypted credentials for deliberate readmission"
+        );
+        stop.send(true).unwrap();
+        runner.await.unwrap();
     }
 
     #[tokio::test]

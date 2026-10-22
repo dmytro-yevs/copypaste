@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import '../../support/temporary_payloads.dart';
 
 import 'dart:async';
@@ -301,7 +302,10 @@ void main() {
       final ocrButton = tester.widget<Button>(
         find.byKey(const ValueKey('history-ocr')),
       );
-      expect(ocrButton.child, isA<Icon>());
+      expect(
+        ocrButton.child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
       expect(ocrButton.leading, isNull);
       final actionHeight = tester
           .getSize(find.byKey(const ValueKey('history-detail-copy')))
@@ -408,7 +412,14 @@ void main() {
       final first = tester.getRect(find.byKey(ValueKey<String>(keys.first)));
       for (final key in keys) {
         final finder = find.byKey(ValueKey<String>(key));
-        expect(tester.widget<Button>(finder).child, isA<Icon>());
+        expect(
+          tester.widget<Button>(finder).child,
+          isA<AppIconFrame>().having(
+            (frame) => frame.child,
+            'icon',
+            isA<Icon>(),
+          ),
+        );
         final size = tester.getSize(finder);
         expect(size.width, closeTo(size.height, 0.01));
         expect(
@@ -465,7 +476,7 @@ void main() {
               find.byKey(const ValueKey<String>('history-detail-copy')),
             )
             .child,
-        isA<Icon>(),
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
       );
       await render(720, 1);
       expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);

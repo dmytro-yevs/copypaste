@@ -11,6 +11,7 @@ use super::pairing::{
     PAIRING_CONFIRM_TIMEOUT,
 };
 use super::{placeholder_name, Node, NodeError};
+use crate::group::PairAdmissions;
 use crate::peers::{Peer, MAX_PAIRINGS};
 use crate::protocol::{MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_LISTEN_ADDR_BYTES};
 use crate::sync::SyncSource;
@@ -30,13 +31,14 @@ enum PairingMessage {
     },
     Decision {
         accept: bool,
+        admissions: Option<PairAdmissions>,
     },
     Stored {
         ok: bool,
     },
 }
 
-const PAIRING_PROTOCOL_VERSION: u32 = 2;
+const PAIRING_PROTOCOL_VERSION: u32 = 3;
 
 impl Node {
     pub fn pair_create_invite(&self) -> Result<PairingInvite, NodeError> {
@@ -71,6 +73,7 @@ impl Node {
         addr: &str,
         source: &S,
     ) -> Result<PairingStatus, NodeError> {
+        self.prepare_group(source)?;
         let short_code = code.and_then(|code| PairingCode::parse(code).ok());
         let legacy_token = if code.is_some() && short_code.is_none() {
             let code = code.ok_or(NodeError::BadCode)?;
@@ -184,6 +187,7 @@ impl Node {
         pairing_id: &str,
         source: &S,
     ) -> Result<(), NodeError> {
+        self.prepare_group(source)?;
         let (psk, control) = self.pairing.begin_responder(pairing_id)?;
         let identity = local_identity(self, source, session.local_addr());
         let established = establish(
@@ -226,9 +230,30 @@ impl Node {
         control: watch::Receiver<LocalDecision>,
     ) {
         let pairing_id = peer.pairing_id.clone();
+        let proposal = (|| {
+            Ok::<_, NodeError>(PairAdmissions {
+                local: self
+                    .peers
+                    .desired_group_admission(None)
+                    .map_err(|_| NodeError::PeerStore)?,
+                remote: self
+                    .peers
+                    .desired_group_admission(peer.device_id.as_deref())
+                    .map_err(|_| NodeError::PeerStore)?,
+            })
+        })();
+        let Ok(proposal) = proposal else {
+            self.pairing.finish(
+                &pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::PeerStore),
+            );
+            let _ = session.close().await;
+            return;
+        };
         let decision = tokio::time::timeout(
             PAIRING_CONFIRM_TIMEOUT,
-            exchange_decisions(&mut session, control),
+            exchange_decisions(&mut session, control, proposal),
         )
         .await;
         let (phase, error) = match decision {
@@ -237,17 +262,17 @@ impl Node {
             Ok(Err(DecisionEnd::Cancelled)) => (PairingPhase::Cancelled, None),
             Ok(Err(DecisionEnd::TimedOut)) => (PairingPhase::TimedOut, None),
             Ok(Err(DecisionEnd::Failed)) => (PairingPhase::Failed, Some(NodeError::Session)),
-            Ok(Ok(())) if !self.pairing.begin_commit(&pairing_id) => {
-                (PairingPhase::Cancelled, None)
-            }
-            Ok(Ok(())) => match persist_bilaterally(self, &mut session, &peer).await {
-                Commit::Both => {
-                    self.republish();
-                    (PairingPhase::Confirmed, None)
+            Ok(Ok(_)) if !self.pairing.begin_commit(&pairing_id) => (PairingPhase::Cancelled, None),
+            Ok(Ok(admissions)) => {
+                match persist_bilaterally(self, &mut session, &peer, admissions).await {
+                    Commit::Both => match self.confirm_group_admission(&pairing_id) {
+                        Ok(()) => (PairingPhase::Confirmed, None),
+                        Err(_) => (PairingPhase::Failed, Some(NodeError::PeerStore)),
+                    },
+                    Commit::PeerSilent => (PairingPhase::TimedOut, Commit::PeerSilent.error()),
+                    other => (PairingPhase::Failed, other.error()),
                 }
-                Commit::PeerSilent => (PairingPhase::TimedOut, Commit::PeerSilent.error()),
-                other => (PairingPhase::Failed, other.error()),
-            },
+            }
         };
         self.pairing.finish(&pairing_id, phase, error);
         self.republish();
@@ -358,7 +383,9 @@ enum DecisionEnd {
 async fn exchange_decisions(
     session: &mut Session,
     mut local: watch::Receiver<LocalDecision>,
-) -> Result<(), DecisionEnd> {
+    proposal: PairAdmissions,
+) -> Result<PairAdmissions, DecisionEnd> {
+    let mut agreed = proposal;
     let mut local_accepted = false;
     let mut remote_accepted = false;
     while !local_accepted || !remote_accepted {
@@ -372,17 +399,17 @@ async fn exchange_decisions(
                     LocalDecision::Pending => {}
                     LocalDecision::Accept => {
                         if !local_accepted {
-                            session.send(&PairingMessage::Decision { accept: true })
+                            session.send(&PairingMessage::Decision { accept: true, admissions: Some(proposal) })
                                 .await.map_err(|_| DecisionEnd::Failed)?;
                             local_accepted = true;
                         }
                     }
                     LocalDecision::Reject => {
-                        let _ = session.send(&PairingMessage::Decision { accept: false }).await;
+                        let _ = session.send(&PairingMessage::Decision { accept: false, admissions: None }).await;
                         return Err(DecisionEnd::Rejected);
                     }
                     LocalDecision::Cancel => {
-                        let _ = session.send(&PairingMessage::Decision { accept: false }).await;
+                        let _ = session.send(&PairingMessage::Decision { accept: false, admissions: None }).await;
                         return Err(DecisionEnd::Cancelled);
                     }
                     LocalDecision::Expire => return Err(DecisionEnd::TimedOut),
@@ -390,10 +417,11 @@ async fn exchange_decisions(
             }
             message = session.recv::<PairingMessage>() => {
                 match message {
-                    Ok(Some(PairingMessage::Decision { accept: true })) => {
+                    Ok(Some(PairingMessage::Decision { accept: true, admissions: Some(remote) })) => {
+                        agreed = proposal.agree(remote).map_err(|_| DecisionEnd::Failed)?;
                         remote_accepted = true;
                     }
-                    Ok(Some(PairingMessage::Decision { accept: false })) => {
+                    Ok(Some(PairingMessage::Decision { accept: false, .. })) => {
                         return Err(DecisionEnd::Rejected);
                     }
                     _ => return Err(DecisionEnd::Failed),
@@ -401,7 +429,7 @@ async fn exchange_decisions(
             }
         }
     }
-    Ok(())
+    Ok(agreed)
 }
 
 /// The commit exchange is the one place a silent peer costs more than a
@@ -420,9 +448,17 @@ const PAIRING_COMMIT_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// `false` rolls this side back — an unacknowledged pairing is worse than no
 /// pairing, because the other device will not answer a key it never kept.
-async fn persist_bilaterally(node: &Node, session: &mut Session, peer: &Peer) -> Commit {
+async fn persist_bilaterally(
+    node: &Node,
+    session: &mut Session,
+    peer: &Peer,
+    admissions: PairAdmissions,
+) -> Commit {
     let mut slot = node.peers.snapshot(&peer.pairing_id);
-    let stored = node.peers.upsert_from(&mut slot, peer.clone()).is_ok();
+    let stored = node
+        .peers
+        .upsert_from_admission(&mut slot, peer.clone(), Some(admissions))
+        .is_ok();
     let acknowledged = tokio::time::timeout(PAIRING_COMMIT_TIMEOUT, async {
         session
             .send(&PairingMessage::Stored { ok: stored })
@@ -736,17 +772,47 @@ mod tests {
         wait_for(responder, PairingPhase::AwaitingConfirmation).await;
         responder.pair_confirm(true).unwrap();
         session
-            .send(&PairingMessage::Decision { accept: true })
+            .send(&PairingMessage::Decision {
+                accept: true,
+                admissions: Some(PairAdmissions::default()),
+            })
             .await
             .unwrap();
         loop {
             match session.recv::<PairingMessage>().await {
                 Ok(Some(PairingMessage::Stored { .. })) => break,
-                Ok(Some(PairingMessage::Decision { accept: true })) => {}
+                Ok(Some(PairingMessage::Decision { accept: true, .. })) => {}
                 other => panic!("the responder never reached the commit exchange: {other:?}"),
             }
         }
         tokio::time::pause();
+    }
+
+    #[tokio::test]
+    async fn peer_cannot_certify_an_overflowing_local_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "generation-responder");
+        let source = Arc::new(TestSource::new("generation-responder", vec![]));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), Arc::clone(&source)).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let mut peer = handshake_by_hand(addr, &invite.code).await;
+        wait_for(&responder, PairingPhase::AwaitingConfirmation).await;
+        responder.pair_confirm(true).unwrap();
+        peer.send(&PairingMessage::Decision {
+            accept: true,
+            admissions: Some(PairAdmissions {
+                local: 0,
+                remote: u64::MAX,
+            }),
+        })
+        .await
+        .unwrap();
+        wait_for(&responder, PairingPhase::Failed).await;
+        assert!(responder.peers().list().is_empty());
+        let snapshot = responder.prepare_group(source.as_ref()).unwrap();
+        assert_eq!(snapshot.roster.members["generation-responder"].admission, 0);
+        assert!(snapshot.roster.removed.is_empty());
+        let _ = shutdown.send(true);
     }
 
     /// The whole of the defect. A peer that accepts and then stops writing had
@@ -823,6 +889,48 @@ mod tests {
         })
         .await
         .expect("the ceremony never wrote its peer");
+    }
+
+    #[tokio::test]
+    async fn a_tentative_pairing_cannot_admit_a_second_connection_before_stored_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), source).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let code = PairingCode::parse(&invite.code).unwrap();
+        let (mut session, token) = Session::connect_pairing(addr, &code).await.unwrap();
+        session
+            .send(&PairingMessage::Hello {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                device_id: "silent-device".into(),
+                device_name: "silent".into(),
+                profile: DeviceProfile::current(),
+                listen_addr: None,
+            })
+            .await
+            .unwrap();
+        session.recv::<PairingMessage>().await.unwrap();
+        accept_then_go_silent(&responder, &mut session).await;
+        wait_for_tentative_write(&responder).await;
+        assert!(Session::connect(addr, &token.psk()).await.is_err());
+        assert_eq!(
+            responder
+                .peers()
+                .stored_group()
+                .unwrap()
+                .roster
+                .members
+                .len(),
+            1
+        );
+        session
+            .send(&PairingMessage::Stored { ok: false })
+            .await
+            .unwrap();
+        wait_for(&responder, PairingPhase::Failed).await;
+        assert!(responder.peers().is_empty());
+        let _ = shutdown.send(true);
     }
 
     /// Renaming over a directory fails on every platform, and the parent still

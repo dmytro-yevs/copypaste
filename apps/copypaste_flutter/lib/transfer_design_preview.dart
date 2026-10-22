@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app/theme/app_toast.dart';
@@ -143,7 +144,7 @@ class _PreviewPanelState extends State<_PreviewPanel> {
             Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () {},
-              child: const Icon(LucideIcons.x),
+              child: const AppIconFrame(child: Icon(LucideIcons.x)),
             ),
           ],
         ),
@@ -159,7 +160,7 @@ class _PreviewPanelState extends State<_PreviewPanel> {
               onPressed: _showCompleted
                   ? () => setState(() => _showCompleted = false)
                   : null,
-              leading: const Icon(LucideIcons.trash2),
+              leading: const AppIconFrame(child: Icon(LucideIcons.trash2)),
               child: const Text('Clear completed history'),
             ),
           ),
