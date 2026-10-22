@@ -76,6 +76,18 @@ abstract final class AppMotion {
   static const Curve enterCurve = Curves.easeOutCubic;
   static const Curve exitCurve = Curves.easeInCubic;
 
+  /// Interpolates an event-driven progress value without an initial animation.
+  static Widget progressTransition(
+    BuildContext context, {
+    required double value,
+    required ValueWidgetBuilder<double> builder,
+  }) => TweenAnimationBuilder<double>(
+    tween: Tween<double>(begin: value, end: value),
+    duration: resolve(context, quick),
+    curve: standardCurve,
+    builder: builder,
+  );
+
   static const List<Effect<dynamic>> fadeIn = <Effect<dynamic>>[
     FadeEffect(duration: standard, curve: enterCurve),
   ];

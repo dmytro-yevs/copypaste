@@ -95,6 +95,7 @@ fn expected(method: &Method) -> Expected {
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
         Method::PairJoin { .. } => Expected::Error(ErrorCode::PairingCode),
+        Method::PairNearby { .. } => Expected::Error(ErrorCode::PairingAddress),
         Method::Unpair { .. } => Expected::Error(ErrorCode::PeerNotFound),
         Method::ImportFile { .. }
         | Method::Import { .. }
@@ -186,6 +187,9 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::PairCreateInvite,
         Method::PairProgress,
         Method::PairConfirm { accept: true },
+        Method::PairNearby {
+            addr: "invalid".into(),
+        },
         Method::PairJoin {
             code: "malformed".into(),
             addr: "127.0.0.1:1".into(),
@@ -307,7 +311,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        51,
+        52,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

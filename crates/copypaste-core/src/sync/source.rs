@@ -428,6 +428,24 @@ impl SyncSource for StoreSource {
             .map_err(|error| SyncError::Source(error.to_string()))
         })
     }
+    fn file_size(&self, id: &str, sha256: &str) -> Result<u64, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let row = self
+                .store
+                .get(id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            let descriptor = crate::file_transfer::row_offer(&row, &self.keyring.item_key())
+                .map_err(|error| SyncError::Source(error.to_string()))?
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            if !sha256.is_empty() && descriptor.sha256 != sha256 {
+                return Err(SyncError::Source("The file is unavailable.".into()));
+            }
+            Ok(descriptor.size_bytes)
+        })
+    }
     fn device_id(&self) -> String {
         self.device_id.clone()
     }

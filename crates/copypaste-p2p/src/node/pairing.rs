@@ -116,6 +116,7 @@ pub(super) struct PairingManager {
     state: Mutex<PairingState>,
     now: Arc<dyn Fn() -> Instant + Send + Sync>,
     changes: watch::Sender<()>,
+    next_nearby_request: Mutex<Option<Instant>>,
 }
 
 impl PairingManager {
@@ -129,7 +130,22 @@ impl PairingManager {
             state: Mutex::new(PairingState::Idle),
             now: Arc::new(now),
             changes,
+            next_nearby_request: Mutex::new(None),
         }
+    }
+
+    pub(super) fn nearby_candidate(&self) -> Option<PairingCandidate> {
+        let mut next = self
+            .next_nearby_request
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let now = self.now();
+        if next.is_some_and(|deadline| now < deadline) {
+            return None;
+        }
+        self.create_invite(None).ok()?;
+        *next = Some(now + Duration::from_secs(5));
+        self.invitation_candidate()
     }
 
     pub(super) fn changes(&self) -> watch::Receiver<()> {
@@ -366,6 +382,21 @@ impl PairingManager {
             active.expires_at,
             self.now(),
         ))
+    }
+
+    pub(super) fn cancel_reservation(&self, pairing_id: &str) {
+        let mut state = self.lock();
+        if let PairingState::Invited(invite) = &*state {
+            if invite.status.pairing_id.as_deref() == Some(pairing_id) {
+                let _ = invite.control.send(LocalDecision::Cancel);
+                *state = PairingState::Terminal(PairingStatus {
+                    phase: PairingPhase::Cancelled,
+                    ..invite.status.clone()
+                });
+                drop(state);
+                self.changed();
+            }
+        }
     }
 
     pub(super) fn cancel(&self) -> PairingStatus {

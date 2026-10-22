@@ -1,14 +1,13 @@
-Manage file imports and device transfers consistently in CopyPaste 1.0.32.
+Improve nearby pairing, transfer performance, and download controls in CopyPaste 1.0.33.
 
-- Keep file transfers running when Quick Paste closes, with shared progress and errors across History, inspectors, and Quick Paste.
-- Add a downloads manager with byte progress, source and destination devices, timestamps, persistent history, retry, cancellation, and saved-file links.
-- Reuse completed downloads when a clip is activated again. Clearing transfer history preserves files, clips, and active transfers.
-- Make selected files available immediately by registering their original location and streaming bytes only on request. An unavailable or changed original produces an actionable error.
-- Separate Quick Paste status from keyboard shortcuts and display the failure reason above clip metadata.
-- Report capture running, paused, stopped, and unavailable states consistently in the header and tray, and offer recovery for stopped Android screenshot capture.
-- Keep Quick Paste action failures visible and refresh OCR availability when module or runtime state changes.
-- Keep device cards compact with inline connection latency and shared typography.
-- Refresh OCR, Semantic Search, and Supabase packages to 0.1.23 for CopyPaste 1.0.32.
+- Connect nearby devices through a confirmation code on both devices, with typed pairing status, bounded requests, and system notifications for incoming requests.
+- Show device type and connection state consistently in device controls and settings, and start device observation when the runtime becomes ready.
+- Use a compact transfer manager with source and destination device identity, event-driven speed, a perimeter progress indicator on the toolbar button, and clear visual hierarchy.
+- Remove an individual completed transfer from its history without deleting its saved file; completed-history clearing keeps the same preservation contract.
+- Stream file blocks in one authenticated transfer instead of JSON byte arrays and one request per block. File transfers use protocol v9 and require both paired devices to update to CopyPaste 1.0.33 before they can synchronize.
+- Use an accelerated cryptography backend for the existing authenticated Noise protocol.
+- Keep pairing, notification, transfer, and Windows daemon-start behavior behind their existing typed adapters across supported platforms.
+- Refresh OCR, Semantic Search, and Supabase packages to 0.1.24 for CopyPaste 1.0.33.
 
 Paired devices must use this release's file-transfer protocol to exchange files. Optional modules remain available from Settings; OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
 

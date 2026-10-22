@@ -9,17 +9,16 @@
 //!   deadline turns that into a task that never finishes and a peer slot that is
 //!   never freed.
 //! * **`encode`/`decode` rather than serde on `SyncMessage` directly.** Those
-//!   two functions are where the wire bounds and the timestamp clamp live, so
-//!   the payload is moved as a raw JSON document and handed to them verbatim.
-//!   Calling `Session::recv::<SyncMessage>()` would deserialise the same bytes
-//!   while quietly skipping both — a second, weaker copy of the wire contract.
+//!   functions own the wire bounds, timestamp clamp, and compact binary file
+//!   chunks, so authenticated bytes are handed to them verbatim. Calling
+//!   `Session::recv::<SyncMessage>()` would deserialize JSON directly and
+//!   quietly skip part of that contract.
 
 use std::time::Duration;
 
 use crate::protocol::SyncMessage;
 use crate::sync::{SyncChannel, SyncError};
 use crate::transport::Session;
-use serde_json::value::RawValue;
 use zeroize::Zeroizing;
 
 /// How long one half waits for the other's next message.
@@ -61,7 +60,7 @@ impl NoiseChannel {
     /// has still received everything this side sent; the session succeeded
     /// either way and the deadline keeps a rude peer from holding the caller.
     pub async fn wait_for_close(&mut self) {
-        match tokio::time::timeout(self.read_timeout, self.session.recv::<Box<RawValue>>()).await {
+        match tokio::time::timeout(self.read_timeout, self.session.recv_bytes()).await {
             Ok(Ok(None)) => {}
             Ok(Ok(Some(_))) => tracing::debug!("peer sent more after the session ended"),
             Ok(Err(e)) => tracing::debug!(error = %e, "peer session ended untidily"),
@@ -82,10 +81,11 @@ impl SyncChannel for NoiseChannel {
     async fn send(&mut self, mut msg: SyncMessage) -> Result<(), SyncError> {
         // Handed down verbatim, so what reaches the wire is exactly the bytes
         // `encode` validated.
-        let bytes = Zeroizing::new(msg.encode()?);
+        let encoded = msg.encode();
         if let SyncMessage::FileChunk { bytes, .. } = &mut msg {
             zeroize::Zeroize::zeroize(bytes);
         }
+        let bytes = Zeroizing::new(encoded?);
 
         self.session
             .send_bytes(bytes)
@@ -94,8 +94,7 @@ impl SyncChannel for NoiseChannel {
     }
 
     async fn recv(&mut self) -> Result<SyncMessage, SyncError> {
-        let received =
-            tokio::time::timeout(self.read_timeout, self.session.recv::<Box<RawValue>>()).await;
+        let received = tokio::time::timeout(self.read_timeout, self.session.recv_bytes()).await;
 
         match received {
             Err(_) => Err(SyncError::Channel(
@@ -106,7 +105,7 @@ impl SyncChannel for NoiseChannel {
             Ok(Ok(None)) => Err(SyncError::Channel(
                 "the peer closed the session".to_string(),
             )),
-            Ok(Ok(Some(raw))) => Ok(SyncMessage::decode(raw.get().as_bytes())?),
+            Ok(Ok(Some(raw))) => Ok(SyncMessage::decode(&raw)?),
             Ok(Err(e)) => Err(SyncError::Channel(e.to_string())),
         }
     }

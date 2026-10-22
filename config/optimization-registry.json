@@ -1824,7 +1824,7 @@
         "file_downloads_per_host": 1,
         "file_limit": "Live editable max_file_size_bytes; default 64 MiB, supported setting range 1 MiB through 20 GiB. This is an allocation policy, not a native resource budget."
       },
-      "tradeoffs": "Import hashes then encrypts the source and holds one SQLite write transaction for the snapshot. Peer requests acknowledge each chunk. Source device must be online for an uncached download. Native clipboard staging retains its existing timed cleanup owner.",
+      "tradeoffs": "Import hashes then encrypts the source and holds one SQLite write transaction for the snapshot. One authenticated size-checked request starts a bounded binary stream; storage chunks remain 64 KiB without a per-chunk network round trip. The source must be online for an uncached download. Native clipboard staging retains its existing timed cleanup owner.",
       "next_step": "Collect equivalent baseline/candidate native peak, steady, recovery, growth, CPU, latency and I/O evidence on macOS, physical Android and installed Windows. Resolve unset runtime budgets before resource qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2650,7 +2650,7 @@
         "crates/copypaste-core/src/storage/file_operations.rs",
         "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart"
       ],
-      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative.",
+      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative. Individual terminal-history deletion preserves saved paths, downloaded-file mappings and active workers. Visible throughput uses a bounded event-driven monotonic EMA without polling timers.",
       "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history. Small attempt directories remain available for retry alongside durable history; the runtime removes incomplete files on orderly failure.",
       "bounds": {
         "file_block_bytes": 65536,
@@ -2698,6 +2698,195 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "native_update_fixture_passed_installed_adoption_and_resource_evidence_pending"
+    },
+    {
+      "id": "RUN-058",
+      "title": "Bounded Nearby requests and notification inbox",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P pairing and Flutter Notifications",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/transport/nearby.rs",
+        "crates/copypaste-p2p/src/node/pairing.rs",
+        "apps/copypaste_flutter/lib/features/notifications/notifications_controller.dart",
+        "apps/copypaste_flutter/lib/platform/notifications/app_notification_service.dart"
+      ],
+      "invariant": "One active ceremony, five-second unsolicited request cooldown, existing ten-second handshake and sixty-second confirmation deadlines, 8 KiB untrusted pairing messages and at most 50 display-only session inbox entries. No idle notification polling; existing runtime invalidations and active-session observation drive updates. One shared notification plugin owner preserves response callbacks.",
+      "next_step": "Measure app, daemon and workers separately and together on all supported platforms, including peak, steady state and repeated request/close growth. Native evidence and applicable resource budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-final-tests.log",
+          "sha256": "6f2ae4d8e924d8110715c868486156e41d0b0abef00152ec425cdc0a9d7a3143",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "notification-final-tests.log",
+          "sha256": "e8104bb35a98c6ba64a2cf86d1750950cb6bc58324c0c2a6c6454e6cfface7d8",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-final-tests.log",
+          "sha256": "b9e4252b29d0b6076f48622b4be91d6676d520930c8af909d64ad5813bc0269f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending",
+      "tradeoffs": "Adds an explicit untrusted handshake before bilateral numeric comparison. Active pairing retains its existing observer until completion. Inbox history is bounded and session-only. No measured saving or resource qualification is claimed."
+    },
+    {
+      "id": "RUN-059",
+      "title": "Animate download-button progress only on byte updates",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P2",
+      "owner_module": "FileOperationsHeaderAction",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_button_progress.dart",
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_view.dart"
+      ],
+      "invariant": "Draw progress on the themed button perimeter. Interpolate only when progress changes; unknown totals use a static border; inactive transfers retain no progress widget. Respect reduced motion and retain no repeating ticker or polling timer.",
+      "next_step": "Measure application and runtime CPU, wakeups and native footprint for active, stalled, idle and repeated transfer states on macOS, Android and Windows. CPU and wakeup budgets remain unresolved in runtime-resource-budgets.json.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "transfer-regression-test.log",
+          "sha256": "8a6b3efddd656d047da8a84408d10b3c68fe46bcecd4f99d19f024022e30dacb",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "supersedes": [],
+      "id": "RUN-060",
+      "title": "Bounded authenticated binary file stream",
+      "owner_module": "P2P file sessions",
+      "source_references": [
+        "crates/copypaste-p2p/src/node/files.rs",
+        "crates/copypaste-p2p/src/protocol/codec.rs",
+        "crates/copypaste-p2p/src/transport/session.rs",
+        "crates/copypaste-core/src/sync/source.rs"
+      ],
+      "invariant": "One versioned authenticated request validates the authoritative file size before streaming. CPF1 binary envelopes preserve exact chunk index and byte length, SHA-256 verification, cancellation, pairing revocation, source privacy checks, partial-output cleanup and single-session admission.",
+      "bounds": {
+        "file_payload_bytes": 65536,
+        "binary_envelope_bytes": 16,
+        "file_sessions_per_node": 1,
+        "protocol_version": 9
+      },
+      "functional_validation": "319 isolated P2P tests, two real encrypted loopback stream tests and three core file-download tests passed; the integrated application candidate requires its final combined validation.",
+      "evidence_refs": [
+        {
+          "kind": "physical_p2p_probe",
+          "name": "max-throughput-results.json",
+          "sha256": "33a63728a5aafb714f5dcc7c8a9551784c77128971aabc6662f759cd03c3e230",
+          "source_state": "a4787cd0e79d0ddb4b6fdca1bcc6c102e3b0cab2_and_e07d603d014404e23e46e1bfe3c592930e2a3456",
+          "release_qualification": false
+        }
+      ],
+      "next_step": "Qualify the final signed application artifacts on supported platforms. Native app/daemon/worker peak, steady, recovery and growth measurements remain missing; unresolved CPU/wakeup/I/O budgets stay unresolved."
+    },
+    {
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "supersedes": [],
+      "id": "RUN-061",
+      "title": "Use accelerated Snow crypto with the existing Noise suite",
+      "owner_module": "P2P authenticated transport",
+      "source_references": [
+        "Cargo.toml",
+        "crates/copypaste-p2p/src/transport/handshake.rs"
+      ],
+      "invariant": "Snow ring-accelerated uses the maintained RingResolver with the existing default-resolver fallback. Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s, pairing authentication, protocol framing, key identity and integrity requirements remain unchanged.",
+      "functional_validation": "319 P2P unit and two full-stream integration tests passed for the isolated crypto variant.",
+      "performance_evidence": {
+        "scope": "Physical Android-to-macOS P2P disk-write-and-SHA256 probe, not the installed application or native resource qualification",
+        "fixture_bytes": 134217728,
+        "unit": "decimal_MB_per_second",
+        "baseline_commit": "a4787cd0e79d0ddb4b6fdca1bcc6c102e3b0cab2",
+        "baseline_samples": [
+          31.092,
+          26.57,
+          30.445
+        ],
+        "candidate_commit": "e07d603d014404e23e46e1bfe3c592930e2a3456",
+        "candidate_samples": [
+          36.455,
+          34.515,
+          34.505
+        ],
+        "median_improvement_percent": 13.37,
+        "filesystem_cache_state": "not_controlled",
+        "raw_tcp_median_mib_per_second": 35.758,
+        "raw_tcp_diagnostic_integrity": "length_only"
+      },
+      "evidence_refs": [
+        {
+          "kind": "physical_p2p_probe",
+          "name": "max-throughput-results.json",
+          "sha256": "33a63728a5aafb714f5dcc7c8a9551784c77128971aabc6662f759cd03c3e230",
+          "source_state": "e07d603d014404e23e46e1bfe3c592930e2a3456",
+          "release_qualification": false
+        }
+      ],
+      "next_step": "Measure final installed app, daemon and workers on macOS, physical Android and Windows. Probe RSS and one-off CPU samples do not establish released native memory or resource qualification; runtime budgets remain unchanged."
     }
   ]
 }

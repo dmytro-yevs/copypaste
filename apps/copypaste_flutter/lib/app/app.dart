@@ -4,6 +4,8 @@ import 'dart:io';
 import '../features/modules/controller/modules_controller.dart';
 
 import '../features/transfers/file_operations_view.dart';
+import '../features/notifications/notifications_controller.dart';
+import '../features/notifications/notifications_view.dart';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -33,6 +35,7 @@ class CopyPasteApp extends StatelessWidget {
     required this.navigation,
     this.historyController,
     this.devicesController,
+    this.notifications,
     this.quickPasteSettings,
     this.settingsController,
     this.launchAtLogin,
@@ -48,6 +51,7 @@ class CopyPasteApp extends StatelessWidget {
   final AppNavigationController navigation;
   final HistoryController? historyController;
   final DevicesController? devicesController;
+  final NotificationsController? notifications;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
   final LaunchAtLoginController? launchAtLogin;
@@ -110,11 +114,20 @@ class CopyPasteApp extends StatelessWidget {
               headerActions: {
                 if (settingsController != null)
                   AppDestination.history: [
+                    if (notifications case final inbox?)
+                      NotificationsHeaderAction(
+                        controller: inbox,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
                             navigation.setBottomOverlayOpen,
+                        resolveDeviceClass: _deviceClassResolver(
+                          devicesController,
+                        ),
                       ),
                     SyncHeaderAction(
                       controller: settingsController!,
@@ -126,11 +139,20 @@ class CopyPasteApp extends StatelessWidget {
                   ],
                 if (devicesController != null || settingsController != null)
                   AppDestination.devices: [
+                    if (notifications case final inbox?)
+                      NotificationsHeaderAction(
+                        controller: inbox,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
                             navigation.setBottomOverlayOpen,
+                        resolveDeviceClass: _deviceClassResolver(
+                          devicesController,
+                        ),
                       ),
                     if (devicesController != null)
                       DevicesHeaderActions(controller: devicesController!),
@@ -146,11 +168,20 @@ class CopyPasteApp extends StatelessWidget {
                   ],
                 if (settingsController != null)
                   AppDestination.settings: [
+                    if (notifications case final inbox?)
+                      NotificationsHeaderAction(
+                        controller: inbox,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
                             navigation.setBottomOverlayOpen,
+                        resolveDeviceClass: _deviceClassResolver(
+                          devicesController,
+                        ),
                       ),
                     SyncHeaderAction(
                       controller: settingsController!,
@@ -165,9 +196,7 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.history: historyController == null
                     ? StateView.error(
                         title: 'History runtime is unavailable',
-                        message:
-                            runtimeUnavailableMessage ??
-                            'Start the application runtime before opening history.',
+                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening history.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )
@@ -180,9 +209,7 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.devices: devicesController == null
                     ? StateView.error(
                         title: 'Devices runtime is unavailable',
-                        message:
-                            runtimeUnavailableMessage ??
-                            'Start the application runtime before opening devices.',
+                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening devices.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )
@@ -197,9 +224,7 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.settings: settingsController == null
                     ? StateView.error(
                         title: 'Settings runtime is unavailable',
-                        message:
-                            runtimeUnavailableMessage ??
-                            'Start the application runtime before opening settings.',
+                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening settings.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )
@@ -273,4 +298,26 @@ class CopyPasteApp extends StatelessWidget {
       ),
     );
   }
+}
+
+DeviceClass? Function(String displayName)? _deviceClassResolver(
+  DevicesController? controller,
+) {
+  if (controller == null) return null;
+  return (displayName) {
+    final snapshot = controller.snapshot;
+    if (snapshot == null) return null;
+    if (displayName == 'This device') {
+      return snapshot.thisDevice.details?.profile?.deviceClass;
+    }
+    final candidates = <DeviceProfile?>[
+      if (snapshot.thisDevice.name == displayName)
+        snapshot.thisDevice.details?.profile,
+      ...snapshot.peers
+          .where((peer) => peer.name == displayName)
+          .map((peer) => peer.details?.profile),
+    ];
+    if (candidates.length != 1) return null;
+    return candidates.single?.deviceClass;
+  };
 }

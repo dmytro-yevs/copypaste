@@ -11,7 +11,7 @@ import 'devices_gateway.dart';
 /// observed peer changes. Local mutations do not synthesize a change event:
 /// their caller awaits the operation and performs one authoritative refresh.
 class FlutterRustDevicesGateway
-    implements DevicesGateway, DisposableDevicesGateway {
+    implements DevicesGateway, DisposableDevicesGateway, NearbyPairingGateway {
   FlutterRustDevicesGateway({GeneratedDevicesApi? api})
     : _api = api ?? FrbGeneratedDevicesApi();
 
@@ -89,6 +89,28 @@ class FlutterRustDevicesGateway
   @override
   Future<void> setThisDeviceName(String name) async {
     await _api.setThisDeviceName(name: name);
+  }
+
+  @override
+  Future<DevicesPairingSession> requestNearbyPairing(String address) async {
+    final api = _api;
+    if (api is! GeneratedNearbyPairingApi) {
+      throw StateError('Nearby pairing is unavailable.');
+    }
+    final ceremony = await (api as GeneratedNearbyPairingApi)
+        .requestNearbyPairing(address);
+    return FlutterRustPairingSession(api: _api, ceremony: ceremony);
+  }
+
+  @override
+  Future<DevicesPairingSession?> incomingPairing() async {
+    final api = _api;
+    if (api is! GeneratedNearbyPairingApi) return null;
+    final ceremony = await (api as GeneratedNearbyPairingApi)
+        .incomingPairingCeremony();
+    return ceremony == null
+        ? null
+        : FlutterRustPairingSession(api: _api, ceremony: ceremony);
   }
 
   @override
@@ -342,7 +364,20 @@ abstract interface class GeneratedDevicesApi {
   Future<void> cancelRuntimeWatch({required BigInt watchId});
 }
 
-class FrbGeneratedDevicesApi implements GeneratedDevicesApi {
+abstract interface class GeneratedNearbyPairingApi {
+  Future<frb.PairingCeremony> requestNearbyPairing(String address);
+  Future<frb.PairingCeremony?> incomingPairingCeremony();
+}
+
+class FrbGeneratedDevicesApi
+    implements GeneratedDevicesApi, GeneratedNearbyPairingApi {
+  @override
+  Future<frb.PairingCeremony> requestNearbyPairing(String address) =>
+      frb.requestNearbyPairing(address: address);
+  @override
+  Future<frb.PairingCeremony?> incomingPairingCeremony() =>
+      frb.incomingPairingCeremony();
+
   @override
   Future<BigInt> allocateRuntimeWatch() => frb.allocateRuntimeWatch();
 
@@ -564,6 +599,7 @@ class FlutterRustPairingSession implements DevicesPairingSession {
 
   static PairingCeremony _mapCeremony(frb.PairingCeremony ceremony) {
     return PairingCeremony(
+      id: ceremony.ceremonyId,
       state: switch (ceremony.state) {
         'idle' => PairingState.idle,
         'waiting_for_peer' => PairingState.waitingForPeer,

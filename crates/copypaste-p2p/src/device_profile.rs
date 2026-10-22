@@ -342,7 +342,10 @@ fn windows_model() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn windows_chassis_class() -> DeviceClass {
+    use std::os::windows::process::CommandExt;
     let mut command = std::process::Command::new("powershell.exe");
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
     command.args([
         "-NoLogo",
         "-NoProfile",

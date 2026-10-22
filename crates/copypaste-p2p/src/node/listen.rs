@@ -112,21 +112,33 @@ async fn serve_peer<S, F, P>(
             psk: candidate.token.psk,
         });
     }
-    if candidates.is_empty() && pending.is_none() {
-        debug!(%addr, "a peer connected but this device has no pairings");
-        return;
-    }
-
+    let mut nearby_id = None;
     let (session, pairing_id) =
-        match Session::accept_with_pairing(stream, &candidates, pending.as_ref()).await {
+        match Session::accept_with_nearby(stream, &candidates, pending.as_ref(), || {
+            if !node.lan_visible.load(std::sync::atomic::Ordering::Relaxed)
+                || node.peers.len() >= crate::peers::MAX_PAIRINGS
+            {
+                return None;
+            }
+            let candidate = node.pairing.nearby_candidate()?;
+            nearby_id = Some(candidate.token.pairing_id.clone());
+            Some(candidate)
+        })
+        .await
+        {
             Ok(accepted) => accepted,
             Err(e) => {
+                if let Some(id) = &nearby_id {
+                    node.pairing.cancel_reservation(id);
+                }
                 debug!(%addr, error = %e, "inbound peer handshake failed");
                 return;
             }
         };
 
-    if pending_pairing_id.as_deref() == Some(pairing_id.as_str()) {
+    if nearby_id.as_deref() == Some(pairing_id.as_str())
+        || pending_pairing_id.as_deref() == Some(pairing_id.as_str())
+    {
         if let Err(error) = Arc::clone(node)
             .accept_pairing(session, &pairing_id, source)
             .await

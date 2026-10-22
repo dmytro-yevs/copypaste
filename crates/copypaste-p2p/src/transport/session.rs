@@ -67,7 +67,9 @@ pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 ///
 /// Only [`Session::connect`] and [`Session::accept`] produce one, and both
 /// return after the handshake completes, so a `Session` that exists is a
-/// session that authenticated.
+/// session that authenticated. The explicit Nearby bootstrap is the exception:
+/// it restricts messages to 8 KiB and must complete bilateral SAS confirmation
+/// before its token can be used for a separate authenticated sync session.
 ///
 /// Not `Clone` and not shareable: `send` and `recv` take `&mut self` because
 /// the Noise transport state carries a per-direction nonce counter that must
@@ -77,6 +79,7 @@ pub struct Session {
     noise: TransportState,
     peer_addr: SocketAddr,
     handshake_hash: [u8; 32],
+    pairing_only: bool,
     /// Reused plaintext staging buffer, allocated once at
     /// [`MAX_NOISE_PLAINTEXT`] so it never reallocates — a growing `Vec` leaves
     /// copies of old plaintext in freed heap that nothing will ever zeroize.
@@ -91,6 +94,20 @@ pub struct Session {
 }
 
 impl Session {
+    pub(super) fn restrict_to_pairing(&mut self) {
+        self.pairing_only = true;
+    }
+    pub(super) fn bind_pairing_sas(&mut self, hash: [u8; 32]) {
+        self.handshake_hash = hash;
+    }
+    fn message_limit(&self) -> usize {
+        if self.pairing_only {
+            8192
+        } else {
+            MAX_MESSAGE_BYTES
+        }
+    }
+
     /// Send one logical message, JSON-encoded, split across as many Noise
     /// messages as it needs.
     ///
@@ -125,7 +142,7 @@ impl Session {
     }
 
     async fn write_message(&mut self, payload: &[u8]) -> Result<(), TransportError> {
-        if payload.len() > MAX_MESSAGE_BYTES {
+        if payload.len() > self.message_limit() {
             return Err(TransportError::TooLarge);
         }
 
@@ -162,6 +179,16 @@ impl Session {
     pub async fn recv<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> Result<Option<T>, TransportError> {
+        let Some(message) = self.recv_bytes().await? else {
+            return Ok(None);
+        };
+        serde_json::from_slice(&message)
+            .map(Some)
+            .map_err(|_| TransportError::Codec)
+    }
+
+    /// Receive bounded authenticated bytes without applying a payload codec.
+    pub async fn recv_bytes(&mut self) -> Result<Option<Zeroizing<Vec<u8>>>, TransportError> {
         if self.poisoned {
             return Err(TransportError::Malformed);
         }
@@ -211,6 +238,15 @@ impl Session {
             }
 
             let marker = self.plain[0];
+            if message
+                .as_slice()
+                .len()
+                .saturating_add(len - RECORD_HEADER_LEN)
+                > self.message_limit()
+            {
+                self.poisoned = true;
+                return Err(TransportError::TooLarge);
+            }
             if let Err(err) = message.push(&self.plain[RECORD_HEADER_LEN..len]) {
                 self.poisoned = true;
                 return Err(err);
@@ -227,9 +263,7 @@ impl Session {
             }
         }
 
-        serde_json::from_slice(message.as_slice())
-            .map(Some)
-            .map_err(|_| TransportError::Codec)
+        Ok(Some(message.into_inner()))
     }
 
     /// The peer's address, as the socket reports it.
@@ -286,6 +320,7 @@ impl Session {
             noise,
             peer_addr,
             handshake_hash,
+            pairing_only: false,
             plain: Zeroizing::new(vec![0u8; MAX_NOISE_PLAINTEXT]),
             cipher: vec![0u8; MAX_NOISE_MESSAGE],
             poisoned: false,
@@ -358,7 +393,7 @@ impl Reassembly {
     /// is copied or reserved, so a peer cannot spend this device's memory by
     /// declaring a message it is not allowed to send.
     fn push(&mut self, body: &[u8]) -> Result<(), TransportError> {
-        let wanted = self.0.len().saturating_add(body.len());
+        let wanted = self.as_slice().len().saturating_add(body.len());
         if wanted > MAX_MESSAGE_BYTES {
             return Err(TransportError::TooLarge);
         }
@@ -375,6 +410,10 @@ impl Reassembly {
         }
         self.0.extend_from_slice(body);
         Ok(())
+    }
+
+    fn into_inner(self) -> Zeroizing<Vec<u8>> {
+        self.0
     }
 
     fn as_slice(&self) -> &[u8] {
@@ -496,6 +535,37 @@ mod tests {
         client.send(&big).await.expect("send big");
         let echoed: String = client.recv().await.expect("recv").expect("message");
         assert_eq!(echoed, big);
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn raw_binary_message_round_trips_over_noise_without_json() {
+        let (listener, addr) = loopback().await;
+        let psk = PairingToken::generate().psk();
+        let expected = (0..crate::protocol::FILE_CHUNK_BYTES)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let outbound = expected.clone();
+
+        let server_psk = psk;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut session = Session::accept(stream, &server_psk)
+                .await
+                .expect("responder");
+            let received = session
+                .recv_bytes()
+                .await
+                .expect("receive binary")
+                .expect("message");
+            assert_eq!(&*received, expected.as_slice());
+        });
+
+        let mut client = Session::connect(addr, &psk).await.expect("initiator");
+        client
+            .send_bytes(Zeroizing::new(outbound))
+            .await
+            .expect("send binary");
         server.await.expect("server task");
     }
 
