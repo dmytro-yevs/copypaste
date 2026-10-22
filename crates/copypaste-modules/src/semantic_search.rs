@@ -236,8 +236,7 @@ impl SemanticSearch {
                 budget,
                 device,
                 matches,
-                item_key,
-                preview_key,
+                (item_key, preview_key),
             )
         })
     }

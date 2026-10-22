@@ -134,8 +134,7 @@ impl ModuleHost {
                 budget,
                 device,
                 None,
-                item_key,
-                preview_key,
+                (item_key, preview_key),
             )
         }
     }

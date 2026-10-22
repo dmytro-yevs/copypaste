@@ -228,8 +228,7 @@ mod tests {
                 usize::MAX,
                 None,
                 None,
-                &keys.item_key(),
-                &keys.preview_key(),
+                (&keys.item_key(), &keys.preview_key()),
             )
             .unwrap()
     }
@@ -518,8 +517,7 @@ mod tests {
                         40,
                         None,
                         None,
-                        &keys.item_key(),
-                        &keys.preview_key(),
+                        (&keys.item_key(), &keys.preview_key()),
                     )
                     .unwrap();
                 assert_eq!(
@@ -575,8 +573,7 @@ mod tests {
                     usize::MAX,
                     None,
                     Some(&matches),
-                    &keys.item_key(),
-                    &keys.preview_key(),
+                    (&keys.item_key(), &keys.preview_key()),
                 )
                 .unwrap();
             assert_eq!(

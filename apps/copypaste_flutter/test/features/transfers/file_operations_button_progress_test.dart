@@ -1,6 +1,7 @@
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/features/transfers/file_operations_button_progress.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -8,46 +9,69 @@ void main() {
   testWidgets(
     'perimeter progress handles determinate, unknown, idle, and reduced motion states',
     (tester) async {
-      await tester.pumpWidget(_host(active: true, progress: 0.25));
+      final progress = ValueNotifier<double?>(0.25);
+      addTearDown(progress.dispose);
+      await tester.pumpWidget(_host(active: true, progress: progress));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(tester.hasRunningAnimations, isFalse);
 
-      await tester.pumpWidget(_host(active: true, progress: 0.75));
+      progress.value = 0.75;
       await tester.pump();
-      expect(tester.hasRunningAnimations, isTrue);
-      await tester.pump(AppMotion.quick);
-      expect(tester.hasRunningAnimations, isFalse);
+      final transition = find.descendant(
+        of: find.byType(FileOperationsButtonProgress),
+        matching: find.byType(TweenAnimationBuilder<double>),
+      );
+      expect(transition, findsOneWidget);
+      final transitionWidget = tester.widget<TweenAnimationBuilder<double>>(
+        transition,
+      );
+      expect(transitionWidget.duration, AppMotion.quick);
+      expect(transitionWidget.curve, AppMotion.standardCurve);
+      await tester.pumpAndSettle();
 
-      await tester.pumpWidget(_host(active: true));
+      progress.value = null;
       await tester.pump();
       expect(tester.takeException(), isNull);
-      expect(tester.hasRunningAnimations, isFalse);
 
+      final reducedProgress = ValueNotifier<double?>(0.5);
+      addTearDown(reducedProgress.dispose);
       await tester.pumpWidget(
-        _host(active: true, progress: 0.75, disableAnimations: true),
+        _host(
+          active: true,
+          progress: reducedProgress,
+          disableAnimations: true,
+        ),
       );
+      await tester.pumpAndSettle();
+      reducedProgress.value = 0.75;
       await tester.pump();
-      expect(tester.hasRunningAnimations, isFalse);
+      final reducedTransition = tester.widget<TweenAnimationBuilder<double>>(
+        find.descendant(
+          of: find.byType(FileOperationsButtonProgress),
+          matching: find.byType(TweenAnimationBuilder<double>),
+        ),
+      );
+      expect(reducedTransition.duration, AppMotion.instant);
+      await tester.pumpAndSettle();
 
-      await tester.pumpWidget(_host());
+      final idleProgress = ValueNotifier<double?>(null);
+      addTearDown(idleProgress.dispose);
+      await tester.pumpWidget(
+        _host(
+          progress: idleProgress,
+          active: false,
+        ),
+      );
       await tester.pump();
       expect(find.byType(FileOperationsButtonProgress), findsNothing);
       expect(tester.takeException(), isNull);
-
-      await tester.pumpWidget(
-        _host(active: true, progress: 0.5, disableAnimations: true),
-      );
-      await tester.pump();
-      expect(tester.takeException(), isNull);
-      expect(tester.hasRunningAnimations, isFalse);
     },
   );
 }
 
 Widget _host({
+  required ValueListenable<double?> progress,
   bool active = false,
-  double? progress,
   bool disableAnimations = false,
 }) => ShadcnApp(
   theme: AppTheme.dark,
@@ -64,14 +88,17 @@ Widget _host({
                 ),
                 child: const Icon(LucideIcons.download),
               )
-            : FileOperationsButtonProgress(
-                progress: progress,
-                child: Button.secondary(
-                  onPressed: () {},
-                  style: AppTheme.controlButtonStyle(
-                    const ButtonStyle.secondaryIcon(),
+            : ValueListenableBuilder<double?>(
+                valueListenable: progress,
+                builder: (context, value, _) => FileOperationsButtonProgress(
+                  progress: value,
+                  child: Button.secondary(
+                    onPressed: () {},
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.secondaryIcon(),
+                    ),
+                    child: const Icon(LucideIcons.download),
                   ),
-                  child: const Icon(LucideIcons.download),
                 ),
               ),
       ),
