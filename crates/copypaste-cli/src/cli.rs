@@ -254,7 +254,7 @@ pub(crate) enum ConfigAction {
         /// Ignore encoded images larger than this many bytes. Minimum: 1 MiB.
         #[arg(long)]
         max_image_size_bytes: Option<u64>,
-        /// Ignore files larger than this many bytes. Range: 1-100 MiB.
+        /// Ignore files larger than this many bytes. Range: 1 MiB-20 GiB.
         #[arg(long)]
         max_file_size_bytes: Option<u64>,
         /// Maximum decoded image memory in MiB. Minimum: 1 MiB.

@@ -62,5 +62,9 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CopyPaste"
   DeleteRegKey HKCU "Software\CopyPaste"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CopyPaste"
+  ReadRegStr $0 HKCU "Software\Classes\copypaste\shell\open\command" ""
+  ${If} $0 == '"$INSTDIR\CopyPaste.exe" "%1"'
+    DeleteRegKey HKCU "Software\Classes\copypaste"
+  ${EndIf}
   RMDir /r "$INSTDIR"
 SectionEnd
