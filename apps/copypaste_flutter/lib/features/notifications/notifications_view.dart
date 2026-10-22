@@ -90,7 +90,7 @@ class _NotificationsDrawer extends StatelessWidget {
         const Divider(),
         Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Button.secondary(
+          child: Button.outline(
             onPressed:
                 controller.items.any((item) => item.read && !item.actionable)
                 ? controller.clearRead

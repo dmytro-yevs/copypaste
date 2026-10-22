@@ -837,6 +837,105 @@ void main() {
     }
   });
 
+  for (final layout in [
+    (name: 'unified desktop', size: const Size(1200, 720), unified: true),
+    (name: 'desktop', size: const Size(1200, 720), unified: false),
+    (name: 'mobile', size: const Size(390, 844), unified: false),
+  ]) {
+    testWidgets('drawers preserve header actions on ${layout.name}', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(layout.size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = AppNavigationController();
+      addTearDown(controller.dispose);
+      var presses = 0;
+      await tester.pumpWidget(
+        _shell(
+          controller: controller,
+          unifiedTitleBar: layout.unified,
+          headerActions: {
+            AppDestination.history: [
+              Builder(
+                builder: (context) => Button.secondary(
+                  key: const ValueKey('open-test-drawer'),
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.secondaryIcon(),
+                  ),
+                  onPressed: () => showOverlay<void>(
+                    context,
+                    AppOverlays.drawerConfiguration(context),
+                    builder: (context) => ConstrainedBox(
+                      constraints: AppOverlays.drawerContentConstraints(
+                        context,
+                      ),
+                      child: Scaffold(
+                        child: Button.outline(
+                          onPressed: () => closeDrawer(context),
+                          child: const Text('Close test drawer'),
+                        ),
+                      ),
+                    ),
+                  ),
+                  child: const Icon(LucideIcons.bell),
+                ),
+              ),
+              Button.secondary(
+                key: const ValueKey('test-header-action'),
+                style: AppTheme.controlButtonStyle(
+                  const ButtonStyle.secondaryIcon(),
+                ),
+                onPressed: () => presses++,
+                child: const Icon(LucideIcons.refreshCw),
+              ),
+              if (layout.name == 'mobile') ...[
+                for (final icon in [LucideIcons.download, LucideIcons.pause])
+                  Button.secondary(
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.secondaryIcon(),
+                    ),
+                    onPressed: () {},
+                    child: Icon(icon),
+                  ),
+              ],
+            ],
+          },
+        ),
+      );
+      // Expanded navigation uses a continuously ticking library marquee.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      final action = find.byKey(const ValueKey('test-header-action'));
+      final headerRect = tester.getRect(action);
+      await tester.tap(find.byKey(const ValueKey('open-test-drawer')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(find.text('Close test drawer'), findsOneWidget);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('app-body-drawer-overlay')))
+            .top,
+        greaterThan(headerRect.bottom),
+      );
+      expect(tester.getRect(action), headerRect);
+      expect(action.hitTestable(), findsOneWidget);
+      await tester.tap(action);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(presses, 1);
+      expect(find.text('Close test drawer'), findsOneWidget);
+      await tester.tap(find.text('Close test drawer'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(find.text('Close test drawer'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('shows only the selected destination header actions', (
     tester,
   ) async {

@@ -13,46 +13,36 @@ import 'app_tokens.dart';
 ///
 /// Platform file pickers, permission prompts, and system menus remain native.
 abstract final class AppOverlays {
+  static const drawerBodyAnchor = Symbol('app-drawer-body');
   static const Color scrimColor = Color(0x99000000);
 
-  static const DrawerConfiguration _bottomDrawerConfiguration =
-      DrawerConfiguration(
-        position: OverlayPosition.bottom,
-        expands: true,
-        draggable: true,
-        barrierDismissible: true,
-        transformBackdrop: false,
-        showDragHandle: true,
-        dragHandleSize: Size(
-          AppOverlaySize.dragHandleWidth,
-          AppOverlaySize.dragHandleHeight,
-        ),
-        surfaceOpacity: 1,
-        surfaceBlur: 0,
-        barrierColor: scrimColor,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
-      );
-
-  static const DrawerConfiguration _sideDrawerConfiguration =
-      DrawerConfiguration(
-        position: OverlayPosition.right,
-        expands: true,
-        draggable: false,
-        barrierDismissible: true,
-        transformBackdrop: false,
-        showDragHandle: false,
-        surfaceOpacity: 1,
-        surfaceBlur: 0,
-        barrierColor: scrimColor,
-        borderRadius: BorderRadius.horizontal(
-          left: Radius.circular(AppRadius.xl),
-        ),
-      );
-
-  static DrawerConfiguration drawerConfiguration(BuildContext context) =>
-      MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
-      ? _sideDrawerConfiguration
-      : _bottomDrawerConfiguration;
+  static DrawerConfiguration drawerConfiguration(BuildContext context) {
+    final registry = OverlayAnchorRegistry.of(context);
+    final side =
+        MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector;
+    return DrawerConfiguration(
+      // Header actions target the body overlay through the library registry.
+      anchor: registry.find(drawerBodyAnchor) == null
+          ? null
+          : LinkedAnchor(drawerBodyAnchor, registry: registry),
+      position: side ? OverlayPosition.right : OverlayPosition.bottom,
+      expands: true,
+      draggable: !side,
+      barrierDismissible: true,
+      transformBackdrop: false,
+      showDragHandle: !side,
+      dragHandleSize: const Size(
+        AppOverlaySize.dragHandleWidth,
+        AppOverlaySize.dragHandleHeight,
+      ),
+      surfaceOpacity: 1,
+      surfaceBlur: 0,
+      barrierColor: scrimColor,
+      borderRadius: side
+          ? const BorderRadius.horizontal(left: Radius.circular(AppRadius.xl))
+          : const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+    );
+  }
 
   static BoxConstraints drawerContentConstraints(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
