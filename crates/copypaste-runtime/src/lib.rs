@@ -159,6 +159,19 @@ impl Runtime {
         std::fs::create_dir_all(data_dir).map_err(|_| RuntimeError::Storage)?;
         let keyring =
             Arc::new(Keyring::load_or_create(data_dir).map_err(|_| RuntimeError::Keyring)?);
+        Self::open_with_keyring(data_dir, device_name, port, clipboard, keyring)
+    }
+
+    /// Continues production runtime construction after the host has selected a
+    /// keyring. Keeping the remaining composition shared lets tests inject an
+    /// in-memory deterministic key without touching the platform keychain.
+    fn open_with_keyring(
+        data_dir: &Path,
+        device_name: &str,
+        port: u16,
+        clipboard: Arc<dyn ClipboardWriter>,
+        keyring: Arc<Keyring>,
+    ) -> Result<Self, RuntimeError> {
         let store = Store::open(&data_dir.join("history.db"), &keyring.db_key())
             .map_err(|_| RuntimeError::Storage)?;
         copypaste_core::file_transfer::upgrade_legacy(&store, &keyring.item_key())
@@ -2702,8 +2715,14 @@ mod tests {
     fn the_opened_runtime_applies_received_content_through_its_platform_writer() {
         let dir = tempfile::tempdir().unwrap();
         let clipboard = Arc::new(ReceivingClipboard::default());
-        let runtime =
-            Runtime::open_with_clipboard(dir.path(), "receiver", 0, clipboard.clone()).unwrap();
+        let runtime = Runtime::open_with_keyring(
+            dir.path(),
+            "receiver",
+            0,
+            clipboard.clone(),
+            Arc::new(Keyring::from_secret(&[7; 32])),
+        )
+        .unwrap();
         let incoming = copypaste_core::RemoteVersion {
             item_id: "incoming",
             content: "from another device",
