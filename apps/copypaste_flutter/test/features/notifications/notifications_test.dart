@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:copypaste_flutter/features/devices/devices.dart';
@@ -109,6 +110,12 @@ void main() {
       await tester.pumpAndSettle();
       final bell = find.byKey(const ValueKey('notifications-open'));
       final download = find.byIcon(LucideIcons.download);
+      final title = find.descendant(
+        of: find.byType(AppBar),
+        matching: find.text('History'),
+      );
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(tester.getCenter(title).dy, closeTo(tester.getCenter(bell).dy, 1));
       expect(
         tester.getCenter(bell).dy,
         closeTo(tester.getCenter(download).dy, 1),
