@@ -20,10 +20,7 @@ class QuickPasteRowGeometry extends SingleChildRenderObjectWidget {
       _RenderQuickPasteRowGeometry(onExtent);
 
   @override
-  void updateRenderObject(
-    BuildContext context,
-    RenderProxyBox renderObject,
-  ) {
+  void updateRenderObject(BuildContext context, RenderProxyBox renderObject) {
     (renderObject as _RenderQuickPasteRowGeometry).onExtent = onExtent;
   }
 }

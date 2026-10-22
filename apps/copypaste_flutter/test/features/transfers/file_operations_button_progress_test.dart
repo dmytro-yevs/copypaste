@@ -36,11 +36,7 @@ void main() {
       final reducedProgress = ValueNotifier<double?>(0.5);
       addTearDown(reducedProgress.dispose);
       await tester.pumpWidget(
-        _host(
-          active: true,
-          progress: reducedProgress,
-          disableAnimations: true,
-        ),
+        _host(active: true, progress: reducedProgress, disableAnimations: true),
       );
       await tester.pumpAndSettle();
       reducedProgress.value = 0.75;
@@ -56,12 +52,7 @@ void main() {
 
       final idleProgress = ValueNotifier<double?>(null);
       addTearDown(idleProgress.dispose);
-      await tester.pumpWidget(
-        _host(
-          progress: idleProgress,
-          active: false,
-        ),
-      );
+      await tester.pumpWidget(_host(progress: idleProgress, active: false));
       await tester.pump();
       expect(find.byType(FileOperationsButtonProgress), findsNothing);
       expect(tester.takeException(), isNull);
