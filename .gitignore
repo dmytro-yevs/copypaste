@@ -108,3 +108,42 @@ __pycache__/
 
 # Local project documentation
 /docs/
+
+# AI assistant instructions, state, specifications, and scratch outputs
+AGENTS.md
+agents.md
+CLAUDE.md
+GEMINI.md
+AGENTS.local.md
+CLAUDE.local.md
+.cursorrules
+.cursor/
+.windsurfrules
+.windsurf/
+.aider*
+.continue/
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+/agents/
+/openspec/
+/HANDOFF.md
+/STATUS.md
+/BRANCHES.md
+/INTEGRATION.md
+/REOPENED_ISSUES.md
+/CLOSED_TASK_VERIFICATION_MATRIX.md
+/MANUAL_QA_CHECKLIST.md
+/FIX_SUMMARY.md
+/PARITY_FIX_SUMMARY.md
+/POST_FIX_AUDIT_REPORT.md
+/docs/
+.agents/
+.codex/
+.claude/
+.beads/
+.swarm/
+.claude-flow/
+graphify-out/
+reports/
+/AUDIT_*.md
