@@ -192,10 +192,12 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
             _ = wait_for_clipboard(change_signal.as_deref(), retry, wait) => {
                 // Bound to a local so the clipboard guard is released before
                 // the handoff below rather than held across it.
+                let source_attribution_required =
+                    !state.settings.get().excluded_app_bundle_ids.is_empty();
                 let (changed, available) = {
                     let pending = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some();
                     let mut clipboard = state.clipboard();
-                    (pending || clipboard.changed(), clipboard.is_available())
+                    (pending || clipboard.changed_with_requirements(source_attribution_required), clipboard.is_available())
                 };
                 state.observe_clipboard_availability(available);
                 if !changed {

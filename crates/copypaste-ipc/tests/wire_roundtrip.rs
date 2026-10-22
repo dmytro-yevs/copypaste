@@ -135,6 +135,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             runtime_watch: false,
             capture_watch: false,
             capture_revision: 0,
+            platform_capabilities: Default::default(),
             sync_status: Default::default(),
             device_name: "Laptop".into(),
             device_id: Some("device-1".into()),

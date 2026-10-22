@@ -11,9 +11,11 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::StoredItem;
 use copypaste_core::{p2p_contract, HistoryCursor, ItemCursor, StoreError};
 use copypaste_ipc::{
-    clamp_page, ErrorCode, HistoryQuery, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
-    DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
+    clamp_page, CapabilityGuarantee, CapabilityState, CapabilityStatus, ErrorCode, HistoryQuery,
+    PlatformCapability, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE,
+    MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
 };
+use std::collections::BTreeMap;
 use tracing::{error, warn};
 
 mod copy;
@@ -59,6 +61,7 @@ pub(crate) fn status(state: &AppState, id: u64) -> Response {
         sync_enabled,
         capture_running,
         clipboard_available,
+        settings,
     ) = loop {
         let revision = state.capture_revision();
         let settings = state.settings.get();
@@ -70,6 +73,7 @@ pub(crate) fn status(state: &AppState, id: u64) -> Response {
             settings.sync_enabled,
             state.capture_running(),
             state.clipboard_available(),
+            (*settings).clone(),
         );
         if revision == state.capture_revision() {
             break fields;
@@ -77,9 +81,67 @@ pub(crate) fn status(state: &AppState, id: u64) -> Response {
     };
     let device_name = state.meta.device_name();
     let listen_addr = state.p2p.listen_addr();
+    let (clipboard_backend, mut platform_capabilities) = {
+        let clipboard = state.clipboard();
+        (
+            clipboard.backend_name().to_string(),
+            clipboard.platform_capabilities(),
+        )
+    };
+    let unprobed = CapabilityStatus {
+        state: CapabilityState::Error,
+        backend: None,
+        reason: Some("No daemon-side probe is registered for this capability.".into()),
+        permissions: Vec::new(),
+        guarantee: CapabilityGuarantee::None,
+        mime_types: Vec::new(),
+        max_bytes: None,
+    };
+    for kind in [
+        PlatformCapability::GlobalShortcuts,
+        PlatformCapability::QuickPaste,
+        PlatformCapability::DesktopIntegration,
+        PlatformCapability::Updates,
+    ] {
+        platform_capabilities.insert(kind, unprobed.clone());
+    }
+    platform_capabilities.insert(
+        PlatformCapability::SecureStorage,
+        if cfg!(target_os = "linux") {
+            CapabilityStatus {
+                state: CapabilityState::Available,
+                backend: Some("secret_service".into()),
+                reason: Some(
+                    "Device key loaded at daemon startup; current lock state was not probed."
+                        .into(),
+                ),
+                permissions: Vec::new(),
+                guarantee: CapabilityGuarantee::BestEffort,
+                mime_types: Vec::new(),
+                max_bytes: None,
+            }
+        } else {
+            unprobed
+        },
+    );
+    apply_capture_policy_capabilities(&mut platform_capabilities, &settings);
+    if !capture_running {
+        if let Some(capture) = platform_capabilities.get_mut(&PlatformCapability::ClipboardCapture)
+        {
+            capture.state = CapabilityState::Error;
+            capture.guarantee = CapabilityGuarantee::None;
+            capture.reason = Some("Capture loop is stopped.".into());
+        }
+    } else if private_mode {
+        if let Some(capture) = platform_capabilities.get_mut(&PlatformCapability::ClipboardCapture)
+        {
+            capture.reason = Some("Capture is paused by private mode.".into());
+        }
+    }
     Response::ok(
         id,
         ResponseData::Status(StatusData {
+            platform_capabilities,
             runtime_watch: true,
             capture_watch: true,
             capture_revision,
@@ -96,7 +158,7 @@ pub(crate) fn status(state: &AppState, id: u64) -> Response {
             item_count,
             capture_running,
             clipboard_available,
-            clipboard_backend: state.backend_name().to_string(),
+            clipboard_backend,
             private_mode,
             private_mode_epoch,
             counters: state.counters(),
@@ -106,6 +168,30 @@ pub(crate) fn status(state: &AppState, id: u64) -> Response {
             settings_health,
         }),
     )
+}
+
+fn apply_capture_policy_capabilities(
+    capabilities: &mut BTreeMap<PlatformCapability, CapabilityStatus>,
+    settings: &copypaste_ipc::ConfigData,
+) {
+    if settings.excluded_app_bundle_ids.is_empty() {
+        return;
+    }
+    let source_is_unsupported = capabilities
+        .get(&PlatformCapability::SourceAttribution)
+        .is_some_and(|source| source.state == CapabilityState::Unsupported);
+    if source_is_unsupported {
+        if let Some(capture) = capabilities.get_mut(&PlatformCapability::ClipboardCapture) {
+            if capture.state == CapabilityState::Available {
+                capture.state = CapabilityState::NeedsCompanion;
+                capture.guarantee = CapabilityGuarantee::None;
+                capture.reason = Some(
+                    "Source exclusions stop capture until an authenticated source adapter is active."
+                        .into(),
+                );
+            }
+        }
+    }
 }
 
 pub(super) fn set_device_name(state: &AppState, id: u64, name: &str) -> Response {
@@ -512,6 +598,8 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
     use copypaste_ipc::{content_type::TEXT, Method};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     struct UnavailableClipboard;
 
@@ -559,6 +647,102 @@ mod tests {
 
         assert!(available.clipboard_available);
         assert!(!unavailable.clipboard_available);
+    }
+
+    struct ChangingClipboard(Arc<AtomicBool>);
+
+    impl crate::clipboard::ClipboardSource for ChangingClipboard {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            None
+        }
+
+        fn poll_with_policy(
+            &mut self,
+            _: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            None
+        }
+
+        fn is_available(&self) -> bool {
+            self.0.load(Ordering::Acquire)
+        }
+
+        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn backend_name(&self) -> &'static str {
+            if self.0.load(Ordering::Acquire) {
+                "linux-wayland-data-control"
+            } else {
+                "linux-wayland-data-control-inactive"
+            }
+        }
+    }
+
+    #[test]
+    fn status_reads_current_backend_after_reconnect() {
+        let connected = Arc::new(AtomicBool::new(false));
+        let (state, _dir) = test_state_with_clipboard(
+            "status-backend-reconnect",
+            Box::new(ChangingClipboard(Arc::clone(&connected))),
+        );
+        let Some(ResponseData::Status(before)) = status(&state, 1).data else {
+            panic!("status response expected");
+        };
+        connected.store(true, Ordering::Release);
+        let Some(ResponseData::Status(after)) = status(&state, 2).data else {
+            panic!("status response expected");
+        };
+        assert!(!before.clipboard_available);
+        assert_eq!(
+            before.clipboard_backend,
+            "linux-wayland-data-control-inactive"
+        );
+        assert!(after.clipboard_available);
+        assert_eq!(after.clipboard_backend, "linux-wayland-data-control");
+    }
+
+    #[test]
+    fn source_exclusions_report_capture_blocked_without_attribution() {
+        let mut capabilities = BTreeMap::from([
+            (
+                PlatformCapability::ClipboardCapture,
+                CapabilityStatus {
+                    state: CapabilityState::Available,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::Verified,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+            (
+                PlatformCapability::SourceAttribution,
+                CapabilityStatus {
+                    state: CapabilityState::Unsupported,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::None,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+        ]);
+        let settings = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Private".into()],
+            ..Default::default()
+        };
+        apply_capture_policy_capabilities(&mut capabilities, &settings);
+        let capture = &capabilities[&PlatformCapability::ClipboardCapture];
+        assert_eq!(capture.state, CapabilityState::NeedsCompanion);
+        assert_eq!(capture.guarantee, CapabilityGuarantee::None);
+        assert_eq!(
+            capture.backend.as_deref(),
+            Some("linux-wayland-data-control")
+        );
     }
 
     #[test]

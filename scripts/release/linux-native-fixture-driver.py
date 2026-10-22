@@ -533,6 +533,49 @@ def status(cli, environment):
     return value
 
 
+def capability_report(cli, environment, evidence_dir, architecture, desktop, session, runtime_format):
+    """Record only the redacted diagnostics from the exact installed CLI."""
+    result = run([str(cli), "doctor", "--json"], env=environment)
+    report = json.loads(result.stdout)
+    names = {
+        "clipboard_capture", "clipboard_read_write", "source_attribution",
+        "privacy_enforcement", "global_shortcuts", "quick_paste",
+        "secure_storage", "desktop_integration", "updates",
+    }
+    if not isinstance(report, dict) or set(report) != {"schema", "capabilities"} or report["schema"] != 1:
+        raise RuntimeError("installed CLI capability report has an invalid schema")
+    capabilities = report["capabilities"]
+    if not isinstance(capabilities, dict) or set(capabilities) != names:
+        raise RuntimeError("installed CLI capability report is incomplete")
+    for name, entry in capabilities.items():
+        allowed = {"state", "backend", "guarantee", "reason", "permissions"}
+        if name == "clipboard_read_write":
+            allowed |= {"mime_formats", "limitations", "max_bytes"}
+        if (not isinstance(entry, dict) or not allowed.issuperset(entry)
+                or not {"state", "backend", "guarantee", "reason", "permissions"} <= set(entry)
+                or entry["state"] not in {"available", "needs_permission", "needs_companion", "unsupported", "error"}
+                or entry["guarantee"] not in {"none", "best_effort", "verified"}
+                or (entry["backend"] is not None and not isinstance(entry["backend"], str))
+                or (entry["reason"] is not None and not isinstance(entry["reason"], str))
+                or not isinstance(entry["permissions"], list)
+                or any(not isinstance(value, str) for value in entry["permissions"])):
+            raise RuntimeError(f"installed CLI capability report is invalid: {name}")
+        if entry["state"] == "available" and (not entry["backend"] or entry["guarantee"] == "none"):
+            raise RuntimeError(f"installed CLI capability lacks an active backend: {name}")
+        if name == "clipboard_read_write" and entry["state"] == "available":
+            if (not isinstance(entry.get("mime_formats"), list)
+                    or not entry["mime_formats"]
+                    or any(not isinstance(mime, str) for mime in entry["mime_formats"])
+                    or type(entry.get("max_bytes")) is not int
+                    or not 0 < entry["max_bytes"] <= 4 * 1024 * 1024):
+                raise RuntimeError("installed CLI clipboard formats or size limit are invalid")
+    if capabilities["clipboard_capture"]["state"] != "available":
+        raise RuntimeError("installed CLI did not report active clipboard capture")
+    output = Path(evidence_dir) / f"capabilities-{architecture}-{desktop.lower()}-{session}-{runtime_format}.json"
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    emit_result("daemon_cli_gui", result)
+
+
 def native_clipboard_transport_is_ready(value):
     """Return whether status proves the live Linux capture transport is usable."""
     return (
@@ -1529,6 +1572,8 @@ def main():
             if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
                 raise RuntimeError("packaged daemon status has an invalid shape")
             emit_result("daemon_cli_gui", gui_status)
+            capability_report(cli, cli_environment, args.evidence_dir,
+                              args.architecture, args.desktop, args.session, args.runtime_format)
             require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
             require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
             require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")

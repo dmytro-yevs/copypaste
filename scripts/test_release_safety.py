@@ -390,13 +390,20 @@ class ReleaseSafetyTest(unittest.TestCase):
         })
         for path in (
             ROOT / ".github/workflows/compositor-runtime.yml",
-            ROOT / ".github/workflows/linux-native-qualification.yml",
             ROOT / ".github/workflows/release.yml",
         ):
             value = path.read_text(encoding="utf-8")
             for name in expected:
                 self.assertIn(name, value)
             self.assertNotIn("copypaste-compositor-runtime-kde-", value)
+        manifest = json.loads((ROOT / "packaging/linux/release-contract.json").read_text(encoding="utf-8"))
+        self.assertTrue(expected <= {
+            row["compositor_artifact"] for row in manifest["targets"]
+            if row["tier"] == "stable" and row["native_qualification"]
+        })
+        qualification = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("platform_manifest.py matrix --tier stable --purpose qualification", qualification)
+        self.assertIn("fromJSON(needs.source.outputs.matrix)", qualification)
         verifier = runpy.run_path(str(ROOT / "scripts/release/verify-compositor-runtime-source-run.py"))
         self.assertTrue(expected <= verifier["EXPECTED"])
 
@@ -1001,6 +1008,32 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
+                        capability_evidence = []
+                        for format_name in ("AppImage", native_format):
+                            capability_name = f"{format_name.lower()}/capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
+                            clipboard_backend = "linux-x11-system-clipboard" if session == "x11" else f"linux-{desktop.lower()}-wayland-clipboard"
+                            available = {"state": "available", "backend": clipboard_backend,
+                                         "reason": None, "permissions": [], "guarantee": "verified"}
+                            unprobed = {"state": "error", "backend": None,
+                                        "reason": "No daemon-side probe is registered for this capability.",
+                                        "permissions": [], "guarantee": "none"}
+                            capability_rows = {name: dict(unprobed) for name in verifier["CAPABILITY_NAMES"]}
+                            for kind in ("clipboard_capture", "clipboard_read_write", "privacy_enforcement"):
+                                capability_rows[kind] = dict(available)
+                            capability_rows["clipboard_read_write"].update({
+                                "mime_formats": ["text/plain;charset=utf-8", "image/png"],
+                                "max_bytes": 4 * 1024 * 1024,
+                                "limitations": ["One local file per clipboard change."],
+                            })
+                            capability_rows["source_attribution"] = {
+                                **available, "guarantee": "best_effort",
+                            }
+                            capability_path = root / capability_name
+                            capability_path.parent.mkdir(exist_ok=True)
+                            capability_path.write_text(json.dumps({"schema": 1, "capabilities": capability_rows}), encoding="utf-8")
+                            capability_evidence.append({"name": capability_name,
+                                "sha256": hashlib.sha256(capability_path.read_bytes()).hexdigest(),
+                                "size_bytes": capability_path.stat().st_size})
                         (root / f"linux-native-{architecture}-{desktop.lower()}-{session}.json").write_text(json.dumps({
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
                             "source_run_id": "123", "artifact_run_id": "456", "architecture": architecture,
@@ -1015,13 +1048,15 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "previous_packages": previous_package_rows(architecture),
                             "upgrade": upgrade,
                             "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
-                            "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}, *session_evidence],
+                            "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}, *session_evidence, *capability_evidence],
                         }))
             verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
             trace_path = root / "linux-native-x86_64-gnome-x11.trace.json"
             x11 = root / "linux-native-x86_64-gnome-x11.json"
             original_trace = json.loads(trace_path.read_text())
             original_receipt = json.loads(x11.read_text())
+            capability_attachments = [item for item in original_receipt["evidence"]
+                                      if "/capabilities-" in item["name"]]
             def rejects_trace(mutator, message):
                 trace = deepcopy(original_trace)
                 mutator(trace)
@@ -1029,7 +1064,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 receipt = deepcopy(original_receipt)
                 attachment = {"name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(), "size_bytes": trace_path.stat().st_size}
                 receipt["trace"] = attachment
-                receipt["evidence"] = [attachment]
+                receipt["evidence"] = [attachment, *capability_attachments]
                 with self.assertRaisesRegex(ValueError, message):
                     verifier["verify_trace"](root, receipt, "x86_64", "GNOME", "x11", "1.2.3", "a" * 40, "123", "456", verifier["assertion_set"]("prior_release", "x11"), "1.2.2", verifier["expected_packages"](previous_artifacts, "1.2.2", "x86_64"))
                 trace_path.write_text(json.dumps(original_trace))
@@ -1045,7 +1080,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 trace_path.write_text(json.dumps(trace))
                 attachment = {"name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(), "size_bytes": trace_path.stat().st_size}
                 receipt["trace"] = attachment
-                receipt["evidence"] = [attachment]
+                receipt["evidence"] = [attachment, *capability_attachments]
                 x11.write_text(json.dumps(receipt))
                 with self.assertRaisesRegex(ValueError, message):
                     verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
@@ -1062,7 +1097,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 "size_bytes": trace_path.stat().st_size,
             }
             receipt["trace"] = trace_attachment
-            receipt["evidence"] = [trace_attachment]
+            receipt["evidence"] = [trace_attachment, *capability_attachments]
             x11.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError, "typed IPC"):
                 verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")

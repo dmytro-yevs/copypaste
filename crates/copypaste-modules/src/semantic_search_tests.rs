@@ -203,6 +203,8 @@ fn history_notifications_only_schedule_changed_semantic_input() {
     let fixture = Fixture::new(Some("semantic fixture"));
     let service = fixture.service();
     until(|| service.ready.load(Ordering::Acquire));
+    // Scheduling is checked independently of the worker consuming the revision.
+    service.shutdown();
     let before = fixture.store.resource_revisions().unwrap();
     let scheduled = service.wake.0.lock().unwrap().background_generation;
 
@@ -220,7 +222,6 @@ fn history_notifications_only_schedule_changed_semantic_input() {
         service.wake.0.lock().unwrap().background_generation,
         scheduled.wrapping_add(1)
     );
-    service.shutdown();
 }
 
 #[test]
