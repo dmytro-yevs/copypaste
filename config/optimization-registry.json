@@ -2956,6 +2956,30 @@
         }
       ],
       "next_step": "Measure candidate application, daemon and module workers separately and together on macOS, physical Android and installed Windows, including peak, steady state, repeated reconciliation and growth. Existing CPU/wakeup/I/O/network/growth budgets remain unresolved; no resource qualification is claimed."
+    },
+    {
+      "id": "RUN-063",
+      "title": "Bound Linux clipboard adapter reprobes",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "Linux clipboard adapter",
+      "platforms": [
+        "Linux"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/linux.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "A healthy idle data-control adapter adds no reconnect wakeups; a missing required capability or lost bridge triggers at most one probe per five seconds, without reading a clipboard payload.",
+      "next_step": "Measure daemon and worker CPU, wakeups, memory peaks and reconnection latency on GNOME and KDE Wayland sessions before native resource qualification.",
+      "native_resource_qualification": {
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Unit adapter selection and reconnect tests passed; native resource qualification pending."
     }
   ]
 }

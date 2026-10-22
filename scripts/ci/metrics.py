@@ -282,8 +282,20 @@ def markdown(report):
 def api(repository, endpoint, paginated=False):
     command = ["gh", "api"]
     if paginated:
-        command += ["--paginate", "--slurp"]
-    return json.loads(subprocess.check_output([*command, f"repos/{repository}/{endpoint}"], text=True))
+        command.append("--paginate")
+    response = subprocess.check_output([*command, f"repos/{repository}/{endpoint}"], text=True)
+    if not paginated:
+        return json.loads(response)
+    pages = []
+    decoder = json.JSONDecoder()
+    offset = 0
+    while offset < len(response):
+        while offset < len(response) and response[offset].isspace():
+            offset += 1
+        if offset < len(response):
+            page, offset = decoder.raw_decode(response, offset)
+            pages.append(page)
+    return pages
 
 
 def collect(repository, workflow, limit):

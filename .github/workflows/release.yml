@@ -87,6 +87,7 @@ jobs:
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
       linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      linux_build_matrix: ${{ steps.platform.outputs.matrix }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -140,8 +141,8 @@ jobs:
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true || "${GITHUB_REF_TYPE:-}" == tag ]]
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            release_commit="$(git rev-list -n 1 "v$version")"
+            git fetch --no-tags origin "refs/tags/v$version"
+            release_commit="$(git rev-list -n 1 FETCH_HEAD)"
             linux_required=false
             compositor_runtime_required=false
             if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
@@ -181,8 +182,8 @@ jobs:
             [[ "$GITHUB_REF_NAME" == "v$version" ]]
             publish=true
           elif [[ "${REQUESTED_PUBLISH:-false}" == true ]]; then
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            [[ "$(git rev-list -n 1 "v$version")" == "$GITHUB_SHA" ]]
+            git fetch --no-tags origin "refs/tags/v$version"
+            [[ "$(git rev-list -n 1 FETCH_HEAD)" == "$GITHUB_SHA" ]]
             publish=true
           fi
           if [[ -z "${linux_required+x}" ]]; then
@@ -263,6 +264,8 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: python3 scripts/release/preflight-sources.py
+      - id: platform
+        run: echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier stable --purpose build)" >> "$GITHUB_OUTPUT"
 
   policy:
     name: Release CI policy
@@ -605,12 +608,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
+      matrix: ${{ fromJSON(needs.preflight.outputs.linux_build_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

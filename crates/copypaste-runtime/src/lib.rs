@@ -71,6 +71,7 @@ fn capture_status_data(
         }
     };
     copypaste_ipc::StatusData {
+        platform_capabilities: Default::default(),
         runtime_watch: true,
         capture_watch: true,
         capture_revision: revision,
