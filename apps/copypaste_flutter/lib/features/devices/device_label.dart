@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_tokens.dart';
@@ -28,10 +29,13 @@ class DeviceLabel extends StatelessWidget {
     final resolvedStyle = style ?? DefaultTextStyle.of(context).style;
     final leading = SizedBox.square(
       dimension: iconSize,
-      child: Icon(
-        DevicePresentation.icon(deviceClass),
+      child: AppIconFrame(
         size: iconSize,
-        color: resolvedStyle.color,
+        child: Icon(
+          DevicePresentation.icon(deviceClass),
+          size: iconSize,
+          color: resolvedStyle.color,
+        ),
       ),
     );
     if (!showName) return ExcludeSemantics(child: leading);

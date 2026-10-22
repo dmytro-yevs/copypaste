@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -110,7 +111,9 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  leading: const [Icon(LucideIcons.settings)],
+                  leading: const [
+                    AppIconFrame(child: Icon(LucideIcons.settings)),
+                  ],
                   trailing: [
                     Tooltip(
                       tooltip: (context) => const TooltipContainer(
@@ -125,7 +128,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                             const ButtonStyle.ghostIcon(),
                           ),
                           onPressed: () => closeDrawer(context),
-                          child: const Icon(LucideIcons.x),
+                          child: const AppIconFrame(child: Icon(LucideIcons.x)),
                         ),
                       ),
                     ),
@@ -211,7 +214,9 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                               ),
                               alignment: AppTheme.moduleSettingsActionAlignment,
                               leading: const Center(
-                                child: Icon(LucideIcons.messageSquare),
+                                child: AppIconFrame(
+                                  child: Icon(LucideIcons.messageSquare),
+                                ),
                               ),
                               onPressed: controller.busy
                                   ? null
@@ -238,7 +243,9 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                               ),
                               alignment: AppTheme.moduleSettingsActionAlignment,
                               leading: const Center(
-                                child: Icon(LucideIcons.rotateCw),
+                                child: AppIconFrame(
+                                  child: Icon(LucideIcons.rotateCw),
+                                ),
                               ),
                               onPressed: controller.busy
                                   ? null
@@ -259,7 +266,9 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                               ),
                               alignment: AppTheme.moduleSettingsActionAlignment,
                               leading: const Center(
-                                child: Icon(LucideIcons.play),
+                                child: AppIconFrame(
+                                  child: Icon(LucideIcons.play),
+                                ),
                               ),
                               onPressed:
                                   controller.busy ||

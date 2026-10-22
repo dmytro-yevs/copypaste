@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import '../../../shared/format_bytes.dart';
 import 'dart:async';
 
@@ -69,7 +70,10 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                       controller.catalogState == ModulesLoadState.loading
                   ? null
                   : controller.loadMarketplace,
-              leading: const Icon(LucideIcons.refreshCw, size: AppIconSize.sm),
+              leading: const AppIconFrame(
+                size: AppIconSize.sm,
+                child: Icon(LucideIcons.refreshCw, size: AppIconSize.sm),
+              ),
               child: const Text('Refresh'),
             ),
           ],
@@ -80,7 +84,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           placeholder: const Text('Search modules'),
           onChanged: controller.search,
           features: const [
-            InputFeature.leading(Icon(LucideIcons.search)),
+            InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
             InputFeature.clear(),
           ],
         ),
@@ -195,7 +199,10 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(LucideIcons.puzzle, size: AppIconSize.xl),
+                  const AppIconFrame(
+                    size: AppIconSize.xl,
+                    child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
+                  ),
                   if (installed != null)
                     Semantics(
                       label: 'Enable ${installed.title}',
@@ -289,7 +296,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                                     controller.busy || installed.restartRequired
                                     ? null
                                     : () => controller.install(update),
-                                child: const Icon(LucideIcons.download),
+                                child: const AppIconFrame(
+                                  child: Icon(LucideIcons.download),
+                                ),
                               ),
                             ),
                           ),
@@ -311,7 +320,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                                   controller.busy || installed.restartRequired
                                   ? null
                                   : () => _remove(context, installed),
-                              child: const Icon(LucideIcons.trash2),
+                              child: const AppIconFrame(
+                                child: Icon(LucideIcons.trash2),
+                              ),
                             ),
                           ),
                         ),
@@ -331,7 +342,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                               onPressed: controller.busy
                                   ? null
                                   : () => _settings(context, id),
-                              child: const Icon(LucideIcons.settings),
+                              child: const AppIconFrame(
+                                child: Icon(LucideIcons.settings),
+                              ),
                             ),
                           ),
                         ),

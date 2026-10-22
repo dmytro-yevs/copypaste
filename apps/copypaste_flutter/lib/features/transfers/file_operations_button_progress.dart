@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_motion.dart';
+import '../../app/theme/app_icon_frame.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 
@@ -37,8 +38,8 @@ class FileOperationsButtonProgress extends StatelessWidget {
       ),
     );
 
-    return SizedBox.square(
-      dimension: extent,
+    return AppIconFrame(
+      size: extent,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -49,8 +50,7 @@ class FileOperationsButtonProgress extends StatelessWidget {
             AppMotion.progressTransition(
               context,
               value: progress!.clamp(0, 1).toDouble(),
-              builder: (context, value, _) =>
-                  paint(value, staticBorder: false),
+              builder: (context, value, _) => paint(value, staticBorder: false),
             ),
         ],
       ),

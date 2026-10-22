@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -71,9 +72,11 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
               : _open,
           child: Semantics(
             label: 'Synchronization: ${phase.label}',
-            child: Icon(
-              LucideIcons.network,
-              color: _phaseColor(context, phase),
+            child: AppIconFrame(
+              child: Icon(
+                LucideIcons.network,
+                color: _phaseColor(context, phase),
+              ),
             ),
           ),
         ),
@@ -159,7 +162,12 @@ class _SyncDetails extends StatelessWidget {
         title: const Text('Synchronization'),
         subtitle: Text(status.phase.label),
         leading: [
-          Icon(LucideIcons.network, color: _phaseColor(context, status.phase)),
+          AppIconFrame(
+            child: Icon(
+              LucideIcons.network,
+              color: _phaseColor(context, status.phase),
+            ),
+          ),
         ],
         trailing: [
           Tooltip(
@@ -175,7 +183,7 @@ class _SyncDetails extends StatelessWidget {
                   const ButtonStyle.ghostIcon(),
                 ),
                 onPressed: onClose,
-                child: const Icon(LucideIcons.x),
+                child: const AppIconFrame(child: Icon(LucideIcons.x)),
               ),
             ),
           ),
@@ -267,7 +275,7 @@ class _SyncPeerCard extends StatelessWidget {
           const Gap(AppSpacing.md),
           if (peer.error case final error?) ...[
             Alert.destructive(
-              leading: const Icon(LucideIcons.circleAlert),
+              leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
               title: Text(
                 phase == SyncPhase.synced
                     ? 'Items pending synchronization'

@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -560,12 +561,17 @@ class _HistoryListState extends State<_HistoryList> {
                         child: Center(
                           child: hasError
                               ? Alert.destructive(
-                                  leading: const Icon(LucideIcons.circleAlert),
+                                  leading: const AppIconFrame(
+                                    child: Icon(LucideIcons.circleAlert),
+                                  ),
                                   title: const Text('History needs attention'),
                                   content: Text(controller.errorMessage!),
                                 )
                               : controller.isLoadingMore
-                              ? const CircularProgressIndicator()
+                              ? const AppIconFrame(
+                                  size: AppIconSize.sm,
+                                  child: CircularProgressIndicator(),
+                                )
                               : Button.ghost(
                                   onPressed: () =>
                                       unawaited(controller.loadMore()),
@@ -664,10 +670,13 @@ class _HistoryListState extends State<_HistoryList> {
             key: const ValueKey<String>('history-pin-drop-placeholder'),
             decoration: AppTheme.historyPinnedDropDecoration(context),
             child: Center(
-              child: Icon(
-                LucideIcons.moveVertical,
+              child: AppIconFrame(
                 size: AppIconSize.md,
-                color: Theme.of(context).colorScheme.primary,
+                child: Icon(
+                  LucideIcons.moveVertical,
+                  size: AppIconSize.md,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
               ),
             ),
           ),
@@ -753,11 +762,14 @@ class _HistorySectionDivider extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               spacing: AppSpacing.xs,
               children: [
-                Icon(
-                  collapsed
-                      ? LucideIcons.chevronRight
-                      : LucideIcons.chevronDown,
+                AppIconFrame(
                   size: AppIconSize.sm,
+                  child: Icon(
+                    collapsed
+                        ? LucideIcons.chevronRight
+                        : LucideIcons.chevronDown,
+                    size: AppIconSize.sm,
+                  ),
                 ),
                 Text(section.label(context)),
               ],
@@ -850,7 +862,7 @@ class _SkippedRowsWarning extends StatelessWidget {
   Widget build(BuildContext context) {
     final noun = count == 1 ? 'row was' : 'rows were';
     return Alert(
-      leading: const Icon(LucideIcons.triangleAlert),
+      leading: const AppIconFrame(child: Icon(LucideIcons.triangleAlert)),
       title: Text('$count clipboard $noun skipped'),
       content: const Text(
         'Some retained clips could not be read and are not shown in this list.',
@@ -963,7 +975,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                   key: const ValueKey<String>('history-search-toggle'),
                   style: AppTheme.historyToolbarIconStyle,
                   onPressed: () => setState(() => _searchExpanded = true),
-                  child: const Icon(LucideIcons.search, size: AppIconSize.md),
+                  child: const AppIconFrame(
+                    size: AppIconSize.md,
+                    child: Icon(LucideIcons.search, size: AppIconSize.md),
+                  ),
                 ),
               ),
               ...filters,
@@ -1006,8 +1021,14 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ? () => unawaited(widget.controller.chooseFiles())
             : null,
         child: widget.controller.isImportingFiles
-            ? const CircularProgressIndicator(size: AppIconSize.md)
-            : const Icon(LucideIcons.filePlus, size: AppIconSize.md),
+            ? const AppIconFrame(
+                size: AppIconSize.md,
+                child: CircularProgressIndicator(size: AppIconSize.md),
+              )
+            : const AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(LucideIcons.filePlus, size: AppIconSize.md),
+              ),
       ),
     ),
   );
@@ -1026,7 +1047,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                 widget.controller.beginBulkSelection();
               }
             : null,
-        child: const Icon(LucideIcons.squareCheck, size: AppIconSize.md),
+        child: const AppIconFrame(
+          size: AppIconSize.md,
+          child: Icon(LucideIcons.squareCheck, size: AppIconSize.md),
+        ),
       ),
     ),
   );
@@ -1044,7 +1068,9 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       onChanged: widget.controller.updateSearch,
       features: compact
           ? [
-              const InputFeature.leading(Icon(LucideIcons.search)),
+              const InputFeature.leading(
+                AppIconFrame(child: Icon(LucideIcons.search)),
+              ),
               InputFeature.trailing(
                 Semantics(
                   label: 'Close search',
@@ -1052,14 +1078,18 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                   child: Button.ghost(
                     style: AppTheme.inputFeatureButtonStyle,
                     onPressed: _closeCompactSearch,
-                    child: const Icon(LucideIcons.x),
+                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
                 ),
               ),
             ]
           : const [
-              InputFeature.leading(Icon(LucideIcons.search)),
-              InputFeature.clear(icon: Icon(LucideIcons.x)),
+              InputFeature.leading(
+                AppIconFrame(child: Icon(LucideIcons.search)),
+              ),
+              InputFeature.clear(
+                icon: AppIconFrame(child: Icon(LucideIcons.x)),
+              ),
             ],
     );
   }
@@ -1347,13 +1377,19 @@ class _HistoryFilterOption<T> {
     if (compact) {
       return Semantics(
         label: label,
-        child: Icon(resolvedIcon, size: AppIconSize.md),
+        child: AppIconFrame(
+          size: AppIconSize.md,
+          child: Icon(resolvedIcon, size: AppIconSize.md),
+        ),
       );
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(resolvedIcon, size: AppIconSize.sm),
+        AppIconFrame(
+          size: AppIconSize.sm,
+          child: Icon(resolvedIcon, size: AppIconSize.sm),
+        ),
         const Gap(AppSpacing.sm),
         Text(label, maxLines: 1),
       ],
@@ -1533,10 +1569,12 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                                 onPressed: controller.isPinPending(clip.id)
                                     ? null
                                     : () => controller.togglePin(clip),
-                                child: Icon(
-                                  clip.pinned
-                                      ? LucideIcons.pinOff
-                                      : LucideIcons.pin,
+                                child: AppIconFrame(
+                                  child: Icon(
+                                    clip.pinned
+                                        ? LucideIcons.pinOff
+                                        : LucideIcons.pin,
+                                  ),
                                 ),
                               ),
                             ),
@@ -1564,7 +1602,9 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                                         controller: controller,
                                         clipId: clip.id,
                                       ),
-                                child: const Icon(LucideIcons.trash2),
+                                child: const AppIconFrame(
+                                  child: Icon(LucideIcons.trash2),
+                                ),
                               ),
                             ),
                           ),
@@ -1641,8 +1681,8 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                                         onPressed: controller.canReorderPinned
                                             ? () {}
                                             : null,
-                                        child: const Icon(
-                                          LucideIcons.gripVertical,
+                                        child: const AppIconFrame(
+                                          child: Icon(LucideIcons.gripVertical),
                                         ),
                                       ),
                                     ),
@@ -1784,11 +1824,15 @@ class _ClipContentState extends State<_ClipContent> {
           builder: (context, snapshot) {
             final preview = snapshot.data;
             if (preview == null) {
-              final placeholder = const Icon(LucideIcons.image);
+              final placeholder = const AppIconFrame(
+                child: Icon(LucideIcons.image),
+              );
               return revealed ? placeholder : Center(child: placeholder);
             }
             if (preview.width <= 0 || preview.height <= 0) {
-              final placeholder = const Icon(LucideIcons.imageOff);
+              final placeholder = const AppIconFrame(
+                child: Icon(LucideIcons.imageOff),
+              );
               return revealed ? placeholder : Center(child: placeholder);
             }
             final scale = math.min(
@@ -1816,8 +1860,9 @@ class _ClipContentState extends State<_ClipContent> {
                     preview.height,
                     (preview.height * scale * pixelRatio).ceil().clamp(1, 2048),
                   ),
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Center(child: Icon(LucideIcons.imageOff)),
+                  errorBuilder: (context, error, stackTrace) => const Center(
+                    child: AppIconFrame(child: Icon(LucideIcons.imageOff)),
+                  ),
                 ),
               ),
             );
@@ -1846,10 +1891,13 @@ class _ClipMeta extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = AppTheme.historyMetadataTextStyle(context);
     final strutStyle = AppTheme.historyMetadataStrutStyle(context);
-    final kindIcon = Icon(
-      HistoryClipPresentation.icon(clip.contentKind),
+    final kindIcon = AppIconFrame(
       size: AppIconSize.xs,
-      color: style.color,
+      child: Icon(
+        HistoryClipPresentation.icon(clip.contentKind),
+        size: AppIconSize.xs,
+        color: style.color,
+      ),
     );
     return Text.rich(
       TextSpan(

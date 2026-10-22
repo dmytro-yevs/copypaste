@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -128,7 +129,7 @@ class _ActiveRecord extends StatelessWidget {
                     const ButtonStyle.ghostIcon(),
                   ),
                   onPressed: onCancel,
-                  child: const Icon(LucideIcons.x),
+                  child: const AppIconFrame(child: Icon(LucideIcons.x)),
                 ),
               ),
             ],
@@ -221,7 +222,9 @@ class _CompletedRecord extends StatelessWidget {
                 height: AppControlSize.regular,
                 child: Button.link(
                   onPressed: onOpenFile,
-                  leading: const Icon(LucideIcons.folderOpen),
+                  leading: const AppIconFrame(
+                    child: Icon(LucideIcons.folderOpen),
+                  ),
                   child: const Text('Show file'),
                 ),
               ),
@@ -235,7 +238,7 @@ class _CompletedRecord extends StatelessWidget {
                     const ButtonStyle.ghostIcon(),
                   ),
                   onPressed: onRemove,
-                  child: const Icon(LucideIcons.trash2),
+                  child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
                 ),
               ),
             ],

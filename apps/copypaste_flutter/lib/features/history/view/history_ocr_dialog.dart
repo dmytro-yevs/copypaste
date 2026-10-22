@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -73,7 +74,7 @@ Future<void> showHistoryOcrDialog(
                             : AppToastTone.error,
                       );
                     },
-              leading: const Icon(LucideIcons.copy),
+              leading: const AppIconFrame(child: Icon(LucideIcons.copy)),
               child: const Text('Copy'),
             ),
           ],

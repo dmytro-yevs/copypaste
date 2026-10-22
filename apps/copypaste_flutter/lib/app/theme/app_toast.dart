@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 enum AppToastTone { information, success, error }
@@ -41,11 +42,15 @@ class AppToast extends StatelessWidget {
     final content = Text(message);
     if (tone == AppToastTone.error) {
       return Alert.destructive(
-        leading: Icon(icon),
+        leading: AppIconFrame(child: Icon(icon)),
         title: Text(title),
         content: content,
       );
     }
-    return Alert(leading: Icon(icon), title: Text(title), content: content);
+    return Alert(
+      leading: AppIconFrame(child: Icon(icon)),
+      title: Text(title),
+      content: content,
+    );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../app/theme/app_tokens.dart';
@@ -78,10 +79,16 @@ class StateView extends StatelessWidget {
   Widget _contentFor(double availableWidth) {
     return switch (kind) {
       StateViewKind.loading => _standardContent(
-        leading: const CircularProgressIndicator(),
+        leading: const AppIconFrame(
+          size: AppIconSize.sm,
+          child: CircularProgressIndicator(),
+        ),
       ),
       StateViewKind.empty => _standardContent(
-        leading: Icon(icon, size: compact ? AppIconSize.lg : AppIconSize.state),
+        leading: AppIconFrame(
+          size: compact ? AppIconSize.lg : AppIconSize.state,
+          child: Icon(icon, size: compact ? AppIconSize.lg : AppIconSize.state),
+        ),
       ),
       StateViewKind.error => _errorContent(
         showTrailingAction: availableWidth >= 420,
@@ -97,7 +104,7 @@ class StateView extends StatelessWidget {
             child: Text(actionLabel!, textAlign: TextAlign.center),
           );
     return Alert.destructive(
-      leading: const Icon(LucideIcons.circleAlert),
+      leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
       title: Text(title),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

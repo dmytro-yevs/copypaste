@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -28,10 +29,13 @@ class SourceAppLabel extends StatelessWidget {
       builder: (context, snapshot) {
         final resolvedStyle = style ?? DefaultTextStyle.of(context).style;
         final sourceIcon = snapshot.data;
-        final leading = Avatar(
-          initials: Avatar.getInitials(name),
+        final leading = AppIconFrame(
           size: iconSize,
-          provider: sourceIcon == null ? null : MemoryImage(sourceIcon.bytes),
+          child: Avatar(
+            initials: Avatar.getInitials(name),
+            size: iconSize,
+            provider: sourceIcon == null ? null : MemoryImage(sourceIcon.bytes),
+          ),
         );
         if (!showName) return ExcludeSemantics(child: leading);
         return Text.rich(

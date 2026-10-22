@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -33,7 +34,10 @@ class HistoryBulkToolbar extends StatelessWidget {
               key: const ValueKey('history-bulk-close'),
               style: AppTheme.historyToolbarIconStyle,
               onPressed: busy ? null : controller.endBulkSelection,
-              child: const Icon(LucideIcons.x, size: AppIconSize.md),
+              child: const AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(LucideIcons.x, size: AppIconSize.md),
+              ),
             ),
           ),
         ),
@@ -48,7 +52,10 @@ class HistoryBulkToolbar extends StatelessWidget {
               onPressed: !canApply
                   ? null
                   : () => unawaited(controller.setBulkPinned(true)),
-              child: const Icon(LucideIcons.pin, size: AppIconSize.md),
+              child: const AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(LucideIcons.pin, size: AppIconSize.md),
+              ),
             ),
           ),
         ),
@@ -63,7 +70,10 @@ class HistoryBulkToolbar extends StatelessWidget {
               onPressed: !canApply
                   ? null
                   : () => unawaited(controller.setBulkPinned(false)),
-              child: const Icon(LucideIcons.pinOff, size: AppIconSize.md),
+              child: const AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(LucideIcons.pinOff, size: AppIconSize.md),
+              ),
             ),
           ),
         ),
@@ -83,8 +93,14 @@ class HistoryBulkToolbar extends StatelessWidget {
                       controller: controller,
                     ),
               child: busy
-                  ? const CircularProgressIndicator(size: AppIconSize.md)
-                  : const Icon(LucideIcons.trash2, size: AppIconSize.md),
+                  ? const AppIconFrame(
+                      size: AppIconSize.md,
+                      child: CircularProgressIndicator(size: AppIconSize.md),
+                    )
+                  : const AppIconFrame(
+                      size: AppIconSize.md,
+                      child: Icon(LucideIcons.trash2, size: AppIconSize.md),
+                    ),
             ),
           ),
         ),

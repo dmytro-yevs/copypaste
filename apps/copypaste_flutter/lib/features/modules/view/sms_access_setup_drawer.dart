@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -67,9 +68,11 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                     key: ValueKey('sms-access-setup-title'),
                   ),
                   leading: const [
-                    Icon(
-                      LucideIcons.messageSquare,
-                      key: ValueKey('sms-access-setup-icon'),
+                    AppIconFrame(
+                      child: Icon(
+                        LucideIcons.messageSquare,
+                        key: ValueKey('sms-access-setup-icon'),
+                      ),
                     ),
                   ],
                   trailing: [
@@ -88,7 +91,7 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                           onPressed: controller.busy
                               ? null
                               : () => closeDrawer(context),
-                          child: const Icon(LucideIcons.x),
+                          child: const AppIconFrame(child: Icon(LucideIcons.x)),
                         ),
                       ),
                     ),

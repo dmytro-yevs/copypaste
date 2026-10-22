@@ -2481,6 +2481,18 @@ void main() {
     await tester.tap(_detailAction('Download'));
     await tester.pump();
     expect(find.text('0%'), findsOneWidget);
+    final indicator = find.descendant(
+      of: find.byKey(const ValueKey('history-detail-download')),
+      matching: find.byType(CircularProgressIndicator),
+    );
+    final indicatorSize = tester.getSize(indicator);
+    expect(indicatorSize.width, greaterThan(0));
+    expect(indicatorSize.width, indicatorSize.height);
+    expect(
+      find.ancestor(of: indicator, matching: find.byType(AspectRatio)),
+      findsOneWidget,
+    );
+
     pendingSave.complete();
     await tester.pump();
     await tester.pump();

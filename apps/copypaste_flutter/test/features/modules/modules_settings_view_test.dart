@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -87,8 +88,14 @@ void main() {
         find.descendant(of: card, matching: find.byType(Button)),
         findsNWidgets(2),
       );
-      expect(tester.widget<Button>(remove).child, isA<Icon>());
-      expect(tester.widget<Button>(settings).child, isA<Icon>());
+      expect(
+        tester.widget<Button>(remove).child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
+      expect(
+        tester.widget<Button>(settings).child,
+        isA<AppIconFrame>().having((frame) => frame.child, 'icon', isA<Icon>()),
+      );
       expect(find.text('Recognize image text'), findsNothing);
       final toggle = find.byKey(const ValueKey('module-enabled-copypaste.ocr'));
       expect(find.descendant(of: card, matching: toggle), findsOneWidget);
