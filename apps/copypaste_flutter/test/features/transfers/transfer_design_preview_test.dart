@@ -170,18 +170,12 @@ void main() {
         tester.widget<Button>(button).onPressed!();
       }
 
-      press(
-        find.byKey(const ValueKey('active-tile')),
-        LucideIcons.x,
-      );
+      press(find.byKey(const ValueKey('active-tile')), LucideIcons.x);
       press(
         find.byKey(const ValueKey('completed-tile')),
         LucideIcons.folderOpen,
       );
-      press(
-        find.byKey(const ValueKey('completed-tile')),
-        LucideIcons.trash2,
-      );
+      press(find.byKey(const ValueKey('completed-tile')), LucideIcons.trash2);
 
       expect(cancellations, 1);
       expect(opened, 1);
