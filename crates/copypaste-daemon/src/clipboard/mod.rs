@@ -185,10 +185,8 @@ pub struct Capture {
     /// are mutually exclusive so no caller can accidentally feed binary to a
     /// string-only consumer.
     pub binary_content: Option<Vec<u8>>,
-    /// Deferred desktop local file reference. The admitted blocking tick
-    /// normalizes it once before Pending acceptance; retries retain owned bytes.
-    /// macOS materializes inside its admitted poll and leaves this field empty.
-    /// Multi-file clipboard changes remain unsupported.
+    /// Deferred desktop local source. Capture resolves metadata; an explicit
+    /// file transfer opens the body. Multi-file clipboard changes remain unsupported.
     pub file_path: Option<std::path::PathBuf>,
     pub file_metadata: Option<copypaste_core::FileMetadata>,
     /// One of `copypaste_ipc::content_type`.
