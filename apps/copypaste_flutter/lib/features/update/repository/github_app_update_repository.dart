@@ -1,4 +1,5 @@
 import '../../../shared/network/github_artifact_downloader.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -82,20 +83,44 @@ class GitHubAppUpdateRepository
     } catch (_) {
       // A missing temporary-directory provider must not break update checks.
     }
-    final request = await _client.getUrl(_releasesUri).timeout(_requestTimeout);
+    // Stable installations need one release, not the history of fifty builds.
+    // Prerelease installations still inspect the list to preserve their channel.
+    final uri = currentVersion.isPreRelease
+        ? _releasesUri
+        : Uri(
+            scheme: _releasesUri.scheme,
+            userInfo: _releasesUri.userInfo,
+            host: _releasesUri.host,
+            port: _releasesUri.hasPort ? _releasesUri.port : null,
+            path: '${_releasesUri.path}/latest',
+          );
+    final elapsed = Stopwatch()..start();
+    final request = await _client.getUrl(uri).timeout(_requestTimeout);
     request.headers
       ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
       ..set(HttpHeaders.userAgentHeader, 'CopyPaste updater')
       ..set('X-GitHub-Api-Version', '2026-03-10');
-    final response = await request.close().timeout(_requestTimeout);
-    if (response.statusCode != HttpStatus.ok) {
-      await response.drain<void>();
-      throw const AppUpdateException('CopyPaste could not check for updates.');
+    final String body;
+    try {
+      body = await (() async {
+        final response = await request.close();
+        if (response.statusCode == HttpStatus.notFound &&
+            !currentVersion.isPreRelease) {
+          await response.drain<void>();
+          return '[]';
+        }
+        if (response.statusCode != HttpStatus.ok) {
+          await response.drain<void>();
+          throw const AppUpdateException(
+            'CopyPaste could not check for updates.',
+          );
+        }
+        return _readBoundedUtf8(response, maximumBytes: _maximumMetadataBytes);
+      })().timeout(_requestTimeout - elapsed.elapsed);
+    } catch (_) {
+      request.abort();
+      rethrow;
     }
-    final body = await _readBoundedUtf8(
-      response,
-      maximumBytes: _maximumMetadataBytes,
-    );
     return const GitHubReleaseParser().latestFor(
       body,
       currentVersion: currentVersion,
@@ -279,13 +304,15 @@ class GitHubReleaseParser {
         'GitHub returned invalid update metadata.',
       );
     }
-    if (decoded is! List<Object?>) {
-      throw const AppUpdateException(
+    final releases = switch (decoded) {
+      List<Object?> values => values,
+      Map<String, Object?> value => [value],
+      _ => throw const AppUpdateException(
         'GitHub returned invalid update metadata.',
-      );
-    }
+      ),
+    };
     AppRelease? selected;
-    for (final rawRelease in decoded) {
+    for (final rawRelease in releases) {
       if (rawRelease is! Map<String, Object?> || rawRelease['draft'] == true) {
         continue;
       }

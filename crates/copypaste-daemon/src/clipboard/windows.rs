@@ -242,9 +242,8 @@ impl ClipboardSource for WindowsClipboard {
             return None;
         }
 
-        let reading = read::representation(policy, &self.formats);
-        // Holding this open blocks every other application's copy and paste.
-        drop(clipboard);
+        // The reader releases the global clipboard before decoding its bytes.
+        let reading = read::representation(policy, &self.formats, clipboard);
 
         let representation = match reading {
             Reading::Got(representation) => representation,

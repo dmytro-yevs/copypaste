@@ -211,14 +211,19 @@ class FlutterDesktopWindowHost
     final menuImages = <IconData, Image>{};
 
     try {
-      for (final glyph in const [
-        LucideIcons.appWindow,
-        LucideIcons.pause,
-        LucideIcons.play,
-        LucideIcons.settings,
-        LucideIcons.power,
-      ]) {
-        menuImages[glyph] = await createTrayMenuIcon(glyph);
+      // The Win32 backend forces every bitmap to 32px, inflating native menu
+      // rows. Let Windows own font, spacing and DPI metrics for its text menu.
+      // Other backends render menu images at their normal logical icon size.
+      if (!Platform.isWindows || menu.backend != MenuBackend.native) {
+        for (final glyph in const [
+          LucideIcons.appWindow,
+          LucideIcons.pause,
+          LucideIcons.play,
+          LucideIcons.settings,
+          LucideIcons.power,
+        ]) {
+          menuImages[glyph] = await createTrayMenuIcon(glyph);
+        }
       }
       menu
         ..addItem(open)

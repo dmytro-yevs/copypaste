@@ -201,8 +201,9 @@ abstract final class HistoryCodeHighlighter {
         lower.startsWith('from ') && lower.contains(' import ')) {
       return 'python';
     }
-    if (RegExp(r'^\s*(git|npm|pnpm|yarn|cargo|docker|kubectl|brew|sudo)\s+')
-        .hasMatch(lower)) {
+    if (RegExp(
+      r'^\s*(git|npm|pnpm|yarn|cargo|docker|kubectl|brew|sudo)\s+',
+    ).hasMatch(lower)) {
       return 'bash';
     }
     if (lower.startsWith('from ') && lower.contains('\nrun ')) {

@@ -44,6 +44,33 @@ void main() {
     messenger.setMockMethodCallHandler(channel, null);
   });
 
+  test('system copy is never reserved as a global shortcut', () async {
+    const copy = DesktopShortcut(
+      key: PhysicalKeyboardKey.keyC,
+      modifiers: [DesktopShortcutModifier.control],
+    );
+    expect(copy.isValid, isFalse);
+    expect(
+      () => DesktopShortcut.fromJson(copy.toJson()),
+      throwsFormatException,
+    );
+    await expectLater(
+      registrar.register(copy, () async {}),
+      throwsArgumentError,
+    );
+    expect(calls, isEmpty);
+    const quickPaste = DesktopShortcut(
+      key: PhysicalKeyboardKey.keyC,
+      modifiers: [
+        DesktopShortcutModifier.control,
+        DesktopShortcutModifier.shift,
+      ],
+    );
+    expect(quickPaste.isValid, isTrue);
+    await registrar.register(quickPaste, () async {});
+    expect(calls, ['register']);
+  });
+
   test(
     'failed release retains callback ownership and blocks replacement',
     () async {
