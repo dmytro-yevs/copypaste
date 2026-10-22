@@ -38,6 +38,40 @@ pub enum TransportFault {
 /// The REST surface this driver uses. `SupabaseRest` is the production
 /// implementation, via the adapter in [`super::adapters`].
 pub trait RestApi: Send + Sync {
+    fn fetch_group_catalog(
+        &self,
+        _token: &str,
+        _after_device: Option<&str>,
+    ) -> impl Future<Output = Result<Vec<crate::rest::group::GroupVersion>, TransportFault>> + Send
+    {
+        async {
+            Err(TransportFault::Permanent(
+                "device group transport is unavailable",
+            ))
+        }
+    }
+    fn fetch_groups(
+        &self,
+        _token: &str,
+        _device_ids: &[String],
+    ) -> impl Future<Output = Result<Vec<crate::rest::GroupRow>, TransportFault>> + Send {
+        async {
+            Err(TransportFault::Permanent(
+                "device group transport is unavailable",
+            ))
+        }
+    }
+    fn upsert_group(
+        &self,
+        _token: &str,
+        _row: &crate::rest::GroupRow,
+    ) -> impl Future<Output = Result<(), TransportFault>> + Send {
+        async {
+            Err(TransportFault::Permanent(
+                "device group transport is unavailable",
+            ))
+        }
+    }
     /// One page of rows, **oldest first**, at most `limit` of them, positioned
     /// by a keyset cursor.
     ///

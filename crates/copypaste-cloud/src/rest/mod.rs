@@ -155,7 +155,9 @@ use std::time::Duration;
 
 pub mod client;
 pub mod error;
+pub mod group;
 pub mod item;
+pub use group::GroupRow;
 
 #[cfg(test)]
 mod testkit;

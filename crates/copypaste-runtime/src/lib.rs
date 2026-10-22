@@ -228,6 +228,8 @@ impl Runtime {
             }),
         );
         let (events, _) = tokio::sync::broadcast::channel(64);
+        node.prepare_group(source.as_ref())
+            .map_err(|_| RuntimeError::Storage)?;
         let modules = Arc::new(copypaste_modules::ModuleHost::new(data_dir));
         let changed_events = events.clone();
         let changed_store = store.clone();
@@ -251,31 +253,73 @@ impl Runtime {
         let module_node = Arc::clone(&node);
         let module_peers = peer_sync::PeerSyncDriver::new();
         let module_relay = Arc::clone(&module_peers);
+        let group_export_node = Arc::clone(&node);
+        let group_export_source = Arc::clone(&source);
+        let group_import_node = Arc::clone(&node);
+        let group_enabled_node = Arc::clone(&node);
+        let group_revision_node = Arc::clone(&node);
+        let group_events = events.clone();
+        let group_store = store.clone();
+        let group_wake = Arc::clone(&module_peers);
         modules
-            .set_sync_services(Arc::new(copypaste_modules::SyncServices::new(
-                store.clone(),
-                copypaste_sync::store::StoreView::new(
-                    source.without_version_hook(),
-                    identity.device_id.clone(),
+            .set_sync_services(Arc::new(
+                copypaste_modules::SyncServices::new(
+                    store.clone(),
+                    copypaste_sync::store::StoreView::new(
+                        source.without_version_hook(),
+                        identity.device_id.clone(),
+                    ),
+                    move || {
+                        !*module_shutdown.borrow()
+                            && module_settings.config().sync_enabled
+                            && group_enabled_node.peers().group_active()
+                    },
+                    move |stamp| {
+                        module_node.cursors().note_local(stamp);
+                        module_relay.wake();
+                        let _ = module_events.send(EventData {
+                            sync_status: None,
+                            event: EventKind::Items,
+                            item_count: module_store.count().unwrap_or(0),
+                            captured: false,
+                            captured_item_id: None,
+                        });
+                    },
+                )
+                .with_group(
+                    move || {
+                        group_export_node
+                            .export_group(group_export_source.as_ref())
+                            .map_err(|e| e.to_string())
+                    },
+                    move |device_id, json| {
+                        if group_import_node
+                            .import_cloud_group(device_id, json)
+                            .or_else(|error| match error {
+                                copypaste_p2p::group::GroupImportError::Rejected => Ok(false),
+                                error => Err(error),
+                            })
+                            .map_err(|e| e.to_string())?
+                        {
+                            group_wake.wake();
+                            let _ = group_events.send(EventData {
+                                sync_status: None,
+                                event: EventKind::Peers,
+                                item_count: group_store.count().unwrap_or(0),
+                                captured: false,
+                                captured_item_id: None,
+                            });
+                        }
+                        Ok(())
+                    },
+                    move || group_revision_node.peers().group_revision(),
                 ),
-                move || !*module_shutdown.borrow() && module_settings.config().sync_enabled,
-                move |stamp| {
-                    module_node.cursors().note_local(stamp);
-                    module_relay.wake();
-                    let _ = module_events.send(EventData {
-                        sync_status: None,
-                        event: EventKind::Items,
-                        item_count: module_store.count().unwrap_or(0),
-                        captured: false,
-                        captured_item_id: None,
-                    });
-                },
-            )))
+            ))
             .map_err(|_| RuntimeError::Storage)?;
         let device_class = copypaste_p2p::DeviceProfile::current().device_class;
         Ok(Self {
             file_downloads: Default::default(),
-            peer_sync: peer_sync::PeerSyncDriver::new(),
+            peer_sync: module_peers,
             modules,
             store,
             keyring,
@@ -750,10 +794,7 @@ impl Runtime {
                             .seen()
                             .into_iter()
                             .map(|found| {
-                                let paired = found
-                                    .pairing_ids
-                                    .iter()
-                                    .any(|pairing_id| self.node.peers().get(pairing_id).is_some());
+                                let paired = self.node.is_paired_discovery(&found);
                                 p2p_contract::discovered_device(found, paired)
                             })
                             .collect(),
@@ -916,11 +957,17 @@ impl Runtime {
         let runtime = Arc::clone(self);
         let mut pairing_changes = self.node.subscribe_pairing_changes();
         let mut sync_changes = self.node.subscribe_sync_changes();
+        let mut group_changes = self.node.peers().subscribe_group_changes();
         let mut shutdown = self.shutdown.subscribe();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = shutdown.changed() => return,
+                    changed = group_changes.changed() => if changed.is_err() { return } else {
+                        runtime.modules.wake_sync();
+                        runtime.peer_sync.wake();
+                        runtime.emit(EventKind::Peers);
+                    },
                     changed = pairing_changes.changed() => if changed.is_err() { return } else {
                         runtime.peer_sync.wake();
                         runtime.emit(EventKind::Peers);

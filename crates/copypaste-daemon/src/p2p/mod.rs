@@ -162,9 +162,16 @@ pub async fn forward_pairing_changes(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut sync_changes = state.p2p.node().subscribe_sync_changes();
+    let mut group_changes = state.p2p.peers().subscribe_group_changes();
     loop {
         tokio::select! {
             _ = shutdown.changed() => return,
+            changed = group_changes.changed() => {
+                if changed.is_err() { return; }
+                state.modules.wake_sync();
+                state.p2p.wake();
+                state.note_peers_changed();
+            },
             changed = sync_changes.changed() => {
                 if changed.is_err() { return; }
                 state.note_sync_status_changed();

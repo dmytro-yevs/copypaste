@@ -46,6 +46,7 @@
 pub mod adapters;
 pub mod cadence;
 pub mod driver;
+mod group;
 pub mod outcome;
 pub mod pull;
 pub mod push;

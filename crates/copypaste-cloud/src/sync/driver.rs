@@ -14,6 +14,8 @@ use zeroize::Zeroizing;
 type SessionPersistence = Arc<dyn Fn(&Session) -> Result<(), SyncError> + Send + Sync>;
 
 pub struct CloudSync<R: RestApi, A: AuthApi> {
+    pub(super) group_downloaded: Mutex<std::collections::BTreeMap<String, String>>,
+    pub(super) group_uploaded: Mutex<Option<super::group::GroupUpload>>,
     pub(super) rest: R,
     pub(super) auth: A,
     pub(super) key: SyncKey,
@@ -51,6 +53,8 @@ impl<R: RestApi, A: AuthApi> std::fmt::Debug for CloudSync<R, A> {
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     pub fn new(rest: R, auth: A, key: SyncKey, config: CloudConfig, session: Session) -> Self {
         Self {
+            group_downloaded: Mutex::new(std::collections::BTreeMap::new()),
+            group_uploaded: Mutex::new(None),
             rest,
             auth,
             key,
@@ -177,6 +181,10 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// live row (INV-N2). Retained local LWW winners are then republished
     /// because backend upserts resolve same-item writes by arrival.
     pub async fn sync(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
+        self.sync_group(source).await?;
+        if !source.group_sync_allowed() {
+            return Err(SyncError::Source("this device was removed from the group"));
+        }
         let pushed = self.push(source).await?;
         let (pulled, republish) = self.pull_with_republish(source).await?;
         let stats = if republish {

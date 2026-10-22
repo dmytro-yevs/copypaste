@@ -148,15 +148,41 @@ impl Session {
     where
         F: FnOnce() -> Option<super::PairingCandidate>,
     {
+        Self::accept_with_membership(stream, candidates, invitation, reserve, || {
+            Zeroizing::new(Vec::new())
+        })
+        .await
+    }
+    pub(crate) async fn accept_with_membership<F, G>(
+        stream: TcpStream,
+        candidates: &[PskCandidate],
+        invitation: Option<&super::PairingCandidate>,
+        reserve: F,
+        membership: G,
+    ) -> Result<(Self, String), TransportError>
+    where
+        F: FnOnce() -> Option<super::PairingCandidate>,
+        G: FnOnce() -> Zeroizing<Vec<PskCandidate>>,
+    {
         let peer_addr = stream.peer_addr().map_err(TransportError::Io)?;
         let _ = stream.set_nodelay(true);
         timeout(HANDSHAKE_TIMEOUT, async move {
             let mut framed = Framed::new(stream, codec());
-            let first = next_handshake_frame(&mut framed).await?;
-            if first.as_ref() == super::nearby::PREFIX {
+            let mut first = next_handshake_frame(&mut framed).await?;
+            let membership_keys = if first.as_ref() == super::membership::PREFIX {
+                first = next_handshake_frame(&mut framed).await?;
+                Some(membership())
+            } else {
+                None
+            };
+            let candidates = membership_keys
+                .as_ref()
+                .map(|keys| keys.as_slice())
+                .unwrap_or(candidates);
+            if membership_keys.is_none() && first.as_ref() == super::nearby::PREFIX {
                 return super::nearby::accept(framed, peer_addr, reserve).await;
             }
-            if first.starts_with(super::pairing_bootstrap::PREFIX) {
+            if membership_keys.is_none() && first.starts_with(super::pairing_bootstrap::PREFIX) {
                 let invitation = invitation.ok_or(TransportError::Handshake)?;
                 return super::pairing_bootstrap::accept(framed, &first, invitation, peer_addr)
                     .await;
@@ -186,10 +212,11 @@ impl Session {
                     .map_err(|_| TransportError::Handshake)?;
                 let pairing_id = candidate.pairing_id.clone();
                 tracing::debug!(%peer_addr, %pairing_id, "inbound session established");
-                return Ok((
-                    Self::new(framed, noise, peer_addr, handshake_hash),
-                    pairing_id,
-                ));
+                let mut session = Self::new(framed, noise, peer_addr, handshake_hash);
+                if membership_keys.is_some() {
+                    session.restrict_to_membership();
+                }
+                return Ok((session, pairing_id));
             }
             tracing::debug!(%peer_addr, "inbound handshake matched no known pairing");
             Err(TransportError::Handshake)

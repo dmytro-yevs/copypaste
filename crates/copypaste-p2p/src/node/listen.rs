@@ -102,6 +102,8 @@ async fn serve_peer<S, F, P>(
     P: Fn(),
 {
     let mut candidates = node.peers().psks();
+    // Tentative Stored slots cannot admit another connection before commit.
+    candidates.retain(|candidate| !node.pairing.is_pending_pairing(&candidate.pairing_id));
     let pending = node.pairing_candidate();
     let pending_pairing_id = pending
         .as_ref()
@@ -113,8 +115,11 @@ async fn serve_peer<S, F, P>(
         });
     }
     let mut nearby_id = None;
-    let (session, pairing_id) =
-        match Session::accept_with_nearby(stream, &candidates, pending.as_ref(), || {
+    let (session, pairing_id) = match Session::accept_with_membership(
+        stream,
+        &candidates,
+        pending.as_ref(),
+        || {
             if !node.lan_visible.load(std::sync::atomic::Ordering::Relaxed)
                 || node.peers.len() >= crate::peers::MAX_PAIRINGS
             {
@@ -123,18 +128,20 @@ async fn serve_peer<S, F, P>(
             let candidate = node.pairing.nearby_candidate()?;
             nearby_id = Some(candidate.token.pairing_id.clone());
             Some(candidate)
-        })
-        .await
-        {
-            Ok(accepted) => accepted,
-            Err(e) => {
-                if let Some(id) = &nearby_id {
-                    node.pairing.cancel_reservation(id);
-                }
-                debug!(%addr, error = %e, "inbound peer handshake failed");
-                return;
+        },
+        || node.peers().metadata_psks(),
+    )
+    .await
+    {
+        Ok(accepted) => accepted,
+        Err(e) => {
+            if let Some(id) = &nearby_id {
+                node.pairing.cancel_reservation(id);
             }
-        };
+            debug!(%addr, error = %e, "inbound peer handshake failed");
+            return;
+        }
+    };
 
     if nearby_id.as_deref() == Some(pairing_id.as_str())
         || pending_pairing_id.as_deref() == Some(pairing_id.as_str())
@@ -148,9 +155,10 @@ async fn serve_peer<S, F, P>(
         return;
     }
 
+    let membership_only = session.is_membership_only();
     let listen_addr = node.session_listen_addr(session.local_addr());
     let mut channel = NoiseChannel::new(session);
-    let first = match channel.recv().await {
+    let mut first = match channel.recv().await {
         Ok(message) => message,
         Err(error) => {
             debug!(%pairing_id, error = %error, "peer sent no valid application message");
@@ -158,6 +166,22 @@ async fn serve_peer<S, F, P>(
             return;
         }
     };
+    if membership_only {
+        if let SyncMessage::Group { snapshot, .. } = first {
+            if matches!(
+                tokio::time::timeout(
+                    SESSION_TIMEOUT,
+                    node.respond_group(&mut channel, source, &pairing_id, snapshot, false)
+                )
+                .await,
+                Ok(Ok(()))
+            ) {
+                on_probe();
+            }
+        }
+        channel.close().await;
+        return;
+    }
     if let SyncMessage::Probe {
         protocol_version,
         nonce,
@@ -188,6 +212,30 @@ async fn serve_peer<S, F, P>(
         let _ = node
             .serve_file(&pairing_id, source, &mut channel, first)
             .await;
+        channel.close().await;
+        return;
+    }
+    if let SyncMessage::Group { snapshot, .. } = first {
+        let exchanged = tokio::time::timeout(
+            SESSION_TIMEOUT,
+            node.respond_group(&mut channel, source, &pairing_id, snapshot, false),
+        )
+        .await;
+        if !matches!(exchanged, Ok(Ok(()))) {
+            channel.close().await;
+            return;
+        }
+        on_probe();
+        first = match channel.recv().await {
+            Ok(message) => message,
+            Err(_) => {
+                channel.close().await;
+                return;
+            }
+        };
+    } else {
+        // Current nodes always exchange membership before history. A bare
+        // legacy Hello must not silently bypass the group protocol.
         channel.close().await;
         return;
     }

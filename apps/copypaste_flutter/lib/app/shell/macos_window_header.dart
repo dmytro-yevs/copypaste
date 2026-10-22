@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 
 /// Places app navigation in the macOS native title bar without covering traffic
@@ -48,9 +49,7 @@ class MacosWindowHeader extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: DefaultTextStyle.merge(
-                    style: theme.typography.large
-                        .merge(theme.typography.medium)
-                        .copyWith(height: 1),
+                    style: AppTheme.navigationTextStyle(context),
                     child: title,
                   ),
                 ),

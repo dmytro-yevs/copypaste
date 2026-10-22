@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::channel::{jwt_subject, open_channel};
+use super::channel::{jwt_subject, open_channel_scoped};
 use super::event::{RealtimeError, RealtimeEvent};
 use super::socket::run;
 use crate::{auth::transient_backoff, CloudConfig};
@@ -64,12 +64,26 @@ impl RealtimeSubscription {
     /// [`RealtimeError::JoinRefused`] if the channel join or PostgreSQL change
     /// subscription is not confirmed within [`JOIN_TIMEOUT`](super::JOIN_TIMEOUT).
     pub async fn connect(config: &CloudConfig, access_token: &str) -> Result<Self, RealtimeError> {
+        Self::connect_scoped(config, access_token, false).await
+    }
+    /// Observe membership and history over the same authenticated socket.
+    pub async fn connect_with_groups(
+        config: &CloudConfig,
+        access_token: &str,
+    ) -> Result<Self, RealtimeError> {
+        Self::connect_scoped(config, access_token, true).await
+    }
+    async fn connect_scoped(
+        config: &CloudConfig,
+        access_token: &str,
+        groups: bool,
+    ) -> Result<Self, RealtimeError> {
         let user_id = jwt_subject(access_token).ok_or(RealtimeError::MissingUserId)?;
         let endpoint = config.realtime_endpoint();
         let anon_key = config.anon_key().to_owned();
         let token = access_token.to_owned();
 
-        let open = || open_channel(endpoint.clone(), &anon_key, &token, &user_id);
+        let open = || open_channel_scoped(endpoint.clone(), &anon_key, &token, &user_id, groups);
         let stream = open
             .retry(transient_backoff())
             .when(|error| matches!(error, RealtimeError::Connect(_)))
@@ -86,6 +100,7 @@ impl RealtimeSubscription {
             user_id,
             tx,
             shutdown.clone(),
+            groups,
         ));
 
         Ok(Self {

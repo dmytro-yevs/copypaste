@@ -21,6 +21,8 @@ use crate::rest::CloudItem;
 /// sibling's DTO for the convenience of a test.
 #[derive(Debug)]
 pub enum RealtimeEvent {
+    /// A membership write is a content-free hint to run group anti-entropy.
+    GroupChanged,
     Insert(CloudItem),
     Update(CloudItem),
     Delete {

@@ -81,6 +81,7 @@ pub(super) fn build_service_info(
     device_name: &str,
     pairing_ids: &[String],
     port: u16,
+    identity_tag: Option<&str>,
 ) -> Result<ServiceInfo, DiscoveryError> {
     let instance = sanitise_instance(instance).ok_or(DiscoveryError::InvalidDeviceName)?;
     let hostname = format!(
@@ -88,7 +89,7 @@ pub(super) fn build_service_info(
         sanitise_host_label(device_name).unwrap_or_else(|| "copypaste".to_string())
     );
 
-    let txt = advertisement_attributes(device_name, pairing_ids)?;
+    let txt = advertisement_attributes(device_name, pairing_ids, identity_tag)?;
     let info = ServiceInfo::new(SERVICE_TYPE, &instance, &hostname, (), port, txt)?;
     Ok(info.enable_addr_auto())
 }
@@ -98,6 +99,7 @@ pub(super) fn build_service_info(
 pub fn advertisement_attributes(
     device_name: &str,
     pairing_ids: &[String],
+    identity_tag: Option<&str>,
 ) -> Result<HashMap<String, String>, DiscoveryError> {
     let display = sanitise_display_name(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
 
@@ -130,6 +132,11 @@ pub fn advertisement_attributes(
         txt.insert(format!("{TXT_KEY_PAIRING_PREFIX}{i}"), (*id).clone());
     }
 
+    if let Some(tag) = identity_tag
+        .filter(|tag| tag.len() == 64 && tag.bytes().all(|value| value.is_ascii_hexdigit()))
+    {
+        txt.insert("g".into(), tag.into());
+    }
     Ok(txt)
 }
 
@@ -162,6 +169,7 @@ fn add_profile_properties(txt: &mut HashMap<String, String>, profile: &DevicePro
 /// What we were able to read out of somebody's TXT record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Advertisement {
+    identity_tag: Option<String>,
     name: String,
     pairing_ids: Vec<String>,
     profile: Option<DeviceProfile>,
@@ -215,6 +223,10 @@ fn parse_advertisement(
     }
 
     Some(Advertisement {
+        identity_tag: txt
+            .get("g")
+            .filter(|tag| tag.len() == 64 && tag.bytes().all(|value| value.is_ascii_hexdigit()))
+            .cloned(),
         name,
         pairing_ids,
         profile: parse_profile(txt),
@@ -281,6 +293,7 @@ pub fn peer_from_record(
 ) -> Option<DiscoveredPeer> {
     let advertisement = parse_advertisement(attributes, service_name)?;
     (port != 0).then(|| DiscoveredPeer {
+        group_identity: advertisement.identity_tag,
         discovery_id: discovery_id(service_name),
         pairing_ids: advertisement.pairing_ids,
         name: advertisement.name,
@@ -360,7 +373,7 @@ mod tests {
             "pair_two".to_string(),
             "P3".to_string(),
         ];
-        let info = build_service_info("Dmitriy's Laptop", "Dmitriy's Laptop", &ids, 47_654)
+        let info = build_service_info("Dmitriy's Laptop", "Dmitriy's Laptop", &ids, 47_654, None)
             .expect("valid advertisement");
 
         let parsed = parse_advertisement(&attrs(&info), "fallback").expect("record is ours");
@@ -379,7 +392,7 @@ mod tests {
         let ids = vec!["pair-one".to_string()];
         // What `republish` does after a conflict rename: instance differs from
         // the display name, but the display name still round-trips.
-        let info = build_service_info("Laptop (2)", "Laptop", &ids, 47_654).unwrap();
+        let info = build_service_info("Laptop (2)", "Laptop", &ids, 47_654, None).unwrap();
         let parsed = parse_advertisement(&attrs(&info), "fallback").unwrap();
         assert_eq!(parsed.name, "Laptop");
         assert_eq!(
@@ -404,7 +417,7 @@ mod tests {
     #[test]
     fn platform_records_use_the_canonical_parser() {
         let ids = vec!["pair-one".to_string()];
-        let attributes = advertisement_attributes("Android", &ids).unwrap();
+        let attributes = advertisement_attributes("Android", &ids, None).unwrap();
         let peer = peer_from_record(
             "phone._copypaste._tcp.local.",
             "192.0.2.1".parse().unwrap(),
@@ -470,7 +483,7 @@ mod tests {
             .map(|i| format!("id-{i}"))
             .collect();
         ids.push("id-0".to_string());
-        let info = build_service_info("Laptop", "Laptop", &ids, 1).unwrap();
+        let info = build_service_info("Laptop", "Laptop", &ids, 1, None).unwrap();
         let parsed = parse_advertisement(&attrs(&info), "Laptop").unwrap();
         assert_eq!(parsed.pairing_ids.len(), MAX_ADVERTISED_PAIRING_IDS);
         assert_eq!(parsed.pairing_ids[0], "id-0");
@@ -492,7 +505,7 @@ mod tests {
     fn advertisement_carries_the_pairing_id_and_nothing_else_of_the_token() {
         let tokens = [PairingToken::generate(), PairingToken::generate()];
         let ids: Vec<String> = tokens.iter().map(PairingToken::pairing_id).collect();
-        let info = build_service_info("Laptop", "Laptop", &ids, 47_654).unwrap();
+        let info = build_service_info("Laptop", "Laptop", &ids, 47_654, None).unwrap();
 
         let rendered = String::from_utf8(txt_bytes(&info)).unwrap();
         let lowered = rendered.to_lowercase();

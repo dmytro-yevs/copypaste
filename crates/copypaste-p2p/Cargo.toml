@@ -32,6 +32,11 @@ subtle.workspace = true
 hex.workspace = true
 # The wire definition of content identity (protocol::content_hash).
 sha2.workspace = true
+hkdf.workspace = true
+# Device signatures authenticate group snapshots; expanded secrets wipe on drop.
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+# Static device key material and shared secrets are zeroized on drop.
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
 uuid.workspace = true
 url.workspace = true
 # Atomic peer-file writes, not just tests: the file holds PSKs.

@@ -4,7 +4,6 @@ use crate::{
     peers::Peer,
     protocol::{SyncMessage, FILE_CHUNK_BYTES, PROTOCOL_VERSION},
     sync::{SyncChannel, SyncError, SyncSource},
-    transport::Session,
 };
 use sha2::{Digest, Sha256};
 
@@ -23,24 +22,26 @@ impl Node {
             .file_transfers
             .try_acquire()
             .map_err(|_| SyncError::Source("Another file transfer is in progress.".into()))?;
+        let peer = self
+            .current_peer(peer)
+            .ok_or_else(|| SyncError::Source("The source device is unavailable.".into()))?;
+        let mut connected = None;
+        for candidate in self.dial_candidates_with_sources(&peer, true) {
+            if let Ok(session) = self.connect_peer(candidate.addr, &peer).await {
+                connected = Some(session);
+                break;
+            }
+        }
+        let (session, peer) = connected.ok_or_else(|| {
+            SyncError::Source(
+                "The source device is unavailable. Bring it online and try Download again.".into(),
+            )
+        })?;
         let active = self
             .begin_active_sync(&peer.pairing_id)
             .ok_or_else(|| SyncError::Source("The source device is unavailable.".into()))?;
         let cancel = active.cancelled();
         let operation = async {
-            let mut connected = None;
-            for candidate in self.dial_candidates_with_sources(peer, true) {
-                if let Ok(session) = Session::connect(candidate.addr, &peer.psk).await {
-                    connected = Some(session);
-                    break;
-                }
-            }
-            let session = connected.ok_or_else(|| {
-                SyncError::Source(
-                    "The source device is unavailable. Bring it online and try Download again."
-                        .into(),
-                )
-            })?;
             let mut channel = NoiseChannel::new(session);
             // FILE_CHUNK_BYTES bounds one storage read and one plaintext buffer;
             // it no longer causes a request/response round trip per chunk.

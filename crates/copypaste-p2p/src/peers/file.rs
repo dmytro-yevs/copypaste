@@ -17,8 +17,11 @@ use super::{Peer, PeerStoreError, MAX_REVOCATIONS};
 ///
 /// `revoked` is keyed by pairing id and holds no key material, so it is an
 /// ordinary map beside the peers rather than a field on [`Peer`].
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(super) struct State {
+    pub(super) pair_admissions: BTreeMap<String, crate::group::PairAdmissions>,
+    pub(super) group: Option<crate::group::GroupState>,
+    pub(super) group_admissions: std::collections::BTreeSet<String>,
     pub(super) peers: HashMap<String, Peer>,
     /// Pairing ids that were cut off, and when. Kept after the peer is gone: it
     /// is the audit trail, and it is what stops a revoked pairing being
@@ -35,6 +38,12 @@ pub(super) struct State {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoreFile {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pair_admissions: BTreeMap<String, crate::group::PairAdmissions>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    group_admissions: std::collections::BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group: Option<crate::group::GroupState>,
     peers: Vec<Peer>,
     revoked: BTreeMap<String, i64>,
 }
@@ -42,10 +51,24 @@ struct StoreFile {
 /// Parse the persisted state.
 pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
     let file: StoreFile = serde_json::from_slice(bytes).map_err(|_| PeerStoreError::Corrupt)?;
+    if let Some(group) = &file.group {
+        group.validate().map_err(|_| PeerStoreError::Corrupt)?;
+    }
+    if file.group_admissions.len() > super::MAX_PAIRINGS {
+        return Err(PeerStoreError::Corrupt);
+    }
     let mut peers = HashMap::with_capacity(file.peers.len());
     for peer in file.peers {
         peer.validate().map_err(|_| PeerStoreError::Corrupt)?;
         peers.insert(peer.pairing_id.clone(), peer);
+    }
+    if file.pair_admissions.len() > super::MAX_PAIRINGS
+        || file
+            .pair_admissions
+            .keys()
+            .any(|id| !peers.contains_key(id))
+    {
+        return Err(PeerStoreError::Corrupt);
     }
     // Refused rather than trimmed. Dropping a revocation is what lets a device
     // someone still holds a code for be re-added, so the two safe answers to an
@@ -57,6 +80,9 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
         validate_pairing_id(id).map_err(|_| PeerStoreError::Corrupt)?;
     }
     Ok(State {
+        pair_admissions: file.pair_admissions,
+        group_admissions: file.group_admissions,
+        group: file.group,
         peers,
         revoked: file.revoked,
         generations: HashMap::new(),
@@ -85,6 +111,9 @@ fn write_now(path: &Path, state: &State, key: &[u8; 32]) -> Result<(), PeerStore
     let mut records: Vec<Peer> = state.peers.values().cloned().collect();
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
+        pair_admissions: state.pair_admissions.clone(),
+        group_admissions: state.group_admissions.clone(),
+        group: state.group.clone(),
         peers: records,
         revoked: state.revoked.clone(),
     };
