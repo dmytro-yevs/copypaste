@@ -39,7 +39,14 @@ impl Store {
     ) -> Result<Vec<FileOperation>, StoreError> {
         let conn = self.conn()?;
         if clear {
-            conn.execute("DELETE FROM file_operations WHERE phase='finished'", [])?;
+            if let Some(id) = id {
+                conn.execute(
+                    "DELETE FROM file_operations WHERE id=?1 AND phase='finished'",
+                    [id],
+                )?;
+            } else {
+                conn.execute("DELETE FROM file_operations WHERE phase='finished'", [])?;
+            }
             let _ = self
                 .file_operation_changes
                 .send(copypaste_ipc::FileOperationUpdate::default());
@@ -185,5 +192,60 @@ mod tests {
             reopened.file_operations(false, None, None).unwrap()[0].phase,
             FileOperationPhase::Interrupted
         );
+    }
+
+    #[test]
+    fn removing_one_history_record_preserves_other_records_and_download() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.db");
+        let saved = directory.path().join("saved.bin");
+        std::fs::write(&saved, b"keep").unwrap();
+        let store = Store::open(&path, &[47; 32]).unwrap();
+        let operation = |id: &str, phase: FileOperationPhase| FileOperation {
+            id: id.into(),
+            item_id: format!("file-{id}"),
+            name: "file.bin".into(),
+            kind: FileOperationKind::Receive,
+            phase,
+            source_device: "Phone".into(),
+            destination_device: "Desktop".into(),
+            written: 4,
+            total: 4,
+            started_at: 1,
+            finished_at: Some(1),
+            error: None,
+            local_path: Some(saved.to_string_lossy().into()),
+        };
+        let first = operation("first", FileOperationPhase::Completed);
+        let second = operation("second", FileOperationPhase::Completed);
+        let mut active = operation("active", FileOperationPhase::Running);
+        active.finished_at = None;
+        store.write_file_operation(&first).unwrap();
+        store.write_file_operation(&second).unwrap();
+        store.write_file_operation(&active).unwrap();
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "INSERT INTO clipboard_items(id,content_type,content_hash,created_at) VALUES (?1,'file','',0)",
+                [&first.item_id],
+            )
+            .unwrap();
+        store
+            .set_downloaded_file(&first.item_id, saved.to_str().unwrap())
+            .unwrap();
+
+        store.file_operations(true, None, Some(&first.id)).unwrap();
+
+        let records = store.file_operations(false, None, None).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(!records.iter().any(|record| record.id == first.id));
+        assert!(records.iter().any(|record| record.id == second.id));
+        assert!(records.iter().any(|record| record.id == active.id));
+        assert_eq!(
+            store.downloaded_file(&first.item_id).unwrap().as_deref(),
+            saved.to_str()
+        );
+        assert!(saved.exists());
     }
 }

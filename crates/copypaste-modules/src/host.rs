@@ -121,11 +121,10 @@ impl ModuleHost {
         limit: u32,
         budget: usize,
         device: Option<&str>,
-        item_key: &copypaste_core::ItemKey,
-        preview_key: &copypaste_core::PreviewKey,
+        preview_keys: (&copypaste_core::ItemKey, &copypaste_core::PreviewKey),
     ) -> Result<copypaste_core::HistoryPreviewPage, copypaste_core::StoreError> {
         if let Some(service) = self.search_service() {
-            service.query_previews(query, after, limit, budget, device, item_key, preview_key)
+            service.query_previews(query, after, limit, budget, device, preview_keys)
         } else {
             store.query_history_previews_with_semantic(
                 query,
@@ -134,8 +133,7 @@ impl ModuleHost {
                 budget,
                 device,
                 None,
-                item_key,
-                preview_key,
+                preview_keys,
             )
         }
     }

@@ -159,6 +159,19 @@ impl Runtime {
         std::fs::create_dir_all(data_dir).map_err(|_| RuntimeError::Storage)?;
         let keyring =
             Arc::new(Keyring::load_or_create(data_dir).map_err(|_| RuntimeError::Keyring)?);
+        Self::open_with_keyring(data_dir, device_name, port, clipboard, keyring)
+    }
+
+    /// Continues production runtime construction after the host has selected a
+    /// keyring. Keeping the remaining composition shared lets tests inject an
+    /// in-memory deterministic key without touching the platform keychain.
+    fn open_with_keyring(
+        data_dir: &Path,
+        device_name: &str,
+        port: u16,
+        clipboard: Arc<dyn ClipboardWriter>,
+        keyring: Arc<Keyring>,
+    ) -> Result<Self, RuntimeError> {
         let store = Store::open(&data_dir.join("history.db"), &keyring.db_key())
             .map_err(|_| RuntimeError::Storage)?;
         copypaste_core::file_transfer::upgrade_legacy(&store, &keyring.item_key())
@@ -304,6 +317,20 @@ impl Runtime {
     /// and Noise node as the desktop service.
     pub async fn request(&self, id: u64, method: Method) -> Response {
         self.start_module_sync();
+        if !self.settings.config().sync_enabled
+            && matches!(
+                &method,
+                Method::PairNearby { .. }
+                    | Method::PairCreateInvite
+                    | Method::PairJoin { .. }
+                    | Method::PairConfirm { accept: true }
+            )
+        {
+            if matches!(&method, Method::PairConfirm { accept: true }) {
+                self.node.pair_cancel();
+            }
+            return Response::err(id, ErrorCode::NotReady, "Sync is turned off.");
+        }
         let item_mutation = matches!(
             &method,
             Method::Delete { .. }
@@ -321,6 +348,7 @@ impl Runtime {
                 | Method::PairConfirm { .. }
                 | Method::PairCancel
                 | Method::PairJoin { .. }
+                | Method::PairNearby { .. }
                 | Method::Unpair { .. }
                 | Method::Revoke { .. }
         );
@@ -369,8 +397,7 @@ impl Runtime {
                     limit.clamp(1, 1000),
                     copypaste_ipc::MAX_CONTENT_BYTES,
                     Some(&self.device_id),
-                    &self.keyring.item_key(),
-                    &self.keyring.preview_key(),
+                    (&self.keyring.item_key(), &self.keyring.preview_key()),
                 ) {
                     Ok(page) => Response::ok(
                         id,
@@ -765,6 +792,12 @@ impl Runtime {
                 ),
             },
             Method::SyncNow { pairing_id } => self.sync_now(id, pairing_id).await,
+            Method::PairNearby { addr } => {
+                match self.node.pair_nearby(&addr, self.source.as_ref()).await {
+                    Ok(status) => self.pair_progress(id, status),
+                    Err(error) => self.node_error(id, error),
+                }
+            }
             Method::PairJoin { code, addr } => match self
                 .node
                 .pair_join(&code, &addr, self.source.as_ref())
@@ -1884,6 +1917,50 @@ mod tests {
         assert_eq!(second.capture_revision, 2);
     }
 
+    #[tokio::test]
+    async fn nearby_request_uses_typed_errors_and_honors_the_sync_switch() {
+        let (runtime, _dir) = fixture();
+        let invalid = runtime
+            .request(
+                1,
+                Method::PairNearby {
+                    addr: "invalid".into(),
+                },
+            )
+            .await;
+        assert_eq!(invalid.error_code, Some(ErrorCode::PairingAddress));
+        assert!(
+            runtime
+                .request(
+                    2,
+                    Method::SetConfig {
+                        patch: copypaste_ipc::ConfigPatch {
+                            sync_enabled: Some(false),
+                            ..Default::default()
+                        }
+                    }
+                )
+                .await
+                .ok
+        );
+        for method in [
+            Method::PairNearby {
+                addr: "invalid".into(),
+            },
+            Method::PairCreateInvite,
+            Method::PairJoin {
+                code: "invalid".into(),
+                addr: "invalid".into(),
+            },
+            Method::PairConfirm { accept: true },
+        ] {
+            assert_eq!(
+                runtime.request(3, method).await.error_code,
+                Some(ErrorCode::NotReady)
+            );
+        }
+    }
+
     fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
         fixture_with(Arc::new(UnavailableClipboard))
     }
@@ -2638,8 +2715,14 @@ mod tests {
     fn the_opened_runtime_applies_received_content_through_its_platform_writer() {
         let dir = tempfile::tempdir().unwrap();
         let clipboard = Arc::new(ReceivingClipboard::default());
-        let runtime =
-            Runtime::open_with_clipboard(dir.path(), "receiver", 0, clipboard.clone()).unwrap();
+        let runtime = Runtime::open_with_keyring(
+            dir.path(),
+            "receiver",
+            0,
+            clipboard.clone(),
+            Arc::new(Keyring::from_secret(&[7; 32])),
+        )
+        .unwrap();
         let incoming = copypaste_core::RemoteVersion {
             item_id: "incoming",
             content: "from another device",

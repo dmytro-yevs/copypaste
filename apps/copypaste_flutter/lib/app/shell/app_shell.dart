@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../theme/app_motion.dart';
+import '../theme/app_overlays.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'macos_window_header.dart';
@@ -196,36 +198,50 @@ class _AppShellState extends State<AppShell> {
                       ),
                       const Divider(),
                     ],
-              child: Builder(
-                builder: (context) {
-                  final media = MediaQuery.of(context);
-                  // The floating footer already includes the system safe area.
-                  final bottom =
-                      (media.padding.bottom -
-                              (mobileNavigationVisible
-                                  ? systemBottomPadding
-                                  : 0))
-                          .clamp(0.0, double.infinity)
-                          .toDouble();
-                  return MediaQuery(
-                    data: media.copyWith(
-                      padding: media.padding.copyWith(bottom: bottom),
-                    ),
-                    child: Semantics(
-                      container: true,
-                      explicitChildNodes: true,
-                      child: AppNavigationHost(
-                        key: _navigationHostKey,
-                        controller: widget.controller,
-                        child: AppDestinationViewport(
-                          controller: widget.controller,
-                          swipeEnabled: mode == _ShellNavigationMode.bottom,
-                          children: _destinationChildren,
-                        ),
+              // Drawer barriers may paint outside their bounds; keep the
+              // header visible as well as outside the modal hit-test region.
+              child: ClipRect(
+                // Scaffold owns another overlay; body drawers must be roots.
+                child: Data<DrawerLayerData>.boundary(
+                  child: DrawerOverlay(
+                    key: const ValueKey('app-body-drawer-overlay'),
+                    child: OverlayAnchor(
+                      anchor: AppOverlays.drawerBodyAnchor,
+                      child: Builder(
+                        builder: (context) {
+                          final media = MediaQuery.of(context);
+                          // The floating footer already includes the system safe area.
+                          final bottom =
+                              (media.padding.bottom -
+                                      (mobileNavigationVisible
+                                          ? systemBottomPadding
+                                          : 0))
+                                  .clamp(0.0, double.infinity)
+                                  .toDouble();
+                          return MediaQuery(
+                            data: media.copyWith(
+                              padding: media.padding.copyWith(bottom: bottom),
+                            ),
+                            child: Semantics(
+                              container: true,
+                              explicitChildNodes: true,
+                              child: AppNavigationHost(
+                                key: _navigationHostKey,
+                                controller: widget.controller,
+                                child: AppDestinationViewport(
+                                  controller: widget.controller,
+                                  swipeEnabled:
+                                      mode == _ShellNavigationMode.bottom,
+                                  children: _destinationChildren,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             );
 
@@ -309,7 +325,7 @@ class _AppShellState extends State<AppShell> {
               },
               child: Focus(
                 autofocus: true,
-                child: DrawerOverlay(
+                child: OverlayAnchorScope(
                   child: Column(
                     children: [
                       if (widget.unifiedTitleBar)

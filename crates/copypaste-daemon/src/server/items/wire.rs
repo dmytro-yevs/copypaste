@@ -6,107 +6,6 @@ use tracing::warn;
 
 use crate::AppState;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn email_previews_require_an_explicit_secret_hint_to_hide_content() {
-        let (state, _dir) = crate::testutil::test_state("email-preview");
-        let text = "person.99@example.com";
-        let id = crate::testutil::add(&state, text);
-        let stored = state.store.get(&id).unwrap().unwrap();
-        for (metadata, secret) in [
-            ("unrecognized old metadata", false),
-            (
-                r#"{"privacy":{"secret":true},"source_app_icon":"broken"}"#,
-                true,
-            ),
-        ] {
-            let mut row = stored.clone();
-            row.payload_metadata = Some(metadata.into());
-            for preview in [true, false] {
-                let (item, _) = to_wire_with(
-                    row.clone(),
-                    &state.meta.here(),
-                    state.meta.device_id(),
-                    &state.keyring.item_key(),
-                    preview,
-                )
-                .unwrap();
-                assert_eq!(item.privacy.secret, secret);
-                if secret && preview {
-                    assert!(item.content.is_empty());
-                    assert!(item.semantic_kind.is_none());
-                } else {
-                    assert_eq!(item.content, text);
-                    assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Email));
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn origin_lookup_errors_preserve_remote_identity_and_local_file_availability() {
-        for table in ["sync_device_name", "sync_device_state"] {
-            let (state, dir) = crate::testutil::test_state("origin-fallback");
-            let source = dir.path().join("remote-original.txt");
-            std::fs::write(&source, b"file bytes").unwrap();
-            let metadata = copypaste_core::FileMetadata::with_source_reference(
-                "remote-original.txt",
-                "text/plain",
-                source.to_str().unwrap(),
-            )
-            .unwrap();
-            let mut remote = copypaste_core::ingest::ingest_binary_into_with_capture_context(
-                &state.store,
-                &state.keyring,
-                b"file bytes",
-                copypaste_ipc::content_type::FILE,
-                copypaste_core::now_ms(),
-                None,
-                Some(&metadata),
-                &state.settings.get(),
-            )
-            .unwrap()
-            .into_item();
-            remote.origin_device_id = "remote-device".into();
-            let local_id = crate::testutil::add(&state, "local text");
-            let local = state.store.get(&local_id).unwrap().unwrap();
-            let conn =
-                copypaste_core::storage::open_validated(state.db_path(), &state.keyring.db_key())
-                    .unwrap();
-            conn.execute(&format!("DROP TABLE {table}"), []).unwrap();
-            assert!(state.meta.origin_of(&remote).is_err());
-
-            let item = to_wire(&state, remote.clone()).unwrap();
-            assert_eq!(item.origin_device_id, "remote-device");
-            assert_eq!(item.origin_device_name, None);
-            assert_eq!(
-                item.origin_device_class,
-                copypaste_ipc::DeviceClass::Unknown
-            );
-            assert!(!item.file_details.unwrap().source_available);
-
-            let page = decrypt_rows(&state, vec![remote, local]);
-            assert_eq!(page.skipped_undecryptable, 0);
-            assert_eq!(page.items[0].origin_device_id, "remote-device");
-            assert!(
-                !page.items[0]
-                    .file_details
-                    .as_ref()
-                    .unwrap()
-                    .source_available
-            );
-            assert_eq!(page.items[1].origin_device_id, state.meta.device_id());
-            assert_eq!(
-                page.items[1].origin_device_name.as_deref(),
-                Some(state.meta.device_name().as_str()),
-            );
-        }
-    }
-}
-
 pub(super) fn is_oversized_text(payload: &ClipboardPayload) -> bool {
     copypaste_core::history_actions::oversized_text(payload)
 }
@@ -249,4 +148,105 @@ pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage 
         }
     }
     page
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_previews_require_an_explicit_secret_hint_to_hide_content() {
+        let (state, _dir) = crate::testutil::test_state("email-preview");
+        let text = "person.99@example.com";
+        let id = crate::testutil::add(&state, text);
+        let stored = state.store.get(&id).unwrap().unwrap();
+        for (metadata, secret) in [
+            ("unrecognized old metadata", false),
+            (
+                r#"{"privacy":{"secret":true},"source_app_icon":"broken"}"#,
+                true,
+            ),
+        ] {
+            let mut row = stored.clone();
+            row.payload_metadata = Some(metadata.into());
+            for preview in [true, false] {
+                let (item, _) = to_wire_with(
+                    row.clone(),
+                    &state.meta.here(),
+                    state.meta.device_id(),
+                    &state.keyring.item_key(),
+                    preview,
+                )
+                .unwrap();
+                assert_eq!(item.privacy.secret, secret);
+                if secret && preview {
+                    assert!(item.content.is_empty());
+                    assert!(item.semantic_kind.is_none());
+                } else {
+                    assert_eq!(item.content, text);
+                    assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Email));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn origin_lookup_errors_preserve_remote_identity_and_local_file_availability() {
+        for table in ["sync_device_name", "sync_device_state"] {
+            let (state, dir) = crate::testutil::test_state("origin-fallback");
+            let source = dir.path().join("remote-original.txt");
+            std::fs::write(&source, b"file bytes").unwrap();
+            let metadata = copypaste_core::FileMetadata::with_source_reference(
+                "remote-original.txt",
+                "text/plain",
+                source.to_str().unwrap(),
+            )
+            .unwrap();
+            let mut remote = copypaste_core::ingest::ingest_binary_into_with_capture_context(
+                &state.store,
+                &state.keyring,
+                b"file bytes",
+                copypaste_ipc::content_type::FILE,
+                copypaste_core::now_ms(),
+                None,
+                Some(&metadata),
+                &state.settings.get(),
+            )
+            .unwrap()
+            .into_item();
+            remote.origin_device_id = "remote-device".into();
+            let local_id = crate::testutil::add(&state, "local text");
+            let local = state.store.get(&local_id).unwrap().unwrap();
+            let conn =
+                copypaste_core::storage::open_validated(state.db_path(), &state.keyring.db_key())
+                    .unwrap();
+            conn.execute(&format!("DROP TABLE {table}"), []).unwrap();
+            assert!(state.meta.origin_of(&remote).is_err());
+
+            let item = to_wire(&state, remote.clone()).unwrap();
+            assert_eq!(item.origin_device_id, "remote-device");
+            assert_eq!(item.origin_device_name, None);
+            assert_eq!(
+                item.origin_device_class,
+                copypaste_ipc::DeviceClass::Unknown
+            );
+            assert!(!item.file_details.unwrap().source_available);
+
+            let page = decrypt_rows(&state, vec![remote, local]);
+            assert_eq!(page.skipped_undecryptable, 0);
+            assert_eq!(page.items[0].origin_device_id, "remote-device");
+            assert!(
+                !page.items[0]
+                    .file_details
+                    .as_ref()
+                    .unwrap()
+                    .source_available
+            );
+            assert_eq!(page.items[1].origin_device_id, state.meta.device_id());
+            assert_eq!(
+                page.items[1].origin_device_name.as_deref(),
+                Some(state.meta.device_name().as_str()),
+            );
+        }
+    }
 }

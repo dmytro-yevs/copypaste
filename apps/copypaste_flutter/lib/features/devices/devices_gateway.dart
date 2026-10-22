@@ -178,7 +178,7 @@ class DiscoveredDevice {
 }
 
 /// The entry point selected for the active pairing inspector.
-enum PairingEntryMode { invite, scanQr, enterCode }
+enum PairingEntryMode { invite, scanQr, enterCode, nearby }
 
 /// The Rust-owned pairing lifecycle represented without pairing material.
 enum PairingState {
@@ -208,12 +208,14 @@ extension PairingStateX on PairingState {
 class PairingCeremony {
   const PairingCeremony({
     required this.state,
+    this.id,
     this.peerName,
     this.expiresIn,
     this.failureMessage,
   });
 
   final PairingState state;
+  final String? id;
   final String? peerName;
   final Duration? expiresIn;
   final String? failureMessage;
@@ -293,6 +295,12 @@ abstract interface class DevicesGateway {
 
   /// Joins one versioned `copypaste://pair` payload decoded by any scanner.
   Future<DevicesPairingSession> joinPairingUri(String uri);
+}
+
+/// Optional discovery pairing boundary; ordinary manual entry remains separate.
+abstract interface class NearbyPairingGateway {
+  Future<DevicesPairingSession> requestNearbyPairing(String address);
+  Future<DevicesPairingSession?> incomingPairing();
 }
 
 /// Implemented when a gateway owns a shared runtime subscription.

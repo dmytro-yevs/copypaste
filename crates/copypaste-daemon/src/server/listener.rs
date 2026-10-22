@@ -544,8 +544,7 @@ impl Reader {
         if required > frame.capacity() {
             let target = required
                 .next_power_of_two()
-                .max(CONTROL_FRAME)
-                .min(MAX_FRAME_BYTES);
+                .clamp(CONTROL_FRAME, MAX_FRAME_BYTES);
             // Reserve for the new buffer while the previous buffer remains live.
             let lease = WireLease::acquire_in(budget, target * 2).ok_or(FrameError::Overloaded)?;
             let mut replacement = Vec::new();
@@ -1514,7 +1513,15 @@ mod tests {
                         break;
                     }
                 }
-                changes.recv().await.unwrap();
+                match changes.recv().await {
+                    // The durable operation record is the assertion source;
+                    // broadcast only wakes this loop. A faster transfer can
+                    // legitimately overwrite its bounded notification buffer.
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        panic!("file-operation updates closed before completion")
+                    }
+                }
             }
         })
         .await

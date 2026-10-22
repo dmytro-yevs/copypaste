@@ -213,6 +213,7 @@ fn requires_ready(method: &Method) -> bool {
         // the device identity that comes out of the same database.
         | Method::PairCreateInvite
         | Method::PairJoin { .. }
+                | Method::PairNearby { .. }
         | Method::PairProgress
         | Method::PairConfirm { .. }
         | Method::PairCancel
@@ -494,6 +495,7 @@ pub(super) async fn dispatch_request(
             Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
         },
         Method::PairCreateInvite => crate::p2p::handlers::pair_create_invite(state, id).await,
+        Method::PairNearby { addr } => crate::p2p::handlers::pair_nearby(state, id, &addr).await,
         Method::PairJoin { code, addr } => {
             crate::p2p::handlers::pair_join(state, id, &code, &addr).await
         }
@@ -680,6 +682,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         // error here, which is the whole point of dispatching on a type.
         Method::PairCreateInvite
         | Method::PairJoin { .. }
+        | Method::PairNearby { .. }
         | Method::PairProgress
         | Method::PairConfirm { .. }
         | Method::PairCancel

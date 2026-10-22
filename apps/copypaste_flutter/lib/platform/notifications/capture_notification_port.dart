@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'capture_notification_preview.dart';
+import 'app_notification_service.dart';
 
 abstract interface class CaptureNotificationPort {
   Future<void> initialize();
@@ -16,33 +17,22 @@ abstract interface class CaptureNotificationPort {
 
 class PlatformCaptureNotificationPort implements CaptureNotificationPort {
   PlatformCaptureNotificationPort({FlutterLocalNotificationsPlugin? plugin})
-    : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+    : _notifications = plugin == null
+          ? AppNotificationService.instance
+          : AppNotificationService(plugin: plugin);
 
   static const _androidCapture = MethodChannel(
     'com.copypaste.app/android_capture',
   );
-  final FlutterLocalNotificationsPlugin _plugin;
+  final AppNotificationService _notifications;
+  FlutterLocalNotificationsPlugin get _plugin => _notifications.plugin;
   bool _initialized = false;
   File? _previewFile;
 
   @override
   Future<void> initialize() async {
     if (_initialized || Platform.isAndroid) return;
-    await _plugin.initialize(
-      settings: const InitializationSettings(
-        macOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-        windows: WindowsInitializationSettings(
-          appName: 'CopyPaste',
-          appUserModelId: 'com.copypaste.app',
-          guid: 'f112c130-c009-4a8c-b95a-16608410ce76',
-        ),
-        linux: LinuxInitializationSettings(defaultActionName: 'Open'),
-      ),
-    );
+    await _notifications.initialize();
     _initialized = true;
   }
 

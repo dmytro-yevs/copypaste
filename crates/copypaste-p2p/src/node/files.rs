@@ -42,15 +42,19 @@ impl Node {
                 )
             })?;
             let mut channel = NoiseChannel::new(session);
-            for index in 0..size.div_ceil(FILE_CHUNK_BYTES as u64).max(1) {
-                channel
-                    .send(SyncMessage::FileRequest {
-                        protocol_version: PROTOCOL_VERSION,
-                        item_id: id.into(),
-                        sha256: hash.into(),
-                        index,
-                    })
-                    .await?;
+            // FILE_CHUNK_BYTES bounds one storage read and one plaintext buffer;
+            // it no longer causes a request/response round trip per chunk.
+            channel
+                .send(SyncMessage::FileRequest {
+                    protocol_version: PROTOCOL_VERSION,
+                    item_id: id.into(),
+                    sha256: hash.into(),
+                    index: 0,
+                    size,
+                })
+                .await?;
+            let chunk_count = size.div_ceil(FILE_CHUNK_BYTES as u64).max(1);
+            for index in 0..chunk_count {
                 match channel.recv().await? {
                     SyncMessage::FileChunk {
                         index: received,
@@ -68,7 +72,7 @@ impl Node {
                         result?;
                     }
                     SyncMessage::FileUnavailable { reason } => {
-                        return Err(SyncError::Source(reason))
+                        return Err(SyncError::Source(reason));
                     }
                     _ => return Err(SyncError::Source("The source file is unavailable.".into())),
                 }
@@ -78,12 +82,12 @@ impl Node {
                 match channel.recv().await? {
                     SyncMessage::FileChecksum { sha256 } => sha256,
                     SyncMessage::FileUnavailable { reason } => {
-                        return Err(SyncError::Source(reason))
+                        return Err(SyncError::Source(reason));
                     }
                     _ => {
                         return Err(SyncError::Source(
                             "The source file could not be verified.".into(),
-                        ))
+                        ));
                     }
                 }
             } else {
@@ -100,7 +104,7 @@ impl Node {
         pairing_id: &str,
         source: &S,
         channel: &mut NoiseChannel,
-        mut request: SyncMessage,
+        request: SyncMessage,
     ) -> Result<(), SyncError> {
         let mut permit = match self.file_transfers.try_acquire() {
             Ok(permit) => Some(permit),
@@ -142,40 +146,47 @@ impl Node {
         let mut observer = source.observe_file_transfer(&first_id, &peer_name);
         let operation = async {
             let mut deferred = source.deferred_file(&first_id)?;
-            if deferred.is_some()
-                && matches!(&request, SyncMessage::FileRequest { sha256, .. } if !sha256.is_empty())
-            {
+            let SyncMessage::FileRequest {
+                item_id,
+                sha256,
+                index,
+                size,
+                ..
+            } = request
+            else {
+                return Err(SyncError::Source("Invalid file request.".into()));
+            };
+            if index != 0 {
+                return Err(SyncError::Source("Invalid file range.".into()));
+            }
+            if deferred.is_some() && !sha256.is_empty() {
                 return Err(SyncError::Source(
                     "The requested file version does not match the source.".into(),
                 ));
             }
+            if source.file_size(&item_id, &sha256)? != size {
+                return Err(SyncError::Source(
+                    "The requested file size does not match the source.".into(),
+                ));
+            }
             let mut digest = Sha256::new();
             let mut written = 0u64;
-            let mut identity = None;
-            let mut next_index = 0;
-            loop {
-                let SyncMessage::FileRequest {
-                    item_id,
-                    sha256,
-                    index,
-                    ..
-                } = request
-                else {
-                    return Err(SyncError::Source("Invalid file request.".into()));
-                };
-                let current = (item_id, sha256);
-                if index != next_index || identity.as_ref().is_some_and(|value| value != &current) {
-                    return Err(SyncError::Source("Invalid file range.".into()));
-                }
-                identity = Some(current);
-                let (id, hash) = identity.as_ref().unwrap();
+            // Backpressure from `channel.send` bounds the stream to one
+            // FILE_CHUNK_BYTES buffer without a request per chunk.
+            let chunk_count = size.div_ceil(FILE_CHUNK_BYTES as u64).max(1);
+            for index in 0..chunk_count {
                 let chunk = if let Some(input) = deferred.as_mut() {
                     input.read_chunk()
                 } else {
-                    source.file_chunk(id, hash, index)
+                    source.file_chunk(&item_id, &sha256, index)
                 };
                 match chunk {
                     Ok(mut bytes) => {
+                        let expected =
+                            (size - index * FILE_CHUNK_BYTES as u64).min(FILE_CHUNK_BYTES as u64);
+                        if bytes.len() as u64 != expected {
+                            return Err(SyncError::Source("The source file is incomplete.".into()));
+                        }
                         written += bytes.len() as u64;
                         if deferred.is_some() {
                             digest.update(&bytes);
@@ -191,24 +202,25 @@ impl Node {
                     }
                     Err(error) => return Err(error),
                 }
-                next_index += 1;
-                request = channel.recv().await?;
-                if matches!(request, SyncMessage::Done) {
-                    let checksum = if let Some(mut input) = deferred.take() {
-                        input.verify()?;
-                        Some(format!("{:x}", digest.finalize()))
-                    } else {
-                        None
-                    };
-                    // All file I/O is done. Release admission before the terminal
-                    // reply so a new transfer does not wait for history bookkeeping.
-                    drop(permit.take());
-                    if let Some(sha256) = checksum {
-                        channel.send(SyncMessage::FileChecksum { sha256 }).await?;
-                    }
-                    return Ok(());
-                }
             }
+            if !matches!(channel.recv().await?, SyncMessage::Done) {
+                return Err(SyncError::Source(
+                    "The file transfer was not confirmed.".into(),
+                ));
+            }
+            let checksum = if let Some(mut input) = deferred.take() {
+                input.verify()?;
+                Some(format!("{:x}", digest.finalize()))
+            } else {
+                None
+            };
+            // All file I/O is done. Release admission before the terminal
+            // reply so a new transfer does not wait for history bookkeeping.
+            drop(permit.take());
+            if let Some(sha256) = checksum {
+                channel.send(SyncMessage::FileChecksum { sha256 }).await?;
+            }
+            Ok(())
         };
         let result = tokio::select! { biased; _ = cancel.cancelled() => Err(SyncError::Source("File transfer was cancelled.".into())), result = operation => result };
         drop(permit.take());

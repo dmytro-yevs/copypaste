@@ -225,8 +225,7 @@ impl SemanticSearch {
         limit: u32,
         budget: usize,
         device: Option<&str>,
-        item_key: &copypaste_core::ItemKey,
-        preview_key: &copypaste_core::PreviewKey,
+        preview_keys: (&copypaste_core::ItemKey, &copypaste_core::PreviewKey),
     ) -> Result<copypaste_core::HistoryPreviewPage, StoreError> {
         self.query_with(query, |matches| {
             self.store.query_history_previews_with_semantic(
@@ -236,8 +235,7 @@ impl SemanticSearch {
                 budget,
                 device,
                 matches,
-                item_key,
-                preview_key,
+                preview_keys,
             )
         })
     }

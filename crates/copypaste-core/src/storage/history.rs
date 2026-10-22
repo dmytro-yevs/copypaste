@@ -466,8 +466,7 @@ impl Store {
         budget: usize,
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
-        item_key: &crate::ItemKey,
-        preview_key: &crate::crypto::PreviewKey,
+        preview_keys: (&crate::ItemKey, &crate::crypto::PreviewKey),
     ) -> Result<HistoryPreviewPage, StoreError> {
         let page = self.query_history_inner(
             query,
@@ -476,7 +475,7 @@ impl Store {
             budget,
             local_device_id,
             semantic,
-            Some((item_key, preview_key)),
+            Some(preview_keys),
         )?;
         Ok(HistoryPreviewPage {
             items: page

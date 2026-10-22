@@ -428,6 +428,24 @@ impl SyncSource for StoreSource {
             .map_err(|error| SyncError::Source(error.to_string()))
         })
     }
+    fn file_size(&self, id: &str, sha256: &str) -> Result<u64, SyncError> {
+        let settings = self.settings_if_sync_enabled()?;
+        super::blocking(|| {
+            let row = self
+                .store
+                .get(id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            let descriptor = crate::file_transfer::row_offer(&row, &self.keyring.item_key())
+                .map_err(|error| SyncError::Source(error.to_string()))?
+                .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
+            if !sha256.is_empty() && descriptor.sha256 != sha256 {
+                return Err(SyncError::Source("The file is unavailable.".into()));
+            }
+            Ok(descriptor.size_bytes)
+        })
+    }
     fn device_id(&self) -> String {
         self.device_id.clone()
     }
@@ -576,6 +594,61 @@ impl SyncSource for StoreSource {
                 })
                 .collect())
         })
+    }
+}
+
+struct OutgoingOperation {
+    total: u64,
+    operation: crate::file_operation::FileOperationGuard,
+}
+impl copypaste_p2p::sync::FileTransferObserver for OutgoingOperation {
+    fn progress(&mut self, written: u64) {
+        super::blocking(|| self.operation.progress(written, self.total));
+    }
+    fn finish(&mut self, error: Option<String>) {
+        super::blocking(|| self.operation.finish(error, false, None));
+    }
+}
+
+/// Re-check sharing and clip privacy on every deferred-source block.
+struct SharedFileSource {
+    source: Box<dyn copypaste_p2p::sync::DeferredFileSource>,
+    store: Store,
+    id: String,
+    settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
+}
+impl SharedFileSource {
+    fn check_access(&self) -> Result<(), SyncError> {
+        super::blocking(|| {
+            let settings = (self.settings)();
+            if !settings.sync_enabled {
+                return Err(SyncError::Source(MSG_SYNC_DISABLED.into()));
+            }
+            self.store
+                .get(&self.id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
+                .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
+            if self
+                .store
+                .file_reference(&self.id)
+                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .is_none()
+            {
+                return Err(SyncError::Source("The source file changed.".into()));
+            }
+            Ok(())
+        })
+    }
+}
+impl copypaste_p2p::sync::DeferredFileSource for SharedFileSource {
+    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
+        self.check_access()?;
+        self.source.read_chunk()
+    }
+    fn verify(&mut self) -> Result<(), SyncError> {
+        self.check_access()?;
+        self.source.verify()
     }
 }
 
@@ -1150,60 +1223,5 @@ mod tests {
         row.content_ciphertext.push(1);
         row.nonce.clear();
         assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
-    }
-}
-
-struct OutgoingOperation {
-    total: u64,
-    operation: crate::file_operation::FileOperationGuard,
-}
-impl copypaste_p2p::sync::FileTransferObserver for OutgoingOperation {
-    fn progress(&mut self, written: u64) {
-        super::blocking(|| self.operation.progress(written, self.total));
-    }
-    fn finish(&mut self, error: Option<String>) {
-        super::blocking(|| self.operation.finish(error, false, None));
-    }
-}
-
-/// Re-check sharing and clip privacy on every deferred-source block.
-struct SharedFileSource {
-    source: Box<dyn copypaste_p2p::sync::DeferredFileSource>,
-    store: Store,
-    id: String,
-    settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
-}
-impl SharedFileSource {
-    fn check_access(&self) -> Result<(), SyncError> {
-        super::blocking(|| {
-            let settings = (self.settings)();
-            if !settings.sync_enabled {
-                return Err(SyncError::Source(MSG_SYNC_DISABLED.into()));
-            }
-            self.store
-                .get(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
-                .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
-                .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
-            if self
-                .store
-                .file_reference(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
-                .is_none()
-            {
-                return Err(SyncError::Source("The source file changed.".into()));
-            }
-            Ok(())
-        })
-    }
-}
-impl copypaste_p2p::sync::DeferredFileSource for SharedFileSource {
-    fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
-        self.check_access()?;
-        self.source.read_chunk()
-    }
-    fn verify(&mut self) -> Result<(), SyncError> {
-        self.check_access()?;
-        self.source.verify()
     }
 }

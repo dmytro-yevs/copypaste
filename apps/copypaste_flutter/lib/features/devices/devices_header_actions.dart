@@ -44,7 +44,7 @@ class DevicesHeaderActions extends StatelessWidget {
             ? controller.openInvitation
             : null,
         leading: const Icon(LucideIcons.plus),
-        child: const Text('Pair device'),
+        child: const Text('Add device'),
       ),
       Button.secondary(
         key: const ValueKey<String>('scan-pairing-qr'),
@@ -74,7 +74,7 @@ class DevicesHeaderActions extends StatelessWidget {
       _compactAction(
         context: context,
         key: const ValueKey<String>('pair-device'),
-        label: 'Pair device',
+        label: 'Add device',
         icon: LucideIcons.plus,
         primary: true,
         onPressed: controller.canChangePairingMode

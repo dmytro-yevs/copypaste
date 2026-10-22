@@ -108,6 +108,10 @@ class DevicesController extends ChangeNotifier {
   String? _verificationCode;
   Object? _verificationCodeRequest;
   bool _disposed = false;
+  bool _incomingPairing = false;
+  bool _locallyConfirmed = false;
+  bool get locallyConfirmed => _locallyConfirmed;
+  bool get incomingPairing => _incomingPairing;
 
   DevicesLoadState get loadState => _loadState;
   DevicesSnapshot? get snapshot => _snapshot;
@@ -142,7 +146,7 @@ class DevicesController extends ChangeNotifier {
       !_systemScanInFlight;
   PairingInvitation? get invitation => _invitation;
   String? get verificationCode => _verificationCode;
-  bool get canConfirmPairing => _verificationCode != null;
+  bool get canConfirmPairing => _verificationCode != null && !_locallyConfirmed;
 
   /// Display-safe peer connection state. Expired observations fail closed.
   DeviceConnectionState peerConnectionState(DevicePeer peer) =>
@@ -196,6 +200,7 @@ class DevicesController extends ChangeNotifier {
       _errorMessage = null;
       _lastErrorWasAction = false;
       _scheduleFreshnessRefresh(_snapshot!);
+      await _adoptIncomingPairing();
     } catch (error) {
       _loadState = _snapshot == null
           ? DevicesLoadState.error
@@ -324,6 +329,47 @@ class DevicesController extends ChangeNotifier {
     if (_deviceDetailsTarget == null) return;
     _deviceDetailsTarget = null;
     _notify();
+  }
+
+  Future<void> _adoptIncomingPairing() async {
+    final gateway = _gateway;
+    if (gateway is! NearbyPairingGateway ||
+        _pairingSession != null ||
+        _pairingInFlight ||
+        _disposed) {
+      return;
+    }
+    final session = await (gateway as NearbyPairingGateway).incomingPairing();
+    if (session == null) return;
+    if (_disposed ||
+        _pairingInFlight ||
+        _pairingSession != null ||
+        !await _openPairingInspector(PairingEntryMode.nearby)) {
+      await session.cancel();
+      await session.dispose();
+      return;
+    }
+    _incomingPairing = true;
+    await _startPairing(() async => session);
+  }
+
+  Future<void> connectNearby(DiscoveredDevice device) async {
+    final gateway = _gateway;
+    if (gateway is! NearbyPairingGateway) {
+      _setError(
+        StateError(
+          'Nearby pairing is unavailable. Use Add device to show a pairing code.',
+        ),
+      );
+      return;
+    }
+    if (!await _openPairingInspector(PairingEntryMode.nearby)) return;
+    _incomingPairing = false;
+    await _startPairing(
+      () => (gateway as NearbyPairingGateway).requestNearbyPairing(
+        device.address,
+      ),
+    );
   }
 
   Future<void> openInvitation() async {
@@ -460,6 +506,7 @@ class DevicesController extends ChangeNotifier {
       }
     }
     _deviceDetailsTarget = null;
+    _incomingPairing = false;
     _pairingEntryMode = mode;
     _pairingInspectorVisible = showInspector;
     _pendingAddress = address;
@@ -548,7 +595,7 @@ class DevicesController extends ChangeNotifier {
     final session = _pairingSession;
     if (session == null ||
         _pairingCeremony?.state != PairingState.awaitingConfirmation ||
-        _verificationCode == null ||
+        !canConfirmPairing ||
         _decisionInFlight) {
       return;
     }
@@ -556,6 +603,7 @@ class DevicesController extends ChangeNotifier {
     _notify();
     try {
       await session.confirm(accept: accept);
+      if (identical(_pairingSession, session)) _locallyConfirmed = accept;
     } catch (error) {
       _errorMessage = devicesErrorMessage(error);
     } finally {
@@ -635,6 +683,7 @@ class DevicesController extends ChangeNotifier {
         return;
       }
       _pairingSession = session;
+      _locallyConfirmed = false;
       _pairingCeremony = session.ceremony;
       _invitation = null;
       _clearVerificationCode();

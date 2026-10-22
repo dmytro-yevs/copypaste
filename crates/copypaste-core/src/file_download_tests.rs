@@ -9,7 +9,7 @@ use copypaste_p2p::{
 use std::{
     io::Write,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -59,6 +59,9 @@ impl SyncSource for ObservedSource {
     fn file_chunk(&self, id: &str, hash: &str, index: u64) -> Result<Vec<u8>, SyncError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.source.file_chunk(id, hash, index)
+    }
+    fn file_size(&self, id: &str, hash: &str) -> Result<u64, SyncError> {
+        self.source.file_size(id, hash)
     }
 }
 
@@ -202,7 +205,7 @@ async fn exercise_download(deferred: bool) {
     assert!(wire[0].binary_content.len() < 256);
 
     let destination = dir.path().join("received.apk");
-    let downloads = FileDownloads::default();
+    let downloads = Arc::new(FileDownloads::default());
     downloads.cancel("pre-cancelled-token");
     let early = dir.path().join("pre-cancelled.apk");
     assert!(matches!(
@@ -243,13 +246,14 @@ async fn exercise_download(deferred: bool) {
         )
         .await
         .unwrap();
-    let progress = progress.lock().unwrap();
-    assert_eq!(
-        progress.last(),
-        Some(&(expected.size_bytes, expected.size_bytes))
-    );
-    assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
-    drop(progress);
+    {
+        let progress = progress.lock().unwrap();
+        assert_eq!(
+            progress.last(),
+            Some(&(expected.size_bytes, expected.size_bytes))
+        );
+        assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
     if !deferred {
         assert_eq!(
             source_view.reads.load(Ordering::SeqCst) as u64,
@@ -314,26 +318,33 @@ async fn exercise_download(deferred: bool) {
 
     let source_cancelled = source.subscribe_file_operations();
     let cancelled = dir.path().join("cancelled.apk");
-    let transfer = downloads.save(
-        &target,
-        &target_key,
-        &receiver,
-        "receiver",
-        &row.id,
-        &cancelled,
-        &config,
+    let cancellation_started = Arc::new(AtomicBool::new(false));
+    let cancel_downloads = Arc::clone(&downloads);
+    let cancel_id = row.id.clone();
+    let cancellation_started_for_progress = Arc::clone(&cancellation_started);
+    let result = downloads
+        .save_with_progress(
+            &target,
+            &target_key,
+            &receiver,
+            "receiver",
+            &config,
+            crate::file_download::FileDownloadRequest {
+                id: &row.id,
+                destination: &cancelled,
+                token: None,
+            },
+            Arc::new(move |written, _| {
+                if written > 0 && !cancellation_started_for_progress.swap(true, Ordering::SeqCst) {
+                    cancel_downloads.cancel(&cancel_id);
+                }
+            }),
+        )
+        .await;
+    assert!(
+        cancellation_started.load(Ordering::SeqCst),
+        "progress must cancel a transfer after its first written bytes"
     );
-    let cancel = async {
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while !cancelled.exists() || cancelled.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
-                tokio::task::yield_now().await;
-            }
-            downloads.cancel(&row.id);
-        })
-        .await
-        .expect("The explicit transfer must start producing bytes");
-    };
-    let (result, ()) = tokio::join!(transfer, cancel);
     assert!(matches!(
         result,
         Err(file_transfer::FileTransferError::Cancelled)

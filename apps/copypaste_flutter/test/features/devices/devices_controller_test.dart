@@ -23,6 +23,50 @@ void main() {
   tearDown(() => controller.dispose());
 
   test(
+    'adopts an incoming request through runtime events with no manual code',
+    () async {
+      await controller.start();
+      gateway.session._ceremony = const PairingCeremony(
+        id: 'incoming',
+        state: PairingState.awaitingConfirmation,
+      );
+      gateway.incoming = gateway.session;
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.pairingEntryMode, PairingEntryMode.nearby);
+      expect(controller.incomingPairing, isTrue);
+      expect(controller.verificationCode, '123456');
+      expect(controller.canConfirmPairing, isTrue);
+      expect(gateway.joinedCodes, isEmpty);
+      expect(captureProtection.values.first, isTrue);
+    },
+  );
+
+  test(
+    'Nearby connects to the selected address without asking for a code',
+    () async {
+      gateway.session._ceremony = const PairingCeremony(
+        id: 'outgoing',
+        state: PairingState.awaitingConfirmation,
+      );
+      await controller.connectNearby(
+        DiscoveredDevice(
+          id: 'remote',
+          name: 'Remote',
+          address: '192.0.2.8:1234',
+          paired: false,
+          lastSeen: DateTime.utc(2026),
+        ),
+      );
+      expect(gateway.nearbyAddress, '192.0.2.8:1234');
+      expect(gateway.joinedCodes, isEmpty);
+      expect(controller.pairingEntryMode, PairingEntryMode.nearby);
+      expect(controller.incomingPairing, isFalse);
+    },
+  );
+
+  test(
     'switches an invitation to code entry while keeping protection',
     () async {
       await controller.openInvitation();
@@ -777,7 +821,22 @@ class _ManualFreshnessTimer implements DevicesFreshnessTimer {
   }
 }
 
-class _FakeDevicesGateway implements DevicesGateway {
+class _FakeDevicesGateway implements DevicesGateway, NearbyPairingGateway {
+  DevicesPairingSession? incoming;
+  String? nearbyAddress;
+  @override
+  Future<DevicesPairingSession?> incomingPairing() async {
+    final result = incoming;
+    incoming = null;
+    return result;
+  }
+
+  @override
+  Future<DevicesPairingSession> requestNearbyPairing(String address) async {
+    nearbyAddress = address;
+    return session;
+  }
+
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final _FakePairingSession session = _FakePairingSession();
   final List<_FakePairingSession> nextInvitations = [];
