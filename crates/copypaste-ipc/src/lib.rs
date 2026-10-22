@@ -270,6 +270,10 @@ pub enum Method {
         code: String,
         addr: String,
     },
+    /// Request a Nearby ceremony; both devices must compare and confirm SAS.
+    PairNearby {
+        addr: String,
+    },
     /// Current ceremony state, including SAS or confirmed known-device data.
     PairProgress,
     /// Record the local SAS decision. Persistence still waits for the peer's
@@ -461,6 +465,7 @@ impl Method {
                 | Self::CloudSignIn { .. }
                 | Self::CloudSignUp { .. }
                 | Self::PairJoin { .. }
+                | Self::PairNearby { .. }
                 | Self::PairConfirm { .. }
         )
     }

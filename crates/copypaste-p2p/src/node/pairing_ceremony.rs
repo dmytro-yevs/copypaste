@@ -54,8 +54,26 @@ impl Node {
         addr: &str,
         source: &S,
     ) -> Result<PairingStatus, NodeError> {
-        let short_code = PairingCode::parse(code).ok();
-        let legacy_token = if short_code.is_none() {
+        self.pair_start(Some(code), addr, source).await
+    }
+
+    pub async fn pair_nearby<S: SyncSource>(
+        self: &Arc<Self>,
+        addr: &str,
+        source: &S,
+    ) -> Result<PairingStatus, NodeError> {
+        self.pair_start(None, addr, source).await
+    }
+
+    async fn pair_start<S: SyncSource>(
+        self: &Arc<Self>,
+        code: Option<&str>,
+        addr: &str,
+        source: &S,
+    ) -> Result<PairingStatus, NodeError> {
+        let short_code = code.and_then(|code| PairingCode::parse(code).ok());
+        let legacy_token = if code.is_some() && short_code.is_none() {
+            let code = code.ok_or(NodeError::BadCode)?;
             Some(PairingToken::parse(code).map_err(|_| NodeError::BadCode)?)
         } else {
             None
@@ -69,7 +87,9 @@ impl Node {
         }
         let addr = resolve(addr).await.ok_or(NodeError::BadAddress)?;
         let control = self.pairing.begin_join(pairing_id.clone())?;
-        let connected = if let Some(code) = short_code {
+        let connected = if code.is_none() {
+            Session::connect_nearby(addr).await
+        } else if let Some(code) = short_code {
             Session::connect_pairing(addr, &code).await
         } else {
             let token = legacy_token.ok_or(NodeError::BadCode)?;
@@ -516,6 +536,66 @@ mod tests {
             receiver,
         ));
         (addr, shutdown)
+    }
+
+    #[tokio::test]
+    async fn nearby_pairs_without_invitation_only_after_both_confirm() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = node(&dir, "nearby-a");
+        let b = node(&dir, "nearby-b");
+        let (addr, shutdown) = start_listener(
+            Arc::clone(&b),
+            Arc::new(TestSource::new("nearby-b", vec![])),
+        )
+        .await;
+        let initiated = a
+            .pair_nearby(&addr.to_string(), &TestSource::new("nearby-a", vec![]))
+            .await
+            .unwrap();
+        let received = wait_for(&b, PairingPhase::AwaitingConfirmation).await;
+        assert_eq!(initiated.sas, received.sas);
+        assert_eq!(initiated.pairing_id, received.pairing_id);
+        assert_eq!(received.role, Some(PairingRole::Responder));
+        assert_eq!(received.peer.as_ref().unwrap().device_id, "nearby-a");
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        a.pair_confirm(true).unwrap();
+        tokio::task::yield_now().await;
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        b.pair_confirm(true).unwrap();
+        wait_for(&a, PairingPhase::Confirmed).await;
+        wait_for(&b, PairingPhase::Confirmed).await;
+        let left = a.peers().list().pop().unwrap();
+        let right = b.peers().list().pop().unwrap();
+        assert_eq!(left.psk, right.psk);
+        assert_eq!(left.device_id.as_deref(), Some("nearby-b"));
+        assert_eq!(right.device_id.as_deref(), Some("nearby-a"));
+        let _ = shutdown.send(true);
+    }
+
+    #[tokio::test]
+    async fn nearby_rejection_persists_nothing_and_releases_the_ceremony() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = node(&dir, "reject-a");
+        let b = node(&dir, "reject-b");
+        let (addr, shutdown) = start_listener(
+            Arc::clone(&b),
+            Arc::new(TestSource::new("reject-b", vec![])),
+        )
+        .await;
+        a.pair_nearby(&addr.to_string(), &TestSource::new("reject-a", vec![]))
+            .await
+            .unwrap();
+        wait_for(&b, PairingPhase::AwaitingConfirmation).await;
+        b.pair_confirm(false).unwrap();
+        wait_for(&a, PairingPhase::Rejected).await;
+        wait_for(&b, PairingPhase::Rejected).await;
+        assert!(a.peers().list().is_empty() && b.peers().list().is_empty());
+        assert!(
+            b.pairing.nearby_candidate().is_none(),
+            "unsolicited requests are rate limited"
+        );
+        b.pair_create_invite().unwrap();
+        let _ = shutdown.send(true);
     }
 
     /// Sleeps rather than yielding: under `start_paused` the clock only moves

@@ -299,7 +299,7 @@ void main() {
         try {
           await _pumpDevices(tester, controller, size: Size(width, 760));
           await tester.pumpAndSettle();
-          for (final label in ['Pair device', 'Scan QR', 'Enter code']) {
+          for (final label in ['Add device', 'Scan QR', 'Enter code']) {
             final command = find.semantics.byPredicate(
               (node) =>
                   node.label == label &&
@@ -506,7 +506,7 @@ void main() {
         expect(position.pixels, greaterThan(0));
         expect(tester.getRect(actions), actionsRect);
         if (confirm) {
-          await tester.tap(find.widgetWithText(Button, 'Accept'));
+          await tester.tap(find.widgetWithText(Button, 'Confirm'));
         } else {
           await tester.tap(actions);
           await tester.pumpAndSettle();
@@ -586,7 +586,7 @@ void main() {
       await tester.pumpAndSettle();
       final pair = find.descendant(
         of: find.byKey(const ValueKey('discovered-device-row-Nearby 7')),
-        matching: find.widgetWithText(Button, 'Pair'),
+        matching: find.widgetWithText(Button, 'Connect'),
       );
       expect(
         tester.getRect(pair).bottom,
@@ -598,7 +598,7 @@ void main() {
       );
       await tester.tap(pair);
       await tester.pumpAndSettle();
-      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(controller.pairingEntryMode, PairingEntryMode.nearby);
       await tester.runAsync(controller.closePairing);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -681,12 +681,12 @@ void main() {
           closeTo(tester.getCenter(find.text('Nearby devices')).dy, 1),
         );
 
-        final pair = find.descendant(of: row, matching: find.text('Pair'));
+        final pair = find.descendant(of: row, matching: find.text('Connect'));
         await tester.ensureVisible(pair);
         await tester.tap(pair);
         await tester.pumpAndSettle();
-        expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
-        expect(controller.pendingAddress, '192.0.2.30:47654');
+        expect(controller.pairingEntryMode, PairingEntryMode.nearby);
+        expect(gateway.nearbyAddress, '192.0.2.30:47654');
         await tester.runAsync(controller.closePairing);
         await tester.pumpAndSettle();
 
@@ -786,7 +786,7 @@ void main() {
 
   for (final size in [const Size(320, 640), const Size(1400, 900)]) {
     testWidgets(
-      'shows selectable invitation details below QR at $size',
+      'shows selectable invitation details before QR at $size',
       (tester) async {
         final controller = DevicesController(
           gateway: _ScreenGateway(),
@@ -805,7 +805,7 @@ void main() {
         expect(detailsTitle, findsOneWidget);
         expect(
           tester.getTopLeft(detailsTitle).dy,
-          greaterThan(tester.getBottomLeft(qr).dy),
+          lessThan(tester.getTopLeft(qr).dy),
         );
         expect(
           tester.getBottomLeft(detailsTitle).dy,
@@ -819,10 +819,7 @@ void main() {
           tester.widget<SelectableText>(address).data,
           '192.168.50.232:62951',
         );
-        expect(
-          tester.getTopLeft(code).dy,
-          greaterThan(tester.getBottomLeft(qr).dy),
-        );
+        expect(tester.getTopLeft(code).dy, lessThan(tester.getTopLeft(qr).dy));
         expect(
           tester.getTopLeft(address).dy,
           greaterThan(tester.getTopLeft(code).dy),
@@ -862,10 +859,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('123456'), findsOneWidget);
         expect(find.text('Show verification code'), findsNothing);
-        expect(find.text('Accept'), findsOneWidget);
+        expect(find.text('Confirm'), findsOneWidget);
         expect(find.text('Reject'), findsOneWidget);
         expect(gateway.session.confirmations, isEmpty);
-        await tester.tap(find.text(accept ? 'Accept' : 'Reject'));
+        await tester.tap(find.text(accept ? 'Confirm' : 'Reject'));
         await tester.pumpAndSettle();
         expect(gateway.session.confirmations, [accept]);
         await tester.runAsync(controller.closePairing);
@@ -1569,7 +1566,7 @@ void main() {
         reason: '$key must be square',
       );
     }
-    expect(find.text('Pair device'), findsNothing);
+    expect(find.text('Add device'), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey<String>('pair-device')),
@@ -1709,7 +1706,21 @@ Future<void> _pumpDevices(
   await tester.pump();
 }
 
-class _ScreenGateway implements DevicesGateway {
+class _ScreenGateway implements DevicesGateway, NearbyPairingGateway {
+  String? nearbyAddress;
+  @override
+  Future<DevicesPairingSession?> incomingPairing() async => null;
+  @override
+  Future<DevicesPairingSession> requestNearbyPairing(String address) async {
+    nearbyAddress = address;
+    session.ceremony = const PairingCeremony(
+      state: PairingState.awaitingConfirmation,
+      id: 'nearby',
+      peerName: 'Nearby laptop',
+    );
+    return session;
+  }
+
   _ScreenGateway({
     List<DevicePeer>? peers,
     List<DiscoveredDevice>? discovered,

@@ -502,9 +502,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
       trailing: Button.primary(
         onPressed:
             !controller.pairingInspectorOpen && controller.canChangePairingMode
-            ? () => controller.openCodeEntry(address: device.address)
+            ? () => controller.connectNearby(device)
             : null,
-        child: const Text('Pair'),
+        child: const Text('Connect'),
       ),
     );
   }
@@ -1117,6 +1117,14 @@ class _PairingInspectorState extends State<_PairingInspector> {
               key: const ValueKey<String>('pairing-scroll-content'),
               child: switch (mode) {
                 PairingEntryMode.invite => _invitationContent(),
+                PairingEntryMode.nearby =>
+                  widget.controller.pairing != null
+                      ? _pairingProgress(widget.controller.pairing!)
+                      : widget.controller.pairingInFlight
+                      ? const StateView.loading(
+                          message: 'Sending connection request…',
+                        )
+                      : _pairingError(),
                 PairingEntryMode.scanQr => _scannerContent(),
                 PairingEntryMode.enterCode => _codeContent(),
                 null => const StateView.empty(
@@ -1338,7 +1346,14 @@ class _PairingInspectorState extends State<_PairingInspector> {
             children: [
               Icon(_pairingIcon(ceremony.state)),
               const Gap(AppSpacing.md),
-              Expanded(child: Text(title).h4()),
+              Expanded(
+                child: Text(
+                  widget.controller.locallyConfirmed &&
+                          ceremony.state == PairingState.awaitingConfirmation
+                      ? 'Waiting for the other device'
+                      : title,
+                ).h4(),
+              ),
             ],
           ),
           if (ceremony.failureMessage ??
@@ -1352,21 +1367,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
         if (widget.controller.invitation case final invitation?) ...[
           if (ceremony.state != PairingState.waitingForPeer)
             const Gap(AppSpacing.lg),
-          Center(
-            child: ColoredBox(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Image.memory(
-                  invitation.qrPng,
-                  key: const ValueKey<String>('pairing-invite-qr'),
-                  width: 260,
-                  height: 260,
-                  filterQuality: FilterQuality.none,
-                ),
-              ),
-            ),
-          ),
+          const Text(
+            'On the other device, choose Add device → Enter code, or scan the QR code.',
+          ).muted(),
           const Gap(AppSpacing.lg),
           const Divider(key: ValueKey('pairing-invite-divider')),
           const Gap(AppSpacing.lg),
@@ -1394,6 +1397,22 @@ class _PairingInspectorState extends State<_PairingInspector> {
               ),
             ],
           ),
+          const Gap(AppSpacing.lg),
+          Center(
+            child: ColoredBox(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Image.memory(
+                  invitation.qrPng,
+                  key: const ValueKey<String>('pairing-invite-qr'),
+                  width: 260,
+                  height: 260,
+                  filterQuality: FilterQuality.none,
+                ),
+              ),
+            ),
+          ),
         ],
         if (widget.controller.verificationCode
             case final verificationCode?) ...[
@@ -1403,6 +1422,10 @@ class _PairingInspectorState extends State<_PairingInspector> {
             child: Column(
               children: [
                 const Text('Verification code').semiBold(),
+                const Gap(AppSpacing.sm),
+                const Text(
+                  'Confirm only if this code matches on both devices.',
+                ).muted(),
                 const Gap(AppSpacing.sm),
                 Text(
                   verificationCode,
@@ -1456,7 +1479,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
                       !widget.controller.canConfirmPairing
                   ? null
                   : () => widget.controller.confirmPairing(accept: true),
-              child: const Text('Accept'),
+              child: const Text('Confirm'),
             ),
           if (terminal)
             Button.primary(
@@ -1497,6 +1520,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
           ),
         );
       case PairingEntryMode.invite:
+      case PairingEntryMode.nearby:
       case null:
         return null;
     }
@@ -1515,6 +1539,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
     PairingEntryMode.invite => 'Pair a device',
     PairingEntryMode.scanQr => 'Scan QR code',
     PairingEntryMode.enterCode => 'Enter pairing code',
+    PairingEntryMode.nearby => 'Connect nearby device',
     null => 'Pairing',
   };
 

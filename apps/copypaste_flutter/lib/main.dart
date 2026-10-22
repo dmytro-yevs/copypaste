@@ -30,6 +30,8 @@ import 'app/shell/macos_window_header.dart';
 import 'app/theme/app_motion.dart';
 import 'app/theme/app_theme.dart';
 import 'features/devices/devices.dart';
+import 'features/notifications/notifications_controller.dart';
+import 'platform/notifications/pairing_notification_port.dart';
 import 'features/devices/flutter_rust_devices_gateway.dart';
 import 'features/history/controller/history_controller.dart';
 import 'features/history/controller/history_ocr_controller.dart';
@@ -211,6 +213,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   HistoryController? _historyController;
   FlutterRustDevicesGateway? _devicesGateway;
   DevicesController? _devicesController;
+  NotificationsController? _notifications;
   QuickPasteSettingsController? _quickPasteSettings;
   SettingsController? _settingsController;
   ModulesController? _modulesController;
@@ -462,7 +465,17 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       ]);
       _syncCaptureControls();
       if (!mounted) return;
+      _notifications = NotificationsController(
+        devices: _devicesController!,
+        platform: PlatformPairingNotificationPort(),
+        visible: _visibility,
+        openPairing: _openPairingFromNotification,
+      );
       setState(() => _runtimeState = _RuntimeState.ready);
+      if (_visibility.value) {
+        unawaited(_notifications!.enableSystemNotifications());
+      }
+      unawaited(_devicesController!.start());
       unawaited(_activatePendingPairingLink());
     } catch (error) {
       if (!mounted) {
@@ -525,6 +538,12 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     await controller.joinPairingUri(uri);
   }
 
+  void _openPairingFromNotification() {
+    if (!mounted || _runtimeState != _RuntimeState.ready) return;
+    _navigation.selectDestination(AppDestination.devices);
+    if (!_visibility.value) unawaited(_desktopWindow?.showFromTrayOrDock());
+  }
+
   Future<void> _retryRuntime() async {
     await _stopRuntime();
     await _startRuntime();
@@ -548,6 +567,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     historyController?.dispose();
     _modulesController?.dispose();
     _modulesController = null;
+    _notifications?.dispose();
+    _notifications = null;
     devicesController?.dispose();
     quickPasteSettings?.dispose();
     settingsController?.removeListener(_syncCaptureControls);
@@ -586,6 +607,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     historyController?.dispose();
     _modulesController?.dispose();
     _modulesController = null;
+    _notifications?.dispose();
+    _notifications = null;
     devicesController?.dispose();
     quickPasteSettings?.dispose();
     settingsController?.removeListener(_syncCaptureControls);
@@ -881,6 +904,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       navigation: _navigation,
       historyController: _historyController,
       devicesController: _devicesController,
+      notifications: _notifications,
       quickPasteSettings: _quickPasteSettings,
       settingsController: _settingsController,
       launchAtLogin: _launchAtLogin,

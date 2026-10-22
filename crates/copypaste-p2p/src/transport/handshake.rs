@@ -9,11 +9,11 @@
 //!
 //! * **Authentication.** Possession of the token is the identity. Both sides
 //!   prove possession by being able to decrypt at all.
-//! * **Fail-closed by construction.** `psk0` establishes a cipher key before
+//! * **Fail-closed synchronization.** `psk0` establishes a cipher key before
 //!   message one's payload, so message one is already an AEAD ciphertext and a
-//!   responder holding the wrong token cannot decrypt it. No downgrade, no
-//!   "unauthenticated but encrypted" mode, and no code path here that could
-//!   offer one (port manifest 02, I-15; `AGENTS.md` rule 4).
+//!   responder holding the wrong token cannot decrypt it. No downgrade to an
+//!   unauthenticated sync session. Nearby uses a distinct, explicit bootstrap that
+//!   cannot serve history and requires bilateral SAS confirmation before trust.
 //! * **Forward secrecy.** The `ee` DH in message two means a token disclosed
 //!   later does not decrypt traffic captured earlier.
 //!
@@ -136,11 +136,26 @@ impl Session {
         candidates: &[PskCandidate],
         invitation: Option<&super::PairingCandidate>,
     ) -> Result<(Self, String), TransportError> {
+        Self::accept_with_nearby(stream, candidates, invitation, || None).await
+    }
+
+    pub(crate) async fn accept_with_nearby<F>(
+        stream: TcpStream,
+        candidates: &[PskCandidate],
+        invitation: Option<&super::PairingCandidate>,
+        reserve: F,
+    ) -> Result<(Self, String), TransportError>
+    where
+        F: FnOnce() -> Option<super::PairingCandidate>,
+    {
         let peer_addr = stream.peer_addr().map_err(TransportError::Io)?;
         let _ = stream.set_nodelay(true);
         timeout(HANDSHAKE_TIMEOUT, async move {
             let mut framed = Framed::new(stream, codec());
             let first = next_handshake_frame(&mut framed).await?;
+            if first.as_ref() == super::nearby::PREFIX {
+                return super::nearby::accept(framed, peer_addr, reserve).await;
+            }
             if first.starts_with(super::pairing_bootstrap::PREFIX) {
                 let invitation = invitation.ok_or(TransportError::Handshake)?;
                 return super::pairing_bootstrap::accept(framed, &first, invitation, peer_addr)

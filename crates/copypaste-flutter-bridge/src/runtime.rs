@@ -197,7 +197,13 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
             return Err(RuntimeError::runtime_conflict());
         }
 
-        let child = Command::new(daemon_executable)
+        let mut command = Command::new(daemon_executable);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let child = command
             .args([
                 "--data-dir",
                 data_dir.to_string_lossy().as_ref(),

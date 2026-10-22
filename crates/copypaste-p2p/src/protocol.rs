@@ -18,7 +18,7 @@ pub use codec::ProtocolError;
 /// Version of the message set. Bumped whenever two builds would disagree on a
 /// field. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
@@ -225,6 +225,8 @@ pub enum SyncMessage {
         protocol_version: u32,
         item_id: String,
         sha256: String,
+        /// The offered file size, used to bound every requested chunk index.
+        size: u64,
         index: u64,
     },
     FileChunk {

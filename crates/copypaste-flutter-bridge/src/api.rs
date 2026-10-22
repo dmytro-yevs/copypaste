@@ -945,6 +945,16 @@ pub async fn create_pairing_ceremony() -> Result<PairingCeremony, RuntimeError> 
     crate::protected::create().await
 }
 
+/// Sends a Nearby request without a manual invitation code.
+pub async fn request_nearby_pairing(address: String) -> Result<PairingCeremony, RuntimeError> {
+    crate::protected::nearby(address).await
+}
+
+/// Adopts an inbound request once; returns only non-secret progress.
+pub async fn incoming_pairing_ceremony() -> Result<Option<PairingCeremony>, RuntimeError> {
+    crate::protected::incoming().await
+}
+
 /// Starts the backend `PairJoin { code, addr }` flow and returns safe progress.
 pub async fn join_pairing_ceremony(
     code: String,

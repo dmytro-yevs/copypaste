@@ -56,6 +56,65 @@ pub(crate) async fn create() -> Result<PairingCeremony, RuntimeError> {
     Ok(public)
 }
 
+pub(crate) async fn nearby(addr: String) -> Result<PairingCeremony, RuntimeError> {
+    let response = crate::client::request(Method::PairNearby { addr }).await?;
+    let Some(ResponseData::PairingProgress(progress)) = response.data else {
+        return Err(RuntimeError::internal());
+    };
+    register_progress(progress)
+}
+
+pub(crate) async fn incoming() -> Result<Option<PairingCeremony>, RuntimeError> {
+    let response = crate::client::request(Method::PairProgress).await?;
+    let Some(ResponseData::PairingProgress(progress)) = response.data else {
+        return Err(RuntimeError::internal());
+    };
+    if progress.role != Some(copypaste_ipc::PairingRole::Responder)
+        || progress.state != copypaste_ipc::PairingState::AwaitingConfirmation
+    {
+        return Ok(None);
+    }
+    let Some(pairing_id) = progress.pairing_id.as_deref() else {
+        return Ok(None);
+    };
+    let mut guard = ceremonies().lock().unwrap_or_else(|p| p.into_inner());
+    if guard
+        .values()
+        .any(|ceremony| ceremony.pairing_id == pairing_id)
+    {
+        return Ok(None);
+    }
+    Ok(Some(insert_progress(&mut guard, progress)?))
+}
+
+fn register_progress(progress: PairingProgressData) -> Result<PairingCeremony, RuntimeError> {
+    let mut guard = ceremonies().lock().unwrap_or_else(|p| p.into_inner());
+    insert_progress(&mut guard, progress)
+}
+
+fn insert_progress(
+    guard: &mut HashMap<String, SecretCeremony>,
+    progress: PairingProgressData,
+) -> Result<PairingCeremony, RuntimeError> {
+    let pairing_id = progress
+        .pairing_id
+        .clone()
+        .ok_or_else(RuntimeError::internal)?;
+    let id = Uuid::new_v4().to_string();
+    let public = sanitize(&id, progress);
+    guard.insert(
+        id,
+        SecretCeremony {
+            invitation: None,
+            pairing_id,
+            native_context: None,
+            generation: 1,
+            decision_in_flight: false,
+        },
+    );
+    Ok(public)
+}
+
 pub(crate) async fn join(code: String, addr: String) -> Result<PairingCeremony, RuntimeError> {
     let expected_pairing_id = if copypaste_p2p::PairingCode::parse(&code).is_ok() {
         None
@@ -242,8 +301,13 @@ pub(crate) async fn cancel(ceremony_id: &str) -> Result<PairingCeremony, Runtime
 }
 
 pub(crate) async fn dispose(ceremony_id: &str) -> Result<(), RuntimeError> {
-    require(ceremony_id)?;
-    let _ = crate::client::request(Method::PairCancel).await?;
+    let expected = pairing_id(ceremony_id)?;
+    let response = crate::client::request(Method::PairProgress).await?;
+    if let Some(ResponseData::PairingProgress(progress)) = response.data {
+        if progress.pairing_id.as_deref() == Some(expected.as_str()) {
+            let _ = crate::client::request(Method::PairCancel).await?;
+        }
+    }
     remove(ceremony_id);
     Ok(())
 }

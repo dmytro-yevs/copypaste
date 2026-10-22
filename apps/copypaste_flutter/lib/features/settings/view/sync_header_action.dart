@@ -37,6 +37,17 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   OverlayCompleter<void>? _drawer;
   bool _opening = false;
 
+  SyncStatus get _status {
+    final devices = widget.devices;
+    return widget.controller.syncStatus.withOfflinePeers({
+      if (devices != null)
+        for (final peer in devices.snapshot?.peers ?? <DevicePeer>[])
+          if (devices.peerConnectionState(peer) ==
+              DeviceConnectionState.offline)
+            peer.id,
+    });
+  }
+
   @override
   void dispose() {
     if (_drawer?.isCompleted == false) _drawer!.remove();
@@ -48,7 +59,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([widget.controller, ?widget.devices]),
     builder: (context, _) {
-      final phase = widget.controller.syncStatus.phase;
+      final phase = _status.phase;
       return Tooltip(
         showDuration: AppMotion.resolve(context, AppMotion.standard),
         tooltip: (context) => TooltipContainer(child: Text(phase.label)),
@@ -96,7 +107,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
                   ?widget.devices,
                 ]),
                 builder: (context, _) => _SyncDetails(
-                  status: widget.controller.syncStatus,
+                  status: _status,
                   devices: widget.devices,
                   onClose: () => unawaited(closeDrawer(context)),
                 ),

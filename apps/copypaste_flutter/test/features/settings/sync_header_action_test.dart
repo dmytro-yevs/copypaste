@@ -182,7 +182,7 @@ void main() {
   );
 
   testWidgets(
-    'drawer shows active devices, errors, endpoint and measured ping',
+    'drawer shows active devices and offline peers without stale errors',
     (tester) async {
       final now = DateTime(2026, 10, 7, 20);
       final repository = FakeSettingsRepository()
@@ -272,7 +272,12 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('The device stopped responding.'), findsOneWidget);
+      expect(find.text('Offline'), findsOneWidget);
+      expect(find.text('Waiting for sync'), findsOneWidget);
+      expect(find.text('Sync failed'), findsNothing);
+      expect(find.text('Last sync problem'), findsNothing);
+      expect(find.text('The device stopped responding.'), findsNothing);
+      expect(find.text('Syncing'), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.tap(
         find.byKey(const ValueKey<String>('close-sync-details')),
@@ -291,6 +296,76 @@ void main() {
       TargetPlatform.android,
     }),
   );
+
+  testWidgets('offline failure does not make the header or drawer an error', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 10, 21, 22, 29);
+    final repository = FakeSettingsRepository()
+      ..capture = CaptureSettingsState(
+        running: true,
+        paused: false,
+        epoch: 0,
+        syncStatus: SyncStatus(
+          revision: 1,
+          phase: SyncPhase.failed,
+          peers: [
+            PeerSyncStatus(
+              id: 'windows',
+              name: 'Windows desktop',
+              phase: SyncPhase.failed,
+              lastSuccess: now,
+              error: 'the other device did not accept this pairing code',
+            ),
+          ],
+        ),
+      );
+    final controller = _controller(repository);
+    final gateway = _Devices(now);
+    final devices = DevicesController(
+      gateway: gateway,
+      captureProtection: _Protection(),
+      now: () => now,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await devices.start();
+    await tester.pumpWidget(_app(controller, devices: devices));
+    final header = find.byKey(const ValueKey<String>('sync-header-open'));
+    final semantics = tester.ensureSemantics();
+    expect(
+      find.bySemanticsLabel('Synchronization: Waiting for sync'),
+      findsOneWidget,
+    );
+    semantics.dispose();
+    final icon = tester.widget<Icon>(find.byIcon(LucideIcons.network));
+    expect(
+      icon.color,
+      AppTheme.statusColor(tester.element(header), AppStatusTone.muted),
+    );
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(find.text('Offline'), findsOneWidget);
+    expect(find.text('Sync failed'), findsNothing);
+    expect(find.text('Last sync problem'), findsNothing);
+    expect(find.text('Last successful sync'), findsOneWidget);
+    expect(controller.syncStatus.peers.single.error, isNotNull);
+
+    gateway.windowsOnline = true;
+    await devices.refresh();
+    await tester.pumpAndSettle();
+    expect(find.text('Available'), findsOneWidget);
+    expect(find.text('Sync failed'), findsWidgets);
+    expect(find.text('Last sync problem'), findsOneWidget);
+    expect(
+      find.text('the other device did not accept this pairing code'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const ValueKey<String>('close-sync-details')));
+    await tester.pumpAndSettle();
+    devices.dispose();
+  });
 
   testWidgets('sync details fit a narrow phone with enlarged text', (
     tester,
@@ -379,6 +454,7 @@ Widget _app(
 class _Devices implements DevicesGateway {
   _Devices(this.now);
   final DateTime now;
+  bool windowsOnline = false;
   @override
   Stream<void> get changes => const Stream.empty();
   @override
@@ -423,8 +499,18 @@ class _Devices implements DevicesGateway {
         id: 'windows',
         name: 'Windows desktop',
         lastSeen: now,
-        online: false,
+        online: windowsOnline,
         details: DeviceDetails(
+          presence: DevicePresenceObservation(
+            state: windowsOnline
+                ? DevicePresence.online
+                : DevicePresence.offline,
+            lastSeen: now,
+            provenance: DeviceObservationProvenance.measured,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: now,
+            freshUntil: now.add(const Duration(minutes: 1)),
+          ),
           profile: DeviceProfile(
             displayName: 'Windows desktop',
             platform: DevicePlatform.windows,

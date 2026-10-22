@@ -28,7 +28,7 @@ abstract final class DevicePresentation {
     PairingEntryMode.invite => LucideIcons.qrCode,
     PairingEntryMode.scanQr => LucideIcons.scanLine,
     PairingEntryMode.enterCode => LucideIcons.keyboard,
-    null => LucideIcons.link,
+    PairingEntryMode.nearby || null => LucideIcons.link,
   };
 
   static IconData icon(DeviceClass? deviceClass) => switch (deviceClass) {

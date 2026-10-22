@@ -11,11 +11,19 @@ use std::net::SocketAddr;
 use crate::DeviceProfile;
 
 use super::{
-    SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES,
-    MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
-    MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE,
-    MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    SyncItem, SyncMessage, FILE_CHUNK_BYTES, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES,
+    MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE,
+    MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES,
+    MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
 };
+
+/// Authenticated binary envelope for a file chunk.
+///
+/// The outer Noise record authenticates this header and payload. The magic is
+/// deliberately not valid JSON, so a binary file chunk can never be confused
+/// with an ordinary sync message.
+const FILE_CHUNK_MAGIC: [u8; 4] = *b"CPF1";
+const FILE_CHUNK_HEADER_BYTES: usize = 16;
 
 /// Wire-level failures.
 ///
@@ -71,9 +79,18 @@ pub enum ProtocolError {
 }
 
 impl SyncMessage {
-    /// Serialises to JSON after checking every bound.
+    /// Serialises ordinary messages to JSON and file chunks to their compact
+    /// binary envelope after checking every bound.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
+        if let Self::FileChunk { index, bytes } = self {
+            let mut encoded = Vec::with_capacity(FILE_CHUNK_HEADER_BYTES + bytes.len());
+            encoded.extend_from_slice(&FILE_CHUNK_MAGIC);
+            encoded.extend_from_slice(&index.to_be_bytes());
+            encoded.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+            encoded.extend_from_slice(bytes);
+            return Ok(encoded);
+        }
         let bytes = serde_json::to_vec(self).map_err(|e| ProtocolError::Encode(e.to_string()))?;
         if bytes.len() > MAX_MESSAGE_BYTES {
             return Err(ProtocolError::MessageTooLarge {
@@ -84,7 +101,8 @@ impl SyncMessage {
         Ok(bytes)
     }
 
-    /// Parses a message and enforces every bound before returning it.
+    /// Parses a JSON message or compact binary file chunk and enforces every
+    /// bound before returning it.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() > MAX_MESSAGE_BYTES {
             return Err(ProtocolError::MessageTooLarge {
@@ -92,10 +110,16 @@ impl SyncMessage {
                 max: MAX_MESSAGE_BYTES,
             });
         }
+        if bytes.starts_with(&FILE_CHUNK_MAGIC) {
+            return decode_file_chunk(bytes);
+        }
         let mut msg: Self =
             serde_json::from_slice(bytes).map_err(|e| ProtocolError::Decode(e.to_string()))?;
         msg.clamp_timestamps();
-        msg.validate()?;
+        if let Err(error) = msg.validate() {
+            zeroize_file_chunk(&mut msg);
+            return Err(error);
+        }
         Ok(msg)
     }
 
@@ -203,6 +227,7 @@ impl SyncMessage {
                 protocol_version,
                 item_id,
                 sha256,
+                size,
                 index,
             } => {
                 check_protocol_version(*protocol_version)?;
@@ -211,7 +236,8 @@ impl SyncMessage {
                     || !sha256
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    || *index > i64::MAX as u64 / super::FILE_CHUNK_BYTES as u64
+                    || (*size == 0 && *index != 0)
+                    || (*size > 0 && *index > (*size - 1) / FILE_CHUNK_BYTES as u64)
                 {
                     return Err(ProtocolError::Decode("invalid file request".into()));
                 }
@@ -240,6 +266,40 @@ impl SyncMessage {
             }
         }
         Ok(())
+    }
+}
+
+fn decode_file_chunk(bytes: &[u8]) -> Result<SyncMessage, ProtocolError> {
+    if bytes.len() < FILE_CHUNK_HEADER_BYTES {
+        return Err(ProtocolError::Decode("invalid binary file chunk".into()));
+    }
+    let index = u64::from_be_bytes(
+        bytes[4..12]
+            .try_into()
+            .map_err(|_| ProtocolError::Decode("invalid binary file chunk".into()))?,
+    );
+    let length = u32::from_be_bytes(
+        bytes[12..16]
+            .try_into()
+            .map_err(|_| ProtocolError::Decode("invalid binary file chunk".into()))?,
+    ) as usize;
+    if length > FILE_CHUNK_BYTES || bytes.len() != FILE_CHUNK_HEADER_BYTES + length {
+        return Err(ProtocolError::Decode("invalid binary file chunk".into()));
+    }
+    let mut message = SyncMessage::FileChunk {
+        index,
+        bytes: bytes[FILE_CHUNK_HEADER_BYTES..].to_vec(),
+    };
+    if let Err(error) = message.validate() {
+        zeroize_file_chunk(&mut message);
+        return Err(error);
+    }
+    Ok(message)
+}
+
+fn zeroize_file_chunk(message: &mut SyncMessage) {
+    if let SyncMessage::FileChunk { bytes, .. } = message {
+        zeroize::Zeroize::zeroize(bytes);
     }
 }
 
@@ -366,14 +426,14 @@ mod tests {
     use copypaste_ipc::{DeviceClass, DevicePlatform};
 
     use crate::protocol::{
-        plaintext_content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES,
-        MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
-        MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE,
-        MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+        plaintext_content_hash, ItemSummary, SyncItem, SyncMessage, FILE_CHUNK_BYTES,
+        MAX_CONTENT_BYTES, MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE,
+        MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES,
+        MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
     };
     use crate::DeviceProfile;
 
-    use super::ProtocolError;
+    use super::{ProtocolError, FILE_CHUNK_HEADER_BYTES, FILE_CHUNK_MAGIC};
     use copypaste_payload::PayloadMetadata;
 
     fn summary(id: &str) -> ItemSummary {
@@ -562,6 +622,50 @@ mod tests {
         };
         let decoded = SyncMessage::decode(&message.encode().unwrap()).unwrap();
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn file_chunks_use_a_small_binary_envelope_and_keep_the_exact_payload() {
+        let payload = (0..FILE_CHUNK_BYTES)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let message = SyncMessage::FileChunk {
+            index: 42,
+            bytes: payload.clone(),
+        };
+        let encoded = message.encode().expect("encode binary file chunk");
+        assert_eq!(encoded.len(), payload.len() + FILE_CHUNK_HEADER_BYTES);
+        assert_eq!(&encoded[..4], &FILE_CHUNK_MAGIC);
+        assert_eq!(
+            SyncMessage::decode(&encoded).expect("decode binary"),
+            message
+        );
+    }
+
+    #[test]
+    fn malformed_binary_file_chunks_are_rejected_before_payload_allocation() {
+        for bytes in [
+            FILE_CHUNK_MAGIC.to_vec(),
+            [FILE_CHUNK_MAGIC.as_slice(), &[0; 8]].concat(),
+            [
+                FILE_CHUNK_MAGIC.as_slice(),
+                &0_u64.to_be_bytes(),
+                &((FILE_CHUNK_BYTES as u32) + 1).to_be_bytes(),
+            ]
+            .concat(),
+            [
+                FILE_CHUNK_MAGIC.as_slice(),
+                &0_u64.to_be_bytes(),
+                &1_u32.to_be_bytes(),
+                &[],
+            ]
+            .concat(),
+        ] {
+            assert!(matches!(
+                SyncMessage::decode(&bytes),
+                Err(ProtocolError::Decode(_))
+            ));
+        }
     }
 
     #[test]

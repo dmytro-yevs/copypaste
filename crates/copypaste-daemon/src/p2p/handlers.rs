@@ -46,6 +46,17 @@ pub async fn pair_create_invite(state: &Arc<AppState>, id: u64) -> Response {
     }
 }
 
+pub async fn pair_nearby(state: &Arc<AppState>, id: u64, addr: &str) -> Response {
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
+    let source = peer_source(state);
+    match state.p2p.node().pair_nearby(addr, &source).await {
+        Ok(status) => pairing_progress(state, id, status),
+        Err(error) => failed(id, error),
+    }
+}
+
 pub async fn pair_join(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
     if !state.settings.get().sync_enabled {
         return sync_disabled(id);
@@ -758,6 +769,10 @@ mod tests {
         );
         assert_eq!(
             sync_now(&state, 3, None).await.error_code,
+            Some(ErrorCode::NotReady)
+        );
+        assert_eq!(
+            pair_nearby(&state, 4, "127.0.0.1:1").await.error_code,
             Some(ErrorCode::NotReady)
         );
     }

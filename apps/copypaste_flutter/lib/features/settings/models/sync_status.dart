@@ -45,4 +45,43 @@ class SyncStatus {
   final int revision;
   final SyncPhase phase;
   final List<PeerSyncStatus> peers;
+
+  /// Present confirmed offline peers as waiting, retaining session diagnostics
+  /// in the original backend snapshot for when connectivity changes.
+  SyncStatus withOfflinePeers(Set<String> offlinePeerIds) {
+    if (offlinePeerIds.isEmpty) return this;
+    if (!peers.any((peer) => offlinePeerIds.contains(peer.id))) return this;
+    final visiblePeers = [
+      for (final peer in peers)
+        if (offlinePeerIds.contains(peer.id))
+          PeerSyncStatus(
+            id: peer.id,
+            name: peer.name,
+            phase: switch (phase) {
+              SyncPhase.unavailable || SyncPhase.disabled => phase,
+              _ => SyncPhase.waiting,
+            },
+            startedAt: peer.startedAt,
+            lastSuccess: peer.lastSuccess,
+            sent: peer.sent,
+            received: peer.received,
+            skippedTooLarge: peer.skippedTooLarge,
+          )
+        else
+          peer,
+    ];
+    final visiblePhase = switch (phase) {
+      SyncPhase.unavailable || SyncPhase.disabled => phase,
+      _ when visiblePeers.any((peer) => peer.phase == SyncPhase.syncing) =>
+        SyncPhase.syncing,
+      _ when visiblePeers.any((peer) => peer.phase == SyncPhase.failed) =>
+        SyncPhase.failed,
+      _ => SyncPhase.waiting,
+    };
+    return SyncStatus(
+      revision: revision,
+      phase: visiblePhase,
+      peers: visiblePeers,
+    );
+  }
 }

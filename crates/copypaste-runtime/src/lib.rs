@@ -304,6 +304,20 @@ impl Runtime {
     /// and Noise node as the desktop service.
     pub async fn request(&self, id: u64, method: Method) -> Response {
         self.start_module_sync();
+        if !self.settings.config().sync_enabled
+            && matches!(
+                &method,
+                Method::PairNearby { .. }
+                    | Method::PairCreateInvite
+                    | Method::PairJoin { .. }
+                    | Method::PairConfirm { accept: true }
+            )
+        {
+            if matches!(&method, Method::PairConfirm { accept: true }) {
+                self.node.pair_cancel();
+            }
+            return Response::err(id, ErrorCode::NotReady, "Sync is turned off.");
+        }
         let item_mutation = matches!(
             &method,
             Method::Delete { .. }
@@ -321,6 +335,7 @@ impl Runtime {
                 | Method::PairConfirm { .. }
                 | Method::PairCancel
                 | Method::PairJoin { .. }
+                | Method::PairNearby { .. }
                 | Method::Unpair { .. }
                 | Method::Revoke { .. }
         );
@@ -765,6 +780,12 @@ impl Runtime {
                 ),
             },
             Method::SyncNow { pairing_id } => self.sync_now(id, pairing_id).await,
+            Method::PairNearby { addr } => {
+                match self.node.pair_nearby(&addr, self.source.as_ref()).await {
+                    Ok(status) => self.pair_progress(id, status),
+                    Err(error) => self.node_error(id, error),
+                }
+            }
             Method::PairJoin { code, addr } => match self
                 .node
                 .pair_join(&code, &addr, self.source.as_ref())
@@ -1882,6 +1903,50 @@ mod tests {
         assert!(second.private_mode);
         assert_eq!(second.private_mode_epoch, 1);
         assert_eq!(second.capture_revision, 2);
+    }
+
+    #[tokio::test]
+    async fn nearby_request_uses_typed_errors_and_honors_the_sync_switch() {
+        let (runtime, _dir) = fixture();
+        let invalid = runtime
+            .request(
+                1,
+                Method::PairNearby {
+                    addr: "invalid".into(),
+                },
+            )
+            .await;
+        assert_eq!(invalid.error_code, Some(ErrorCode::PairingAddress));
+        assert!(
+            runtime
+                .request(
+                    2,
+                    Method::SetConfig {
+                        patch: copypaste_ipc::ConfigPatch {
+                            sync_enabled: Some(false),
+                            ..Default::default()
+                        }
+                    }
+                )
+                .await
+                .ok
+        );
+        for method in [
+            Method::PairNearby {
+                addr: "invalid".into(),
+            },
+            Method::PairCreateInvite,
+            Method::PairJoin {
+                code: "invalid".into(),
+                addr: "invalid".into(),
+            },
+            Method::PairConfirm { accept: true },
+        ] {
+            assert_eq!(
+                runtime.request(3, method).await.error_code,
+                Some(ErrorCode::NotReady)
+            );
+        }
     }
 
     fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {

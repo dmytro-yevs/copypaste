@@ -93,6 +93,11 @@ pub trait SyncSource {
     fn file_chunk(&self, _id: &str, _sha256: &str, _index: u64) -> Result<Vec<u8>, SyncError> {
         Err(SyncError::Source("The file is unavailable.".into()))
     }
+    /// Resolves the authenticated transfer's byte count before the sender
+    /// streams it. This must use local metadata, not the peer's request.
+    fn file_size(&self, _id: &str, _sha256: &str) -> Result<u64, SyncError> {
+        Err(SyncError::Source("The file is unavailable.".into()))
+    }
     fn device_id(&self) -> String;
     fn device_name(&self) -> String;
 

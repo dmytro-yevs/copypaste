@@ -7,8 +7,11 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/format_bytes.dart';
 import '../../shared/state_view.dart';
-import '../../shared/system_date_time.dart';
+import '../devices/device_presentation.dart';
+import '../devices/devices_gateway.dart';
+import 'file_operations_button_progress.dart';
 import 'file_operations_controller.dart';
+import 'file_operation_tile.dart';
 
 /// Shared byte and phase presentation for the manager and clip inspector.
 class FileOperationStatus extends StatelessWidget {
@@ -43,9 +46,11 @@ class FileOperationsHeaderAction extends StatefulWidget {
     super.key,
     required this.controller,
     this.onDrawerVisibilityChanged,
+    this.resolveDeviceClass,
   });
   final FileOperationsController controller;
   final ValueChanged<bool>? onDrawerVisibilityChanged;
+  final DeviceClass? Function(String displayName)? resolveDeviceClass;
   @override
   State<FileOperationsHeaderAction> createState() =>
       _FileOperationsHeaderActionState();
@@ -67,6 +72,12 @@ class _FileOperationsHeaderActionState
       final active = widget.controller.active.toList(growable: false);
       final total = active.fold<int>(0, (sum, item) => sum + item.total);
       final written = active.fold<int>(0, (sum, item) => sum + item.written);
+      final button = Button.secondary(
+        key: const ValueKey('file-operations-open'),
+        style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
+        onPressed: _open,
+        child: const Icon(LucideIcons.download),
+      );
       return Tooltip(
         tooltip: (_) => TooltipContainer(
           child: Text(
@@ -75,29 +86,12 @@ class _FileOperationsHeaderActionState
                 : '${active.length} active transfers · ${formatBytes(written)} / ${formatBytes(total)}',
           ),
         ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Button.secondary(
-              key: const ValueKey('file-operations-open'),
-              style: AppTheme.controlButtonStyle(
-                const ButtonStyle.secondaryIcon(),
+        child: active.isEmpty
+            ? button
+            : FileOperationsButtonProgress(
+                progress: total > 0 ? (written / total).clamp(0, 1) : null,
+                child: button,
               ),
-              onPressed: _open,
-              child: const Icon(LucideIcons.download),
-            ),
-            if (active.isNotEmpty)
-              IgnorePointer(
-                child: CircularProgressIndicator(
-                  value: total > 0 ? (written / total).clamp(0, 1) : null,
-                  animated: !MediaQuery.disableAnimationsOf(context),
-                  theme: CircularProgressIndicatorTheme(
-                    size: AppTheme.controlHeight(context) - AppSpacing.xs,
-                  ),
-                ),
-              ),
-          ],
-        ),
       );
     },
   );
@@ -111,7 +105,10 @@ class _FileOperationsHeaderActionState
         AppOverlays.drawerConfiguration(context),
         builder: (context) => ConstrainedBox(
           constraints: AppOverlays.drawerContentConstraints(context),
-          child: _FileOperationsDrawer(controller: widget.controller),
+          child: _FileOperationsDrawer(
+            controller: widget.controller,
+            resolveDeviceClass: widget.resolveDeviceClass,
+          ),
         ),
       );
       await drawer.future;
@@ -123,8 +120,12 @@ class _FileOperationsHeaderActionState
 }
 
 class _FileOperationsDrawer extends StatelessWidget {
-  const _FileOperationsDrawer({required this.controller});
+  const _FileOperationsDrawer({
+    required this.controller,
+    this.resolveDeviceClass,
+  });
   final FileOperationsController controller;
+  final DeviceClass? Function(String displayName)? resolveDeviceClass;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -161,7 +162,7 @@ class _FileOperationsDrawer extends StatelessWidget {
                   onPressed: controller.loadEarlier,
                   child: const Text('Earlier'),
                 ),
-              Button.secondary(
+              Button.outline(
                 onPressed: controller.items.any((item) => !item.active)
                     ? controller.clearHistory
                     : null,
@@ -194,82 +195,40 @@ class _FileOperationsDrawer extends StatelessWidget {
               ),
               itemBuilder: (context, index) {
                 final item = controller.items[index];
-                return Column(
+                final speed = controller.speedFor(item.id);
+                final canRetry =
+                    !item.active &&
+                    item.phase != 'completed' &&
+                    item.kind == FileOperationKind.receive &&
+                    item.localPath != null;
+                return FileOperationTile(
                   key: ValueKey('file-operation-${item.id}'),
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(switch (item.kind) {
-                          FileOperationKind.send => LucideIcons.upload,
-                          FileOperationKind.receive => LucideIcons.download,
-                          FileOperationKind.import => LucideIcons.filePlus,
-                        }),
-                        const Gap(AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            item.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (item.active &&
-                            item.kind == FileOperationKind.receive)
-                          Button.ghost(
-                            style: AppTheme.controlButtonStyle(
-                              const ButtonStyle.ghostIcon(),
-                            ),
-                            onPressed: () => controller.cancel(item),
-                            child: const Icon(LucideIcons.x),
-                          ),
-                      ],
-                    ),
-                    const Gap(AppSpacing.sm),
-                    Text('${item.sourceDevice} → ${item.destinationDevice}'),
-                    const Gap(AppSpacing.sm),
-                    FileOperationStatus(operation: item),
-                    const Gap(AppSpacing.sm),
-                    Text(
-                      item.startedAt.millisecondsSinceEpoch == 0
-                          ? 'Saved before transfer history was available'
-                          : 'Started ${formatSystemDateTime(context, item.startedAt)}',
-                    ),
-                    if (item.finishedAt case final time?)
-                      Text('Finished ${formatSystemDateTime(context, time)}'),
-                    if (!item.active &&
-                        item.phase != 'completed' &&
-                        item.kind == FileOperationKind.receive &&
-                        item.localPath != null) ...[
-                      const Gap(AppSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Button.secondary(
-                          onPressed:
-                              controller.forClip(item.itemId)?.active == true
-                              ? null
-                              : () => controller.retry(item),
-                          leading: const Icon(LucideIcons.rotateCcw),
-                          child: const Text('Retry'),
-                        ),
-                      ),
-                    ],
-                    if (item.phase == 'completed' &&
-                        item.localPath != null) ...[
-                      const Gap(AppSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Button.link(
-                          onPressed: () => controller.openFile(item),
-                          leading: const Icon(LucideIcons.folderOpen),
-                          child: Text(
-                            item.kind == FileOperationKind.import
-                                ? 'Show source file'
-                                : 'Show saved file',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                  operation: item,
+                  sourceDeviceIcon: DevicePresentation.icon(
+                    resolveDeviceClass?.call(item.sourceDevice),
+                  ),
+                  destinationDeviceIcon: DevicePresentation.icon(
+                    resolveDeviceClass?.call(item.destinationDevice),
+                  ),
+                  speedLabel: speed == null
+                      ? null
+                      : '${formatBytes(speed.round())}/s',
+                  onCancel:
+                      item.active && item.kind == FileOperationKind.receive
+                      ? () => controller.cancel(item)
+                      : null,
+                  onOpenFile:
+                      item.phase == 'completed' && item.localPath != null
+                      ? () => controller.openFile(item)
+                      : null,
+                  onRemove: !item.active
+                      ? () => controller.removeHistory(item)
+                      : null,
+                  onRetry:
+                      canRetry &&
+                          controller.forClip(item.itemId)?.active != true
+                      ? () => controller.retry(item)
+                      : null,
                 );
               },
             ),

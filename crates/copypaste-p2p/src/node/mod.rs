@@ -411,6 +411,10 @@ impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
         let _operation = self.operation()?;
         self.source.file_chunk(id, sha256, index)
     }
+    fn file_size(&self, id: &str, sha256: &str) -> Result<u64, SyncError> {
+        let _operation = self.operation()?;
+        self.source.file_size(id, sha256)
+    }
     fn device_id(&self) -> String {
         self.source.device_id()
     }
@@ -1514,6 +1518,9 @@ mod tests {
             ) -> Result<Box<dyn crate::sync::SummaryWorkspace>, SyncError> {
                 Err(SyncError::Source("workspace factory forwarded".into()))
             }
+            fn file_size(&self, _: &str, _: &str) -> Result<u64, SyncError> {
+                Err(SyncError::Source("file size lookup forwarded".into()))
+            }
             fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
                 self.0.fetch(ids)
             }
@@ -1529,6 +1536,7 @@ mod tests {
         };
         assert!(guarded.summary_workspace().is_err());
         assert!(guarded.local_summaries(&[]).is_err());
+        assert!(guarded.file_size("file", "hash").is_err());
     }
 
     #[test]

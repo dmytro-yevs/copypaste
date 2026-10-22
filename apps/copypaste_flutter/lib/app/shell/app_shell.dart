@@ -192,8 +192,24 @@ class _AppShellState extends State<AppShell> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        trailing: headerActions,
+                        trailing:
+                            mode == _ShellNavigationMode.bottom &&
+                                headerActions.length > 3
+                            ? const []
+                            : headerActions,
                       ),
+                      if (mode == _ShellNavigationMode.bottom &&
+                          headerActions.length > 3)
+                        AppBar(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              spacing: AppSpacing.sm,
+                              children: headerActions,
+                            ),
+                          ),
+                        ),
                       const Divider(),
                     ],
               child: Builder(
