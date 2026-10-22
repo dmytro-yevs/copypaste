@@ -384,8 +384,7 @@ impl Runtime {
                     limit.clamp(1, 1000),
                     copypaste_ipc::MAX_CONTENT_BYTES,
                     Some(&self.device_id),
-                    &self.keyring.item_key(),
-                    &self.keyring.preview_key(),
+                    (&self.keyring.item_key(), &self.keyring.preview_key()),
                 ) {
                     Ok(page) => Response::ok(
                         id,

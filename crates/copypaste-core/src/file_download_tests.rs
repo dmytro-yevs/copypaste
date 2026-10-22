@@ -246,13 +246,14 @@ async fn exercise_download(deferred: bool) {
         )
         .await
         .unwrap();
-    let progress = progress.lock().unwrap();
-    assert_eq!(
-        progress.last(),
-        Some(&(expected.size_bytes, expected.size_bytes))
-    );
-    assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
-    drop(progress);
+    {
+        let progress = progress.lock().unwrap();
+        assert_eq!(
+            progress.last(),
+            Some(&(expected.size_bytes, expected.size_bytes))
+        );
+        assert!(progress.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
     if !deferred {
         assert_eq!(
             source_view.reads.load(Ordering::SeqCst) as u64,

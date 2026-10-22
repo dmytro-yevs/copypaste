@@ -272,16 +272,18 @@ fn rasterize_svg(svg: Vec<u8>) -> Option<AppIcon> {
     let rejected_reference = Arc::new(AtomicBool::new(false));
     let data_reference = rejected_reference.clone();
     let string_reference = rejected_reference.clone();
-    let mut options = usvg::Options::default();
-    options.image_href_resolver = usvg::ImageHrefResolver {
-        resolve_data: Box::new(move |_, _, _| {
-            data_reference.store(true, Ordering::Relaxed);
-            None
-        }),
-        resolve_string: Box::new(move |_, _| {
-            string_reference.store(true, Ordering::Relaxed);
-            None
-        }),
+    let options = usvg::Options {
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(move |_, _, _| {
+                data_reference.store(true, Ordering::Relaxed);
+                None
+            }),
+            resolve_string: Box::new(move |_, _| {
+                string_reference.store(true, Ordering::Relaxed);
+                None
+            }),
+        },
+        ..Default::default()
     };
     let tree = usvg::Tree::from_data(&svg, &options).ok()?;
     if rejected_reference.load(Ordering::Relaxed) {
