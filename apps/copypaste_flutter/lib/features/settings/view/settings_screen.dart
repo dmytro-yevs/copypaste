@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -1396,8 +1397,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final current = controller.currentVersion?.toString();
     final available = controller.release?.version.toString();
     return switch (controller.phase) {
-      AppUpdatePhase.idle => 'Check GitHub for a newer CopyPaste release.',
-      AppUpdatePhase.checking => 'Checking GitHub for updates.',
+      AppUpdatePhase.idle => 'Check for a newer CopyPaste version.',
+      AppUpdatePhase.checking => 'Checking for updates.',
       AppUpdatePhase.upToDate =>
         current == null
             ? 'CopyPaste is up to date.'

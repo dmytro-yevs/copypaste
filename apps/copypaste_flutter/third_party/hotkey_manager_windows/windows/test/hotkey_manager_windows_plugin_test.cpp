@@ -16,13 +16,13 @@ using flutter::EncodableMap;
 using flutter::EncodableValue;
 using flutter::MethodCall;
 using flutter::MethodResultFunctions;
-struct NativeCall { HWND window; int id; };
+struct NativeCall { HWND window; int id; UINT modifiers = 0; UINT key = 0; };
 std::vector<NativeCall> registrations;
 std::vector<NativeCall> releases;
 std::unordered_set<int> failed_releases;
 bool reject_registration = false;
-BOOL WINAPI RegisterFake(HWND window, int id, UINT, UINT) {
-  registrations.push_back({window, id});
+BOOL WINAPI RegisterFake(HWND window, int id, UINT modifiers, UINT key) {
+  registrations.push_back({window, id, modifiers, key});
   return reject_registration ? FALSE : TRUE;
 }
 BOOL WINAPI UnregisterFake(HWND window, int id) {
@@ -55,6 +55,19 @@ class HotKeyContracts : public testing::Test {
   HWND first = reinterpret_cast<HWND>(static_cast<uintptr_t>(1));
   HWND second = reinterpret_cast<HWND>(static_cast<uintptr_t>(2));
 };
+TEST_F(HotKeyContracts, CopyIsReservedForApplicationsAndQuickPasteKeepsBothModifiers) {
+  HotkeyManagerWindowsPlugin plugin(api, first);
+  auto args = std::get<EncodableMap>(Args("copy"));
+  args[EncodableValue("keyCode")] = EncodableValue(static_cast<int32_t>('C'));
+  EXPECT_EQ(Invoke(plugin, "register", EncodableValue(args)).error, "reserved_hotkey");
+  EXPECT_TRUE(registrations.empty());
+  args[EncodableValue("modifiers")] = EncodableValue(EncodableList{
+      EncodableValue("control"), EncodableValue("shift")});
+  ASSERT_TRUE(Invoke(plugin, "register", EncodableValue(args)).success);
+  ASSERT_EQ(registrations.size(), 1u);
+  EXPECT_EQ(registrations[0].modifiers, static_cast<UINT>(MOD_CONTROL | MOD_SHIFT));
+  EXPECT_EQ(registrations[0].key, static_cast<UINT>('C'));
+}
 TEST_F(HotKeyContracts, FailedReservationIsNotTrackedAndMalformedArgumentsAreSafe) {
   HotkeyManagerWindowsPlugin plugin(api, first);
   reject_registration = true;

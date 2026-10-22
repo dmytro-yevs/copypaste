@@ -456,7 +456,7 @@
         "crates/copypaste-daemon/src/p2p/poll.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2980,6 +2980,106 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Unit adapter selection and reconnect tests passed; native resource qualification pending."
+    },
+    {
+      "id": "RUN-064",
+      "title": "Bound stable update metadata and isolate Windows installer handoff",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "GitHubAppUpdateRepository / Windows update helper",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/update/repository/github_app_update_repository.dart",
+        "apps/copypaste_flutter/windows/runner/app_update_helper.cpp",
+        "apps/copypaste_flutter/windows/runner/CMakeLists.txt"
+      ],
+      "invariant": "Stable update checks fetch one canonical latest release; prerelease checks retain channel discovery. Request and body reading share one existing 30-second deadline. The signed installer helper starts without loading Flutter or bundle DLLs, then exits after verified installer handoff. No signature or digest check is removed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-tests-final.log",
+          "sha256": "413e74dc0ee883c99dd2f57d8894b4ea6c9044a3324dfc638be396b85e86d044",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "86 targeted portable Flutter tests passed. Installed Windows helper launch, signing and installer handoff remain unverified; native resource qualification is not established.",
+      "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
+    },
+    {
+      "id": "RUN-065",
+      "title": "Release the Windows clipboard before representation processing",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Windows clipboard adapter",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/windows.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/read.rs"
+      ],
+      "invariant": "The selected reader owns the clipboard guard and drops it immediately after copying native data, before image decoding, PNG encoding, text normalization or file metadata processing. Existing byte and decoded-image limits remain enforced.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-tests-final.log",
+          "sha256": "413e74dc0ee883c99dd2f57d8894b4ea6c9044a3324dfc638be396b85e86d044",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "132 portable clipboard tests passed; 15 native tests remain ignored on the macOS host. The changed Windows-only reader and live clipboard contention require installed Windows validation.",
+      "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
+    },
+    {
+      "id": "RUN-066",
+      "title": "Use native Win32 tray menu metrics",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "FlutterDesktopWindowHost",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart"
+      ],
+      "invariant": "The native Win32 text menu uses OS font, spacing and DPI metrics rather than the dependency hardcoded 32-pixel bitmap rows. No unused menu glyph raster images are allocated on this backend; action ordering and callbacks remain shared.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-tests-final.log",
+          "sha256": "413e74dc0ee883c99dd2f57d8894b4ea6c9044a3324dfc638be396b85e86d044",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "Dart static analysis passed. Native Windows menu appearance, DPI behavior and resource impact remain unverified.",
+      "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
     }
   ]
 }

@@ -59,11 +59,17 @@ class SharedPreferencesQuickPastePreferencesStore
     if (encoded == null) return QuickPastePreferences.defaults();
     try {
       final json = jsonDecode(encoded) as Map<String, dynamic>;
+      DesktopShortcut shortcut;
+      try {
+        shortcut = DesktopShortcut.fromJson(
+          Map<String, Object?>.from(json['shortcut'] as Map),
+        );
+      } catch (_) {
+        shortcut = DesktopShortcut.defaultForPlatform();
+      }
       return QuickPastePreferences(
         autoPaste: json['autoPaste'] as bool? ?? true,
-        shortcut: DesktopShortcut.fromJson(
-          Map<String, Object?>.from(json['shortcut'] as Map),
-        ),
+        shortcut: shortcut,
       );
     } catch (_) {
       return QuickPastePreferences.defaults();

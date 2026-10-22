@@ -46,9 +46,20 @@ class DesktopShortcut {
 
   bool get isValid =>
       modifiers.isNotEmpty &&
+      !_isSystemCopyShortcut &&
       !DesktopShortcutModifier.values.any(
         (modifier) => modifier.physicalKeys.contains(key),
       );
+
+  // A global registration consumes the key in every application, even when
+  // Quick Paste cannot open. Never reserve the operating system's copy action.
+  bool get _isSystemCopyShortcut =>
+      modifiers.length == 1 &&
+      ((key == PhysicalKeyboardKey.keyC &&
+              (modifiers.single == DesktopShortcutModifier.control ||
+                  modifiers.single == DesktopShortcutModifier.meta)) ||
+          (key == PhysicalKeyboardKey.insert &&
+              modifiers.single == DesktopShortcutModifier.control));
 
   List<LogicalKeyboardKey> get displayKeys => [
     for (final modifier in modifiers) modifier.logicalKey,

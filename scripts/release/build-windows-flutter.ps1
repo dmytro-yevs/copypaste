@@ -45,6 +45,9 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -PathType Leaf)) {
         throw "Flutter did not produce CopyPaste.exe"
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "copypaste-update-helper.exe") -PathType Leaf)) {
+        throw "Flutter did not produce the standalone update helper"
+    }
     $applicationHash = (Get-FileHash -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -Algorithm SHA256).Hash
     Copy-Item -LiteralPath (Join-Path $root "target\release\copypaste-daemon.exe") `
         -Destination (Join-Path $releaseDirectory "copypaste-daemon.exe") -Force

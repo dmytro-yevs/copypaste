@@ -1,33 +1,19 @@
-#include "app_update_helper.h"
-
 #include <windows.h>
 #include <shellapi.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <cwchar>
+#include <string>
+#include <vector>
 #include <optional>
 
 #include "app_update_verifier.h"
 
 namespace {
 
-std::wstring Utf16FromUtf8(const std::string& value) {
-  if (value.empty()) return {};
-  const int length =
-      ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
-                            static_cast<int>(value.size()), nullptr, 0);
-  if (length <= 0) return {};
-  std::wstring output(length, L'\0');
-  if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
-                            static_cast<int>(value.size()), output.data(),
-                            length) != length) {
-    return {};
-  }
-  return output;
-}
-
-std::optional<std::string> ArgumentValue(
-    const std::vector<std::string>& arguments, const std::string& prefix) {
+std::optional<std::wstring> ArgumentValue(
+    const std::vector<std::wstring>& arguments, const std::wstring& prefix) {
   for (const auto& argument : arguments) {
     if (argument.rfind(prefix, 0) == 0) return argument.substr(prefix.size());
   }
@@ -36,34 +22,46 @@ std::optional<std::string> ArgumentValue(
 
 }  // namespace
 
-int RunAppUpdateHelperIfRequested(const std::vector<std::string>& arguments) {
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+  int count = 0;
+  wchar_t** raw = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+  if (raw == nullptr) return EXIT_FAILURE;
+  const std::vector<std::wstring> arguments(raw + 1, raw + count);
+  ::LocalFree(raw);
   if (std::find(arguments.begin(), arguments.end(),
-                "--copypaste-update-helper") == arguments.end()) {
-    return -1;
+                L"--copypaste-update-helper") == arguments.end()) {
+    return EXIT_FAILURE;
   }
-  const auto parent_value = ArgumentValue(arguments, "--parent-pid=");
-  const auto installer_value = ArgumentValue(arguments, "--installer=");
-  const auto sha256 = ArgumentValue(arguments, "--sha256=");
+  const auto parent_value = ArgumentValue(arguments, L"--parent-pid=");
+  const auto installer_value = ArgumentValue(arguments, L"--installer=");
+  const auto sha256 = ArgumentValue(arguments, L"--sha256=");
   if (!parent_value.has_value() || !installer_value.has_value() ||
       !sha256.has_value()) {
     return EXIT_FAILURE;
   }
-  char* end = nullptr;
+  wchar_t* end = nullptr;
   const unsigned long parsed_pid =
-      std::strtoul(parent_value->c_str(), &end, 10);
-  if (end == parent_value->c_str() || *end != '\0' || parsed_pid == 0 ||
+      std::wcstoul(parent_value->c_str(), &end, 10);
+  if (end == parent_value->c_str() || *end != L'\0' || parsed_pid == 0 ||
       parsed_pid > MAXDWORD) {
     return EXIT_FAILURE;
   }
-  const std::wstring installer = Utf16FromUtf8(*installer_value);
-  if (installer.empty()) return EXIT_FAILURE;
+  const std::wstring& installer = *installer_value;
+  if (installer.empty() || sha256->size() != 64) return EXIT_FAILURE;
+  std::string expected_sha256;
+  expected_sha256.reserve(64);
+  for (const wchar_t digit : *sha256) {
+    if (!((digit >= L'0' && digit <= L'9') ||
+          (digit >= L'a' && digit <= L'f'))) return EXIT_FAILURE;
+    expected_sha256.push_back(static_cast<char>(digit));
+  }
 
   const HANDLE parent =
       ::OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(parsed_pid));
   if (parent == nullptr) return EXIT_FAILURE;
   const DWORD wait = ::WaitForSingleObject(parent, 60 * 1000);
   ::CloseHandle(parent);
-  if (wait != WAIT_OBJECT_0 || !VerifyCopyPasteInstaller(installer, *sha256)) {
+  if (wait != WAIT_OBJECT_0 || !VerifyCopyPasteInstaller(installer, expected_sha256)) {
     return EXIT_FAILURE;
   }
 

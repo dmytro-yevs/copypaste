@@ -55,6 +55,10 @@ bool IsTrustedReleaseUrl(const std::string& value) {
 bool LaunchHelper(const std::wstring& installer, const std::string& sha256) {
   const auto current = CurrentExecutable();
   if (!current.has_value()) return false;
+  const auto separator = current->find_last_of(L"\\/");
+  if (separator == std::wstring::npos) return false;
+  const std::wstring bundled_helper =
+      current->substr(0, separator + 1) + L"copypaste-update-helper.exe";
   wchar_t temporary_path[MAX_PATH] = {};
   const DWORD temporary_length = ::GetTempPathW(MAX_PATH, temporary_path);
   if (temporary_length == 0 || temporary_length >= MAX_PATH) return false;
@@ -62,7 +66,7 @@ bool LaunchHelper(const std::wstring& installer, const std::string& sha256) {
       std::wstring(temporary_path) + L"CopyPaste-update-helper-" +
       std::to_wstring(::GetCurrentProcessId()) + L".exe";
   ::DeleteFileW(helper.c_str());
-  if (!::CopyFileW(current->c_str(), helper.c_str(), TRUE)) return false;
+  if (!::CopyFileW(bundled_helper.c_str(), helper.c_str(), TRUE)) return false;
 
   std::wstring command =
       L"\"" + helper + L"\" --copypaste-update-helper --parent-pid=" +

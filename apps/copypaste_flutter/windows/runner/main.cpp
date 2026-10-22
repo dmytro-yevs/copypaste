@@ -6,7 +6,6 @@
 #include <string>
 
 #include "flutter_window.h"
-#include "app_update_helper.h"
 #include "application_instance.h"
 #include "utils.h"
 
@@ -46,10 +45,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
-  const int update_helper_result =
-      RunAppUpdateHelperIfRequested(command_line_arguments);
-  if (update_helper_result >= 0) return update_helper_result;
-
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
