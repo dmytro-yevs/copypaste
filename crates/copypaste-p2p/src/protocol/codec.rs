@@ -147,6 +147,18 @@ impl SyncMessage {
     /// Checks every bound applied by both encode and decode.
     pub fn validate(&self) -> Result<(), ProtocolError> {
         match self {
+            Self::Group {
+                protocol_version,
+                snapshot,
+            } => {
+                check_protocol_version(*protocol_version)?;
+                snapshot
+                    .validate()
+                    .map_err(|_| ProtocolError::Decode("invalid device group".into()))?;
+                snapshot
+                    .encode()
+                    .map_err(|_| ProtocolError::Decode("invalid device group".into()))?;
+            }
             Self::Probe {
                 protocol_version,
                 profile,

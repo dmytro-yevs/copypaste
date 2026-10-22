@@ -19,6 +19,8 @@ use crate::transport::PskCandidate;
 /// disk, so a listener checking PSKs on every inbound connection costs a read
 /// lock and nothing else.
 pub struct PeerStore {
+    pub(super) metadata_cache: std::sync::Mutex<Option<super::group::MembershipKeys>>,
+    pub(super) group_changes: tokio::sync::watch::Sender<u64>,
     path: PathBuf,
     key: Zeroizing<[u8; 32]>,
     pub(super) state: RwLock<State>,
@@ -43,6 +45,8 @@ impl PeerStore {
             Err(err) => return Err(PeerStoreError::Io(err)),
         };
         Ok(Self {
+            metadata_cache: std::sync::Mutex::new(None),
+            group_changes: tokio::sync::watch::channel(0).0,
             path: path.to_path_buf(),
             key: Zeroizing::new(*key),
             state: RwLock::new(state),
@@ -122,7 +126,27 @@ impl PeerStore {
         guard: &mut State,
         peer: Peer,
     ) -> Result<(), PeerStoreError> {
+        self.upsert_locked_certified(guard, peer, None)
+    }
+    pub(super) fn upsert_locked_certified(
+        &self,
+        guard: &mut State,
+        peer: Peer,
+        admission: Option<crate::group::PairAdmissions>,
+    ) -> Result<(), PeerStoreError> {
         peer.validate()?;
+        if let (Some(certified), Some(group)) = (admission, guard.group.as_ref()) {
+            group.check_local_admission(certified.local)?;
+            if certified.remote == u64::MAX
+                || peer.device_id.as_deref().is_some_and(|id| {
+                    group
+                        .desired_admission(id)
+                        .is_ok_and(|required| certified.remote < required)
+                })
+            {
+                return Err(PeerStoreError::Revoked);
+            }
+        }
         let pairing_id = peer.pairing_id.clone();
         if guard.revoked.contains_key(&pairing_id) {
             return Err(PeerStoreError::Revoked);
@@ -141,7 +165,23 @@ impl PeerStore {
             return Err(PeerStoreError::TooManyPairings);
         }
 
-        if only_last_seen_moved(guard, &peer) {
+        let previous_admission = guard.pair_admissions.get(&pairing_id).copied();
+        let next_admission = admission.or_else(|| {
+            guard
+                .peers
+                .get(&pairing_id)
+                .filter(|old| old.psk_matches(&peer.psk))
+                .and(previous_admission)
+        });
+        match next_admission {
+            Some(value) => {
+                guard.pair_admissions.insert(pairing_id.clone(), value);
+            }
+            None => {
+                guard.pair_admissions.remove(&pairing_id);
+            }
+        }
+        if only_last_seen_moved(guard, &peer) && previous_admission == next_admission {
             guard.peers.insert(pairing_id.clone(), peer);
             tentative::bump(guard, &pairing_id);
             self.unflushed.store(true, Ordering::Release);
@@ -157,6 +197,14 @@ impl PeerStore {
                 Ok(())
             }
             Err(err) => {
+                match previous_admission {
+                    Some(value) => {
+                        guard.pair_admissions.insert(pairing_id.clone(), value);
+                    }
+                    None => {
+                        guard.pair_admissions.remove(&pairing_id);
+                    }
+                }
                 match previous {
                     Some(old) => guard.peers.insert(pairing_id.clone(), old),
                     None => guard.peers.remove(&pairing_id),
@@ -199,17 +247,30 @@ impl PeerStore {
     /// panicked holding the lock.
     pub fn remove(&self, pairing_id: &str) -> Result<bool, PeerStoreError> {
         let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
-        let Some(removed) = guard.peers.remove(pairing_id) else {
+        let previous = guard.clone();
+        if let Some(id) = guard
+            .peers
+            .get(pairing_id)
+            .and_then(|peer| peer.device_id.clone())
+        {
+            if let Some(group) = &mut guard.group {
+                group.remove(&id)?;
+            }
+        }
+        let Some(_removed) = guard.peers.remove(pairing_id) else {
             return Ok(false);
         };
+        guard.group_admissions.remove(pairing_id);
+        guard.pair_admissions.remove(pairing_id);
         match self.persist(&guard) {
             Ok(()) => {
                 tentative::bump(&mut guard, pairing_id);
+                self.group_changed();
                 tracing::debug!(%pairing_id, "paired device removed");
                 Ok(true)
             }
             Err(err) => {
-                guard.peers.insert(pairing_id.to_string(), removed);
+                *guard = previous;
                 Err(err)
             }
         }
@@ -244,6 +305,20 @@ impl PeerStore {
         };
         let mut candidates = Vec::with_capacity(guard.peers.len());
         for peer in guard.peers.values() {
+            if guard.group.as_ref().is_some_and(|group| {
+                !group.active()
+                    || group.local_admission().is_ok_and(|local| {
+                        guard
+                            .pair_admissions
+                            .get(&peer.pairing_id)
+                            .copied()
+                            .unwrap_or_default()
+                            .local
+                            < local
+                    })
+            }) {
+                continue;
+            }
             candidates.push(PskCandidate {
                 pairing_id: peer.pairing_id.clone(),
                 // `[u8; 32]` is `Copy`, so this reads the field rather than

@@ -21,6 +21,7 @@ pub type Generation = u64;
 /// A pairing slot as it stood before a ceremony wrote to it.
 #[derive(Debug)]
 pub struct PeerSnapshot {
+    previous_admission: Option<crate::group::PairAdmissions>,
     pairing_id: String,
     previous: Option<Peer>,
     /// What this ceremony last wrote, or what it read.
@@ -54,6 +55,12 @@ pub(super) fn generation(state: &State, pairing_id: &str) -> Generation {
 }
 
 pub(super) fn bump(state: &mut State, pairing_id: &str) {
+    // Derived group credentials never take part in tentative SAS writes.
+    // Their admission generation is already in group state. Indexing their
+    // rotating ids here would retain an entry after every readmission.
+    if pairing_id.starts_with(crate::group::GROUP_PAIRING_PREFIX) {
+        return;
+    }
     let next = generation(state, pairing_id).wrapping_add(1);
     state.generations.insert(pairing_id.to_string(), next);
 }
@@ -65,12 +72,14 @@ impl PeerStore {
         let Ok(guard) = self.state.read() else {
             tracing::error!("paired-devices store lock is poisoned");
             return PeerSnapshot {
+                previous_admission: None,
                 pairing_id: pairing_id.to_string(),
                 previous: None,
                 generation: 0,
             };
         };
         PeerSnapshot {
+            previous_admission: guard.pair_admissions.get(pairing_id).copied(),
             pairing_id: pairing_id.to_string(),
             previous: guard.peers.get(pairing_id).cloned(),
             generation: generation(&guard, pairing_id),
@@ -90,11 +99,19 @@ impl PeerStore {
         snapshot: &mut PeerSnapshot,
         peer: Peer,
     ) -> Result<(), PeerStoreError> {
+        self.upsert_from_admission(snapshot, peer, None)
+    }
+    pub(crate) fn upsert_from_admission(
+        &self,
+        snapshot: &mut PeerSnapshot,
+        peer: Peer,
+        admission: Option<crate::group::PairAdmissions>,
+    ) -> Result<(), PeerStoreError> {
         let mut guard = self.state.write().map_err(|_| PeerStoreError::Poisoned)?;
         if generation(&guard, &snapshot.pairing_id) != snapshot.generation {
             return Err(PeerStoreError::Contended);
         }
-        self.upsert_locked(&mut guard, peer)?;
+        self.upsert_locked_certified(&mut guard, peer, admission)?;
         snapshot.generation = generation(&guard, &snapshot.pairing_id);
         Ok(())
     }
@@ -141,6 +158,18 @@ impl PeerStore {
             }
         }
         bump(&mut guard, &id);
+        if !revoked && guard.peers.contains_key(&id) {
+            match snapshot.previous_admission {
+                Some(value) => {
+                    guard.pair_admissions.insert(id.clone(), value);
+                }
+                None => {
+                    guard.pair_admissions.remove(&id);
+                }
+            }
+        } else {
+            guard.pair_admissions.remove(&id);
+        }
 
         let outcome = if contended {
             Rollback::UndoneOverContention

@@ -683,8 +683,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
       title: Text(revoke ? 'Revoke ${peer.name}?' : 'Unpair ${peer.name}?'),
       content: Text(
         revoke
-            ? 'This permanently prevents this pairing from being used again.'
-            : 'This removes the local pairing key from this device.',
+            ? 'This removes the device from your group and permanently blocks this pairing. Other devices apply the removal when they reconnect.'
+            : 'This removes the device from your group. Other devices apply the removal when they reconnect. Adding it again requires a new confirmation.',
       ),
       actionLabel: revoke ? 'Revoke' : 'Unpair',
       changes: controller,
@@ -1591,7 +1591,8 @@ class _PairingInspectorState extends State<_PairingInspector> {
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>
       'Compare the protected verification code, then confirm on both devices.',
-    PairingState.confirmed => 'The trusted device is now available for sync.',
+    PairingState.confirmed =>
+      'The device is connected. Your group membership will sync automatically.',
     PairingState.rejected ||
     PairingState.cancelled ||
     PairingState.failed => 'No device was added.',

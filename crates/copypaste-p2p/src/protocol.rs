@@ -18,7 +18,7 @@ pub use codec::ProtocolError;
 /// Version of the message set. Bumped whenever two builds would disagree on a
 /// field. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
@@ -181,6 +181,10 @@ impl SyncItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum SyncMessage {
+    Group {
+        protocol_version: u32,
+        snapshot: crate::group::GroupSnapshot,
+    },
     /// A bounded application-level liveness probe. It is sent only after the
     /// Noise handshake authenticated the pairing and never enters sync.
     Probe {
@@ -247,6 +251,7 @@ impl SyncMessage {
     /// includes any field value.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Group { .. } => "group",
             Self::Probe { .. } => "probe",
             Self::ProbeAck { .. } => "probe_ack",
             Self::Hello { .. } => "hello",

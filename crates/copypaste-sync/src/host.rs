@@ -10,6 +10,11 @@ pub const UNREADABLE_UPLOADS: &str = "cloud_unreadable_uploads";
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SyncHostRequest {
+    GroupSnapshot,
+    GroupApply {
+        device_id: String,
+        snapshot: String,
+    },
     Active,
     DeviceId,
     SyncEnabled,

@@ -1,5 +1,13 @@
 # Supabase Sync
 
+The updated application and module also synchronize the personal device group.
+Apply `supabase/migrations/20261022120000_device_group_states.sql` before using
+cloud membership. Sign in with the same account and sync passphrase on each
+device. Group rosters are signed and encrypted separately from clipboard
+history; retention and clearing history do not remove membership. Local P2P
+continues to work without this module. See
+[the personal group contract](../../crates/copypaste-p2p/GROUP.md).
+
 An optional first-party `copypaste.supabase` module for macOS, Android, Windows,
 and Linux. CopyPaste works locally and over P2P without this package. The native module
 contains no local database or OS keystore implementation; the application

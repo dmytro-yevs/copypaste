@@ -25,6 +25,7 @@ mod channel;
 mod dial;
 mod error;
 mod files;
+mod group;
 mod listen;
 mod pairing;
 mod pairing_ceremony;
@@ -485,6 +486,7 @@ impl Drop for ActiveSync<'_> {
 /// `discovery`, where `None` is a decision (the user turned LAN visibility
 /// off) rather than a degraded state.
 pub struct Node {
+    group_profile: std::sync::OnceLock<DeviceProfile>,
     sync_activity: Arc<activity::SyncActivity>,
     peers: PeerStore,
     cursors: CursorStore,
@@ -546,6 +548,7 @@ impl Node {
                 .collect::<Vec<_>>(),
         );
         let node = Self {
+            group_profile: std::sync::OnceLock::new(),
             sync_activity: activity::SyncActivity::new(),
             peers,
             cursors,
@@ -618,6 +621,11 @@ impl Node {
             .active_syncs
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.pairing.is_pending_pairing(pairing_id)
+            || !self.peers.is_current_credential(pairing_id)
+        {
+            return None;
+        }
         self.peers.get(pairing_id)?;
         let id = self.next_active_sync.fetch_add(1, Ordering::Relaxed);
         let state = Arc::new(ActiveSyncState::new());
@@ -725,7 +733,31 @@ impl Node {
     /// Whether a given pairing is visible right now.
     #[must_use]
     pub fn find(&self, pairing_id: &str) -> Option<DiscoveredPeer> {
-        self.discovery.as_ref()?.find(pairing_id)
+        let discovery = self.discovery.as_ref()?;
+        discovery.find(pairing_id).or_else(|| {
+            let peer = self.peers.get(pairing_id)?;
+            let identity = self.peers.identity_tag(Some(peer.device_id.as_deref()?))?;
+            discovery
+                .peers()
+                .into_iter()
+                .filter(|found| found.group_identity.as_deref() == Some(&identity))
+                .max_by_key(|found| found.last_seen_ms)
+        })
+    }
+    pub fn is_paired_discovery(&self, found: &DiscoveredPeer) -> bool {
+        found
+            .pairing_ids
+            .iter()
+            .any(|id| self.peers.get(id).is_some())
+            || found.group_identity.as_deref().is_some_and(|identity| {
+                self.peers.list().iter().any(|peer| {
+                    peer.device_id
+                        .as_deref()
+                        .and_then(|id| self.peers.identity_tag(Some(id)))
+                        .as_deref()
+                        == Some(identity)
+                })
+            })
     }
 
     /// Candidate endpoints for one trusted pairing, in freshness order.
@@ -999,6 +1031,7 @@ impl Node {
         let Some(discovery) = self.discovery.as_ref() else {
             return;
         };
+        discovery.set_group_identity(self.peers.identity_tag(None));
         if !self.wants_discovery() {
             discovery.stop();
             return;
@@ -1108,27 +1141,7 @@ impl Node {
             session.drain();
         }
         if removed {
-            self.cursors.forget(pairing_id);
-            self.profiles
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(pairing_id);
-            self.reachability
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(pairing_id);
-            self.probe_flights
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(pairing_id);
-            let mut cooldowns = self
-                .discovery_candidate_cooldowns
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            cooldowns
-                .endpoint_failures
-                .retain(|key, _| key.pairing_id != pairing_id);
-            cooldowns.pairing_attempts.remove(pairing_id);
+            self.forget_peer_state(pairing_id);
             self.republish();
         }
         Ok(removed)
@@ -1157,6 +1170,13 @@ impl Node {
         for session in &active_sessions {
             session.drain();
         }
+        self.forget_peer_state(pairing_id);
+        self.republish();
+        Ok(removed)
+    }
+
+    /// Shared cleanup for local actions and imported group removals.
+    fn forget_peer_state(&self, pairing_id: &str) {
         self.cursors.forget(pairing_id);
         self.profiles
             .write()
@@ -1170,8 +1190,14 @@ impl Node {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(pairing_id);
-        self.republish();
-        Ok(removed)
+        let mut cooldowns = self
+            .discovery_candidate_cooldowns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cooldowns
+            .endpoint_failures
+            .retain(|key, _| key.pairing_id != pairing_id);
+        cooldowns.pairing_attempts.remove(pairing_id);
     }
 
     /// Record that a session with this peer succeeded.

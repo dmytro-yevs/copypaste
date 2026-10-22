@@ -34,6 +34,7 @@ const TEARDOWN_TIMEOUT: Duration = Duration::from_millis(500);
 /// Cheap to keep around and safe to drop: dropping unregisters the
 /// advertisement and stops the background threads, same as [`Discovery::shutdown`].
 pub struct Discovery {
+    group_identity: RwLock<Option<String>>,
     /// `None` once torn down, and also when the mDNS daemon could not be
     /// created at all — the degraded mode described in the module docs.
     daemon: Mutex<Option<ServiceDaemon>>,
@@ -92,6 +93,7 @@ impl Discovery {
     pub fn dormant(device_name: &str, port: u16) -> Result<Self, DiscoveryError> {
         sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
         Ok(Self {
+            group_identity: RwLock::new(None),
             daemon: Mutex::new(None),
             shared: Arc::new(Shared::for_port(port)),
             device_name: RwLock::new(device_name.to_string()),
@@ -111,7 +113,18 @@ impl Discovery {
         let port = self.port.load(Ordering::Acquire);
         // Validate and encode before touching the network, so bad input is a
         // clean error rather than a half-started daemon.
-        let info = build_service_info(&device_name, &device_name, pairing_ids, port)?;
+        let identity = self
+            .group_identity
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let info = build_service_info(
+            &device_name,
+            &device_name,
+            pairing_ids,
+            port,
+            identity.as_deref(),
+        )?;
         let registration = Registration {
             instance: sanitise_instance(&device_name).ok_or(DiscoveryError::InvalidDeviceName)?,
             fullname: info.get_fullname().to_string(),
@@ -190,6 +203,12 @@ impl Discovery {
     pub fn peers(&self) -> Vec<DiscoveredPeer> {
         lock(&self.shared.table).snapshot(now_ms())
     }
+    pub(crate) fn set_group_identity(&self, identity: Option<String>) {
+        *self
+            .group_identity
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = identity;
+    }
 
     /// Look up one by pairing id. If several addresses claim it, the most
     /// recently seen wins.
@@ -223,6 +242,10 @@ impl Discovery {
             &device_name,
             pairing_ids,
             self.port.load(Ordering::Acquire),
+            self.group_identity
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_deref(),
         )?;
         // The name is already ours; probing again would only conflict with our
         // own records and rename us to "<name> (2)".
@@ -371,7 +394,7 @@ mod tests {
     /// `ServiceInfo` because `ResolvedService` is `#[non_exhaustive]` — and it
     /// keeps the test honest: the TXT record is the one our encoder produced.
     fn resolved_from(instance: &str, ids: &[String], ip: &str, port: u16) -> ResolvedService {
-        let advertised = build_service_info(instance, instance, ids, port).unwrap();
+        let advertised = build_service_info(instance, instance, ids, port, None).unwrap();
         let props: Vec<mdns_sd::TxtProperty> =
             advertised.get_properties().iter().cloned().collect();
         ServiceInfo::new(SERVICE_TYPE, instance, "laptop.local.", ip, port, props)

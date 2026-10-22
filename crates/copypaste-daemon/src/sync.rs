@@ -75,20 +75,29 @@ pub fn peer_source(state: &Arc<AppState>) -> StoreSource {
 pub fn install_module_services(
     state: &Arc<AppState>,
 ) -> Result<(), copypaste_modules::ModuleError> {
+    state
+        .p2p
+        .node()
+        .prepare_group(&store_source(state))
+        .map_err(|_| copypaste_modules::ModuleError::State)?;
     let weak_state = Arc::downgrade(state);
     let weak_settings = Arc::downgrade(state);
-    state
-        .modules
-        .set_sync_services(Arc::new(copypaste_modules::SyncServices::new(
+    let group_export = Arc::downgrade(state);
+    let group_import = Arc::downgrade(state);
+    let group_revision = Arc::downgrade(state);
+    state.modules.set_sync_services(Arc::new(
+        copypaste_modules::SyncServices::new(
             state.store.clone(),
             copypaste_sync::store::StoreView::new(
                 store_source(state),
                 state.meta.device_id().to_string(),
             ),
             move || {
-                weak_settings
-                    .upgrade()
-                    .is_some_and(|state| state.is_ready() && state.settings.get().sync_enabled)
+                weak_settings.upgrade().is_some_and(|state| {
+                    state.is_ready()
+                        && state.settings.get().sync_enabled
+                        && state.p2p.peers().group_active()
+                })
             },
             move |stamp| {
                 if let Some(state) = weak_state.upgrade() {
@@ -97,7 +106,40 @@ pub fn install_module_services(
                     state.note_remote_change();
                 }
             },
-        )))?;
+        )
+        .with_group(
+            move || {
+                let state = group_export.upgrade().ok_or("The application stopped.")?;
+                state
+                    .p2p
+                    .node()
+                    .export_group(&store_source(&state))
+                    .map_err(|e| e.to_string())
+            },
+            move |device_id, json| {
+                let state = group_import.upgrade().ok_or("The application stopped.")?;
+                if state
+                    .p2p
+                    .node()
+                    .import_cloud_group(device_id, json)
+                    .or_else(|error| match error {
+                        copypaste_p2p::group::GroupImportError::Rejected => Ok(false),
+                        error => Err(error),
+                    })
+                    .map_err(|e| e.to_string())?
+                {
+                    state.p2p.wake();
+                    state.note_peers_changed();
+                }
+                Ok(())
+            },
+            move || {
+                group_revision
+                    .upgrade()
+                    .map_or(0, |state| state.p2p.peers().group_revision())
+            },
+        ),
+    ))?;
     Ok(())
 }
 

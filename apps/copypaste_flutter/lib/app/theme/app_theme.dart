@@ -144,6 +144,12 @@ abstract final class AppTheme {
         borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
       );
 
+  /// Preserve room for ascenders and descenders inside navigation clipping.
+  static TextStyle navigationTextStyle(BuildContext context) {
+    final typography = Theme.of(context).typography;
+    return typography.large.merge(typography.medium);
+  }
+
   static final navigationIconButtonStyle = const ButtonStyle.ghostIcon()
       .copyWith(decoration: _navigationButtonDecoration);
 
@@ -336,18 +342,13 @@ abstract final class AppTheme {
         .merge(theme.typography.xSmall)
         .copyWith(
           fontSize: AppTypographySize.historyMetadata,
-          height: 1,
           leadingDistribution: TextLeadingDistribution.even,
           color: theme.colorScheme.mutedForeground,
         );
   }
 
   static StrutStyle historyMetadataStrutStyle(BuildContext context) =>
-      StrutStyle.fromTextStyle(
-        historyMetadataTextStyle(context),
-        leading: 0,
-        forceStrutHeight: true,
-      );
+      StrutStyle.fromTextStyle(historyMetadataTextStyle(context));
 
   static const clipboardSearchFieldTheme = TextFieldTheme(
     filled: true,

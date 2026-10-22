@@ -26,6 +26,7 @@ minisign-verify = "0.3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+copypaste-p2p = { path = "../copypaste-p2p" }
 wiremock = "=0.6.5"
 minisign = "0.9"
 

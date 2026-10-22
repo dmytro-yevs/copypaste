@@ -19,6 +19,7 @@
 
 pub mod device_profile;
 pub mod discovery;
+pub mod group;
 pub mod netif;
 pub mod node;
 pub mod pairing_link;

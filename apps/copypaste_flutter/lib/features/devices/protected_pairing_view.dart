@@ -237,7 +237,8 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>
       'Compare the verification code on both devices.',
-    PairingState.confirmed => 'The device is now trusted.',
+    PairingState.confirmed =>
+      'The device is connected. Your group membership will sync automatically.',
     PairingState.rejected ||
     PairingState.cancelled ||
     PairingState.failed => 'No device was added.',

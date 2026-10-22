@@ -25,6 +25,8 @@ pub const MAX_PEERS: usize = 256;
 /// "trusted" — trust comes only from having been paired.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPeer {
+    /// Stable public-key fingerprint. An address hint, never authorization.
+    pub group_identity: Option<String>,
     /// Opaque identifier for one mDNS service. It is for list de-duplication
     /// only; trust still comes exclusively from the Noise handshake.
     pub discovery_id: String,
@@ -201,6 +203,7 @@ mod tests {
 
     fn peer_at(pairing_id: &str, addr: SocketAddr, last_seen_ms: i64) -> DiscoveredPeer {
         DiscoveredPeer {
+            group_identity: None,
             discovery_id: format!("device-{pairing_id}"),
             pairing_ids: vec![pairing_id.to_string()],
             name: "peer".to_string(),
@@ -271,6 +274,7 @@ mod tests {
         table.observe(
             "laptop._copypaste._tcp.local.",
             DiscoveredPeer {
+                group_identity: None,
                 discovery_id: "laptop".into(),
                 pairing_ids: vec!["a".into(), "b".into()],
                 name: "peer".into(),

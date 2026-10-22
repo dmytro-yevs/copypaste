@@ -2110,8 +2110,8 @@ void main() {
     expect(kindIcon, findsOneWidget);
     expect(tester.widget<Icon>(kindIcon).size, AppIconSize.xs);
     expect(meta.style?.fontSize, AppTypographySize.historyMetadata);
-    expect(meta.style?.height, 1);
-    expect(tester.getSize(metaFinder).height, 12);
+    expect(meta.style?.height, 4 / 3);
+    expect(tester.getSize(metaFinder).height, 16);
     expect(
       tester.getSize(find.byType(Avatar)),
       const Size.square(AppIconSize.xs),
@@ -2164,8 +2164,8 @@ void main() {
     );
     final meta = tester.widget<Text>(metaFinder);
     expect(meta.style?.fontSize, 12);
-    expect(meta.style?.height, 1);
-    expect(tester.getSize(metaFinder).height, 12);
+    expect(meta.style?.height, 4 / 3);
+    expect(tester.getSize(metaFinder).height, 16);
     expect(
       tester.widget<SourceAppLabel>(find.byType(SourceAppLabel)).iconSize,
       AppIconSize.xs,

@@ -64,6 +64,17 @@ pub enum Applied {
 /// Implementations live over the store. The driver never touches SQLite, and
 /// the store never touches the network.
 pub trait CloudSource: Send + Sync {
+    /// Signed membership is transported separately from clipboard history.
+    /// `None` keeps history-only adapters on their existing transport contract.
+    fn group_snapshot(&self) -> Result<Option<String>, SyncError> {
+        Ok(None)
+    }
+    fn apply_group(&self, _device_id: &str, _snapshot: &str) -> Result<(), SyncError> {
+        Ok(())
+    }
+    fn group_sync_allowed(&self) -> bool {
+        true
+    }
     /// This device's stable id. Stamped onto rows this device uploads.
     fn device_id(&self) -> String;
 

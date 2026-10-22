@@ -376,9 +376,7 @@ class _AppShellState extends State<AppShell> {
             label: ExcludeSemantics(
               child: Text(
                 destination.label,
-                style: theme.typography.large
-                    .merge(theme.typography.medium)
-                    .copyWith(height: 1),
+                style: AppTheme.navigationTextStyle(context),
               ),
             ),
             child: Semantics(
@@ -417,10 +415,11 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _navigationBrand(ThemeData theme, bool expanded) {
-    return SizedBox(
+    return ConstrainedBox(
       key: const ValueKey<String>('navigation-brand'),
-      height: AppIconSize.xl,
+      constraints: const BoxConstraints(minHeight: AppIconSize.xl),
       child: Align(
+        heightFactor: 1,
         alignment: expanded ? Alignment.centerLeft : Alignment.center,
         child: Button.ghost(
           style: AppTheme.brandButtonStyle,
@@ -440,9 +439,9 @@ class _AppShellState extends State<AppShell> {
                 const Gap(AppSpacing.sm),
                 Text(
                   'CopyPaste',
-                  style: theme.typography.large
-                      .merge(theme.typography.medium)
-                      .copyWith(color: theme.colorScheme.foreground, height: 1),
+                  style: AppTheme.navigationTextStyle(
+                    context,
+                  ).copyWith(color: theme.colorScheme.foreground),
                 ),
               ],
             ],

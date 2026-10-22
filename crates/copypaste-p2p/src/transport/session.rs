@@ -75,6 +75,7 @@ pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 /// the Noise transport state carries a per-direction nonce counter that must
 /// advance in lockstep with the wire. Give each connection its own task.
 pub struct Session {
+    membership_only: bool,
     framed: Framed<TcpStream, LengthDelimitedCodec>,
     noise: TransportState,
     peer_addr: SocketAddr,
@@ -94,6 +95,12 @@ pub struct Session {
 }
 
 impl Session {
+    pub(crate) fn restrict_to_membership(&mut self) {
+        self.membership_only = true;
+    }
+    pub(crate) fn is_membership_only(&self) -> bool {
+        self.membership_only
+    }
     pub(super) fn restrict_to_pairing(&mut self) {
         self.pairing_only = true;
     }
@@ -101,7 +108,9 @@ impl Session {
         self.handshake_hash = hash;
     }
     fn message_limit(&self) -> usize {
-        if self.pairing_only {
+        if self.membership_only {
+            crate::group::MAX_GROUP_BYTES + 256
+        } else if self.pairing_only {
             8192
         } else {
             MAX_MESSAGE_BYTES
@@ -316,6 +325,7 @@ impl Session {
         handshake_hash: [u8; 32],
     ) -> Self {
         Self {
+            membership_only: false,
             framed,
             noise,
             peer_addr,
