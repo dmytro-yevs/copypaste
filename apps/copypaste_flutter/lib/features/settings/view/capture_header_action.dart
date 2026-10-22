@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -34,15 +35,17 @@ class CaptureHeaderAction extends StatelessWidget {
                 : controller.toggleCapture,
             child: Semantics(
               label: state.actionLabel,
-              child: Icon(
-                state == CaptureControlState.stopped
-                    ? LucideIcons.circleAlert
-                    : state.canResume
-                    ? LucideIcons.play
-                    : LucideIcons.pause,
-                color: state == CaptureControlState.stopped
-                    ? AppTheme.statusColor(context, AppStatusTone.error)
-                    : null,
+              child: AppIconFrame(
+                child: Icon(
+                  state == CaptureControlState.stopped
+                      ? LucideIcons.circleAlert
+                      : state.canResume
+                      ? LucideIcons.play
+                      : LucideIcons.pause,
+                  color: state == CaptureControlState.stopped
+                      ? AppTheme.statusColor(context, AppStatusTone.error)
+                      : null,
+                ),
               ),
             ),
           ),

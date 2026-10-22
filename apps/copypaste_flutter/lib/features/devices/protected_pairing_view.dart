@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -86,7 +87,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
       children: [
         Row(
           children: [
-            Icon(_iconFor(ceremony.state)),
+            AppIconFrame(child: Icon(_iconFor(ceremony.state))),
             const Gap(AppSpacing.md),
             Expanded(child: Text(_titleFor(ceremony.state)).h2()),
             if (ceremony.expiresIn != null && !terminal)
@@ -98,7 +99,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
         if (controller.errorMessage != null) ...[
           const Gap(AppSpacing.lg),
           Alert.destructive(
-            leading: const Icon(LucideIcons.circleAlert),
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: const Text('Pairing action failed'),
             content: Text(controller.errorMessage!),
           ),
@@ -115,7 +116,12 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
         if (!terminal && ceremony.state == PairingState.waitingForPeer)
           _joinAndInviteActions(context, controller),
         if (!terminal && ceremony.state == PairingState.handshaking)
-          const Center(child: CircularProgressIndicator()),
+          const Center(
+            child: AppIconFrame(
+              size: AppIconSize.sm,
+              child: CircularProgressIndicator(),
+            ),
+          ),
         if (awaitingConfirmation) _confirmationActions(controller),
         if (terminal)
           Button.primary(onPressed: _close, child: const Text('Done'))
@@ -144,7 +150,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
           children: [
             Button.secondary(
               onPressed: controller.openCameraScanner,
-              leading: const Icon(LucideIcons.scanLine),
+              leading: const AppIconFrame(child: Icon(LucideIcons.scanLine)),
               child: const Text('Scan QR code'),
             ),
           ],
@@ -167,7 +173,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
           child: Button.secondary(
             onPressed: () =>
                 controller.submitManualJoinCode(_manualCodeController.text),
-            leading: const Icon(LucideIcons.arrowRight),
+            leading: const AppIconFrame(child: Icon(LucideIcons.arrowRight)),
             child: const Text('Join securely'),
           ),
         ),

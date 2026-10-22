@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -76,7 +77,7 @@ class _FileOperationsHeaderActionState
         key: const ValueKey('file-operations-open'),
         style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
         onPressed: _open,
-        child: const Icon(LucideIcons.download),
+        child: const AppIconFrame(child: Icon(LucideIcons.download)),
       );
       return Tooltip(
         tooltip: (_) => TooltipContainer(
@@ -138,7 +139,7 @@ class _FileOperationsDrawer extends StatelessWidget {
             Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () => closeDrawer(context),
-              child: const Icon(LucideIcons.x),
+              child: const AppIconFrame(child: Icon(LucideIcons.x)),
             ),
           ],
         ),
@@ -166,7 +167,7 @@ class _FileOperationsDrawer extends StatelessWidget {
                 onPressed: controller.items.any((item) => !item.active)
                     ? controller.clearHistory
                     : null,
-                leading: const Icon(LucideIcons.trash2),
+                leading: const AppIconFrame(child: Icon(LucideIcons.trash2)),
                 child: const Text('Clear completed history'),
               ),
             ],

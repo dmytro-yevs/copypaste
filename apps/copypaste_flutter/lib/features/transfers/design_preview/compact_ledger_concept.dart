@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -63,7 +64,7 @@ class CompactLedgerConcept extends StatelessWidget {
                       const ButtonStyle.ghostIcon(),
                     ),
                     onPressed: onCancel,
-                    child: const Icon(LucideIcons.x),
+                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
                 ),
               ],
@@ -78,7 +79,9 @@ class CompactLedgerConcept extends StatelessWidget {
                         const ButtonStyle.ghostIcon(),
                       ),
                       onPressed: onOpenFile,
-                      child: const Icon(LucideIcons.folderOpen),
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.folderOpen),
+                      ),
                     ),
                   ),
                 ],
@@ -93,7 +96,9 @@ class CompactLedgerConcept extends StatelessWidget {
                         const ButtonStyle.ghostIcon(),
                       ),
                       onPressed: onRemove,
-                      child: const Icon(LucideIcons.trash2),
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.trash2),
+                      ),
                     ),
                   ),
                 ],

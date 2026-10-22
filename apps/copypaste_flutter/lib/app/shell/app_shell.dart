@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -155,7 +156,9 @@ class _AppShellState extends State<AppShell> {
                       key: const ValueKey<String>('navigation-rail-toggle'),
                       style: AppTheme.navigationIconButtonStyle,
                       onPressed: _toggleDesktopRail,
-                      child: const Icon(LucideIcons.panelLeft),
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.panelLeft),
+                      ),
                     ),
                   )
                 : null;
@@ -391,7 +394,10 @@ class _AppShellState extends State<AppShell> {
                   ),
                   dimension: AppIconSize.xl,
                   child: Center(
-                    child: Icon(destination.icon, size: AppIconSize.md),
+                    child: AppIconFrame(
+                      size: AppIconSize.md,
+                      child: Icon(destination.icon, size: AppIconSize.md),
+                    ),
                   ),
                 ),
               ),

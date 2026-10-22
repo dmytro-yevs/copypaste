@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -107,7 +108,7 @@ class _ErroredFileOperation extends StatelessWidget {
                       const ButtonStyle.ghostIcon(),
                     ),
                     onPressed: onRemove,
-                    child: const Icon(LucideIcons.trash2),
+                    child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
                   ),
                 ),
               ],
@@ -166,59 +167,59 @@ class _ActiveFileOperation extends StatelessWidget {
                   padding: EdgeInsetsDirectional.only(end: trailingInset),
                   child: _OperationName(operation: operation),
                 ),
-                  const Gap(AppSpacing.xs),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _RouteLine(
-                          operation: operation,
-                          sourceDeviceIcon: sourceDeviceIcon,
-                          destinationDeviceIcon: destinationDeviceIcon,
-                        ),
+                const Gap(AppSpacing.xs),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _RouteLine(
+                        operation: operation,
+                        sourceDeviceIcon: sourceDeviceIcon,
+                        destinationDeviceIcon: destinationDeviceIcon,
                       ),
-                      const Gap(AppSpacing.sm),
-                      Text(
-                        speedLabel ?? operation.label,
-                        style: Theme.of(context).typography.small.copyWith(
-                          color: AppTheme.statusColor(
-                            context,
-                            AppStatusTone.info,
-                          ),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Gap(AppSpacing.sm),
-                  SizedBox(
-                    height: AppSpacing.xs,
-                    child: LinearProgressIndicator(
-                      value: operation.progress,
-                      showSparks: false,
-                      disableAnimation: MediaQuery.disableAnimationsOf(context),
                     ),
-                  ),
-                  const Gap(AppSpacing.xs),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${formatBytes(operation.written)} / ${formatBytes(operation.total)}',
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).typography.xSmall.copyWith(
-                            color: colors.mutedForeground,
-                          ),
+                    const Gap(AppSpacing.sm),
+                    Text(
+                      speedLabel ?? operation.label,
+                      style: Theme.of(context).typography.small.copyWith(
+                        color: AppTheme.statusColor(
+                          context,
+                          AppStatusTone.info,
                         ),
+                        fontWeight: FontWeight.w600,
                       ),
-                      const Gap(AppSpacing.sm),
-                      Text(
-                        _percentage(operation.progress),
+                    ),
+                  ],
+                ),
+                const Gap(AppSpacing.sm),
+                SizedBox(
+                  height: AppSpacing.xs,
+                  child: LinearProgressIndicator(
+                    value: operation.progress,
+                    showSparks: false,
+                    disableAnimation: MediaQuery.disableAnimationsOf(context),
+                  ),
+                ),
+                const Gap(AppSpacing.xs),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${formatBytes(operation.written)} / ${formatBytes(operation.total)}',
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).typography.xSmall.copyWith(
                           color: colors.mutedForeground,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    const Gap(AppSpacing.sm),
+                    Text(
+                      _percentage(operation.progress),
+                      style: Theme.of(context).typography.xSmall.copyWith(
+                        color: colors.mutedForeground,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
             if (onCancel != null)
@@ -226,15 +227,14 @@ class _ActiveFileOperation extends StatelessWidget {
                 top: -AppSpacing.sm,
                 end: -AppSpacing.sm,
                 child: Tooltip(
-                  tooltip: (_) => const TooltipContainer(
-                    child: Text('Cancel download'),
-                  ),
+                  tooltip: (_) =>
+                      const TooltipContainer(child: Text('Cancel download')),
                   child: Button.ghost(
                     style: AppTheme.controlButtonStyle(
                       const ButtonStyle.ghostIcon(),
                     ),
                     onPressed: onCancel,
-                    child: const Icon(LucideIcons.x),
+                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
                   ),
                 ),
               ),
@@ -273,10 +273,13 @@ class _CompletedFileOperation extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  LucideIcons.circleCheck,
+                AppIconFrame(
                   size: AppIconSize.sm,
-                  color: AppTheme.statusColor(context, AppStatusTone.success),
+                  child: Icon(
+                    LucideIcons.circleCheck,
+                    size: AppIconSize.sm,
+                    color: AppTheme.statusColor(context, AppStatusTone.success),
+                  ),
                 ),
                 const Gap(AppSpacing.sm),
                 Expanded(child: _OperationName(operation: operation, lines: 1)),
@@ -301,7 +304,9 @@ class _CompletedFileOperation extends StatelessWidget {
                 if (onOpenFile != null)
                   Button.secondary(
                     onPressed: onOpenFile,
-                    leading: const Icon(LucideIcons.folderOpen),
+                    leading: const AppIconFrame(
+                      child: Icon(LucideIcons.folderOpen),
+                    ),
                     child: const Text('Show file'),
                   ),
                 if (onOpenFile != null && onRemove != null)
@@ -316,7 +321,9 @@ class _CompletedFileOperation extends StatelessWidget {
                         const ButtonStyle.ghostIcon(),
                       ),
                       onPressed: onRemove,
-                      child: const Icon(LucideIcons.trash2),
+                      child: const AppIconFrame(
+                        child: Icon(LucideIcons.trash2),
+                      ),
                     ),
                   ),
               ],
@@ -346,10 +353,13 @@ class _TerminalFileOperation extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
-          Icon(
-            LucideIcons.circleAlert,
+          AppIconFrame(
             size: AppIconSize.sm,
-            color: AppTheme.statusColor(context, AppStatusTone.muted),
+            child: Icon(
+              LucideIcons.circleAlert,
+              size: AppIconSize.sm,
+              color: AppTheme.statusColor(context, AppStatusTone.muted),
+            ),
           ),
           const Gap(AppSpacing.sm),
           Expanded(
@@ -367,22 +377,21 @@ class _TerminalFileOperation extends StatelessWidget {
             const Gap(AppSpacing.sm),
             Button.secondary(
               onPressed: onRetry,
-              leading: const Icon(LucideIcons.rotateCcw),
+              leading: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
               child: const Text('Retry'),
             ),
           ],
           if (onRemove != null) ...[
             const Gap(AppSpacing.sm),
             Tooltip(
-              tooltip: (_) => const TooltipContainer(
-                child: Text('Remove from history'),
-              ),
+              tooltip: (_) =>
+                  const TooltipContainer(child: Text('Remove from history')),
               child: Button.ghost(
                 style: AppTheme.controlButtonStyle(
                   const ButtonStyle.ghostIcon(),
                 ),
                 onPressed: onRemove,
-                child: const Icon(LucideIcons.trash2),
+                child: const AppIconFrame(child: Icon(LucideIcons.trash2)),
               ),
             ),
           ],
@@ -428,9 +437,12 @@ class _RouteLine extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          sourceDeviceIcon ?? LucideIcons.circleHelp,
+        AppIconFrame(
           size: AppIconSize.sm,
+          child: Icon(
+            sourceDeviceIcon ?? LucideIcons.circleHelp,
+            size: AppIconSize.sm,
+          ),
         ),
         const Gap(AppSpacing.xs),
         Flexible(
@@ -442,11 +454,17 @@ class _RouteLine extends StatelessWidget {
           ),
         ),
         const Gap(AppSpacing.xs),
-        const Icon(LucideIcons.arrowRight, size: AppIconSize.sm),
-        const Gap(AppSpacing.xs),
-        Icon(
-          destinationDeviceIcon ?? LucideIcons.circleHelp,
+        const AppIconFrame(
           size: AppIconSize.sm,
+          child: Icon(LucideIcons.arrowRight, size: AppIconSize.sm),
+        ),
+        const Gap(AppSpacing.xs),
+        AppIconFrame(
+          size: AppIconSize.sm,
+          child: Icon(
+            destinationDeviceIcon ?? LucideIcons.circleHelp,
+            size: AppIconSize.sm,
+          ),
         ),
         const Gap(AppSpacing.xs),
         Flexible(

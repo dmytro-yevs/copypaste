@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_overlays.dart';
@@ -39,8 +40,12 @@ class _NotificationsHeaderActionState extends State<NotificationsHeaderAction> {
         key: const ValueKey('notifications-open'),
         style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
         onPressed: _open,
-        child: Icon(
-          widget.controller.unread > 0 ? LucideIcons.bellDot : LucideIcons.bell,
+        child: AppIconFrame(
+          child: Icon(
+            widget.controller.unread > 0
+                ? LucideIcons.bellDot
+                : LucideIcons.bell,
+          ),
         ),
       ),
     ),
@@ -80,7 +85,7 @@ class _NotificationsDrawer extends StatelessWidget {
             Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () => closeDrawer(context),
-              child: const Icon(LucideIcons.x),
+              child: const AppIconFrame(child: Icon(LucideIcons.x)),
             ),
           ],
         ),
@@ -119,10 +124,12 @@ class _NotificationsDrawer extends StatelessWidget {
                 ],
                 for (final item in controller.items) ...[
                   Basic(
-                    leading: Icon(
-                      item.actionable
-                          ? LucideIcons.monitorSmartphone
-                          : LucideIcons.info,
+                    leading: AppIconFrame(
+                      child: Icon(
+                        item.actionable
+                            ? LucideIcons.monitorSmartphone
+                            : LucideIcons.info,
+                      ),
                     ),
                     title: Text(item.title),
                     subtitle: Text(item.peerName),

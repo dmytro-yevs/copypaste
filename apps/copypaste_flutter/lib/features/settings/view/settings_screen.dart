@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -221,9 +222,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 selectedStyle: AppTheme
                                     .settingsNavigationSelectedButtonStyle,
                                 label: _navigationTargetLabel(target),
-                                child: Icon(
-                                  target.section.icon,
+                                child: AppIconFrame(
                                   size: AppIconSize.sm,
+                                  child: Icon(
+                                    target.section.icon,
+                                    size: AppIconSize.sm,
+                                  ),
                                 ),
                               ),
                           ],
@@ -283,7 +287,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               if (controller.errorMessage case final message?) ...[
                 Alert.destructive(
-                  leading: const Icon(LucideIcons.circleAlert),
+                  leading: const AppIconFrame(
+                    child: Icon(LucideIcons.circleAlert),
+                  ),
                   title: const Text('Settings need attention'),
                   content: Text(message),
                 ),
@@ -354,7 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       placeholder: const Text('Search settings'),
       onChanged: _updateSearch,
       features: const [
-        InputFeature.leading(Icon(LucideIcons.search)),
+        InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
         InputFeature.clear(),
       ],
     );
@@ -385,11 +391,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onPressed: () => _openCompactSection(context, target),
           child: Row(
             children: [
-              Icon(target.section.icon, size: AppIconSize.md),
+              AppIconFrame(
+                size: AppIconSize.md,
+                child: Icon(target.section.icon, size: AppIconSize.md),
+              ),
               const Gap(AppSpacing.md),
               Expanded(child: _navigationTargetLabel(target)),
               const Gap(AppSpacing.sm),
-              const Icon(LucideIcons.chevronRight, size: AppIconSize.sm),
+              const AppIconFrame(
+                size: AppIconSize.sm,
+                child: Icon(LucideIcons.chevronRight, size: AppIconSize.sm),
+              ),
             ],
           ),
         );
@@ -423,7 +435,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     key: const ValueKey<String>('settings-back'),
                     style: AppTheme.navigationIconButtonStyle,
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Icon(LucideIcons.arrowLeft),
+                    child: const AppIconFrame(
+                      child: Icon(LucideIcons.arrowLeft),
+                    ),
                   ),
                 ),
               ],
@@ -845,7 +859,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         if (controller?.error case final message?)
           Alert.destructive(
-            leading: const Icon(LucideIcons.circleAlert),
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: const Text('Visibility could not be changed'),
             content: Text(message),
           ),
@@ -906,7 +920,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: widget.controller.busy
                   ? null
                   : widget.onOpenAndroidCaptureSetup,
-              leading: const Icon(LucideIcons.shieldCheck),
+              leading: const AppIconFrame(child: Icon(LucideIcons.shieldCheck)),
               child: const Text('Open setup'),
             ),
           ),
@@ -969,7 +983,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         if (capture != null && !capture.running && !capture.paused) ...[
           const Alert(
-            leading: Icon(LucideIcons.circleAlert),
+            leading: AppIconFrame(child: Icon(LucideIcons.circleAlert)),
             title: Text('Capture is not running'),
             content: Text(
               'CopyPaste is not currently receiving clipboard changes on this device.',
@@ -1048,7 +1062,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const ButtonStyle.secondary(),
                 ),
                 onPressed: widget.controller.busy ? null : _exportTextHistory,
-                leading: const Icon(LucideIcons.fileOutput),
+                leading: const AppIconFrame(
+                  child: Icon(LucideIcons.fileOutput),
+                ),
                 child: const Text('Export'),
               ),
             ),
@@ -1064,7 +1080,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onPressed: widget.controller.busy
                     ? null
                     : widget.controller.createBackup,
-                leading: const Icon(LucideIcons.archive),
+                leading: const AppIconFrame(child: Icon(LucideIcons.archive)),
                 child: const Text('Create backup'),
               ),
             ),
@@ -1078,7 +1094,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const ButtonStyle.destructive(),
                 ),
                 onPressed: widget.controller.busy ? null : _confirmRestore,
-                leading: const Icon(LucideIcons.history),
+                leading: const AppIconFrame(child: Icon(LucideIcons.history)),
                 child: const Text('Restore'),
               ),
             ),
@@ -1187,7 +1203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: widget.controller.busy
                         ? null
                         : _addExcludedApplication,
-                    leading: const Icon(LucideIcons.plus),
+                    leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
                     child: const Text('Add'),
                   ),
                 ],
@@ -1202,9 +1218,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.only(top: AppSpacing.xs),
                     child: Row(
                       children: [
-                        const Icon(
-                          LucideIcons.shieldCheck,
+                        const AppIconFrame(
                           size: AppIconSize.sm,
+                          child: Icon(
+                            LucideIcons.shieldCheck,
+                            size: AppIconSize.sm,
+                          ),
                         ),
                         const Gap(AppSpacing.sm),
                         Expanded(
@@ -1229,7 +1248,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 : () => widget.controller.removeExcludedApp(
                                     appId,
                                   ),
-                            child: const Icon(LucideIcons.x),
+                            child: const AppIconFrame(
+                              child: Icon(LucideIcons.x),
+                            ),
                           ),
                         ),
                       ],
@@ -1401,35 +1422,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdatePhase.available => Button.primary(
         key: const ValueKey<String>('install-app-update'),
         onPressed: controller.install,
-        leading: const Icon(LucideIcons.download),
+        leading: const AppIconFrame(child: Icon(LucideIcons.download)),
         child: const Text('Update now'),
       ),
       AppUpdatePhase.permissionRequired => Button.primary(
         key: const ValueKey<String>('continue-app-update'),
         onPressed: controller.install,
-        leading: const Icon(LucideIcons.settings),
+        leading: const AppIconFrame(child: Icon(LucideIcons.settings)),
         child: const Text('Continue'),
       ),
       AppUpdatePhase.unavailable => Button.secondary(
         key: const ValueKey<String>('open-update-release'),
         onPressed: controller.openReleasePage,
-        leading: const Icon(LucideIcons.externalLink),
+        leading: const AppIconFrame(child: Icon(LucideIcons.externalLink)),
         child: const Text('Open release'),
       ),
       AppUpdatePhase.checking => const Button.secondary(
         onPressed: null,
-        leading: Icon(LucideIcons.refreshCw),
+        leading: AppIconFrame(child: Icon(LucideIcons.refreshCw)),
         child: Text('Checking'),
       ),
       AppUpdatePhase.downloading => const Button.secondary(
         onPressed: null,
-        leading: Icon(LucideIcons.download),
+        leading: AppIconFrame(child: Icon(LucideIcons.download)),
         child: Text('Downloading'),
       ),
       AppUpdatePhase.preparingModules ||
       AppUpdatePhase.installing => const Button.secondary(
         onPressed: null,
-        leading: Icon(LucideIcons.loaderCircle),
+        leading: AppIconFrame(child: Icon(LucideIcons.loaderCircle)),
         child: Text('Installing'),
       ),
       AppUpdatePhase.restartRequired => Button.primary(
@@ -1437,7 +1458,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onPressed: controller.busy || !controller.canRestart
             ? null
             : controller.restartApplication,
-        leading: const Icon(LucideIcons.refreshCw),
+        leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
         child: const Text('Restart CopyPaste'),
       ),
       AppUpdatePhase.idle ||
@@ -1445,7 +1466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdatePhase.error => Button.secondary(
         key: const ValueKey<String>('check-app-update'),
         onPressed: () => _checkForUpdates(controller),
-        leading: const Icon(LucideIcons.refreshCw),
+        leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
         child: const Text('Check again'),
       ),
     };
@@ -1755,7 +1776,9 @@ class _QuickPasteSection extends StatelessWidget {
               if (integration.session == LinuxDesktopSession.wayland &&
                   !integration.quickPaste)
                 Alert(
-                  leading: const Icon(LucideIcons.keyboard),
+                  leading: const AppIconFrame(
+                    child: Icon(LucideIcons.keyboard),
+                  ),
                   title: const Text('Set up Quick Paste'),
                   content: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1802,7 +1825,7 @@ class _QuickPasteSection extends StatelessWidget {
               const StateView.loading(message: 'Loading Quick Paste settings.')
             else if (!controller.supported)
               const Alert(
-                leading: Icon(LucideIcons.circleAlert),
+                leading: AppIconFrame(child: Icon(LucideIcons.circleAlert)),
                 title: Text('Quick Paste is unavailable'),
                 content: Text(
                   'This device does not provide the Quick Paste window.',
@@ -1833,7 +1856,9 @@ class _QuickPasteSection extends StatelessWidget {
                   controller.autoPaste &&
                   !controller.accessibilityGranted) ...[
                 Alert(
-                  leading: const Icon(LucideIcons.accessibility),
+                  leading: const AppIconFrame(
+                    child: Icon(LucideIcons.accessibility),
+                  ),
                   title: const Text('Accessibility is required'),
                   content: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1857,7 +1882,9 @@ class _QuickPasteSection extends StatelessWidget {
               ],
               if (controller.errorMessage case final message?) ...[
                 Alert.destructive(
-                  leading: const Icon(LucideIcons.circleAlert),
+                  leading: const AppIconFrame(
+                    child: Icon(LucideIcons.circleAlert),
+                  ),
                   title: const Text('Quick Paste needs attention'),
                   content: Text(message),
                 ),
@@ -1953,7 +1980,7 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
               onPressed: widget.controller.busy || _recording
                   ? null
                   : widget.controller.resetShortcut,
-              child: const Icon(LucideIcons.rotateCcw),
+              child: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
             ),
           ),
         ],
