@@ -114,6 +114,11 @@ void main() {
       await tester.tap(settings);
       await tester.pumpAndSettle();
       expect(find.text('OCR settings'), findsOneWidget);
+      expect(find.text('No additional settings'), findsOneWidget);
+      expect(
+        find.text('This module does not need extra configuration.'),
+        findsOneWidget,
+      );
       final drawer = find.byKey(
         const ValueKey('module-settings-drawer-copypaste.ocr'),
       );
@@ -352,10 +357,51 @@ void main() {
       find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
     );
     await tester.pumpAndSettle();
+    expect(find.text('No additional settings'), findsNothing);
     expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
     await tester.tap(find.text('Restart CopyPaste'));
     await tester.pumpAndSettle();
     expect(restarts, 1);
+  });
+
+  testWidgets('a module error is shown instead of the no-settings message', (
+    tester,
+  ) async {
+    const module = InstalledModule(
+      id: 'copypaste.ocr',
+      title: 'OCR',
+      description: 'Recognize text from images.',
+      version: '0.1.23',
+      enabled: true,
+      sizeBytes: 10,
+      commands: [],
+      preferenceFields: [],
+      preferences: {},
+      error: 'The module needs attention.',
+    );
+    final controller = ModulesController(
+      repository: MemoryModulesRepository()..modules = [module],
+      marketplace: MemoryModuleMarketplace(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectSection(ModulesSection.installed);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: ModulesSettingsView(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-copypaste.ocr')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Module operation failed'), findsOneWidget);
+    expect(find.text('The module needs attention.'), findsWidgets);
+    expect(find.text('No additional settings'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('an installed module is updated from its card', (tester) async {
@@ -626,6 +672,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools settings'), findsOneWidget);
+      expect(find.text('No additional settings'), findsNothing);
       expect(find.text('Uppercase'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Preferences'), findsNothing);
       expect(find.byType(AlertDialog), findsNothing);

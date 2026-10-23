@@ -188,6 +188,24 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (_draft == null &&
+                              controller.settingsCommands(module).isEmpty &&
+                              module.error == null &&
+                              controller.errorMessage == null &&
+                              !controller.busy &&
+                              !(controller.configuringModel &&
+                                  controller.activeModuleId == moduleId) &&
+                              !(controller.canSetUpSmsAccess &&
+                                  module.events.contains(
+                                    ModuleEventKind.smsReceived,
+                                  )) &&
+                              !(module.restartRequired &&
+                                  controller.canRestart))
+                            const StateView.empty(
+                              title: 'No additional settings',
+                              message:
+                                  'This module does not need extra configuration.',
+                            ),
                           if (module.error ?? controller.errorMessage
                               case final error?) ...[
                             StateView.error(
