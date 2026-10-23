@@ -114,6 +114,18 @@ pub fn prepare_copy(
     })
 }
 
+/// Commit recency only after the platform has successfully written the clipboard.
+pub fn finish_copy(
+    store: &Store,
+    mut prepared: PreparedCopy,
+) -> Result<copypaste_ipc::Item, HistoryError> {
+    prepared.item.created_at = store
+        .promote_copied(&prepared.item.id, crate::now_ms())
+        .map_err(HistoryError::Store)?
+        .ok_or(HistoryError::NotFound)?;
+    Ok(prepared.item)
+}
+
 pub fn save_file(
     store: &Store,
     key: &ItemKey,

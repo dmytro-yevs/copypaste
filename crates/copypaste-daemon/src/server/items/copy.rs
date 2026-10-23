@@ -34,10 +34,12 @@ fn copy_with(state: &AppState, id: u64, item_id: &str, plain_text: bool) -> Resp
                 &prepared.content_type,
             )
             .map_err(copypaste_core::history_error::HistoryError::from)?;
+        let item = history_actions::finish_copy(&state.store, prepared)?;
         state
             .instant_clipboard
-            .note_local(&state.store, copypaste_core::now_ms());
-        Ok::<_, copypaste_core::history_error::HistoryError>(prepared.item)
+            .note_local(&state.store, item.created_at);
+        state.note_local_change();
+        Ok::<_, copypaste_core::history_error::HistoryError>(item)
     })();
     match result {
         Ok(item) => Response::ok(id, ResponseData::Item(item)),

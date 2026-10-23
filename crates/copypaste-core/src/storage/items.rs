@@ -82,6 +82,32 @@ const LIVE_ITEMS_SQL: &str = concat!(
 );
 
 impl Store {
+    /// Promotes a successfully copied row without reading or rewriting its payload.
+    /// Pin order and source identity survive; same-tick copies still move forward.
+    pub(crate) fn promote_copied(
+        &self,
+        id: &str,
+        copied_at: i64,
+    ) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "UPDATE clipboard_items SET created_at = MAX( \
+                    ?2, \
+                    CASE WHEN created_at = 9223372036854775807 THEN created_at \
+                         ELSE created_at + 1 END, \
+                    COALESCE((SELECT CASE WHEN created_at = 9223372036854775807 \
+                                          THEN created_at ELSE created_at + 1 END \
+                              FROM clipboard_items INDEXED BY idx_items_evictable \
+                              WHERE deleted = 0 AND pinned = 0 \
+                              ORDER BY created_at DESC, id DESC LIMIT 1), ?2)) \
+                 WHERE id = ?1 AND deleted = 0 RETURNING created_at",
+                params![id, copied_at],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The newest live content's ID and stamp, independently of pin order.
     /// Reads only ordering metadata, never the potentially large ciphertext.
     pub fn newest_live_key(&self) -> Result<Option<(String, i64)>, StoreError> {
@@ -475,6 +501,38 @@ mod tests {
     };
     use super::super::{Store, StoreError};
 
+    #[test]
+    fn copied_rows_rise_without_replacing_payload_source_or_pin_order() {
+        let s = store();
+        let first = s
+            .insert(NewItem {
+                app_bundle_id: Some("com.example.source".into()),
+                app_name: Some("Source".into()),
+                ..item("first", T0)
+            })
+            .unwrap();
+        let second = s.insert(item("second", T0 + 1)).unwrap();
+        assert_eq!(s.promote_copied(&first.id, T0).unwrap(), Some(T0 + 2));
+        assert_eq!(s.list(10, 0).unwrap()[0].id, first.id);
+        let promoted = s.get(&first.id).unwrap().unwrap();
+        assert_eq!(promoted.content_ciphertext, first.content_ciphertext);
+        assert_eq!(promoted.nonce, first.nonce);
+        assert_eq!(promoted.app_bundle_id, first.app_bundle_id);
+        assert_eq!(promoted.app_name, first.app_name);
+        assert_eq!(s.count().unwrap(), 2);
+
+        s.set_pinned(&first.id, true).unwrap();
+        s.set_pinned(&second.id, true).unwrap();
+        let before = s.list(10, 0).unwrap();
+        s.promote_copied(&second.id, T0 + 10).unwrap();
+        let after = s.list(10, 0).unwrap();
+        assert_eq!(after[0].id, before[0].id);
+        assert_eq!(after[1].id, before[1].id);
+        assert_eq!(after[1].pin_order, before[1].pin_order);
+
+        s.delete(&second.id).unwrap();
+        assert_eq!(s.promote_copied(&second.id, T0 + 20).unwrap(), None);
+    }
     fn source_icon() -> crate::SourceAppIconMetadata {
         let image = ImageBuffer::from_pixel(64, 64, Rgba([0x24u8, 0x65, 0xa8, 0xff]));
         let mut png = std::io::Cursor::new(Vec::new());

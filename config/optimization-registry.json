@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-22",
+  "date": "2026-10-24",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -456,7 +456,7 @@
         "crates/copypaste-daemon/src/p2p/poll.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -3080,6 +3080,65 @@
       "supersedes": [],
       "functional_validation": "Dart static analysis passed. Native Windows menu appearance, DPI behavior and resource impact remain unverified.",
       "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
+    },
+    {
+      "id": "RUN-067",
+      "title": "Promote copied history rows through a metadata-only update",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History copy actions and Store",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/lib.rs"
+      ],
+      "invariant": "Successful History and Quick Paste copies promote the existing live row and publish a history change. Failed clipboard writes do not change recency. The update preserves ciphertext, source identity and manual pin order, and uses the existing eviction index for the newest unpinned timestamp without materializing another payload.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "core-tests.log",
+          "sha256": "c32563251ddd1493f964b50b1f7b45e1951dd12f5d55b11811b45fa3d7557909",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "runtime-tests.log",
+          "sha256": "3b98c5789a55f177c0b20569ba4367fd817ddf2b4a2a4bd7f64d3f9bae826a0e",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "daemon-tests.log",
+          "sha256": "67fc6d7a3a333a940c3da441b3dd0eefa0683136d09606087f0fd5f93de30085",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "core-final-test.log",
+          "sha256": "0c736a5cb66116a264d884f214d680c94791759a179035a5e00e2c65bd4d71b5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "484 core library tests, 5 runtime copy tests, 1 daemon socket round-trip test and the final storage promotion regression passed. Native UI and resource evidence remain unestablished on macOS, Android and Windows.",
+      "next_step": "Collect exact-build application, daemon and worker peak, steady-state and growth evidence on all supported platforms. Native resource qualification and unresolved CPU, wakeup, I/O, network and growth budgets remain unestablished. No resource saving is claimed."
     }
   ]
 }

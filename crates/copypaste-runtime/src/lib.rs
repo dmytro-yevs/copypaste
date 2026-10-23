@@ -1807,8 +1807,14 @@ impl Runtime {
             self.clipboard
                 .write(prepared.payload(), &prepared.content_type)
                 .map_err(copypaste_core::history_error::HistoryError::from)?;
-            self.instant_clipboard.note_local(&self.store, now_ms());
-            Ok::<_, copypaste_core::history_error::HistoryError>(prepared.item)
+            let item = history_actions::finish_copy(&self.store, prepared)?;
+            self.instant_clipboard
+                .note_local(&self.store, item.created_at);
+            self.node.note_local_version(item.created_at);
+            self.modules.note_version(item.created_at);
+            self.peer_sync.wake();
+            self.emit(EventKind::Items);
+            Ok::<_, copypaste_core::history_error::HistoryError>(item)
         })();
         match result {
             Ok(item) => Response::ok(request_id, ResponseData::Item(item)),
@@ -2751,12 +2757,48 @@ mod tests {
         let clipboard = Arc::new(RecordingClipboard::default());
         let (runtime, _dir) = fixture_with(clipboard.clone());
         seed_text(&runtime, "text-item", "trusted text");
+        seed_text(&runtime, "z-newer", "another clip");
+        let mut events = runtime.events.subscribe();
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "z-newer");
         assert!(runtime.copy(1, "text-item", false).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "text-item");
+        let first_stamp = runtime.store.get("text-item").unwrap().unwrap().created_at;
+        let event = events.try_recv().unwrap();
+        assert_eq!(event.event, EventKind::Items);
+        assert!(!event.captured);
+        assert!(runtime.copy(2, "z-newer", false).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "z-newer");
         assert!(runtime.copy(2, "text-item", true).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "text-item");
+        assert!(runtime.store.get("text-item").unwrap().unwrap().created_at > first_stamp);
+        assert_eq!(runtime.store.count().unwrap(), 2);
         assert_eq!(
             *clipboard.0.lock().unwrap(),
-            vec!["text:trusted text", "text:trusted text"]
+            vec![
+                "text:trusted text",
+                "text:another clip",
+                "text:trusted text"
+            ]
         );
+    }
+
+    #[test]
+    fn a_failed_copy_does_not_promote_history_or_emit_a_change() {
+        struct RefusingClipboard;
+        impl ClipboardWriter for RefusingClipboard {
+            fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
+                Err(ClipboardWriteError::Failed)
+            }
+        }
+        let (runtime, _dir) = fixture_with(Arc::new(RefusingClipboard));
+        seed_text(&runtime, "text-item", "trusted text");
+        let mut events = runtime.events.subscribe();
+        assert!(!runtime.copy(1, "text-item", false).ok);
+        assert_eq!(
+            runtime.store.get("text-item").unwrap().unwrap().created_at,
+            1
+        );
+        assert!(events.try_recv().is_err());
     }
 
     #[test]
