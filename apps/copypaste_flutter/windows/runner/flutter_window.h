@@ -25,6 +25,7 @@ struct QuickPastePresentationApi {
   decltype(&::GetDpiForWindow) get_dpi_for_window = &::GetDpiForWindow;
   decltype(&::SetForegroundWindow) set_foreground_window = &::SetForegroundWindow;
   decltype(&::ShowWindow) show_window = &::ShowWindow;
+  decltype(&::GetForegroundWindow) get_foreground_window = &::GetForegroundWindow;
 };
 
 RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
@@ -36,6 +37,9 @@ bool PresentQuickPaste(
     const std::function<bool()>& owns = [] { return true; },
     const std::function<void()>& cleanup = {}, bool inspector_visible = false,
     const std::optional<RECT>& tray_anchor = std::nullopt, bool reveal = true);
+
+bool RevealQuickPaste(HWND window, HWND pending_foreground,
+                     const QuickPastePresentationApi& api);
 
 // Public Win32 calls used by the presentation-scoped target decision flow.
 struct QuickPasteTargetApi {

@@ -195,10 +195,8 @@ bool FlutterWindow::OnCreate() {
             }
             flutter_controller_->engine()->SetNextFrameCallback([this, id] {
               if (quick_paste_session_.id() != id) return;
-              if (::GetForegroundWindow() != quick_paste_pending_foreground_ ||
-                  !::SetWindowPos(GetHandle(), HWND_TOPMOST, 0, 0, 0, 0,
-                      SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_FRAMECHANGED) ||
-                  !::SetForegroundWindow(GetHandle())) {
+              if (!RevealQuickPaste(GetHandle(), quick_paste_pending_foreground_,
+                                    QuickPastePresentationApi{})) {
                 quick_paste_session_.Close(id, GetHandle());
                 ScheduleQuickPasteRetirement();
               }
@@ -720,6 +718,16 @@ bool ShowQuickPastePresentation(
     return false;
   }
   return true;
+}
+
+bool RevealQuickPaste(HWND window, HWND pending_foreground,
+                     const QuickPastePresentationApi& api) {
+  const HWND foreground = api.get_foreground_window();
+  // Flutter can activate its own hidden popup while preparing the media frame.
+  if (foreground != pending_foreground && foreground != window) return false;
+  if (!api.set_window_pos(window, HWND_TOPMOST, 0, 0, 0, 0,
+          SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_FRAMECHANGED)) return false;
+  return api.set_foreground_window(window);
 }
 
 bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
