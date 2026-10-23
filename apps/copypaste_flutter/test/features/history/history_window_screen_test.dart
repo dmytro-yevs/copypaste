@@ -50,7 +50,73 @@ class _Repository extends Fake implements HistoryRepository {
   }
 }
 
+class _PrependingRepository extends _Repository {
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async {
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit).clamp(0, clips.length);
+    return HistoryClipPage(
+      items: clips.sublist(start, end),
+      nextCursor: end == clips.length ? null : '$end',
+    );
+  }
+}
+
 void main() {
+  testWidgets('renders a rebuilt prefix after history was offstage', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 300));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repo = _PrependingRepository();
+    final controller = HistoryController(repo, pageSize: 2);
+    final hidden = ValueNotifier(false);
+    addTearDown(controller.dispose);
+    addTearDown(repo.events.close);
+    addTearDown(hidden.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: hidden,
+            child: HistoryScreen(controller: controller),
+            builder: (context, value, child) =>
+                Offstage(offstage: value, child: child),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    hidden.value = true;
+    await tester.pump();
+    controller.beforeWindowChange = () async => {'1'};
+    repo.clips.insertAll(0, [
+      for (final id in ['new-1', 'new-2'])
+        HistoryClip(
+          id: id,
+          contentType: 'text/plain',
+          preview: id,
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+        ),
+    ]);
+    repo.events.add(HistoryRuntimeEvent.itemsChanged);
+    await tester.pumpAndSettle();
+    hidden.value = false;
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('history-row-new-1')), findsOneWidget);
+    expect(find.text('Loading clipboard history.'), findsNothing);
+    expect(find.text('No clips found'), findsNothing);
+  });
+
   testWidgets('retains the visible row position when older pages are evicted', (
     tester,
   ) async {
