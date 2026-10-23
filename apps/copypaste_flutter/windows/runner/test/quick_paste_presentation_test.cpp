@@ -152,6 +152,62 @@ UINT WINAPI Input(UINT count, LPINPUT records, int size) {
   EXPECT_EQ(records[3].ki.dwFlags, KEYEVENTF_KEYUP);
   return inserted;
 }
+BOOL WINAPI RevealPosition(HWND window, HWND after, int x, int y, int width, int height, UINT flags) {
+  EXPECT_EQ(window, popup);
+  EXPECT_EQ(after, HWND_TOPMOST);
+  const bool result = Position(window, after, x, y, width, height, flags);
+  if (!result) ::SetLastError(ERROR_INVALID_WINDOW_HANDLE);
+  return result;
+}
+BOOL WINAPI RevealActivation(HWND window) {
+  EXPECT_EQ(window, popup);
+  const bool result = Foreground(window);
+  if (!result) ::SetLastError(ERROR_ACCESS_DENIED);
+  return result;
+}
+class QuickPasteReveal : public testing::Test {
+ protected:
+  QuickPastePresentationApi api{Cursor, Monitor, MonitorInfo, RevealPosition,
+                               Dpi, RevealActivation, Hide, CurrentForeground};
+  void SetUp() override {
+    calls.clear(); fail_at.clear(); position_count = 1;
+    during_presentation = nullptr;
+    foreground = target_a;
+    presentation_visible = false;
+  }
+};
+TEST_F(QuickPasteReveal, SavedTargetAllowsShowAndActivation) {
+  EXPECT_TRUE(RevealQuickPaste(popup, target_a, api));
+  EXPECT_EQ(calls, (std::vector<std::string>{"get-foreground", "show", "foreground"}));
+  EXPECT_TRUE(presentation_visible);
+  EXPECT_EQ(presentation_flags, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+}
+TEST_F(QuickPasteReveal, CurrentPopupSelfActivationAllowsShowAndActivation) {
+  foreground = popup;
+  EXPECT_TRUE(RevealQuickPaste(popup, target_a, api));
+  EXPECT_EQ(calls, (std::vector<std::string>{"get-foreground", "show", "foreground"}));
+  EXPECT_TRUE(presentation_visible);
+}
+TEST_F(QuickPasteReveal, ForeignMainAndMissingForegroundNeverShowOrActivate) {
+  for (HWND other : {target_b, own_main, static_cast<HWND>(nullptr)}) {
+    calls.clear(); foreground = other;
+    EXPECT_FALSE(RevealQuickPaste(popup, target_a, api));
+    EXPECT_EQ(calls, (std::vector<std::string>{"get-foreground"}));
+    EXPECT_FALSE(presentation_visible);
+  }
+}
+TEST_F(QuickPasteReveal, PositionFailureStopsActivationAndPreservesError) {
+  fail_at = "show";
+  EXPECT_FALSE(RevealQuickPaste(popup, target_a, api));
+  EXPECT_EQ(::GetLastError(), ERROR_INVALID_WINDOW_HANDLE);
+  EXPECT_EQ(calls, (std::vector<std::string>{"get-foreground", "show"}));
+}
+TEST_F(QuickPasteReveal, ActivationFailurePreservesErrorForCallerCleanup) {
+  fail_at = "foreground";
+  EXPECT_FALSE(RevealQuickPaste(popup, target_a, api));
+  EXPECT_EQ(::GetLastError(), ERROR_ACCESS_DENIED);
+  EXPECT_EQ(calls, (std::vector<std::string>{"get-foreground", "show", "foreground"}));
+}
 class QuickPasteTarget : public testing::Test {
  protected:
   QuickPasteTargetApi api{CurrentForeground, Root, Owner, OwnPid, Alive, Visible, TargetHide, ActivateTarget, Input};
