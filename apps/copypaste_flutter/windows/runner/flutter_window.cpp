@@ -414,7 +414,9 @@ bool FlutterWindow::OnCreate() {
             flutter::EncodableValue(context_id);
         result->Success(flutter::EncodableValue(response));
       });
-  SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  // Hidden Quick Paste must not activate itself before its foreground check.
+  SetChildContent(flutter_controller_->view()->GetNativeWindow(),
+                  !is_quick_paste_context_);
 
   if (is_quick_paste_context_) {
     const auto handle = GetHandle();
