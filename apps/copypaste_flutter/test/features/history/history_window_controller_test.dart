@@ -72,6 +72,49 @@ class _MutableRepository extends Fake implements HistoryRepository {
 
 void main() {
   test(
+    'keeps rebuilt pages renderable before their geometry is measured',
+    () async {
+      final repo = _MutableRepository();
+      final controller = HistoryController(
+        repo,
+        pageSize: 2,
+        includeFacets: false,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(repo.events.close);
+      await controller.initialize();
+      await controller.reportPageExtent(0, 100);
+      controller.beforeWindowChange = () async => {'1'};
+
+      repo.clips.insertAll(0, [for (var i = 10000; i < 10008; i++) _clip(i)]);
+      repo.events.add(HistoryRuntimeEvent.itemsChanged);
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(controller.state, HistoryLoadState.ready);
+      expect(controller.items.any((clip) => clip.id == '1'), isTrue);
+      expect(
+        controller.windowPages.every(
+          (page) => page.items != null || page.hasExactExtent,
+        ),
+        isTrue,
+        reason:
+            'A rebuilt page must remain renderable until it can be measured.',
+      );
+      for (var index = 0; index < controller.windowPages.length; index++) {
+        await controller.reportPageExtent(index, 100);
+      }
+      expect(
+        controller.windowPages.where((page) => page.items != null).length,
+        lessThanOrEqualTo(3),
+        reason: 'Measured rebuilt pages still obey the resident-page limit.',
+      );
+      expect(controller.items.any((clip) => clip.id == '1'), isTrue);
+    },
+  );
+
+  test(
     'bounds rows across 10000 visits and refetches backwards by saved cursor',
     () async {
       final repo = _Repository();

@@ -1107,7 +1107,8 @@ class HistoryController extends ChangeNotifier {
           fallbackContents = page;
         }
       }
-      rebuilt.pages.last.items = null;
+      // Fresh boundaries have no measured scroll extent. Keep their summaries
+      // until layout reports geometry and reportPageExtent can safely evict them.
       cursor = page.nextCursor;
     } while (cursor != null);
     if (!found && fallbackPage != null && fallbackContents != null) {
