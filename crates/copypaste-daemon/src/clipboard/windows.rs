@@ -360,7 +360,7 @@ impl ClipboardSource for WindowsClipboard {
             let path = staging
                 .materialize(bytes, metadata)
                 .map_err(|_| ClipboardWriteError::Failed)?;
-            let path = path.to_string_lossy().into_owned();
+            let path = staging::shell_path(&path).to_string_lossy().into_owned();
             return self
                 .write(move || {
                     raw::empty()?;
@@ -802,6 +802,58 @@ mod tests {
             Some("fixture.txt")
         );
         assert_eq!(std::fs::read(&paths[0]).unwrap(), b"synthetic bytes");
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn file_paste_back_from_a_verbatim_data_dir_is_consumable_by_windows_forms() {
+        let _lock = serialised();
+        let data_dir = tempfile::tempdir().unwrap();
+        let verbatim = std::fs::canonicalize(data_dir.path()).unwrap();
+        assert!(matches!(
+            verbatim.components().next(),
+            Some(std::path::Component::Prefix(prefix))
+                if matches!(prefix.kind(), std::path::Prefix::VerbatimDisk(_))
+        ));
+        let mut clipboard = WindowsClipboard::with_data_dir(&verbatim).unwrap();
+        let metadata =
+            copypaste_core::FileMetadata::new("synthetic-Україна.txt", "application/octet-stream")
+                .unwrap();
+        clipboard
+            .set_binary_contents(
+                "synthetic-verbatim-file",
+                copypaste_ipc::content_type::FILE,
+                b"synthetic bytes",
+                Some(&metadata),
+            )
+            .unwrap();
+
+        // DragQueryFileW also returns verbatim paths, concealing the consumer
+        // failure. Use a separate STA Windows Forms process as the recipient.
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-STA",
+                "-Command",
+                r#"$ErrorActionPreference = 'Stop';
+Add-Type -AssemblyName System.Windows.Forms;
+$paths = [Windows.Forms.Clipboard]::GetFileDropList();
+if ($paths.Count -ne 1) { throw 'Expected one Shell-consumable clipboard file'; }
+if ([IO.Path]::GetFileName($paths[0]) -cne $env:COPYPASTE_TEST_FILE_NAME) {
+    throw 'Clipboard file name changed';
+}
+if ([IO.File]::ReadAllText($paths[0]) -cne 'synthetic bytes') {
+    throw 'Clipboard file bytes changed';
+}"#,
+            ])
+            .env("COPYPASTE_TEST_FILE_NAME", &metadata.filename)
+            .output()
+            .expect("run an independent native clipboard consumer");
+        assert!(
+            output.status.success(),
+            "independent Windows Forms file-drop consumer failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     /// The measurement `MAX_SELF_WRITE_DELTA` is a guess about. A delta beyond
