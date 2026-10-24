@@ -2,7 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -21,6 +21,20 @@ use windows_sys::Win32::Security::{
 
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 const RECOVERY_RETRY: Duration = Duration::from_secs(60);
+
+/// File APIs accept verbatim drive paths, but Shell file-drop consumers may
+/// silently discard them. Change only the published spelling, not staging I/O.
+pub(super) fn shell_path(path: &Path) -> PathBuf {
+    if matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(prefix))
+            if matches!(prefix.kind(), std::path::Prefix::VerbatimDisk(_))
+    ) {
+        let units: Vec<u16> = path.as_os_str().encode_wide().skip(4).collect();
+        return std::ffi::OsString::from_wide(&units).into();
+    }
+    path.to_owned()
+}
 
 pub(super) struct StagingArea {
     root: PathBuf,
@@ -298,6 +312,37 @@ mod tests {
 
     fn metadata() -> FileMetadata {
         FileMetadata::new("recovered.txt", "application/octet-stream").unwrap()
+    }
+
+    #[test]
+    fn shell_drive_paths_preserve_unicode_without_the_verbatim_prefix() {
+        assert_eq!(
+            shell_path(Path::new(r"\\?\C:\synthetic\Україна.txt")),
+            Path::new(r"C:\synthetic\Україна.txt")
+        );
+        let mut units: Vec<u16> = r"\\?\C:\synthetic\".encode_utf16().collect();
+        units.push(0xd800);
+        let path = PathBuf::from(std::ffi::OsString::from_wide(&units));
+        assert_eq!(
+            shell_path(&path)
+                .as_os_str()
+                .encode_wide()
+                .collect::<Vec<_>>(),
+            units[4..]
+        );
+    }
+
+    #[test]
+    fn shell_paths_do_not_rewrite_other_windows_namespaces() {
+        for path in [
+            r"C:\synthetic\fixture.txt",
+            r"\\server\share\fixture.txt",
+            r"\\?\UNC\server\share\fixture.txt",
+            r"\\.\pipe\synthetic",
+            r"\\?\Volume{synthetic}\fixture.txt",
+        ] {
+            assert_eq!(shell_path(Path::new(path)), Path::new(path));
+        }
     }
 
     fn wait_until(within: Duration, mut ready: impl FnMut() -> bool) -> bool {
