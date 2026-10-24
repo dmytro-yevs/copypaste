@@ -1038,6 +1038,8 @@ def require_external_file_drag(cli, environment, workspace, gui_pid, session):
     """Drop a URI-list from a separate GTK client and observe its History item through the CLI."""
     require_helper(EXTERNAL_FILE_DRAG, "external GTK file-drag helper")
     actor = require_helper(NATIVE_MEDIA, "History navigation AT-SPI actor")
+    if atspi_present(actor, gui_pid, "Device paired", environment):
+        atspi_action(actor, "click", gui_pid, "Done", environment)
     atspi_action(actor, "click", gui_pid, "History", environment)
     atspi_action(actor, "observe", gui_pid, "Import files", environment)
     before = cli_item_count(status(cli, environment))
@@ -1198,7 +1200,7 @@ def wait_for_pairing_state(socket_path, expected, pairing_id):
     raise RuntimeError("pairing did not reach the required state before the readiness deadline")
 
 
-def require_pairing_sync(prefix, cli, environment, workspace, primary_socket, *, gui_pid):
+def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
     """Pair two exact bundled daemons and verify one real history transfer."""
     peer_socket = workspace / "peer.sock"
     peer_data = workspace / "peer-data"
@@ -1251,9 +1253,6 @@ def require_pairing_sync(prefix, cli, environment, workspace, primary_socket, *,
         peer_items = list_items(cli, peer_environment)
         if not any(item.get("content") == marker for item in peer_items):
             raise RuntimeError("paired exact daemon did not receive the synced item")
-        actor = require_helper(NATIVE_MEDIA, "pairing completion AT-SPI actor")
-        atspi_action(actor, "observe", gui_pid, "Device paired", environment)
-        atspi_action(actor, "click", gui_pid, "Done", environment)
         emit_result("pairing_sync", synced)
     finally:
         peer.terminate()
@@ -1696,7 +1695,7 @@ def main():
                 daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
             )
             require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
-            require_pairing_sync(prefix, cli, environment, workspace, runtime_socket, gui_pid=app.pid)
+            require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
 
             # The remaining assertions deliberately execute their public probes and fail if the exact product
             # does not expose an observable successful result. They are never converted into fixture booleans.
