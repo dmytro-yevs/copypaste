@@ -41,6 +41,12 @@ bool PresentQuickPaste(
 bool RevealQuickPaste(HWND window, HWND pending_foreground,
                      const QuickPastePresentationApi& api);
 
+bool CanRetireQuickPaste(uint64_t requested_generation, uint64_t generation,
+                        int64_t presentation_id, bool visible);
+
+bool CanFailQuickPasteOpen(uint64_t requested_generation, uint64_t generation,
+                          int64_t requested_id, int64_t current_id, bool retiring);
+
 // Public Win32 calls used by the presentation-scoped target decision flow.
 struct QuickPasteTargetApi {
   decltype(&::GetForegroundWindow) get_foreground_window = &::GetForegroundWindow;
@@ -118,6 +124,7 @@ class FlutterWindow : public Win32Window {
   bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember);
   bool PasteIntoPreviousWindow(int64_t presentation_id);
   void NotifyQuickPasteOpened();
+  void NotifyQuickPasteHidden(int64_t presentation_id);
   void ScheduleQuickPasteRetirement();
   void BeginQuickPasteShutdown();
   void ShowMainWindow(bool open_settings);

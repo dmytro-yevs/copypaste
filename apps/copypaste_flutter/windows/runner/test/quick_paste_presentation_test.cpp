@@ -238,6 +238,18 @@ TEST_F(QuickPasteTarget, ActivePopupRetainsExternalRootButGetsNewId) {
   EXPECT_EQ(foreground, target_a); EXPECT_EQ(input_calls, 1);
   EXPECT_FALSE(owner.Paste(id, popup));
 }
+TEST_F(QuickPasteTarget, DelayedFailureRetirementCannotDestroyReopenedOrReplacementEngine) {
+  const uint64_t generation = 7;
+  const auto old_id = owner.Begin(target_a, popup);
+  owner.Close(old_id, popup);
+  EXPECT_TRUE(CanRetireQuickPaste(generation, generation, owner.id(), false));
+  const auto reopened = owner.Begin(target_b, popup);
+  EXPECT_GT(reopened, old_id);
+  EXPECT_FALSE(CanRetireQuickPaste(generation, generation, owner.id(), false));
+  owner.Close(reopened, popup);
+  EXPECT_FALSE(CanRetireQuickPaste(generation, generation + 1, owner.id(), false));
+  EXPECT_FALSE(CanRetireQuickPaste(generation, generation, owner.id(), true));
+}
 TEST_F(QuickPasteTarget, DifferentExternalRootReplacesOldTarget) {
   owner.Begin(target_a, popup);
   const auto id = owner.Begin(target_b, popup);
@@ -338,5 +350,28 @@ TEST_F(QuickPasteTarget, SameOwnerPresentationFailureCleansPartialWindowOnce) {
     EXPECT_FALSE(presentation_visible);
     EXPECT_FALSE(owner.Paste(id, popup));
   }
+}
+TEST_F(QuickPasteTarget, DelayedOpenedFailureOnlyClosesCurrentLiveGenerationAndSession) {
+  const uint64_t generation = 4;
+  const auto old_id = owner.Begin(target_a, popup);
+  const auto current_id = owner.Begin(target_b, popup);
+  const auto fail = [&](uint64_t requested_generation, int64_t requested_id, bool retiring) {
+    if (CanFailQuickPasteOpen(requested_generation, generation, requested_id, owner.id(), retiring)) {
+      owner.Close(requested_id, popup);
+    }
+  };
+  calls.clear();
+  fail(generation, old_id, false);
+  fail(generation - 1, current_id, false);
+  fail(generation, current_id, true);
+  fail(generation, 0, false);
+  EXPECT_EQ(owner.id(), current_id);
+  EXPECT_TRUE(calls.empty());
+  EXPECT_EQ(hide_calls, 0);
+  fail(generation, current_id, false);
+  EXPECT_EQ(owner.id(), 0);
+  EXPECT_EQ(hide_calls, 1);
+  fail(generation, current_id, false);
+  EXPECT_EQ(hide_calls, 1);
 }
 }  // namespace
