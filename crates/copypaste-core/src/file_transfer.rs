@@ -224,7 +224,17 @@ pub fn import(
         )
     };
     #[cfg(not(unix))]
-    let mut file = std::fs::File::open(path).map_err(source_error)?;
+    let mut file = std::fs::File::open(path).map_err(|error| {
+        // Windows rejects opening a directory before handle metadata can
+        // identify it. Preserve other source errors, including denied files.
+        #[cfg(windows)]
+        if error.kind() == std::io::ErrorKind::PermissionDenied
+            && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
+        {
+            return FileTransferError::NotFile;
+        }
+        source_error(error)
+    })?;
     let before = file.metadata().map_err(|_| FileTransferError::Read)?;
     if !before.is_file() {
         return Err(FileTransferError::NotFile);
