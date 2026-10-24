@@ -299,7 +299,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
       builder: (context, child) => CallbackShortcuts(
         bindings: _shortcutBindings(),
         child: ClipRRect(
-          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
+          // Windows clips the complete native popup to this radius. A second
+          // Flutter clip exposes the opaque backing surface at the corners.
+          borderRadius: defaultTargetPlatform == TargetPlatform.windows
+              ? BorderRadius.zero
+              : const BorderRadius.all(Radius.circular(AppRadius.lg)),
           child: Scaffold(
             backgroundColor: Theme.of(context).colorScheme.popover,
             child: Padding(

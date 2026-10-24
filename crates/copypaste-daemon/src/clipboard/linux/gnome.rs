@@ -332,25 +332,19 @@ impl ClipboardSource for GnomeClipboard {
         metadata: Option<&copypaste_core::FileMetadata>,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
-        let (mime, bytes) = match content_type {
-            copypaste_ipc::content_type::HTML => ("text/html", bytes.to_vec()),
-            copypaste_ipc::content_type::RICH_TEXT => ("text/rtf", bytes.to_vec()),
-            copypaste_ipc::content_type::IMAGE_PNG => ("image/png", bytes.to_vec()),
-            copypaste_ipc::content_type::IMAGE_TIFF => ("image/tiff", bytes.to_vec()),
-            copypaste_ipc::content_type::FILE => {
-                let path = self
-                    .staging
-                    .materialize(bytes, metadata.ok_or(ClipboardWriteError::Failed)?)
-                    .map_err(|_| ClipboardWriteError::Failed)?;
-                (
-                    "text/uri-list",
-                    url::Url::from_file_path(path)
-                        .map_err(|_| ClipboardWriteError::Failed)?
-                        .to_string()
-                        .into_bytes(),
-                )
-            }
-            _ => return Err(ClipboardWriteError::UnsupportedContent),
+        let (mime, _) = super::formats::write_format(content_type)
+            .ok_or(ClipboardWriteError::UnsupportedContent)?;
+        let bytes = if content_type == copypaste_ipc::content_type::FILE {
+            let path = self
+                .staging
+                .materialize(bytes, metadata.ok_or(ClipboardWriteError::Failed)?)
+                .map_err(|_| ClipboardWriteError::Failed)?;
+            url::Url::from_file_path(path)
+                .map_err(|_| ClipboardWriteError::Failed)?
+                .to_string()
+                .into_bytes()
+        } else {
+            bytes.to_vec()
         };
         self.write(HashMap::from([(mime.into(), bytes)]))
             .map_err(|_| ClipboardWriteError::Failed)
@@ -794,24 +788,8 @@ fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
         && values.values().map(Vec::len).sum::<usize>() <= MAX_WRITE
 }
 fn representation(mimes: &[String]) -> Option<(String, &'static str, bool)> {
-    for (mime, type_, binary) in [
-        ("text/html", copypaste_ipc::content_type::HTML, false),
-        ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
-        ("image/png", copypaste_ipc::content_type::IMAGE_PNG, true),
-        ("image/tiff", copypaste_ipc::content_type::IMAGE_TIFF, true),
-        ("text/uri-list", copypaste_ipc::content_type::FILE, true),
-        (
-            "text/plain;charset=utf-8",
-            copypaste_ipc::content_type::TEXT,
-            false,
-        ),
-        ("UTF8_STRING", copypaste_ipc::content_type::TEXT, false),
-    ] {
-        if mimes.iter().any(|value| value == mime) {
-            return Some((mime.into(), type_, binary));
-        }
-    }
-    None
+    super::formats::representation(|mime| mimes.iter().any(|value| value == mime))
+        .map(|(mime, kind, binary)| (mime.into(), kind, binary))
 }
 
 #[cfg(test)]
@@ -1373,9 +1351,9 @@ mod tests {
         assert_eq!(
             representation(&["image/png".into(), "text/plain;charset=utf-8".into()]),
             Some((
-                "image/png".into(),
-                copypaste_ipc::content_type::IMAGE_PNG,
-                true
+                "text/plain;charset=utf-8".into(),
+                copypaste_ipc::content_type::TEXT,
+                false
             ))
         );
         assert_eq!(representation(&["application/x-future".into()]), None);

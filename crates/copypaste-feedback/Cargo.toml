@@ -9,4 +9,4 @@ license.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winsafe = { version = "0.0.28", features = ["user"] }
+windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }

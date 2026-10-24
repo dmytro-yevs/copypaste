@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <string>
+#include <limits>
+#include <set>
 #include <vector>
 #include "../flutter_window.h"
 
@@ -13,6 +15,8 @@ int position_count;
 bool presentation_visible;
 RECT presentation_frame;
 UINT presentation_flags;
+UINT presentation_dpi = 96;
+RECT presentation_work_area{0, 0, 1920, 1080};
 std::function<void(const std::string&)> during_presentation;
 bool Succeeds(const std::string& operation) {
   calls.push_back(operation);
@@ -29,7 +33,7 @@ HMONITOR WINAPI Monitor(POINT, DWORD) {
   return Succeeds("monitor") ? reinterpret_cast<HMONITOR>(static_cast<uintptr_t>(1)) : nullptr;
 }
 BOOL WINAPI MonitorInfo(HMONITOR, LPMONITORINFO info) {
-  info->rcWork = RECT{0, 0, 1920, 1080};
+  info->rcWork = presentation_work_area;
   return Succeeds("monitor-info");
 }
 BOOL WINAPI Position(HWND, HWND, int x, int y, int width, int height, UINT flags) {
@@ -41,12 +45,15 @@ BOOL WINAPI Position(HWND, HWND, int x, int y, int width, int height, UINT flags
   }
   return Succeeds(showing ? "show" : "move");
 }
-UINT WINAPI Dpi(HWND) { return Succeeds("dpi") ? 96 : 0; }
+UINT WINAPI Dpi(HWND) { return Succeeds("dpi") ? presentation_dpi : 0; }
 BOOL WINAPI Foreground(HWND) { return Succeeds("foreground"); }
 BOOL WINAPI Hide(HWND, int mode) { EXPECT_EQ(mode, SW_HIDE); calls.push_back("hide"); presentation_visible = false; return TRUE; }
 class QuickPastePresentation : public testing::Test {
  protected:
-  void SetUp() override { calls.clear(); fail_at.clear(); position_count = 0; during_presentation = nullptr; }
+  void SetUp() override {
+    calls.clear(); fail_at.clear(); position_count = 0; during_presentation = nullptr;
+    presentation_dpi = 96; presentation_work_area = RECT{0, 0, 1920, 1080};
+  }
   QuickPastePresentationApi api{Cursor, Monitor, MonitorInfo, Position, Dpi, Foreground, Hide};
   HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(1));
 };
@@ -83,6 +90,18 @@ TEST_F(QuickPastePresentation, PreparingTheMediaFrameDoesNotShowOrActivateTheWin
   EXPECT_EQ(presentation_flags & SWP_SHOWWINDOW, 0u);
   EXPECT_NE(presentation_flags & SWP_NOACTIVATE, 0u);
 }
+TEST_F(QuickPastePresentation, CursorGapUsesLogicalPixelsOnScaledDisplays) {
+  presentation_work_area = RECT{0, 0, 3840, 2160};
+  for (UINT dpi : {96u, 144u, 192u}) {
+    presentation_dpi = dpi;
+    position_count = 0;
+    EXPECT_TRUE(PresentQuickPaste(window, api, [] {}));
+    EXPECT_EQ(presentation_frame.left, 100);
+    EXPECT_EQ(presentation_frame.top, 100 + ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI));
+    EXPECT_EQ(presentation_frame.right - presentation_frame.left,
+              ::MulDiv(448, dpi, USER_DEFAULT_SCREEN_DPI));
+  }
+}
 TEST(QuickPasteTrayGeometry, TopTrayOpensBelowAndLeftEdgeClamps) {
   const auto frame = QuickPasteTrayFrame(RECT{4, 0, 28, 24}, RECT{0, 24, 1920, 1080}, 448, 600, 8);
   EXPECT_EQ(frame.left, 0);
@@ -117,6 +136,12 @@ DWORD target_tid;
 bool activation_result;
 bool activation_changes_focus;
 UINT inserted;
+UINT recovery_inserted;
+std::set<int> held_keys;
+std::set<int> simulated_modifiers;
+std::vector<INPUT> submitted_inputs;
+std::vector<std::vector<INPUT>> input_batches;
+int accepted_v_down;
 int input_calls;
 int activation_calls;
 int hide_calls;
@@ -145,13 +170,30 @@ BOOL WINAPI ActivateTarget(HWND window) {
 }
 UINT WINAPI Input(UINT count, LPINPUT records, int size) {
   calls.push_back("input"); ++input_calls;
-  EXPECT_EQ(count, 4u); EXPECT_EQ(size, sizeof(INPUT));
-  EXPECT_EQ(records[0].ki.wVk, VK_CONTROL);
-  EXPECT_EQ(records[1].ki.wVk, 'V');
-  EXPECT_EQ(records[2].ki.dwFlags, KEYEVENTF_KEYUP);
-  EXPECT_EQ(records[3].ki.dwFlags, KEYEVENTF_KEYUP);
-  return inserted;
+  EXPECT_EQ(size, sizeof(INPUT));
+  const bool paste_batch = std::any_of(records, records + count, [](const auto& input) {
+    return input.ki.wVk == 'V';
+  });
+  if (paste_batch) {
+    submitted_inputs.assign(records, records + count);
+    simulated_modifiers = held_keys;
+  }
+  input_batches.emplace_back(records, records + count);
+  const UINT accepted = std::min(paste_batch ? inserted : recovery_inserted, count);
+  for (UINT index = 0; index < accepted; ++index) {
+    const auto& input = records[index];
+    const int key = input.ki.wVk == VK_CONTROL ? VK_LCONTROL : input.ki.wVk;
+    const bool up = (input.ki.dwFlags & KEYEVENTF_KEYUP) != 0;
+    if (key == 'V') {
+      if (!up) ++accepted_v_down;
+      continue;
+    }
+    if (up) simulated_modifiers.erase(key);
+    else simulated_modifiers.insert(key);
+  }
+  return accepted;
 }
+SHORT WINAPI KeyState(int key) { return held_keys.count(key) ? static_cast<SHORT>(0x8000) : 0; }
 BOOL WINAPI RevealPosition(HWND window, HWND after, int x, int y, int width, int height, UINT flags) {
   EXPECT_EQ(window, popup);
   EXPECT_EQ(after, HWND_TOPMOST);
@@ -210,13 +252,17 @@ TEST_F(QuickPasteReveal, ActivationFailurePreservesErrorForCallerCleanup) {
 }
 class QuickPasteTarget : public testing::Test {
  protected:
-  QuickPasteTargetApi api{CurrentForeground, Root, Owner, OwnPid, Alive, Visible, TargetHide, ActivateTarget, Input};
+  QuickPasteTargetApi api{CurrentForeground, Root, Owner, OwnPid, Alive, Visible, TargetHide, ActivateTarget, Input, KeyState};
   QuickPasteTargetSession owner{api};
   void SetUp() override {
     calls.clear(); fail_at.clear(); position_count = 0; during_presentation = nullptr;
+    presentation_dpi = 96; presentation_work_area = RECT{0, 0, 1920, 1080};
     foreground = popup; alive = true; visible = true;
     target_pid = 2; target_tid = 3; activation_result = true;
-    activation_changes_focus = true; inserted = 4;
+    activation_changes_focus = true;
+    inserted = recovery_inserted = std::numeric_limits<UINT>::max();
+    held_keys.clear(); submitted_inputs.clear(); simulated_modifiers.clear();
+    input_batches.clear(); accepted_v_down = 0;
     input_calls = activation_calls = hide_calls = 0;
     during_activation = nullptr; active_session = &owner;
   }
@@ -237,6 +283,22 @@ TEST_F(QuickPasteTarget, ActivePopupRetainsExternalRootButGetsNewId) {
   EXPECT_TRUE(owner.Paste(id, popup));
   EXPECT_EQ(foreground, target_a); EXPECT_EQ(input_calls, 1);
   EXPECT_FALSE(owner.Paste(id, popup));
+}
+TEST_F(QuickPasteTarget, ActiveReopenHidesOldMediaWithoutLosingTheCapturedTarget) {
+  const auto old_id = owner.Begin(target_a, popup);
+  const auto id = owner.Begin(popup, popup);
+  EXPECT_GT(id, old_id);
+  EXPECT_FALSE(owner.HideForPreparation(old_id, popup));
+  EXPECT_EQ(hide_calls, 0);
+  EXPECT_TRUE(owner.HideForPreparation(id, popup));
+  EXPECT_EQ(owner.id(), id);
+  EXPECT_FALSE(visible);
+  EXPECT_EQ(hide_calls, 1);
+  EXPECT_EQ(input_calls, 0);
+  EXPECT_FALSE(owner.Paste(old_id, popup));
+  EXPECT_TRUE(owner.Paste(id, popup));
+  EXPECT_EQ(foreground, target_a);
+  EXPECT_EQ(input_calls, 1);
 }
 TEST_F(QuickPasteTarget, DelayedFailureRetirementCannotDestroyReopenedOrReplacementEngine) {
   const uint64_t generation = 7;
@@ -291,6 +353,57 @@ TEST_F(QuickPasteTarget, CurrentForegroundSkipsActivationAndInputIsConsumedOnce)
   EXPECT_EQ(activation_calls, 0); EXPECT_EQ(input_calls, 1);
   EXPECT_EQ(calls.back(), "input");
   EXPECT_EQ(calls[calls.size() - 2], "get-foreground");
+  ASSERT_EQ(submitted_inputs.size(), 4u);
+  EXPECT_EQ(submitted_inputs[0].ki.wVk, VK_CONTROL);
+  EXPECT_EQ(submitted_inputs[1].ki.wVk, 'V');
+  EXPECT_EQ(submitted_inputs[2].ki.dwFlags, KEYEVENTF_KEYUP);
+  EXPECT_EQ(submitted_inputs[3].ki.dwFlags, KEYEVENTF_KEYUP);
+}
+TEST_F(QuickPasteTarget, HeldActivationModifiersCannotChangePasteChordAndAreRestored) {
+  const std::vector<std::set<int>> combinations{
+      {VK_LMENU}, {VK_RMENU}, {VK_LSHIFT}, {VK_RSHIFT},
+      {VK_LMENU, VK_LSHIFT}, {VK_RMENU, VK_RSHIFT},
+      {VK_LCONTROL}, {VK_RCONTROL}, {VK_LCONTROL, VK_RCONTROL},
+      {VK_LWIN}, {VK_RWIN}, {VK_RCONTROL, VK_RMENU, VK_RWIN},
+      {VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN}};
+  for (const auto& initial : combinations) {
+    held_keys = initial;
+    foreground = popup;
+    const auto id = owner.Begin(target_a, popup);
+    EXPECT_TRUE(owner.Paste(id, popup));
+    EXPECT_FALSE(owner.Paste(id, popup));
+    auto state = initial;
+    int paste_down = 0;
+    for (const auto& input : submitted_inputs) {
+      EXPECT_EQ(input.type, INPUT_KEYBOARD);
+      const int key = input.ki.wVk == VK_CONTROL ? VK_LCONTROL : input.ki.wVk;
+      const bool up = (input.ki.dwFlags & KEYEVENTF_KEYUP) != 0;
+      if (key == 'V' && !up) {
+        ++paste_down;
+        EXPECT_TRUE(state.count(VK_LCONTROL) || state.count(VK_RCONTROL));
+        for (const int other : {VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN}) {
+          EXPECT_EQ(state.count(other), 0u);
+        }
+      }
+      if (key == VK_LMENU || key == VK_RMENU || key == VK_LWIN || key == VK_RWIN) {
+        EXPECT_TRUE(state.count(VK_LCONTROL) || state.count(VK_RCONTROL));
+      }
+      if (key == VK_RMENU || key == VK_LWIN || key == VK_RWIN) {
+        EXPECT_NE(input.ki.dwFlags & KEYEVENTF_EXTENDEDKEY, 0u);
+      }
+      if (up) state.erase(key);
+      else state.insert(key);
+    }
+    EXPECT_EQ(paste_down, 1);
+    EXPECT_EQ(state, initial);
+    EXPECT_EQ(simulated_modifiers, initial);
+    if (initial.count(VK_LCONTROL) || initial.count(VK_RCONTROL)) {
+      EXPECT_EQ(std::count_if(submitted_inputs.begin(), submitted_inputs.end(), [](const auto& input) {
+        return input.ki.wVk == VK_CONTROL || input.ki.wVk == VK_LCONTROL || input.ki.wVk == VK_RCONTROL;
+      }), 0);
+    }
+  }
+  EXPECT_EQ(input_calls, combinations.size());
 }
 TEST_F(QuickPasteTarget, PartialAndZeroInputAreFalseAndNeverRetried) {
   for (UINT count : {0u, 2u}) {
@@ -298,8 +411,69 @@ TEST_F(QuickPasteTarget, PartialAndZeroInputAreFalseAndNeverRetried) {
     const auto id = owner.Begin(target_a, popup);
     EXPECT_FALSE(owner.Paste(id, popup));
     EXPECT_FALSE(owner.Paste(id, popup));
+    EXPECT_EQ(simulated_modifiers, held_keys);
   }
+  EXPECT_EQ(input_calls, 3); // Two paste attempts; one modifier-only recovery.
+  EXPECT_EQ(accepted_v_down, 1);
+}
+TEST_F(QuickPasteTarget, PartialHeldModifierBatchNeverReportsSuccessOrRetriesPaste) {
+  for (const auto& initial : std::vector<std::set<int>>{
+           {VK_RMENU, VK_LSHIFT, VK_RWIN},
+           {VK_RCONTROL, VK_RMENU, VK_LSHIFT, VK_RWIN}}) {
+    for (UINT count : {0u, 1u, 3u, 7u}) {
+      held_keys = initial;
+      inserted = count;
+      foreground = popup;
+      input_batches.clear(); accepted_v_down = 0;
+      const int before_calls = input_calls;
+      const auto id = owner.Begin(target_a, popup);
+      EXPECT_FALSE(owner.Paste(id, popup));
+      EXPECT_FALSE(owner.Paste(id, popup));
+      EXPECT_EQ(simulated_modifiers, initial);
+      EXPECT_EQ(owner.id(), 0);
+      ASSERT_FALSE(input_batches.empty());
+      EXPECT_EQ(input_batches.size(), count == 0 ? 1u : 2u);
+      EXPECT_EQ(input_calls - before_calls, input_batches.size());
+      EXPECT_LE(accepted_v_down, 1);
+      if (input_batches.size() == 2) {
+        for (const auto& input : input_batches.back()) {
+          EXPECT_NE(input.ki.wVk, 'V');
+          if (initial.count(VK_RCONTROL)) {
+            EXPECT_NE(input.ki.wVk, VK_CONTROL);
+            EXPECT_NE(input.ki.wVk, VK_RCONTROL);
+          }
+        }
+      }
+    }
+  }
+}
+TEST_F(QuickPasteTarget, PrefixAfterPasteRecoversOnlyMissingModifiers) {
+  held_keys = {VK_RMENU, VK_LSHIFT, VK_RWIN};
+  inserted = 8;
+  const auto id = owner.Begin(target_a, popup);
+  EXPECT_FALSE(owner.Paste(id, popup));
+  EXPECT_FALSE(owner.Paste(id, popup));
+  EXPECT_EQ(accepted_v_down, 1);
+  EXPECT_EQ(simulated_modifiers, held_keys);
+  ASSERT_EQ(input_batches.size(), 2u);
+  ASSERT_EQ(input_batches.back().size(), 2u);
+  EXPECT_EQ(input_batches.back()[0].ki.wVk, VK_RWIN);
+  EXPECT_EQ(input_batches.back()[0].ki.dwFlags, KEYEVENTF_EXTENDEDKEY);
+  EXPECT_EQ(input_batches.back()[1].ki.wVk, VK_CONTROL);
+  EXPECT_EQ(input_batches.back()[1].ki.dwFlags, KEYEVENTF_KEYUP);
+}
+TEST_F(QuickPasteTarget, RejectedModifierRecoveryStopsWithoutAnotherAttempt) {
+  held_keys = {VK_RMENU, VK_LSHIFT, VK_RWIN};
+  inserted = 3;
+  recovery_inserted = 0;
+  const auto id = owner.Begin(target_a, popup);
+  EXPECT_FALSE(owner.Paste(id, popup));
+  EXPECT_FALSE(owner.Paste(id, popup));
+  EXPECT_EQ(owner.id(), 0);
   EXPECT_EQ(input_calls, 2);
+  EXPECT_EQ(accepted_v_down, 0);
+  ASSERT_EQ(input_batches.size(), 2u);
+  for (const auto& input : input_batches.back()) EXPECT_NE(input.ki.wVk, 'V');
 }
 TEST_F(QuickPasteTarget, SupersededNativePresentationStagesCannotHideOrInvalidateNewOwner) {
   const QuickPastePresentationApi presentation_api{Cursor, Monitor, MonitorInfo, Position, Dpi, Foreground, Hide};

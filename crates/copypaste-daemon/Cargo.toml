@@ -76,9 +76,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # Windows puts screenshots on the clipboard as an uncompressed bitmap and the
-# rest of CopyPaste stores PNG. `bmp` is added here rather than on the workspace
-# line so macOS and Android builds carry neither the decoder nor the encoder.
-image = { workspace = true, features = ["bmp"] }
+# rest of CopyPaste stores PNG. The remaining codecs match macOS paste-back
+# support for imported/synced JPEG, GIF and WebP. Target-gated so other platforms
+# do not acquire Windows interoperability dependencies.
+image = { workspace = true, features = ["bmp", "jpeg", "gif", "webp"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"

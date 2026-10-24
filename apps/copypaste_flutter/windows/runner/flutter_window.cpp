@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <limits>
@@ -514,6 +515,7 @@ std::string FlutterWindow::OpenProtectedPairingContext(
     return "";
   }
   flutter::DartProject project(L"data");
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
   project.set_dart_entrypoint_arguments(
       std::vector<std::string>{"--route=" + std::string("/protected-pairing/") + context_id});
   auto protected_window = std::make_unique<FlutterWindow>(
@@ -531,6 +533,7 @@ bool FlutterWindow::PrepareQuickPasteContext() {
   if (is_protected_pairing_context_ || is_quick_paste_context_) return false;
   if (quick_paste_window_) return true;
   flutter::DartProject project(L"data");
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
   project.set_dart_entrypoint("quickPasteMain");
   auto quick_window = std::make_unique<FlutterWindow>(
       project, false, "", "", "", true);
@@ -600,6 +603,12 @@ void QuickPasteTargetSession::Hide(HWND popup) {
   internally_hiding_ = was_hiding;
 }
 
+bool QuickPasteTargetSession::HideForPreparation(int64_t id, HWND popup) {
+  if (id <= 0 || id != id_) return false;
+  Hide(popup);
+  return id == id_;
+}
+
 void QuickPasteTargetSession::Close(int64_t id, HWND popup) {
   if (id <= 0 || id != id_) return;
   Invalidate();
@@ -620,22 +629,82 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
   if (!current()) return fail();
   if (api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root &&
       !api_.set_foreground_window(target.root)) return fail();
-  INPUT inputs[4]{};
-  inputs[0].type = INPUT_KEYBOARD;
-  inputs[0].ki.wVk = VK_CONTROL;
-  inputs[1].type = INPUT_KEYBOARD;
-  inputs[1].ki.wVk = 'V';
-  inputs[2].type = INPUT_KEYBOARD;
-  inputs[2].ki.wVk = 'V';
-  inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-  inputs[3].type = INPUT_KEYBOARD;
-  inputs[3].ki.wVk = VK_CONTROL;
-  inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+  // SendInput preserves existing key state. Alt/Shift used to activate a clip
+  // must not turn the target's Ctrl+V into another command. Keep any physical
+  // Ctrl held, and restore the other held modifiers in the same input batch.
+  // Ctrl remains down across their release/restore to suppress bare Alt/Win.
+  // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput
+  constexpr std::array<WORD, 8> modifiers = {
+      VK_LCONTROL, VK_RCONTROL, VK_LSHIFT, VK_RSHIFT,
+      VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN};
+  std::array<bool, 8> original{};
+  for (size_t index = 0; index < modifiers.size(); ++index) {
+    original[index] = api_.get_async_key_state(modifiers[index]) < 0;
+  }
+  const bool control_held = original[0] || original[1];
+  std::vector<INPUT> inputs;
+  inputs.reserve(16);
+  const auto append = [&](WORD key, DWORD flags = 0) {
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = key;
+    input.ki.dwFlags = flags;
+    inputs.push_back(input);
+  };
+  if (!control_held) append(VK_CONTROL);
+  std::vector<WORD> released;
+  for (size_t index = 2; index < modifiers.size(); ++index) {
+    if (!original[index]) continue;
+    const WORD key = modifiers[index];
+    released.push_back(key);
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended | KEYEVENTF_KEYUP);
+  }
+  append('V');
+  append('V', KEYEVENTF_KEYUP);
+  for (const WORD key : released) {
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended);
+  }
+  if (!control_held) append(VK_CONTROL, KEYEVENTF_KEYUP);
   if (!current() || api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root ||
       requested_id != id_) return fail();
   // There is no atomic public compare-foreground-and-SendInput operation.
   Invalidate();
-  return api_.send_input(4, inputs, sizeof(INPUT)) == 4;
+  const auto count = static_cast<UINT>(inputs.size());
+  const UINT inserted = api_.send_input(count, inputs.data(), sizeof(INPUT));
+  if (inserted == count) return true;
+  if (inserted == 0 || inserted > count) return false;
+
+  // A partial batch may leave our Ctrl held or a physical modifier released.
+  // Recover only modifier differences from the accepted prefix, once. Never
+  // resubmit V: the target may already have processed the paste.
+  auto remaining = original;
+  for (UINT event = 0; event < inserted; ++event) {
+    const WORD key = inputs[event].ki.wVk == VK_CONTROL
+        ? VK_LCONTROL : inputs[event].ki.wVk;
+    const auto found = std::find(modifiers.begin(), modifiers.end(), key);
+    if (found == modifiers.end()) continue;
+    remaining[static_cast<size_t>(found - modifiers.begin())] =
+        (inputs[event].ki.dwFlags & KEYEVENTF_KEYUP) == 0;
+  }
+  inputs.clear();
+  // Restore held Alt/Shift/Win before removing the injected Ctrl guard.
+  for (size_t index = 2; index < modifiers.size(); ++index) {
+    if (remaining[index] == original[index]) continue;
+    const WORD key = modifiers[index];
+    const DWORD extended = key == VK_RMENU || key == VK_LWIN || key == VK_RWIN
+        ? KEYEVENTF_EXTENDEDKEY : 0;
+    append(key, extended | (original[index] ? 0 : KEYEVENTF_KEYUP));
+  }
+  if (!control_held && remaining[0]) append(VK_CONTROL, KEYEVENTF_KEYUP);
+  if (!inputs.empty()) {
+    // Recovery can also be rejected by the OS. Do not retry or report success.
+    api_.send_input(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+  }
+  return false;
 }
 
 RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
@@ -694,9 +763,11 @@ bool PresentQuickPaste(
   const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
   const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
   const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
-  const int y = std::clamp(static_cast<int>(cursor.y) + 8, minimum_y, maximum_y);
+  const int gap = ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI);
+  const int y = static_cast<int>(std::clamp<int64_t>(
+      static_cast<int64_t>(cursor.y) + gap, minimum_y, maximum_y));
   const RECT frame = tray_anchor
-      ? QuickPasteTrayFrame(*tray_anchor, work, width, height, ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI))
+      ? QuickPasteTrayFrame(*tray_anchor, work, width, height, gap)
       : RECT{x, y, x + width, y + height};
   if (!api.set_window_pos(window, HWND_TOPMOST, frame.left, frame.top,
                       frame.right - frame.left, frame.bottom - frame.top,
@@ -749,14 +820,22 @@ bool CanFailQuickPasteOpen(uint64_t requested_generation, uint64_t generation,
 bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
                                   const std::optional<RECT>& tray_anchor) {
   if (!is_quick_paste_context_) return false;
+  // Hiding an active popup restores its previous foreground window. Keep the
+  // original opening snapshot so the prepared-frame check still owns that target.
+  const HWND pending_foreground = sampled_foreground == GetHandle() &&
+      quick_paste_session_.id() > 0 && ::IsWindowVisible(GetHandle())
+      ? quick_paste_pending_foreground_ : sampled_foreground;
   const int64_t id = quick_paste_session_.Begin(sampled_foreground, GetHandle());
   if (id == 0) {
     if (quick_paste_session_.id() == 0) ::ShowWindow(GetHandle(), SW_HIDE);
     return false;
   }
+  // Reopening an active popup must prepare its next media frame offscreen too.
+  // Capture the target first, then suppress the hide's focus-loss invalidation.
+  if (!quick_paste_session_.HideForPreparation(id, GetHandle())) return false;
   quick_paste_inspector_visible_ = quick_paste_inspector_pinned_;
   quick_paste_tray_anchor_ = tray_anchor;
-  quick_paste_pending_foreground_ = sampled_foreground;
+  quick_paste_pending_foreground_ = pending_foreground;
   return ShowQuickPastePresentation(
       GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{},
       [this] { NotifyQuickPasteOpened(); }, quick_paste_inspector_visible_, tray_anchor, false);
@@ -915,6 +994,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (!pairing_cancellation_approved_) return 0;
   }
   if (is_quick_paste_context_) {
+    // The client must cover the whole popup, including the native resize frame.
+    // Otherwise WS_THICKFRAME leaves a strip above Flutter and exposed corners.
+    if (message == WM_NCCALCSIZE && wparam == TRUE) return 0;
     if (message == WM_TIMER && wparam == kQuickPasteShutdownTimer && quick_paste_retiring_) {
       ::KillTimer(hwnd, kQuickPasteShutdownTimer);
       ::PostMessage(main_window_handle_, kFinishQuickPasteRetirement,

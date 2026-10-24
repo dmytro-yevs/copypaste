@@ -374,15 +374,18 @@ impl ClipboardSource for WindowsClipboard {
         ) {
             return Err(ClipboardWriteError::UnsupportedContent);
         }
-        // The clipboard's own image format is a bitmap; PNG on the clipboard is
-        // a convention some applications follow and many do not.
-        let bitmap = transcode::to_bitmap(bytes, copypaste_ipc::MAX_DECODED_IMAGE_MB)
-            .ok_or(ClipboardWriteError::Failed)?;
+        let image =
+            transcode::paste_image(bytes, content_type, copypaste_ipc::MAX_DECODED_IMAGE_MB)
+                .ok_or(ClipboardWriteError::Failed)?;
+        let format = raw::register_format(image.format)
+            .ok_or(ClipboardWriteError::Failed)?
+            .get();
         self.write(move || {
             // `set_bitmap` does not clear, so the previous owner's other
             // representations would survive beside ours.
             raw::empty()?;
-            raw::set_bitmap(&bitmap)
+            raw::set_bitmap(&image.bitmap)?;
+            raw::set_without_clear(format, &image.encoded)
         })
         .map_err(|_| ClipboardWriteError::Failed)
     }

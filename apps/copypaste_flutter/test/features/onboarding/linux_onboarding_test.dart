@@ -6,6 +6,39 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  test('failed readiness refresh cannot advance using stale success', () async {
+    final integration = _Integration(
+      const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.x11,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.unsupported,
+        companion: LinuxCompanionState.unavailable,
+        clipboard: true,
+        quickPaste: true,
+        screenshotProtection: false,
+      ),
+    );
+    final controller = LinuxOnboardingController(
+      store: MemoryOnboardingStore(),
+      integration: integration,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.showIntegration();
+    expect(controller.integrationReady, isTrue);
+
+    integration.failStatus = true;
+    await controller.continueFromIntegration();
+    expect(controller.step, LinuxOnboardingStep.integration);
+    expect(controller.errorMessage, contains('could not be refreshed'));
+    expect(await controller.finish(), isFalse);
+
+    integration.failStatus = false;
+    await controller.continueFromIntegration();
+    expect(controller.step, LinuxOnboardingStep.sync);
+    expect(controller.errorMessage, isNull);
+  });
+
   test(
     'Wayland setup requires the verified clipboard bridge and input consent',
     () async {
@@ -329,6 +362,7 @@ class _Integration implements LinuxIntegrationPort {
   LinuxIntegrationStatus statusValue;
   final List<bool> startAtLoginUpdates = <bool>[];
   int uriRegistrations = 0;
+  bool failStatus = false;
 
   @override
   Future<bool> openCompanionSetup() async => true;
@@ -349,5 +383,8 @@ class _Integration implements LinuxIntegrationPort {
   }
 
   @override
-  Future<LinuxIntegrationStatus> status() async => statusValue;
+  Future<LinuxIntegrationStatus> status() async {
+    if (failStatus) throw StateError('Desktop disconnected');
+    return statusValue;
+  }
 }

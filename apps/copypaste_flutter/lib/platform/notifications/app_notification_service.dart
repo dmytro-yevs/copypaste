@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// One plugin owner: capture notifications cannot replace pairing callbacks.
@@ -14,7 +15,7 @@ class AppNotificationService {
   Future<void> initialize() => _initializing ??= _initialize();
   Future<void> _initialize() async {
     try {
-      await plugin.initialize(
+      final initialized = await plugin.initialize(
         settings: const InitializationSettings(
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
           macOS: DarwinInitializationSettings(
@@ -34,6 +35,14 @@ class AppNotificationService {
           if (payload != null) _responses.add(payload);
         },
       );
+      // Windows reports native registration failures as false instead of an
+      // exception. Let callers retry, rather than caching an unusable owner.
+      // Darwin can return false for notification permission without failing
+      // to initialize the plugin, so retain its existing permission flow.
+      if (defaultTargetPlatform == TargetPlatform.windows &&
+          initialized != true) {
+        throw StateError('Windows notifications could not be initialized.');
+      }
     } catch (_) {
       _initializing = null;
       rethrow;

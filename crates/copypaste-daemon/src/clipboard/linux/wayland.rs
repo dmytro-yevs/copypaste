@@ -302,25 +302,19 @@ impl ClipboardSource for WaylandClipboard {
         metadata: Option<&copypaste_core::FileMetadata>,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
-        let (mime, bytes) = match content_type {
-            copypaste_ipc::content_type::HTML => ("text/html", bytes.to_vec()),
-            copypaste_ipc::content_type::RICH_TEXT => ("text/rtf", bytes.to_vec()),
-            copypaste_ipc::content_type::IMAGE_PNG => ("image/png", bytes.to_vec()),
-            copypaste_ipc::content_type::IMAGE_TIFF => ("image/tiff", bytes.to_vec()),
-            copypaste_ipc::content_type::FILE => {
-                let path = self
-                    .staging
-                    .materialize(bytes, metadata.ok_or(ClipboardWriteError::Failed)?)
-                    .map_err(|_| ClipboardWriteError::Failed)?;
-                (
-                    "text/uri-list",
-                    url::Url::from_file_path(path)
-                        .map_err(|_| ClipboardWriteError::Failed)?
-                        .to_string()
-                        .into_bytes(),
-                )
-            }
-            _ => return Err(ClipboardWriteError::UnsupportedContent),
+        let (mime, _) = super::formats::write_format(content_type)
+            .ok_or(ClipboardWriteError::UnsupportedContent)?;
+        let bytes = if content_type == copypaste_ipc::content_type::FILE {
+            let path = self
+                .staging
+                .materialize(bytes, metadata.ok_or(ClipboardWriteError::Failed)?)
+                .map_err(|_| ClipboardWriteError::Failed)?;
+            url::Url::from_file_path(path)
+                .map_err(|_| ClipboardWriteError::Failed)?
+                .to_string()
+                .into_bytes()
+        } else {
+            bytes.to_vec()
         };
         self.write(HashMap::from([(mime.into(), bytes)]))
             .map_err(|_| ClipboardWriteError::Failed)
@@ -500,7 +494,7 @@ impl Worker {
             queue,
             &offer,
             mime,
-            settings.capture_limit_bytes(content_type) as usize,
+            super::formats::capture_limit(settings, content_type),
         )?;
         if self.lost || self.sequence != sequence {
             return None;
@@ -810,22 +804,7 @@ fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
 }
 
 fn representation(mimes: &[String]) -> Option<(&str, &'static str, bool)> {
-    [
-        ("text/uri-list", copypaste_ipc::content_type::FILE, true),
-        ("text/html", copypaste_ipc::content_type::HTML, false),
-        ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
-        ("image/png", copypaste_ipc::content_type::IMAGE_PNG, true),
-        ("image/tiff", copypaste_ipc::content_type::IMAGE_TIFF, true),
-        (
-            "text/plain;charset=utf-8",
-            copypaste_ipc::content_type::TEXT,
-            false,
-        ),
-        ("UTF8_STRING", copypaste_ipc::content_type::TEXT, false),
-        ("text/plain", copypaste_ipc::content_type::TEXT, false),
-    ]
-    .into_iter()
-    .find(|(mime, _, _)| mimes.iter().any(|value| value == mime))
+    super::formats::representation(|mime| mimes.iter().any(|value| value == mime))
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for Worker {
