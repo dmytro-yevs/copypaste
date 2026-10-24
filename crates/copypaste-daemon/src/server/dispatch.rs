@@ -871,15 +871,22 @@ mod tests {
             "cancelled waiter must not release the running closure's lease"
         );
         release_tx.send(()).unwrap();
-        let permit = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            Arc::clone(&pool).acquire_owned(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let permit = tokio::time::timeout_at(deadline, Arc::clone(&pool).acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
         drop(permit);
         assert_eq!(pool.available_permits(), 1);
+        // Response fields drop separately. The semaphore wakes this task
+        // before the blocking thread necessarily drops the following wire lease.
+        tokio::time::timeout_at(deadline, async {
+            while WIRE_USED.load(std::sync::atomic::Ordering::Acquire) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("completed response must release its wire lease");
         assert_eq!(WIRE_USED.load(std::sync::atomic::Ordering::Acquire), 0);
     }
 
