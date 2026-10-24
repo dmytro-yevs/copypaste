@@ -667,7 +667,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "backon",
  "clap",
@@ -684,11 +684,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.34"
+version = "1.0.35"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "argon2",
  "backon",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "backon",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "tracing",
  "windows-sys 0.61.2",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "rustix",
  "tempfile",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-modules"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "copypaste-core",
  "copypaste-fs",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-payload"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "base64",
  "copypaste-ipc",
@@ -998,14 +998,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "base64",
  "hex",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -1243,9 +1243,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
 dependencies = [
  "cmov",
 ]
@@ -1546,7 +1546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2659,7 +2659,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3127,7 +3127,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -3467,7 +3467,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3777,7 +3777,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4273,7 +4273,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4441,9 +4441,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -5090,7 +5090,7 @@ dependencies = [
  "version_check",
  "widestring",
  "win-security-identifier-parsing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5125,7 +5125,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

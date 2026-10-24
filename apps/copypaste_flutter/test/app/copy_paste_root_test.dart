@@ -20,6 +20,7 @@ import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dar
 import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
+import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
@@ -168,7 +169,10 @@ void main() {
   testWidgets('Windows onboarding finishes on the main History screen', (
     tester,
   ) async {
-    final windows = WindowsOnboardingController(store: MemoryOnboardingStore());
+    final windows = WindowsOnboardingController(
+      store: MemoryOnboardingStore(),
+      startup: _UnavailableStartup(),
+    );
     final macos = _completedOnboarding();
     addTearDown(windows.dispose);
     addTearDown(macos.dispose);
@@ -184,7 +188,10 @@ void main() {
     expect(find.text('Welcome to CopyPaste'), findsOneWidget);
     await tester.tap(find.widgetWithText(Button, 'Continue'));
     await tester.pumpAndSettle();
-    expect(find.byType(Button), findsOneWidget);
+    expect(find.text('Set up your PC'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('CopyPaste is ready'), findsOneWidget);
     await tester.tap(find.widgetWithText(Button, 'Get started'));
     await tester.pumpAndSettle();
     expect(windows.complete, isTrue);
@@ -586,6 +593,18 @@ class _QuitHookRecordingController extends DesktopWindowController {
     if (callback != null) quitHookRegistrations += 1;
     super.setBeforeQuit(callback);
   }
+}
+
+class _UnavailableStartup implements LaunchAtLoginGateway {
+  @override
+  Future<LaunchAtLoginStatus> read() async => LaunchAtLoginStatus.unavailable;
+
+  @override
+  Future<LaunchAtLoginStatus> setEnabled(bool enabled) async =>
+      LaunchAtLoginStatus.unavailable;
+
+  @override
+  Future<void> openSystemSettings() async {}
 }
 
 WindowsOnboardingController _completedWindowsOnboarding() {

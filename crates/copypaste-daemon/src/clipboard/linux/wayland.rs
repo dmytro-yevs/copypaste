@@ -1175,13 +1175,13 @@ mod tests {
             (
                 "text/html",
                 b"<b>native html</b>".as_slice(),
-                copypaste_ipc::content_type::HTML,
+                copypaste_ipc::content_type::TEXT,
                 false,
             ),
             (
                 "text/rtf",
                 br"{\rtf1 native rich text}".as_slice(),
-                copypaste_ipc::content_type::RICH_TEXT,
+                copypaste_ipc::content_type::TEXT,
                 false,
             ),
             (
@@ -1204,6 +1204,20 @@ mod tests {
             ),
         ] {
             wl_copy(mime, body);
+            if matches!(mime, "text/html" | "text/rtf") {
+                // wl-copy adds plain-text aliases to rich-text offers. The
+                // shared capture contract prefers those aliases over rich text.
+                let offered = ProcessCommand::new("wl-paste")
+                    .arg("--list-types")
+                    .output()
+                    .expect("wl-paste is installed");
+                assert!(offered.status.success());
+                let offered = String::from_utf8(offered.stdout).expect("offered MIME types");
+                assert!(offered.lines().any(|value| value == mime));
+                assert!(offered
+                    .lines()
+                    .any(|value| value == "text/plain;charset=utf-8"));
+            }
             let capture = wait_capture(&mut clipboard, &settings).expect("external capture");
             assert_eq!(capture.content_type, content_type);
             if content_type == copypaste_ipc::content_type::FILE {
