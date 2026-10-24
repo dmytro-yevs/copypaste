@@ -24,6 +24,7 @@ namespace {
 constexpr size_t kMaximumArtifactBytes = 16 * 1024 * 1024;
 constexpr UINT kRetireQuickPaste = WM_APP + 42;
 constexpr UINT kFinishQuickPasteRetirement = WM_APP + 43;
+constexpr UINT kFailQuickPasteOpen = WM_APP + 44;
 constexpr UINT_PTR kQuickPasteShutdownTimer = 1;
 constexpr char kQuickPasteHostChannel[] =
     "com.copypaste.app/quick_paste_host";
@@ -212,13 +213,17 @@ bool FlutterWindow::OnCreate() {
                 SetQuickPasteInspectorVisible(QuickPastePresentationId(call.arguments()), *visible,
                     BoolArgument(call, "remember") == nullptr || *BoolArgument(call, "remember"))));
           } else if (call.method_name() == "paste") {
+            const auto id = QuickPastePresentationId(call.arguments());
+            const bool pasted = PasteIntoPreviousWindow(id);
             result->Success(flutter::EncodableValue(
-                PasteIntoPreviousWindow(QuickPastePresentationId(call.arguments()))));
-            ScheduleQuickPasteRetirement();
+                pasted));
+            if (!::IsWindowVisible(GetHandle())) NotifyQuickPasteHidden(id);
           } else if (call.method_name() == "close") {
-            quick_paste_session_.Close(QuickPastePresentationId(call.arguments()), GetHandle());
+            const auto id = QuickPastePresentationId(call.arguments());
+            const bool current = quick_paste_session_.id() == id;
+            quick_paste_session_.Close(id, GetHandle());
             result->Success(flutter::EncodableValue(true));
-            ScheduleQuickPasteRetirement();
+            if (current) NotifyQuickPasteHidden(id);
           } else if (call.method_name() == "openMain") {
             ShowMainWindow(false);
             result->Success(flutter::EncodableValue(true));
@@ -730,6 +735,17 @@ bool RevealQuickPaste(HWND window, HWND pending_foreground,
   return api.set_foreground_window(window);
 }
 
+bool CanRetireQuickPaste(uint64_t requested_generation, uint64_t generation,
+                        int64_t presentation_id, bool visible) {
+  return requested_generation == generation && presentation_id == 0 && !visible;
+}
+
+bool CanFailQuickPasteOpen(uint64_t requested_generation, uint64_t generation,
+                          int64_t requested_id, int64_t current_id, bool retiring) {
+  return !retiring && requested_generation == generation && requested_id > 0 &&
+         requested_id == current_id;
+}
+
 bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
                                   const std::optional<RECT>& tray_anchor) {
   if (!is_quick_paste_context_) return false;
@@ -749,10 +765,25 @@ bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
 void FlutterWindow::NotifyQuickPasteOpened() {
   const auto id = quick_paste_session_.id();
   if (!quick_paste_ready_ || quick_paste_retiring_ || id <= 0 || !quick_paste_channel_) return;
+  const HWND owner = main_window_handle_;
+  const auto generation = quick_paste_generation_;
+  const auto failed = [owner, generation, id] {
+    ::PostMessage(owner, kFailQuickPasteOpen, static_cast<WPARAM>(generation),
+                  static_cast<LPARAM>(id));
+  };
   quick_paste_channel_->InvokeMethod(
       "opened", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
           {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)},
-          {flutter::EncodableValue("inspectorVisible"), flutter::EncodableValue(quick_paste_inspector_visible_)}}));
+          {flutter::EncodableValue("inspectorVisible"), flutter::EncodableValue(quick_paste_inspector_visible_)}}),
+      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+          nullptr, [failed](const auto&, const auto&, const auto*) { failed(); }, failed));
+}
+
+void FlutterWindow::NotifyQuickPasteHidden(int64_t presentation_id) {
+  if (presentation_id <= 0 || !quick_paste_channel_) return;
+  quick_paste_channel_->InvokeMethod(
+      "hidden", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
+          {flutter::EncodableValue("presentationId"), flutter::EncodableValue(presentation_id)}}));
 }
 
 void FlutterWindow::ScheduleQuickPasteRetirement() {
@@ -829,9 +860,10 @@ bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
 
 void FlutterWindow::ShowMainWindow(bool open_settings) {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
+  const auto id = quick_paste_session_.id();
   quick_paste_session_.Invalidate();
   ::ShowWindow(GetHandle(), SW_HIDE);
-  ScheduleQuickPasteRetirement();
+  NotifyQuickPasteHidden(id);
   ::ShowWindow(main_window_handle_, SW_SHOW);
   ::SetForegroundWindow(main_window_handle_);
   if (quick_paste_channel_) {
@@ -891,9 +923,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
     if (message == WM_SIZE) UpdateQuickPasteWindowCorners();
     if (message == WM_CLOSE) {
+      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      ScheduleQuickPasteRetirement();
+      NotifyQuickPasteHidden(id);
       return 0;
     }
     if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
@@ -901,14 +934,26 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       // A save dialog owns focus until the inspector's download completes.
       const auto activated_window = reinterpret_cast<HWND>(lparam);
       if (activated_window && ::GetAncestor(activated_window, GA_ROOTOWNER) == hwnd) return 0;
+      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      ScheduleQuickPasteRetirement();
+      NotifyQuickPasteHidden(id);
       return 0;
     }
+  } else if (!is_protected_pairing_context_ && message == kFailQuickPasteOpen) {
+    if (quick_paste_window_ && CanFailQuickPasteOpen(wparam,
+        quick_paste_window_->quick_paste_generation_, static_cast<int64_t>(lparam),
+        quick_paste_window_->quick_paste_session_.id(), quick_paste_window_->quick_paste_retiring_)) {
+      auto* context = quick_paste_window_.get();
+      context->quick_paste_session_.Close(static_cast<int64_t>(lparam), context->GetHandle());
+      context->NotifyQuickPasteHidden(static_cast<int64_t>(lparam));
+      context->ScheduleQuickPasteRetirement();
+    }
+    return 0;
   } else if (!is_protected_pairing_context_ && message == kRetireQuickPaste) {
-    if (quick_paste_window_ && quick_paste_window_->quick_paste_generation_ == wparam &&
-        !::IsWindowVisible(quick_paste_window_->GetHandle())) {
+    if (quick_paste_window_ && CanRetireQuickPaste(wparam,
+        quick_paste_window_->quick_paste_generation_, quick_paste_window_->quick_paste_session_.id(),
+        ::IsWindowVisible(quick_paste_window_->GetHandle()) != FALSE)) {
       quick_paste_inspector_visible_ = quick_paste_window_->quick_paste_inspector_pinned_;
       auto context = std::move(quick_paste_window_);
       auto* retiring = context.get();

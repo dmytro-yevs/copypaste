@@ -116,35 +116,40 @@ Future<void> quickPasteMain() async {
   if (Platform.isLinux) {
     await runtime.attachDesktopRuntime(endpoint: await host.runtimeEndpoint());
   }
-  final repository = RuntimeHistoryRepository();
-  final modules = ModulesController(
-    repository: RuntimeModulesRepository(),
-    marketplace: GitHubModuleMarketplaceRepository(
-      temporaryDirectory: getTemporaryDirectory,
-      currentTarget: ModuleMarketplacePlatform().currentTarget,
-    ),
-  );
-  runApp(
-    QuickPasteApp(
-      controller: QuickPasteController(
-        repository: repository,
-        fileOperations: FileOperationsController(
-          const RuntimeFileOperationsRepository(),
-        ),
-        disposeRepository: () async {
-          modules.dispose();
-          await repository.dispose();
-        },
-        preferencesStore: SharedPreferencesQuickPastePreferencesStore(),
-        host: host,
-        fileDownloader: const FileSelectorHistoryFileDownloader(),
-        ocr: HistoryOcrController(
-          modules: modules,
-          imageInput: TemporaryHistoryImageInput(repository: repository),
-        ),
-        initializeInspector: modules.initialize,
+  QuickPasteController createController() {
+    final repository = RuntimeHistoryRepository();
+    final modules = ModulesController(
+      repository: RuntimeModulesRepository(),
+      marketplace: GitHubModuleMarketplaceRepository(
+        temporaryDirectory: getTemporaryDirectory,
+        currentTarget: ModuleMarketplacePlatform().currentTarget,
       ),
-    ),
+    );
+    return QuickPasteController(
+      repository: repository,
+      fileOperations: FileOperationsController(
+        const RuntimeFileOperationsRepository(),
+      ),
+      disposeRepository: () async {
+        modules.dispose();
+        await repository.dispose();
+      },
+      preferencesStore: SharedPreferencesQuickPastePreferencesStore(),
+      host: host,
+      fileDownloader: const FileSelectorHistoryFileDownloader(),
+      ocr: HistoryOcrController(
+        modules: modules,
+        imageInput: TemporaryHistoryImageInput(repository: repository),
+      ),
+      initializeInspector: modules.initialize,
+      ownsHostLifecycle: !Platform.isWindows,
+    );
+  }
+
+  runApp(
+    Platform.isWindows
+        ? QuickPasteApp.retained(createController: createController, host: host)
+        : QuickPasteApp(controller: createController()),
   );
 }
 

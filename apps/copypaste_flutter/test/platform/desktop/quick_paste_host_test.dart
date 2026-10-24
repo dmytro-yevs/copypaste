@@ -241,6 +241,25 @@ void main() {
       );
     });
 
+    test('hidden awaits cleanup for its exact presentation identity', () async {
+      int? received;
+      var acknowledged = false;
+      final gate = Completer<void>();
+      context.setHiddenHandler((id) async {
+        received = id;
+        await gate.future;
+      });
+      final pending = invokeContext('hidden', {
+        'presentationId': 42,
+      }).then((_) => acknowledged = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(received, 42);
+      expect(acknowledged, isFalse);
+      gate.complete();
+      await pending;
+      expect(acknowledged, isTrue);
+    });
+
     test('reads only a valid child runtime endpoint', () async {
       response = '/tmp/copypaste.sock';
       expect(await context.runtimeEndpoint(), '/tmp/copypaste.sock');
@@ -370,6 +389,14 @@ void main() {
           invoked = true;
         });
         await opened(value);
+        expect(invoked, isFalse);
+      });
+      test('invalid hidden $value cannot invoke the handler', () async {
+        var invoked = false;
+        context.setHiddenHandler((_) async {
+          invoked = true;
+        });
+        await invokeContext('hidden', value);
         expect(invoked, isFalse);
       });
     }

@@ -168,8 +168,13 @@ abstract interface class QuickPasteFrameHost {
   Future<bool> presentFrame({required int presentationId});
 }
 
+abstract interface class RetainedQuickPasteContextHost
+    implements QuickPasteContextHost {
+  void setHiddenHandler(Future<void> Function(int presentationId)? handler);
+}
+
 class MethodChannelQuickPasteContextHost
-    implements QuickPasteContextHost, QuickPasteFrameHost {
+    implements RetainedQuickPasteContextHost, QuickPasteFrameHost {
   MethodChannelQuickPasteContextHost({MethodChannel? channel})
     : _channel =
           channel ??
@@ -180,6 +185,7 @@ class MethodChannelQuickPasteContextHost
   final MethodChannel _channel;
   QuickPasteOpenedHandler? _opened;
   Future<void> Function()? _shutdown;
+  Future<void> Function(int)? _hidden;
 
   @override
   Future<bool> presentFrame({required int presentationId}) async {
@@ -275,16 +281,24 @@ class MethodChannelQuickPasteContextHost
     _shutdown = handler;
   }
 
+  @override
+  void setHiddenHandler(Future<void> Function(int)? handler) =>
+      _hidden = handler;
+
   Future<Object?> _handleMethodCall(MethodCall call) async {
     if (call.method == 'shutdown') {
       await _shutdown?.call();
       return true;
     }
-    if (call.method == 'opened') {
+    if (call.method == 'opened' || call.method == 'hidden') {
       final arguments = call.arguments;
       final id = arguments is Map ? arguments['presentationId'] : null;
       if (id is! int || id <= 0 || id > 0x7fffffffffffffff) {
         throw PlatformException(code: 'invalid_presentation');
+      }
+      if (call.method == 'hidden') {
+        await _hidden?.call(id);
+        return true;
       }
       final inspectorVisible = arguments['inspectorVisible'] ?? false;
       if (inspectorVisible is! bool) {
@@ -302,6 +316,7 @@ class MethodChannelQuickPasteContextHost
   Future<void> dispose() async {
     _opened = null;
     _shutdown = null;
+    _hidden = null;
     _channel.setMethodCallHandler(null);
   }
 }
