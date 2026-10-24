@@ -261,96 +261,6 @@ pub fn import(
     Ok(row)
 }
 
-/// An admitted clipboard file stays encrypted while a History commit is retried.
-/// Dropping an unpublished snapshot releases its temporary chunk lease.
-pub struct FileSnapshot {
-    store: Store,
-    lease: String,
-    pub transfer: FileTransfer,
-}
-impl FileSnapshot {
-    pub fn prepare(
-        store: &Store,
-        key: &ItemKey,
-        path: &Path,
-        limit: u64,
-    ) -> Result<Self, FileTransferError> {
-        use std::io::{Seek, SeekFrom};
-        #[cfg(unix)]
-        let mut file = {
-            use rustix::fs::{open, Mode, OFlags};
-            std::fs::File::from(
-                open(
-                    path,
-                    OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
-                    Mode::empty(),
-                )
-                .map_err(|_| FileTransferError::Read)?,
-            )
-        };
-        #[cfg(not(unix))]
-        let mut file = std::fs::File::open(path).map_err(source_error)?;
-        let metadata = file.metadata().map_err(|_| FileTransferError::Read)?;
-        if !metadata.is_file() {
-            return Err(FileTransferError::NotFile);
-        }
-        if metadata.len() > limit {
-            return Err(FileTransferError::TooLarge {
-                size: metadata.len(),
-                limit,
-            });
-        }
-        let transfer = digest(&mut file, limit)?;
-        file.seek(SeekFrom::Start(0))
-            .map_err(|_| FileTransferError::Read)?;
-        let lease = store.stage_file_transfer(&mut file, &transfer, key)?;
-        Ok(Self {
-            store: store.clone(),
-            lease,
-            transfer,
-        })
-    }
-    #[allow(clippy::too_many_arguments)]
-    pub fn publish(
-        &self,
-        key: &ItemKey,
-        metadata: FileMetadata,
-        created_at: i64,
-        app_bundle_id: Option<&str>,
-        app_name: Option<&str>,
-        context: Option<&PayloadMetadata>,
-        settings: &copypaste_ipc::ConfigData,
-    ) -> Result<crate::ingest::Ingested, FileTransferError> {
-        check_limit(&self.transfer, settings.capture_limit_bytes("file"))?;
-        let item = offer_item(
-            &self.transfer,
-            key,
-            metadata,
-            created_at,
-            app_bundle_id,
-            app_name,
-            context,
-            false,
-        )?;
-        let (row, duplicate) = self
-            .store
-            .publish_file_stage(item, &self.lease, &self.transfer)?;
-        crate::ingest::enforce_retention(&self.store, settings);
-        Ok(if duplicate {
-            crate::ingest::Ingested::Duplicate(row)
-        } else {
-            crate::ingest::Ingested::Stored(row)
-        })
-    }
-}
-impl Drop for FileSnapshot {
-    fn drop(&mut self) {
-        if self.store.release_file_stage(&self.lease).is_err() {
-            tracing::warn!("Deferred cleanup of a clipboard file snapshot.");
-        }
-    }
-}
-
 pub fn read_chunk(
     store: &Store,
     key: &ItemKey,
@@ -390,92 +300,84 @@ pub(crate) fn chunk_id(hash: &str, index: u64) -> String {
 
 pub struct PreparedFileCopy {
     pub payload: ClipboardPayload,
-    _directory: tempfile::TempDir,
+    _directory: Option<tempfile::TempDir>,
 }
 
-/// The native writer streams this scoped plaintext into its existing timed
-/// clipboard staging owner. No descriptor or source path is pasted as text.
+/// Publish existing local paths directly. Only legacy encrypted snapshots need
+/// scoped plaintext for a native writer; downloaded files remain user-owned.
 pub fn prepare_copy(
     store: &Store,
     key: &ItemKey,
     row: &StoredItem,
     limit: u64,
 ) -> Result<Option<PreparedFileCopy>, FileTransferError> {
-    let payload = ClipboardPayload::open(row, key)?;
-    let Some(transfer) = offer(&payload) else {
+    let mut payload = ClipboardPayload::open(row, key)?;
+    let Some(transfer) = offer(&payload).cloned() else {
         return Ok(None);
     };
-    check_limit(transfer, limit)?;
-    let mut builder = tempfile::Builder::new();
-    builder.prefix("file-copy-");
-    let directory = match store.file_work_directory() {
-        Some(root) => builder.tempdir_in(root),
-        None => builder.tempdir(),
-    }
-    .map_err(|_| FileTransferError::Write)?;
-    let path = directory.path().join("payload");
-    if let Some(mut source) = crate::file_reference::source(store, &row.id)? {
-        let mut output = Destination::create(&path)?;
-        for _ in 0..transfer.size_bytes.div_ceil(CHUNK_BYTES as u64).max(1) {
-            let bytes = source.read_chunk().map_err(|_| FileTransferError::Read)?;
-            output
-                .write_all(&bytes)
-                .map_err(|_| FileTransferError::Write)?;
-        }
-        source.verify().map_err(|_| FileTransferError::Read)?;
-        output.finish()?;
-    } else if store.has_file_transfer(&row.id)? {
-        save_local(store, key, &row.id, &path, limit, || false)?;
-    } else {
-        let downloaded = store
-            .downloaded_file(&row.id)?
-            .ok_or(FileTransferError::DownloadFirst)?;
-        let mut source =
-            std::fs::File::open(downloaded).map_err(|_| FileTransferError::DownloadFirst)?;
-        let mut target = Destination::create(&path)?;
-        let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
-        let mut hash = Sha256::new();
-        let mut total = 0u64;
-        loop {
-            let n = source
-                .read(&mut buffer)
-                .map_err(|_| FileTransferError::Read)?;
-            if n == 0 {
-                break;
+    check_limit(&transfer, limit)?;
+    let (path, directory, direct) =
+        if let Some((reference, _, _)) = store.file_reference(&row.id)? {
+            (reference, None, true)
+        } else if store.has_file_transfer(&row.id)? {
+            let mut builder = tempfile::Builder::new();
+            builder.prefix("file-copy-");
+            let directory = match store.file_work_directory() {
+                Some(root) => builder.tempdir_in(root),
+                None => builder.tempdir(),
             }
-            total += n as u64;
-            if total > transfer.size_bytes {
+            .map_err(|_| FileTransferError::Write)?;
+            let path = directory.path().join("payload");
+            save_local(store, key, &row.id, &path, limit, || false)?;
+            (path.to_string_lossy().into_owned(), Some(directory), false)
+        } else {
+            let downloaded = store
+                .downloaded_file(&row.id)?
+                .ok_or(FileTransferError::DownloadFirst)?;
+            let mut source =
+                std::fs::File::open(&downloaded).map_err(|_| FileTransferError::DownloadFirst)?;
+            let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
+            let mut hash = Sha256::new();
+            let mut total = 0u64;
+            loop {
+                let n = source
+                    .read(&mut buffer)
+                    .map_err(|_| FileTransferError::Read)?;
+                if n == 0 {
+                    break;
+                }
+                total += n as u64;
+                if total > transfer.size_bytes {
+                    return Err(FileTransferError::Integrity);
+                }
+                hash.update(&buffer[..n]);
+            }
+            let expected = if transfer.sha256.is_empty() {
+                store
+                    .downloaded_file_checksum(&row.id)?
+                    .ok_or(FileTransferError::Integrity)?
+            } else {
+                transfer.sha256
+            };
+            if total != transfer.size_bytes || hex::encode(hash.finalize()) != expected {
                 return Err(FileTransferError::Integrity);
             }
-            hash.update(&buffer[..n]);
-            target
-                .write_all(&buffer[..n])
-                .map_err(|_| FileTransferError::Write)?;
-        }
-        let expected = if transfer.sha256.is_empty() {
-            store
-                .downloaded_file_checksum(&row.id)?
-                .ok_or(FileTransferError::Integrity)?
-        } else {
-            transfer.sha256.clone()
+            (downloaded, None, true)
         };
-        if total != transfer.size_bytes || hex::encode(hash.finalize()) != expected {
-            return Err(FileTransferError::Integrity);
-        }
-        target.finish()?;
-    }
-    let ClipboardPayload::File { mut metadata, .. } = payload else {
-        unreachable!()
+    let ClipboardPayload::File {
+        metadata: Some(metadata),
+        bytes,
+    } = &mut payload
+    else {
+        return Err(FileTransferError::Integrity);
     };
-    metadata
-        .as_mut()
-        .ok_or(FileTransferError::Integrity)?
-        .source_reference = Some(path.to_string_lossy().into_owned());
+    metadata.source_reference = Some(path);
+    if direct {
+        metadata.transfer = None;
+    }
+    bytes.clear();
     Ok(Some(PreparedFileCopy {
-        payload: ClipboardPayload::File {
-            bytes: Zeroizing::new(Vec::new()),
-            metadata,
-        },
+        payload,
         _directory: directory,
     }))
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-22",
+  "date": "2026-10-24",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -456,7 +456,7 @@
         "crates/copypaste-daemon/src/p2p/poll.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2634,7 +2634,7 @@
     },
     {
       "id": "RUN-056",
-      "title": "Runtime-owned file operations and deferred selected sources",
+      "title": "Runtime-owned file operations and deferred file references",
       "domain": "runtime",
       "implementation_status": "implemented_pending_native_evidence",
       "priority": "P1",
@@ -2648,10 +2648,19 @@
         "crates/copypaste-core/src/file_reference.rs",
         "crates/copypaste-core/src/file_operation.rs",
         "crates/copypaste-core/src/storage/file_operations.rs",
-        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart"
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart",
+        "crates/copypaste-daemon/src/capture.rs",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-daemon/src/clipboard/file_materialize/mod.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/staging.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "crates/copypaste-core/src/file_transfer.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/FileReferenceMetadata.kt"
       ],
-      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative. Individual terminal-history deletion preserves saved paths, downloaded-file mappings and active workers. Visible throughput uses a bounded event-driven monotonic EMA without polling timers.",
-      "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history. Small attempt directories remain available for retry alongside durable history; the runtime removes incomplete files on orderly failure.",
+      "invariant": "Selected files and clipboard file captures register only their original path or content URI and metadata. Capture never hashes, stages, copies or encrypts a file body. History byte retention charges only retained reference metadata, not the referenced file size. Recopy preserves the existing reference identity and pin state. Native paste-back publishes the original reference without creating a staging copy. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative. Individual terminal-history deletion preserves saved paths, downloaded-file mappings and active workers. Visible throughput uses a bounded event-driven monotonic EMA without polling timers.",
+      "allocation_lifetime": "Capture and original-path paste-back retain metadata only, without file-body buffers, staging files or cleanup workers. Explicit transfers use one original descriptor, digest and 64 KiB block per active session. Verified downloaded paths are reused without another staging copy. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history.",
       "bounds": {
         "file_block_bytes": 65536,
         "history_page_records": 50,
@@ -2662,15 +2671,51 @@
         "detached_download_workers_per_host": 1
       },
       "cancellation": "Explicit Cancel and runtime shutdown stop active workers; closing a UI does not. Interrupted operations retain their terminal reason. Android discards unused persisted source grants on the next selection, preserving live and pending references.",
-      "tradeoffs": "Deferred selected files depend on original availability rather than an independent encrypted snapshot. Existing snapshot capture remains supported. Persistent operation history and completed Quick Paste downloads consume user-cleared disk space. No measured resource saving or native qualification is claimed. Updates the production contracts of RUN-035, RUN-041 and RUN-053 while preserving non-runtime compatibility paths.",
-      "functional_validation": "Portable core, runtime, P2P, IPC and Flutter tests; daemon detached-transfer test; Android ARM64 bridge cross-check and Kotlin compilation. Native device and resource evidence are not established.",
+      "tradeoffs": "Deferred selected and captured files depend on original availability and provider grants. Previously retained snapshots remain readable; new clipboard captures never create them. Persistent operation history and completed Quick Paste downloads consume user-cleared disk space. No measured resource saving or native qualification is claimed. Updates the production contracts of RUN-035, RUN-041 and RUN-053 while preserving non-runtime compatibility paths.",
+      "functional_validation": "485 core tests, 57 shared runtime tests, 36 daemon capture tests and the native macOS filesystem reference/staging regression passed. Android API 36 Robolectric metadata test passed and changed Kotlin sources compiled against cached app dependencies. Android ARM64 Rust/JNI check passed. Clippy with warnings denied, owned Rust formatting and diff checks passed. Installed Windows and physical Android execution, full installed macOS app evidence, and native resource qualification remain missing.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "core-final.log",
+          "sha256": "fe8235040e18d394b88d2b0f290e8fd6a32ebf84b895a46ccf89b72dbe3535fb",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "runtime-final.log",
+          "sha256": "2981b626254bec80d6017ff69e12b22bd5833425d81bd7d76119236f2c3dc5ea",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "capture-final.log",
+          "sha256": "cdb16614986030e047f35fed2399e7eaa3a5ad1230955d90bf18053d38124c9d",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "native-reference-final.log",
+          "sha256": "2e4ddc4a4adbbd3a70fecf8746ef855a0e90d198a1172b35b12b3bcd10b84718",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "android-reference-test.log",
+          "sha256": "4927fe2744d244bf755eab907915f7815607f5857b2735baae238e2442763830",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        }
+      ],
       "next_step": "Measure application, daemon and worker peaks, steady state and growth on macOS, physical Android and installed Windows; resolve runtime budgets before resource qualification.",
       "supersedes": []
     },
@@ -3080,6 +3125,119 @@
       "supersedes": [],
       "functional_validation": "Dart static analysis passed. Native Windows menu appearance, DPI behavior and resource impact remain unverified.",
       "next_step": "Collect exact-build native application, daemon and worker peak, steady-state, growth, latency and input evidence. CPU, wakeup, I/O, network and growth budgets remain unresolved; native resource qualification is not established."
+    },
+    {
+      "id": "RUN-067",
+      "title": "Promote copied history rows through a metadata-only update",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History copy actions and Store",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/lib.rs"
+      ],
+      "invariant": "Successful History and Quick Paste copies promote the existing live row and publish a history change. Failed clipboard writes do not change recency. The update preserves ciphertext, source identity and manual pin order, and uses the existing eviction index for the newest unpinned timestamp without materializing another payload.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "core-tests.log",
+          "sha256": "c32563251ddd1493f964b50b1f7b45e1951dd12f5d55b11811b45fa3d7557909",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "runtime-tests.log",
+          "sha256": "3b98c5789a55f177c0b20569ba4367fd817ddf2b4a2a4bd7f64d3f9bae826a0e",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "daemon-tests.log",
+          "sha256": "67fc6d7a3a333a940c3da441b3dd0eefa0683136d09606087f0fd5f93de30085",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "core-final-test.log",
+          "sha256": "0c736a5cb66116a264d884f214d680c94791759a179035a5e00e2c65bd4d71b5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "484 core library tests, 5 runtime copy tests, 1 daemon socket round-trip test and the final storage promotion regression passed. Native UI and resource evidence remain unestablished on macOS, Android and Windows.",
+      "next_step": "Collect exact-build application, daemon and worker peak, steady-state and growth evidence on all supported platforms. Native resource qualification and unresolved CPU, wakeup, I/O, network and growth budgets remain unestablished. No resource saving is claimed."
+    },
+    {
+      "id": "RUN-068",
+      "title": "Preserve the Android input-method session during clipboard capture",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "ClipboardFloatingActivity",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFloatingActivity.kt",
+        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ClipboardFloatingActivityTest.kt",
+        "docs/adr/0005-android-capture-in-rust-kotlin-reports.md"
+      ],
+      "invariant": "The focused 1x1 clipboard hand-off remains focusable for native reads but cannot become an input-method target. It preserves keyboard visibility and existing deferred closure without suppressing clipboard events or adding timers, workers, caches or retained payloads.",
+      "next_step": "Validate receiving clips and immediate local copies in the installed app on physical Android. Measure app/runtime and keyboard transitions, peaks, steady state and growth; CPU, wakeup, I/O and growth thresholds remain unresolved in runtime-resource-budgets.json.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "jvm-regression.log",
+          "sha256": "69a7c0677bcd28b7937fb63403ba24023199350cc077f2a9edd05b23e6c17dd5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "native-probe-results.json",
+          "sha256": "6f969999013bed4343747177d13110a4b60afc5f6d91045ede156dcb4ff0bae9",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "emulator-environment.json",
+          "sha256": "f85c40fba5dc9867848c41d48ad8eb8b34120f8933b333facc0d1958cc2ac5a1",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "probe-identity.json",
+          "sha256": "05346abc889c38517d30d1bb3a21e88bf7857524e3658c0860d98b668586561b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "Maintained Robolectric API 36 regression fails on the original Activity and passes on the patched Activity in an isolated harness. Android 14 arm64 emulator reproduces baseline keyboard hiding; six patched hand-offs preserve initially visible/hidden keyboard state, read every clip with focus and leave editor text unchanged. The probe uses the exact production Activity/theme with an observed native-read boundary; full-app sync and physical-device evidence are not established."
     }
   ]
 }

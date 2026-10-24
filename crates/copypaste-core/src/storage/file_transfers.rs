@@ -15,90 +15,10 @@ pub(crate) struct EncryptedFileChunk {
 }
 
 impl Store {
-    pub(crate) fn stage_file_transfer(
-        &self,
-        reader: &mut impl Read,
-        offer: &FileTransfer,
-        key: &ItemKey,
-    ) -> Result<String, FileTransferError> {
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn).map_err(StoreError::from)?;
-        write_body(&tx, reader, offer, key)?;
-        let lease = uuid::Uuid::new_v4().to_string();
-        tx.execute(
-            "INSERT INTO file_transfer_staging VALUES (?1,?2)",
-            params![lease, offer.sha256],
-        )
-        .map_err(StoreError::from)?;
-        tx.commit().map_err(StoreError::from)?;
-        Ok(lease)
-    }
-    pub(crate) fn release_file_stage(&self, lease: &str) -> Result<(), StoreError> {
-        self.conn()?.execute(
-            "DELETE FROM file_transfer_staging WHERE lease_id=?1",
-            [lease],
-        )?;
-        Ok(())
-    }
     pub(crate) fn clear_file_stages(&self) -> Result<(), StoreError> {
         self.conn()?
             .execute("DELETE FROM file_transfer_staging", [])?;
         Ok(())
-    }
-    pub(crate) fn publish_file_stage(
-        &self,
-        mut item: NewItem,
-        lease: &str,
-        offer: &FileTransfer,
-    ) -> Result<(StoredItem, bool), FileTransferError> {
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn).map_err(StoreError::from)?;
-        let staged:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM file_transfer_staging WHERE lease_id=?1 AND blob_id=?2)",params![lease,offer.sha256],|r|r.get(0)).map_err(StoreError::from)?;
-        if !staged {
-            return Err(FileTransferError::Integrity);
-        }
-        let previous: Option<Option<String>> = tx
-            .query_row(
-                "SELECT payload_metadata FROM clipboard_items WHERE id=?1 AND deleted=0",
-                [&item.id],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(StoreError::from)?;
-        let duplicate = previous.is_some();
-        if let Some(previous) = previous {
-            if let (Some(mut next), Some(previous)) = (
-                item.payload_metadata
-                    .as_deref()
-                    .and_then(|m| crate::PayloadMetadata::from_json(m, "file")),
-                previous
-                    .as_deref()
-                    .and_then(|m| crate::PayloadMetadata::from_json(m, "file")),
-            ) {
-                next.merge_privacy(&previous);
-                item.payload_metadata = next.to_json("file");
-            }
-            tx.execute("UPDATE clipboard_items SET created_at=MAX(created_at+1,?2),app_bundle_id=?3,app_name=?4,payload_metadata=?5 WHERE id=?1",params![item.id,item.created_at,item.app_bundle_id,item.app_name,item.payload_metadata]).map_err(StoreError::from)?;
-        } else {
-            tx.execute(
-                "DELETE FROM clipboard_items WHERE id=?1 AND deleted=1",
-                [&item.id],
-            )
-            .map_err(StoreError::from)?;
-            tx.execute("INSERT INTO clipboard_items (id,content_ciphertext,nonce,content_type,content_hash,created_at,app_bundle_id,app_name,payload_metadata,content_bytes) VALUES (?1,?2,X'','file',?3,?4,?5,?6,?7,?8)",params![item.id,item.content_ciphertext,item.content_hash,item.created_at,item.app_bundle_id,item.app_name,item.payload_metadata,offer.size_bytes+item.content_ciphertext.len() as u64+item.payload_metadata.as_ref().map_or(0,|m|m.len() as u64)]).map_err(StoreError::from)?;
-        }
-        tx.execute("INSERT INTO file_transfer_files VALUES (?1,?2) ON CONFLICT(item_id) DO UPDATE SET blob_id=excluded.blob_id",params![item.id,offer.sha256]).map_err(StoreError::from)?;
-        tx.execute(
-            "DELETE FROM file_transfer_staging WHERE lease_id=?1",
-            [lease],
-        )
-        .map_err(StoreError::from)?;
-        tx.commit().map_err(StoreError::from)?;
-        drop(conn);
-        Ok((
-            self.get(&item.id)?.ok_or(FileTransferError::NotFound)?,
-            duplicate,
-        ))
     }
     pub(crate) fn legacy_file_after(&self, after: &str) -> Result<Option<StoredItem>, StoreError> {
         let conn = self.conn()?;

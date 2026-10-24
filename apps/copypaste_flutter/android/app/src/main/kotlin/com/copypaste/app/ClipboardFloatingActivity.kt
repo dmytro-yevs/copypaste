@@ -43,7 +43,10 @@ class ClipboardFloatingActivity : Activity() {
         params.width = 1
         params.height = 1
         params.gravity = Gravity.TOP or Gravity.START
+        // Clipboard access needs window focus, but this hand-off must not become
+        // an input-method target and hide the previous app's keyboard.
         params.flags = params.flags or
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS

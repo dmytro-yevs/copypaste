@@ -1047,6 +1047,12 @@ mod tests {
             ))
             .await;
         assert!(response.ok, "copy failed: {:?}", response.error);
+        let copied = match response.data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("expected the copied item, got {other:?}"),
+        };
+        assert_eq!(copied.id, added.id);
+        assert!(copied.created_at > added.created_at);
 
         // ⌥Enter reaches its own wire verb, even while text is the only
         // representation v2 captures.
@@ -1059,6 +1065,10 @@ mod tests {
             ))
             .await;
         assert!(response.ok, "plain-text copy failed: {:?}", response.error);
+        match response.data {
+            Some(ResponseData::Item(item)) => assert!(item.created_at > copied.created_at),
+            other => panic!("expected the copied item, got {other:?}"),
+        }
 
         // pin round-trips through the store.
         let response = client
