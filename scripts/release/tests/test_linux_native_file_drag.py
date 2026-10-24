@@ -324,16 +324,33 @@ class LinuxNativeFileDragTest(unittest.TestCase):
                 "id": "new", "content_type": "file",
                 "file_details": {"filename": "external-file-drag-fixture.txt", "size_bytes": 51},
             }]
+            navigation = []
+            def action(_actor, command, pid, target, _environment):
+                self.assertEqual(pid, 42)
+                navigation.append((command, target))
+            def drop(*_args, **_kwargs):
+                self.assertEqual(navigation, [("click", "History"), ("observe", "Import files")])
+                return __import__("subprocess").CompletedProcess(["python3"], 0)
             try:
                 with mock.patch.object(driver, "status", side_effect=[{"item_count": 1}, {"item_count": 2}]), \
                      mock.patch.object(driver, "list_items", side_effect=[before, imported]), \
-                     mock.patch.object(driver, "run", return_value=__import__("subprocess").CompletedProcess(["python3"], 0)) as run:
+                     mock.patch.object(driver, "atspi_action", side_effect=action), \
+                     mock.patch.object(driver, "run", side_effect=drop) as run:
                     driver.require_external_file_drag(root / "copypaste-cli", {}, root, 42, "x11")
             finally:
                 driver.EXTERNAL_FILE_DRAG = original
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("--session") + 1], "x11")
             self.assertEqual(command[command.index("--gui-pid") + 1], "42")
+
+    def test_driver_never_drags_into_an_unready_history_surface(self):
+        with mock.patch.object(driver, "atspi_action", side_effect=RuntimeError("History unavailable")), \
+             mock.patch.object(driver, "run") as run, \
+             mock.patch.object(driver, "status") as status, \
+             self.assertRaisesRegex(RuntimeError, "History unavailable"):
+            driver.require_external_file_drag(Path("cli"), {}, Path("workspace"), 42, "x11")
+        run.assert_not_called()
+        status.assert_not_called()
 
 
 if __name__ == "__main__":

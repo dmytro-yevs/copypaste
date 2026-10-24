@@ -85,10 +85,15 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                  mock.patch.object(driver, "status"), mock.patch.object(driver, "ipc", side_effect=ipc), \
                  mock.patch.object(driver, "run", return_value=sync), \
                  mock.patch.object(driver, "list_items", return_value=[{"content": "copypaste-pairing-sync-fixture"}]), \
+                 mock.patch.object(driver, "atspi_action") as action, \
                  mock.patch.object(driver, "emit_result") as emit, mock.patch.object(driver.time, "sleep"):
-                driver.require_pairing_sync(root, root / "cli", {}, root, primary)
+                driver.require_pairing_sync(root, root / "cli", {}, root, primary, gui_pid=42)
             self.assertEqual(confirmed, [primary, peer])
             emit.assert_called_once_with("pairing_sync", sync)
+            self.assertEqual(action.call_args_list, [
+                mock.call(driver.NATIVE_MEDIA, "observe", 42, "Device paired", {}),
+                mock.call(driver.NATIVE_MEDIA, "click", 42, "Done", {}),
+            ])
             child.terminate.assert_called_once()
 
     def test_pairing_progress_rejects_terminal_or_unrelated_ceremonies(self):
@@ -110,7 +115,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
              mock.patch.object(driver, "ipc", side_effect=[invite, joined]) as ipc, \
              mock.patch.object(driver, "wait_for_pairing_state", side_effect=[{"sas": "123456"}, {"sas": "654321"}]), \
              self.assertRaisesRegex(RuntimeError, "verification code"):
-            driver.require_pairing_sync(Path("prefix"), Path("cli"), {}, Path("workspace"), Path("primary.sock"))
+            driver.require_pairing_sync(Path("prefix"), Path("cli"), {}, Path("workspace"), Path("primary.sock"), gui_pid=42)
         self.assertEqual([call.args[1] for call in ipc.call_args_list], ["pair_create_invite", "pair_join"])
         child.terminate.assert_called_once()
 
@@ -484,7 +489,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             )
         status.assert_called_once_with("cli", {})
 
-    def test_locator_file_capture_saves_bytes_and_copies_an_independent_native_snapshot(self):
+    def test_locator_file_capture_saves_bytes_and_copies_the_original_reference(self):
         captured = {
             "id": "captured", "content_type": "file",
             "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
@@ -499,7 +504,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             snapshot = workspace / "clipboard-copy" / "fixture.txt"
             snapshot.parent.mkdir()
             snapshot.write_bytes(b"CopyPaste qualification file payload\n")
-            copied = (snapshot.as_uri() + "\r\n").encode("utf-8")
+            copied = ((workspace / "fixture.txt").as_uri() + "\r\n").encode("utf-8")
             def ipc(socket_path, method, params):
                 self.assertEqual(socket_path, workspace / "gui.sock")
                 self.assertEqual(method, "save_file")
@@ -524,9 +529,9 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                  mock.patch.object(driver, "ipc", side_effect=ipc), \
                  mock.patch.object(driver, "run", side_effect=[
                      subprocess.CompletedProcess(["copypaste-cli", "copy"], 0),
-                     subprocess.CompletedProcess(["wl-paste"], 0, stdout=(workspace / "fixture.txt").as_uri().encode()),
+                     subprocess.CompletedProcess(["wl-paste"], 0, stdout=snapshot.as_uri().encode()),
                  ]):
-                with self.assertRaisesRegex(RuntimeError, "mutable original"):
+                with self.assertRaisesRegex(RuntimeError, "original file reference"):
                     driver.require_locator_file_capture(
                         Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland", workspace / "gui.sock",
                     )
