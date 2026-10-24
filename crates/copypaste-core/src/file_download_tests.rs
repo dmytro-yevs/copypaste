@@ -289,11 +289,12 @@ async fn exercise_download(deferred: bool) {
         .unwrap()
         .unwrap();
     let path = copy.payload.source_reference().unwrap().to_owned();
+    assert_eq!(std::path::Path::new(&path), destination);
     assert!(std::path::Path::new(&path).is_file());
     drop(copy);
     assert!(
-        !std::path::Path::new(&path).exists(),
-        "The scoped plaintext is released after the native writer returns"
+        std::path::Path::new(&path).is_file(),
+        "Copy reuses the user-owned download without a disposable duplicate"
     );
 
     let limited = copypaste_ipc::ConfigData {

@@ -2634,7 +2634,7 @@
     },
     {
       "id": "RUN-056",
-      "title": "Runtime-owned file operations and deferred selected sources",
+      "title": "Runtime-owned file operations and deferred file references",
       "domain": "runtime",
       "implementation_status": "implemented_pending_native_evidence",
       "priority": "P1",
@@ -2648,10 +2648,19 @@
         "crates/copypaste-core/src/file_reference.rs",
         "crates/copypaste-core/src/file_operation.rs",
         "crates/copypaste-core/src/storage/file_operations.rs",
-        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart"
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart",
+        "crates/copypaste-daemon/src/capture.rs",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-daemon/src/clipboard/file_materialize/mod.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/staging.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt",
+        "crates/copypaste-core/src/file_transfer.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/FileReferenceMetadata.kt"
       ],
-      "invariant": "Selected file registration reads metadata only. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative. Individual terminal-history deletion preserves saved paths, downloaded-file mappings and active workers. Visible throughput uses a bounded event-driven monotonic EMA without polling timers.",
-      "allocation_lifetime": "One original descriptor, digest and 64 KiB block per active file session. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history. Small attempt directories remain available for retry alongside durable history; the runtime removes incomplete files on orderly failure.",
+      "invariant": "Selected files and clipboard file captures register only their original path or content URI and metadata. Capture never hashes, stages, copies or encrypts a file body. History byte retention charges only retained reference metadata, not the referenced file size. Recopy preserves the existing reference identity and pin state. Native paste-back publishes the original reference without creating a staging copy. File bodies move on explicit actions in bounded chunks. Runtime workers survive presentation closure. Repeated activations reuse the existing native-recorded downloaded path; history clearing removes records only. Presentation or RPC failure never deletes a runtime-owned destination; native completion and cancellation remain authoritative. Individual terminal-history deletion preserves saved paths, downloaded-file mappings and active workers. Visible throughput uses a bounded event-driven monotonic EMA without polling timers.",
+      "allocation_lifetime": "Capture and original-path paste-back retain metadata only, without file-body buffers, staging files or cleanup workers. Explicit transfers use one original descriptor, digest and 64 KiB block per active session. Verified downloaded paths are reused without another staging copy. Lazy shared runtime watcher exists only while UI consumers listen. Durable operation metadata stays in SQLCipher until the user clears it; UI reads pages rather than retaining all history.",
       "bounds": {
         "file_block_bytes": 65536,
         "history_page_records": 50,
@@ -2662,15 +2671,51 @@
         "detached_download_workers_per_host": 1
       },
       "cancellation": "Explicit Cancel and runtime shutdown stop active workers; closing a UI does not. Interrupted operations retain their terminal reason. Android discards unused persisted source grants on the next selection, preserving live and pending references.",
-      "tradeoffs": "Deferred selected files depend on original availability rather than an independent encrypted snapshot. Existing snapshot capture remains supported. Persistent operation history and completed Quick Paste downloads consume user-cleared disk space. No measured resource saving or native qualification is claimed. Updates the production contracts of RUN-035, RUN-041 and RUN-053 while preserving non-runtime compatibility paths.",
-      "functional_validation": "Portable core, runtime, P2P, IPC and Flutter tests; daemon detached-transfer test; Android ARM64 bridge cross-check and Kotlin compilation. Native device and resource evidence are not established.",
+      "tradeoffs": "Deferred selected and captured files depend on original availability and provider grants. Previously retained snapshots remain readable; new clipboard captures never create them. Persistent operation history and completed Quick Paste downloads consume user-cleared disk space. No measured resource saving or native qualification is claimed. Updates the production contracts of RUN-035, RUN-041 and RUN-053 while preserving non-runtime compatibility paths.",
+      "functional_validation": "485 core tests, 57 shared runtime tests, 36 daemon capture tests and the native macOS filesystem reference/staging regression passed. Android API 36 Robolectric metadata test passed and changed Kotlin sources compiled against cached app dependencies. Android ARM64 Rust/JNI check passed. Clippy with warnings denied, owned Rust formatting and diff checks passed. Installed Windows and physical Android execution, full installed macOS app evidence, and native resource qualification remain missing.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "core-final.log",
+          "sha256": "fe8235040e18d394b88d2b0f290e8fd6a32ebf84b895a46ccf89b72dbe3535fb",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "runtime-final.log",
+          "sha256": "2981b626254bec80d6017ff69e12b22bd5833425d81bd7d76119236f2c3dc5ea",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "capture-final.log",
+          "sha256": "cdb16614986030e047f35fed2399e7eaa3a5ad1230955d90bf18053d38124c9d",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "native-reference-final.log",
+          "sha256": "2e4ddc4a4adbbd3a70fecf8746ef855a0e90d198a1172b35b12b3bcd10b84718",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "android-reference-test.log",
+          "sha256": "4927fe2744d244bf755eab907915f7815607f5857b2735baae238e2442763830",
+          "source_state": "dirty_worktree_before_integration",
+          "release_qualification": false
+        }
+      ],
       "next_step": "Measure application, daemon and worker peaks, steady state and growth on macOS, physical Android and installed Windows; resolve runtime budgets before resource qualification.",
       "supersedes": []
     },

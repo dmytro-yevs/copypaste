@@ -75,20 +75,21 @@ pub fn prepare_copy(
         options.local_device_id,
         false,
     );
-    let staged = if options.plain_text
-        || crate::file_transfer::offer(&payload).is_none()
-        || store
+    let local_reference = crate::file_transfer::offer(&payload).is_some()
+        && store
             .file_reference(&row.id)
             .map_err(crate::file_transfer::FileTransferError::from)?
-            .is_some()
-    {
-        None
-    } else {
-        crate::file_transfer::prepare_copy(store, key, &row, options.max_file_size_bytes)?
-    };
+            .is_some();
+    let staged =
+        if options.plain_text || crate::file_transfer::offer(&payload).is_none() || local_reference
+        {
+            None
+        } else {
+            crate::file_transfer::prepare_copy(store, key, &row, options.max_file_size_bytes)?
+        };
     if let ClipboardPayload::File {
         metadata: Some(metadata),
-        ..
+        bytes,
     } = &mut payload
     {
         let available = crate::origin_or(&row.origin_device_id, options.local_device_id)
@@ -99,6 +100,15 @@ pub fn prepare_copy(
             });
         if !available {
             metadata.source_reference = None;
+        }
+        if local_reference {
+            if !available {
+                return Err(crate::file_transfer::FileTransferError::SourceMissing.into());
+            }
+            // Native paste-back publishes the original reference, not the
+            // encrypted offer descriptor or a newly materialized file body.
+            bytes.clear();
+            metadata.transfer = None;
         }
     }
     let content_type = if options.plain_text {

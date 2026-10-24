@@ -123,14 +123,9 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
                 }
                 val files = uris.map { uri ->
                     activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    var name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-                    var size: Long? = null
-                    activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            if (!cursor.isNull(0)) name = cursor.getString(0)
-                            if (!cursor.isNull(1)) size = cursor.getLong(1).takeIf { it >= 0 }
-                        }
-                    }
+                    val metadata = FileReferenceMetadata.read(activity.contentResolver, uri, uri.lastPathSegment?.substringAfterLast('/') ?: "file")
+                    val name = metadata.name
+                    val size = metadata.size
                     val token = UUID.randomUUID().toString()
                     selections[token] = uri
                     mapOf("token" to token, "name" to name, "mimeType" to (activity.contentResolver.getType(uri) ?: "application/octet-stream"), "uri" to uri.toString(), "sizeBytes" to size)

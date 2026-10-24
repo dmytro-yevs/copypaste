@@ -1200,28 +1200,25 @@ impl Runtime {
         source_reference: Option<&str>,
         source_app: Option<&CaptureSourceApp>,
     ) -> Result<(), RuntimeError> {
+        if !content_type.starts_with("image/") {
+            return self.capture_file_operation(
+                token,
+                bytes.len() as u64,
+                filename.ok_or(RuntimeError::Capture)?,
+                content_type,
+                source_reference.ok_or(RuntimeError::Capture)?,
+                source_app,
+            );
+        }
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
-        let (stored_type, metadata) = if content_type.starts_with("image/") {
-            (content_type, None)
-        } else {
-            let filename = filename.ok_or(RuntimeError::Capture)?;
-            let source_reference = source_reference.ok_or(RuntimeError::Capture)?;
-            let metadata = copypaste_core::FileMetadata::with_source_reference(
-                filename,
-                content_type,
-                source_reference,
-            )
-            .ok_or(RuntimeError::Capture)?;
-            (copypaste_ipc::content_type::FILE, Some(metadata))
-        };
         let metadata = copypaste_core::PayloadMetadata {
             secret_override: None,
             privacy: permit.privacy,
-            file: metadata,
+            file: None,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
         };
         let metadata = (!metadata.privacy.is_empty()
@@ -1232,7 +1229,7 @@ impl Runtime {
             &self.store,
             &self.keyring,
             bytes,
-            stored_type,
+            content_type,
             now_ms(),
             source_app.map(|source| source.bundle_id.as_str()),
             source_app.and_then(|source| source.name.as_deref()),
@@ -1248,10 +1245,11 @@ impl Runtime {
     pub fn capture_file_operation(
         &self,
         token: u64,
-        path: &Path,
+        size_bytes: u64,
         filename: &str,
         mime_type: &str,
         reference: &str,
+        source_app: Option<&CaptureSourceApp>,
     ) -> Result<(), RuntimeError> {
         let mut permit = self
             .capture_admission()
@@ -1262,22 +1260,29 @@ impl Runtime {
                 .ok_or(RuntimeError::Capture)?;
         let context = copypaste_core::PayloadMetadata {
             privacy: permit.privacy,
+            source_app_icon: source_app.and_then(|source| source.icon.clone()),
             ..Default::default()
         };
-        let row = copypaste_core::file_transfer::import(
-            &self.store,
-            &self.keyring,
-            path,
-            metadata,
-            now_ms(),
-            None,
-            None,
-            Some(&context),
-            &permit.config,
-            false,
+        let reference = copypaste_core::file_reference::FileReference::prepare(
+            reference,
+            permit.config.capture_limit_bytes("file"),
+            Some(size_bytes),
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(row);
+        let row = reference
+            .publish(
+                &self.store,
+                &self.keyring.item_key(),
+                metadata,
+                now_ms(),
+                source_app.map(|source| source.bundle_id.as_str()),
+                source_app.and_then(|source| source.name.as_deref()),
+                Some(&context),
+                &permit.config,
+                false,
+            )
+            .map_err(|_| RuntimeError::Capture)?;
+        self.emit_capture(row.into_item());
         permit.committed();
         Ok(())
     }
@@ -3180,12 +3185,16 @@ mod tests {
             vec!["file:content://documents/paper.pdf"]
         );
         let destination = dir.path().join("paper.pdf");
+        assert!(!runtime.store.has_file_transfer(&row.id).unwrap());
+        assert!(runtime.store.file_reference(&row.id).unwrap().is_some());
+        // This fixture has no provider resolver: capture retained only the URI,
+        // so it cannot recover a hidden copy of the supplied compatibility bytes.
         assert!(
-            runtime
+            !runtime
                 .save_file(3, &row.id, &destination.to_string_lossy())
                 .ok
         );
-        assert_eq!(std::fs::read(destination).unwrap(), b"file bytes");
+        assert!(!destination.exists());
     }
 
     #[test]
@@ -3201,12 +3210,17 @@ mod tests {
             )
             .unwrap();
         let source = runtime.store.list(1, 0).unwrap().pop().unwrap();
+        let ClipboardPayload::File { bytes: offer, .. } =
+            ClipboardPayload::open(&source, &runtime.keyring.item_key()).unwrap()
+        else {
+            panic!("expected file offer")
+        };
         assert!(runtime
             .source
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "received-paper",
                 content: "",
-                binary_content: Some(b"file bytes"),
+                binary_content: Some(&offer),
                 payload_metadata: source.payload_metadata.as_deref(),
                 content_type: copypaste_ipc::content_type::FILE,
                 created_at: copypaste_core::now_ms() + 1,
@@ -3218,8 +3232,8 @@ mod tests {
             })
             .unwrap());
         clipboard.0.lock().unwrap().clear();
-        assert!(runtime.copy(1, "received-paper", false).ok);
-        assert_eq!(*clipboard.0.lock().unwrap(), ["file:"]);
+        assert!(!runtime.copy(1, "received-paper", false).ok);
+        assert!(clipboard.0.lock().unwrap().is_empty());
     }
 
     #[test]

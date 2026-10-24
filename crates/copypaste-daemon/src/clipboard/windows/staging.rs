@@ -80,6 +80,15 @@ impl StagingArea {
                 "invalid file metadata",
             ));
         }
+        if bytes.is_empty() && metadata.transfer.is_none() {
+            if let Some(reference) = metadata.source_reference.as_deref() {
+                let path = PathBuf::from(reference);
+                if path.is_absolute() && path.is_file() {
+                    return Ok(path);
+                }
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+        }
         let filename = metadata.filename.as_str();
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().unwrap_or_else(|held| held.into_inner());
@@ -295,6 +304,23 @@ fn protect_owner_only(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn original_reference_does_not_create_staging_or_start_a_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("original.bin");
+        fs::write(&source, b"original").unwrap();
+        let staging = StagingArea::new(directory.path()).unwrap();
+        let metadata = FileMetadata::with_source_reference(
+            "original.bin",
+            "application/octet-stream",
+            source.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(staging.materialize(&[], &metadata).unwrap(), source);
+        assert_eq!(fs::read_dir(&staging.root).unwrap().count(), 0);
+        assert!(staging.worker.lock().unwrap().is_none());
+    }
 
     fn metadata() -> FileMetadata {
         FileMetadata::new("recovered.txt", "application/octet-stream").unwrap()
