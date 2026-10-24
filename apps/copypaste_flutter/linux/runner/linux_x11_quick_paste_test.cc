@@ -209,6 +209,11 @@ void test_x11_quick_paste() {
   register_and_activate(&quick_paste, display, 0x06, KEY_C);
   register_and_activate(&quick_paste, display, 0x3a, KEY_F1);
   register_and_activate(&quick_paste, display, 0x73, KEY_F24);
+  register_and_activate(&quick_paste, display, 0x4c, KEY_DELETE);
+  register_and_activate(&quick_paste, display, 0x4d, KEY_END);
+  register_and_activate(&quick_paste, display, 0x4e, KEY_PAGEDOWN);
+  register_and_activate(&quick_paste, display, 0x50, KEY_LEFT);
+  register_and_activate(&quick_paste, display, 0x52, KEY_UP);
 
   const std::string target_id = std::to_string(target_xid);
   const std::string focused_id = quick_paste.focused_window();

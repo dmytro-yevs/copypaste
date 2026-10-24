@@ -117,7 +117,7 @@ pub(super) fn representation(
     clipboard: Clipboard,
 ) -> Reading {
     if raw::is_format_avail(formats::CF_HDROP) {
-        return file(clipboard);
+        return file(policy, clipboard);
     }
     if raw::is_format_avail(formats::CF_UNICODETEXT) {
         return text(policy, clipboard);
@@ -151,8 +151,10 @@ pub(super) fn representation(
     {
         return image(policy, format, ImageKind::Tiff, clipboard);
     }
-    if raw::is_format_avail(formats::CF_DIB) {
-        return dib(policy, clipboard);
+    for format in [formats::CF_DIBV5, formats::CF_DIB] {
+        if raw::is_format_avail(format) {
+            return dib(policy, format, clipboard);
+        }
     }
     Reading::Nothing
 }
@@ -212,7 +214,10 @@ fn formatted_text(
     let Some(bytes) = preflight(format) else {
         return Reading::Nothing;
     };
-    if bytes > cap {
+    // Registered text can include a NUL terminator and GlobalSize allocation
+    // padding. Enforce the retained-content cap after normalization, as on
+    // macOS, while bounding this native copy independently.
+    if bytes > text_allocation_limit(cap) {
         return Reading::TooLarge { bytes, cap };
     }
     let mut bytes = Vec::new();
@@ -221,7 +226,7 @@ fn formatted_text(
         return Reading::Nothing;
     }
     drop(clipboard);
-    if bytes.len() as u64 > cap {
+    if bytes.len() as u64 > text_allocation_limit(cap) {
         return Reading::TooLarge {
             bytes: bytes.len() as u64,
             cap,
@@ -235,7 +240,9 @@ fn html(policy: CapturePolicy<'_>, format: u32, clipboard: Clipboard) -> Reading
     let Some(bytes) = preflight(format) else {
         return Reading::Nothing;
     };
-    if bytes > cap {
+    // CF_HTML adds a byte-offset header around the stored HTML fragment.
+    // That transport envelope is not part of the retained-content budget.
+    if bytes > text_allocation_limit(cap) {
         return Reading::TooLarge { bytes, cap };
     }
     let mut payload = Vec::new();
@@ -244,14 +251,22 @@ fn html(policy: CapturePolicy<'_>, format: u32, clipboard: Clipboard) -> Reading
         return Reading::Nothing;
     }
     drop(clipboard);
-    if payload.len() as u64 > cap {
+    html_read(&payload, cap)
+}
+
+fn text_allocation_limit(cap: u64) -> u64 {
+    cap.saturating_add(SIZE_SLACK)
+}
+
+fn html_read(payload: &[u8], cap: u64) -> Reading {
+    if payload.len() as u64 > text_allocation_limit(cap) {
         return Reading::TooLarge {
             bytes: payload.len() as u64,
             cap,
         };
     }
     // GlobalSize can include non-UTF-8 allocation padding beyond EndFragment.
-    let Some(fragment) = crate::clipboard::cf_html::fragment(&payload) else {
+    let Some(fragment) = crate::clipboard::cf_html::fragment(payload) else {
         debug!("the clipboard HTML fragment is invalid; the change was dropped");
         return Reading::Nothing;
     };
@@ -262,6 +277,76 @@ fn html(policy: CapturePolicy<'_>, format: u32, clipboard: Clipboard) -> Reading
         };
     }
     normalized_text(fragment.to_vec(), copypaste_ipc::content_type::HTML, cap)
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    fn html_payload(fragment: &str) -> Vec<u8> {
+        let header = "Version:1.0\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n";
+        let header = header
+            .replace(
+                "StartFragment:0000000000",
+                &format!("StartFragment:{:010}", header.len()),
+            )
+            .replace(
+                "EndFragment:0000000000",
+                &format!("EndFragment:{:010}", header.len() + fragment.len()),
+            );
+        [header.as_bytes(), fragment.as_bytes(), &[0, 0xff, 0xfe]].concat()
+    }
+
+    #[test]
+    fn html_at_the_retained_limit_survives_transport_header_and_padding() {
+        let fragment = "<b>Привіт</b>";
+        let payload = html_payload(fragment);
+        let Reading::Got(Representation::Text {
+            content,
+            content_type,
+        }) = html_read(&payload, fragment.len() as u64)
+        else {
+            panic!("transport bytes must not consume the stored HTML budget");
+        };
+        assert_eq!(content, fragment);
+        assert_eq!(content_type, copypaste_ipc::content_type::HTML);
+        assert!(matches!(
+            html_read(&payload, fragment.len() as u64 - 1),
+            Reading::TooLarge { .. }
+        ));
+    }
+
+    #[test]
+    fn html_native_allocation_is_still_bounded() {
+        let mut payload = html_payload("x");
+        payload.resize(text_allocation_limit(1) as usize + 1, 0);
+        assert!(matches!(html_read(&payload, 1), Reading::TooLarge { .. }));
+        assert!(matches!(html_read(b"invalid", 100), Reading::Nothing));
+    }
+
+    #[test]
+    fn formatted_text_at_the_limit_ignores_native_nul_termination() {
+        let rtf = b"{\\rtf1 hello}";
+        let mut payload = rtf.to_vec();
+        payload.extend_from_slice(&[0; 16]);
+        let Reading::Got(Representation::Text {
+            content,
+            content_type,
+        }) = normalized_text(
+            payload.clone(),
+            copypaste_ipc::content_type::RICH_TEXT,
+            rtf.len() as u64,
+        )
+        else {
+            panic!("native termination must not consume the stored RTF budget");
+        };
+        assert_eq!(content.as_bytes(), rtf);
+        assert_eq!(content_type, copypaste_ipc::content_type::RICH_TEXT);
+        assert!(matches!(
+            normalized_text(payload, content_type, rtf.len() as u64 - 1),
+            Reading::TooLarge { .. }
+        ));
+    }
 }
 
 fn normalized_text(bytes: Vec<u8>, content_type: &'static str, cap: u64) -> Reading {
@@ -327,28 +412,41 @@ fn image(policy: CapturePolicy<'_>, format: u32, kind: ImageKind, clipboard: Cli
     )
 }
 
-fn dib(policy: CapturePolicy<'_>, clipboard: Clipboard) -> Reading {
-    let cap = policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG);
-    let Some(bytes) = preflight(formats::CF_DIB) else {
+fn dib_allocation_limit(policy: CapturePolicy<'_>) -> u64 {
+    // DIB is uncompressed. The PNG retention cap must apply after encoding,
+    // otherwise even a 1080p screenshot is rejected before it can compress.
+    u64::from(policy.settings.max_decoded_image_mb)
+        .saturating_mul(1024 * 1024)
+        .saturating_add(64 * 1024)
+}
+
+fn dib(policy: CapturePolicy<'_>, format: u32, clipboard: Clipboard) -> Reading {
+    let Some(bytes) = preflight(format) else {
         return Reading::Nothing;
     };
-    if bytes > cap {
-        return Reading::TooLarge { bytes, cap };
+    if bytes > dib_allocation_limit(policy) {
+        return Reading::DecodedTooLarge {
+            megabytes: policy.settings.max_decoded_image_mb,
+        };
     }
     let mut dib = Vec::new();
-    if raw::get_vec(formats::CF_DIB, &mut dib).is_err() {
+    if raw::get_vec(format, &mut dib).is_err() {
         debug!("the clipboard bitmap could not be read; the change was dropped");
         return Reading::Nothing;
     }
     drop(clipboard);
-    if dib.len() as u64 > cap {
-        return Reading::TooLarge {
-            bytes: dib.len() as u64,
-            cap,
+    dib_read(policy, &dib)
+}
+
+fn dib_read(policy: CapturePolicy<'_>, dib: &[u8]) -> Reading {
+    if dib.len() as u64 > dib_allocation_limit(policy) {
+        return Reading::DecodedTooLarge {
+            megabytes: policy.settings.max_decoded_image_mb,
         };
     }
+    let cap = policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG);
     let reading = image_read(
-        transcode::png_from_dib(&dib, policy.settings.max_decoded_image_mb, cap),
+        transcode::png_from_dib(dib, policy.settings.max_decoded_image_mb, cap),
         cap,
         copypaste_ipc::content_type::IMAGE_PNG,
         policy.settings.max_decoded_image_mb,
@@ -364,14 +462,131 @@ fn dib(policy: CapturePolicy<'_>, clipboard: Clipboard) -> Reading {
     }
 }
 
-fn file(clipboard: Clipboard) -> Reading {
+#[cfg(test)]
+mod dib_tests {
+    use super::*;
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Rgb};
+
+    fn screenshot() -> Vec<u8> {
+        let image = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1920,
+            1080,
+            Rgb([0x24u8, 0x65, 0xa8]),
+        ));
+        let mut bitmap = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bitmap, ImageFormat::Bmp).unwrap();
+        bitmap.into_inner()[14..].to_vec()
+    }
+
+    #[test]
+    fn dibv5_screenshot_reads_pixels_immediately_after_its_header() {
+        // A real CF_DIBV5 layout: 124-byte BITMAPV5HEADER containing the
+        // BI_BITFIELDS masks, followed immediately by one BGRA pixel.
+        let mut dib = vec![0u8; 124];
+        dib[0..4].copy_from_slice(&124u32.to_le_bytes());
+        dib[4..8].copy_from_slice(&1i32.to_le_bytes());
+        dib[8..12].copy_from_slice(&1i32.to_le_bytes());
+        dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+        dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+        dib[16..20].copy_from_slice(&3u32.to_le_bytes());
+        dib[20..24].copy_from_slice(&4u32.to_le_bytes());
+        for (offset, mask) in [
+            (40, 0x00ff0000u32),
+            (44, 0x0000ff00),
+            (48, 0x000000ff),
+            (52, 0xff000000),
+        ] {
+            dib[offset..offset + 4].copy_from_slice(&mask.to_le_bytes());
+        }
+        dib.extend_from_slice(&[51, 34, 17, 63]);
+        let settings = copypaste_ipc::ConfigData::default();
+        let Reading::Got(Representation::Image { bytes, .. }) =
+            dib_read(CapturePolicy::new(&settings), &dib)
+        else {
+            panic!("a Windows DIBV5 screenshot must survive native capture");
+        };
+        assert_eq!(
+            image::load_from_memory(&bytes)
+                .unwrap()
+                .into_rgba8()
+                .get_pixel(0, 0)
+                .0,
+            [17, 34, 51, 63]
+        );
+    }
+
+    #[test]
+    fn full_hd_screenshot_larger_than_png_cap_is_captured() {
+        let settings = copypaste_ipc::ConfigData::default();
+        let policy = CapturePolicy::new(&settings);
+        let dib = screenshot();
+        assert!(dib.len() as u64 > policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG));
+        assert!(dib.len() as u64 <= dib_allocation_limit(policy));
+        let Reading::Got(Representation::Image {
+            bytes,
+            content_type,
+        }) = dib_read(policy, &dib)
+        else {
+            panic!("a normal screenshot must survive the complete DIB read boundary");
+        };
+        assert_eq!(content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        let image = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((image.width(), image.height()), (1920, 1080));
+        assert!(bytes.len() as u64 <= settings.max_image_size_bytes);
+    }
+
+    #[test]
+    fn screenshot_still_obeys_decoded_memory_budget() {
+        let settings = copypaste_ipc::ConfigData {
+            max_decoded_image_mb: 1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            dib_read(CapturePolicy::new(&settings), &screenshot()),
+            Reading::DecodedTooLarge { megabytes: 1 }
+        ));
+    }
+
+    #[test]
+    fn screenshot_still_obeys_encoded_budget() {
+        let settings = copypaste_ipc::ConfigData {
+            max_image_size_bytes: 64,
+            ..Default::default()
+        };
+        assert!(matches!(
+            dib_read(CapturePolicy::new(&settings), &screenshot()),
+            Reading::TooLarge { cap: 64, .. }
+        ));
+    }
+}
+
+fn file(policy: CapturePolicy<'_>, clipboard: Clipboard) -> Reading {
+    let Some(bytes) = preflight(formats::CF_HDROP) else {
+        return Reading::Nothing;
+    };
+    let cap = file_allocation_limit(policy);
+    if bytes > cap {
+        return Reading::TooLarge { bytes, cap };
+    }
     let mut paths = Vec::new();
     if raw::get_file_list_path(&mut paths).is_err() {
         debug!("the clipboard file list could not be read; the change was dropped");
         return Reading::Nothing;
     }
     drop(clipboard);
-    let [path] = paths.as_slice() else {
+    file_reference(&paths)
+}
+
+fn file_allocation_limit(policy: CapturePolicy<'_>) -> u64 {
+    // This is a list of references, not file bodies. A multi-GiB file-body
+    // allowance must never become a multi-GiB native metadata allocation.
+    policy
+        .limit_bytes(copypaste_ipc::content_type::FILE)
+        .min(copypaste_ipc::MAX_CONTENT_BYTES as u64)
+}
+
+fn file_reference(paths: &[std::path::PathBuf]) -> Reading {
+    let [path] = paths else {
         debug!("the clipboard file list is not a single file; the change was dropped");
         return Reading::Nothing;
     };
@@ -395,6 +610,52 @@ fn file(clipboard: Clipboard) -> Reading {
         path: path.clone(),
         metadata,
     })
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn large_file_body_policy_does_not_expand_native_reference_allocations() {
+        let settings = copypaste_ipc::ConfigData {
+            max_file_size_bytes: copypaste_ipc::MAX_FILE_SIZE_BYTES,
+            ..Default::default()
+        };
+        assert_eq!(
+            file_allocation_limit(CapturePolicy::new(&settings)),
+            copypaste_ipc::MAX_CONTENT_BYTES as u64
+        );
+    }
+
+    #[test]
+    fn one_local_file_retains_its_unicode_reference_without_reading_its_body() {
+        let path = PathBuf::from(r"C:\synthetic\Україна.txt");
+        let Reading::Got(Representation::File {
+            path: reference,
+            metadata,
+        }) = file_reference(&[path.clone()])
+        else {
+            panic!("a local file reference must be accepted without touching the file");
+        };
+        assert_eq!(reference, path);
+        assert_eq!(metadata.filename, "Україна.txt");
+        assert_eq!(metadata.source_reference.as_deref(), path.to_str());
+    }
+
+    #[test]
+    fn unsupported_file_lists_and_nonlocal_references_are_rejected() {
+        for paths in [
+            vec![],
+            vec![PathBuf::from(r"C:\one.txt"), PathBuf::from(r"C:\two.txt")],
+            vec![PathBuf::from(r"\\server\share\one.txt")],
+            vec![PathBuf::from(r"\\.\pipe\synthetic")],
+            vec![PathBuf::from(r"relative\one.txt")],
+        ] {
+            assert!(matches!(file_reference(&paths), Reading::Nothing));
+        }
+    }
 }
 
 fn is_local_disk_path(path: &std::path::Path) -> bool {

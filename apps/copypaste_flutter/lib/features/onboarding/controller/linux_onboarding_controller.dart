@@ -104,7 +104,14 @@ class LinuxOnboardingController extends OnboardingController {
 
   Future<void> continueFromIntegration() async {
     if (busy) return;
-    await _run(_refresh);
+    var refreshed = false;
+    await _run(() async {
+      await _refresh();
+      refreshed = true;
+    });
+    // A failed probe must not turn a previously ready snapshot into current
+    // permission to advance. Preserve the refresh error and allow a retry.
+    if (!refreshed || disposed) return;
     if (busy || integrationReady) {
       if (integrationReady) {
         _step = LinuxOnboardingStep.sync;

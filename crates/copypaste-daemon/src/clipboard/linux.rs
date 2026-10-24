@@ -24,6 +24,7 @@ use x11rb::wrapper::ConnectionExt as _;
 use super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
 use copypaste_ipc::{CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability};
 
+mod formats;
 mod gnome;
 mod wayland;
 
@@ -44,6 +45,7 @@ struct Atoms {
     text: Atom,
     string: Atom,
     plain_utf8: Atom,
+    plain: Atom,
     html: Atom,
     rtf: Atom,
     png: Atom,
@@ -67,6 +69,7 @@ impl Atoms {
             text: a(b"TEXT")?,
             string: a(b"STRING")?,
             plain_utf8: a(b"text/plain;charset=utf-8")?,
+            plain: a(b"text/plain")?,
             html: a(b"text/html")?,
             rtf: a(b"text/rtf")?,
             png: a(b"image/png")?,
@@ -533,14 +536,8 @@ impl ClipboardSource for X11Clipboard {
         metadata: Option<&copypaste_core::FileMetadata>,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
-        let target = match content_type {
-            copypaste_ipc::content_type::HTML => 1,
-            copypaste_ipc::content_type::RICH_TEXT => 2,
-            copypaste_ipc::content_type::IMAGE_PNG => 3,
-            copypaste_ipc::content_type::IMAGE_TIFF => 4,
-            copypaste_ipc::content_type::FILE => 5,
-            _ => return Err(ClipboardWriteError::UnsupportedContent),
-        };
+        let (_, target) =
+            formats::write_format(content_type).ok_or(ClipboardWriteError::UnsupportedContent)?;
         let bytes = if target == 5 {
             let path = self
                 .staging
@@ -710,6 +707,10 @@ fn clipboard_capabilities(
         "text/rtf",
         "image/png",
         "image/tiff",
+        "image/jpeg",
+        "image/gif",
+        "image/bmp",
+        "image/webp",
         "text/uri-list",
     ]
     .into_iter()
@@ -937,7 +938,18 @@ fn set_selection(
         3 => a.png,
         4 => a.tiff,
         5 => a.uri_list,
-        _ => a.utf8,
+        target => {
+            let Some(mime) = formats::write_mime(target) else {
+                return false;
+            };
+            let Ok(cookie) = c.intern_atom(false, mime.as_bytes()) else {
+                return false;
+            };
+            let Ok(reply) = cookie.reply() else {
+                return false;
+            };
+            reply.atom
+        }
     };
     let ok = c
         .set_selection_owner(window, a.clipboard, x11rb::CURRENT_TIME)
@@ -1157,40 +1169,25 @@ impl Transfer<'_> {
             self.privacy.suppress_snapshot(revision);
             return None;
         }
-        let (target, type_, binary) = if targets.contains(&self.atoms.uri_list) {
-            (self.atoms.uri_list, copypaste_ipc::content_type::FILE, true)
-        } else if targets.contains(&self.atoms.html) {
-            (self.atoms.html, copypaste_ipc::content_type::HTML, false)
-        } else if targets.contains(&self.atoms.rtf) {
-            (
-                self.atoms.rtf,
-                copypaste_ipc::content_type::RICH_TEXT,
-                false,
-            )
-        } else if targets.contains(&self.atoms.png) {
-            (self.atoms.png, copypaste_ipc::content_type::IMAGE_PNG, true)
-        } else if targets.contains(&self.atoms.tiff) {
-            (
-                self.atoms.tiff,
-                copypaste_ipc::content_type::IMAGE_TIFF,
-                true,
-            )
-        } else {
-            let target = [
-                self.atoms.utf8,
-                self.atoms.plain_utf8,
-                self.atoms.text,
-                self.atoms.string,
-            ]
-            .into_iter()
-            .find(|atom| targets.contains(atom))?;
-            (target, copypaste_ipc::content_type::TEXT, false)
-        };
-        let bytes = self.read_target(
-            target,
-            settings.capture_limit_bytes(type_) as usize,
-            deadline,
-        )?;
+        let native = [
+            ("text/uri-list", self.atoms.uri_list),
+            ("text/plain;charset=utf-8", self.atoms.plain_utf8),
+            ("UTF8_STRING", self.atoms.utf8),
+            ("text/plain", self.atoms.plain),
+            ("TEXT", self.atoms.text),
+            ("STRING", self.atoms.string),
+            ("text/rtf", self.atoms.rtf),
+            ("text/html", self.atoms.html),
+            ("image/png", self.atoms.png),
+            ("image/tiff", self.atoms.tiff),
+        ];
+        let (mime, type_, binary) = formats::representation(|mime| {
+            native
+                .iter()
+                .any(|(name, atom)| *name == mime && targets.contains(atom))
+        })?;
+        let target = native.iter().find(|(name, _)| *name == mime)?.1;
+        let bytes = self.read_target(target, formats::capture_limit(settings, type_), deadline)?;
         self.owner_is_current(owner)?;
         if type_ == copypaste_ipc::content_type::FILE {
             return file_capture(bytes, privacy, source);
@@ -1440,15 +1437,7 @@ pub(super) fn file_capture(
     privacy: copypaste_ipc::ClipboardPrivacy,
     source: Option<super::linux_attribution::SourceApp>,
 ) -> Option<Capture> {
-    let mut uris = std::str::from_utf8(&bytes)
-        .ok()?
-        .lines()
-        .filter(|line| !line.starts_with('#'));
-    let uri = uris.next()?;
-    if uris.next().is_some() {
-        return None;
-    }
-    let path = url::Url::parse(uri).ok()?.to_file_path().ok()?;
+    let path = formats::local_file_url(&bytes)?.to_file_path().ok()?;
     let filename = path.file_name()?.to_str()?.to_owned();
     let metadata = copypaste_core::FileMetadata::with_source_reference(
         filename,

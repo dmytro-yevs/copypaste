@@ -44,7 +44,7 @@ int evdev_keycode(guint usage) {
   if (usage >= 0x68 && usage <= 0x73) {
     return kFunctionKeys[12 + usage - 0x68];
   }
-  switch (usage) { case 0x28: return 28; case 0x29: return 1; case 0x2a: return 14; case 0x2b: return 15; case 0x2c: return 57; case 0x2d: return 12; case 0x2e: return 13; case 0x2f: return 26; case 0x30: return 27; case 0x31: return 43; case 0x33: return 39; case 0x34: return 40; case 0x35: return 41; case 0x36: return 51; case 0x37: return 52; case 0x38: return 53; case 0x49: return 110; case 0x4a: return 102; case 0x4b: return 104; case 0x4c: return 107; case 0x4d: return 109; case 0x4e: return 105; case 0x4f: return 106; case 0x50: return 103; case 0x51: return 108; case 0x52: return 111; default: return 0; }
+  switch (usage) { case 0x28: return 28; case 0x29: return 1; case 0x2a: return 14; case 0x2b: return 15; case 0x2c: return 57; case 0x2d: return 12; case 0x2e: return 13; case 0x2f: return 26; case 0x30: return 27; case 0x31: return 43; case 0x33: return 39; case 0x34: return 40; case 0x35: return 41; case 0x36: return 51; case 0x37: return 52; case 0x38: return 53; case 0x49: return 110; case 0x4a: return 102; case 0x4b: return 104; case 0x4c: return KEY_DELETE; case 0x4d: return KEY_END; case 0x4e: return KEY_PAGEDOWN; case 0x4f: return 106; case 0x50: return KEY_LEFT; case 0x51: return 108; case 0x52: return KEY_UP; default: return 0; }
 }
 
 unsigned int modifier_mask(const std::vector<std::string>& modifiers) {
@@ -278,7 +278,8 @@ bool LinuxX11QuickPaste::restore_focus(const std::string& window) const {
   gdk_x11_display_error_trap_push(gdk_display);
   const bool viewable = XGetWindowAttributes(impl_->display, target, &attributes) != 0 &&
       attributes.map_state == IsViewable;
-  if (!viewable || gdk_x11_display_error_trap_pop(gdk_display) != 0) return false;
+  const int attributes_error = gdk_x11_display_error_trap_pop(gdk_display);
+  if (!viewable || attributes_error != 0) return false;
   gdk_x11_display_error_trap_push(gdk_display);
   XRaiseWindow(impl_->display, target);
   XSetInputFocus(impl_->display, target, RevertToPointerRoot, CurrentTime);

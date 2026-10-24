@@ -830,7 +830,7 @@ name = "copypaste-feedback"
 version = "1.0.34"
 dependencies = [
  "tracing",
- "winsafe",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

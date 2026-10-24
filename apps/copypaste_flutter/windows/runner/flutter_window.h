@@ -58,12 +58,14 @@ struct QuickPasteTargetApi {
   decltype(&::ShowWindow) show_window = &::ShowWindow;
   decltype(&::SetForegroundWindow) set_foreground_window = &::SetForegroundWindow;
   decltype(&::SendInput) send_input = &::SendInput;
+  decltype(&::GetAsyncKeyState) get_async_key_state = &::GetAsyncKeyState;
 };
 
 class QuickPasteTargetSession {
  public:
   explicit QuickPasteTargetSession(QuickPasteTargetApi api = {}) : api_(api) {}
   int64_t Begin(HWND sampled_foreground, HWND popup);
+  bool HideForPreparation(int64_t id, HWND popup);
   void Invalidate();
   void Close(int64_t id, HWND popup);
   bool Paste(int64_t id, HWND popup);

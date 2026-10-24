@@ -5,7 +5,7 @@ const root = new URL('.', import.meta.url);
 
 function loadGnome({focusWindow = null, clipboardFactoryModule = {default: {}}} = {}) {
     const source = fs.readFileSync(new URL('gnome-shell-extension/extension.js', root), 'utf8')
-        .replace(/^import .*;\n/gm, '')
+        .replace(/^import .*;\r?\n/gm, '')
         .replace(
             "const {default: factory} = await import('gi://CopyPasteClipboard?version=1.0');",
             'const {default: factory} = await importClipboardFactory();'
@@ -146,7 +146,7 @@ function failGnome(bus, call, message) {
 
 function loadShortcutBridge() {
     const source = fs.readFileSync(new URL('gnome-shell-extension/shortcut_bridge.js', root), 'utf8')
-        .replace(/^import .*;\n/gm, '')
+        .replace(/^import .*;\r?\n/gm, '')
         .replace('export class ', 'class ');
     const state = {active: new Map(), allowed: [], calls: [], owner: ':1.host', pendingDbus: [], signals: [], uid: 1000, ungrabs: 0, unexports: 0, watches: 0};
     const bus = {
@@ -233,7 +233,7 @@ function loadShortcutBridge() {
 
 function loadClipboardBridge({nativeAvailable = true, exposeAvailability = true} = {}) {
     const source = fs.readFileSync(new URL('gnome-shell-extension/clipboard_bridge.js', root), 'utf8')
-        .replace(/^import .*;\n/gm, '')
+        .replace(/^import .*;\r?\n/gm, '')
         .replace('export class ', 'class ');
     const state = {
         calls: [],
