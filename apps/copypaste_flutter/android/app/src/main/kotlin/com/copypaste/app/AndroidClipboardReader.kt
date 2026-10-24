@@ -430,35 +430,21 @@ internal object AndroidClipboardReader {
     }
 
     private fun captureFile(context: Context, pending: Pending, uri: Uri, type: String): Boolean {
-        var staged: java.io.File? = null
         var name = filename(uri)
-        try {
-            val read = pending.read("file") { limit ->
-                if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
-                context.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { cursor ->
-                    if (cursor.moveToFirst() && !cursor.isNull(0)) name=cursor.getString(0)
-                }
-                val file=java.io.File.createTempFile("capture-file-", ".bin",context.cacheDir)
-                staged=file
-                openInput(context, uri, pending)?.use { input ->
-                    pending.input(input)
-                    try {
-                        file.outputStream().use { output ->
-                            val buffer=ByteArray(64*1024); var total=0L
-                            while (pending.reading()) {
-                                val count=input.read(buffer)
-                                if (count<0) break
-                                total+=count
-                                require(total<=limit) { "The file exceeds the file size limit in Settings." }
-                                output.write(buffer,0,count)
-                            }
-                        }
-                    } finally {pending.releaseInput(input)}
-                } ?: throw java.io.IOException("The file could not be read.")
-            }
-            val file=staged ?: return false
-            return read && pending.reading() && NativeRuntimeCapture.ingestFile(pending.token,file.absolutePath,name,type,uri.toString())
-        } finally {staged?.delete()}
+        var size: Long? = null
+        val read = pending.read("file") { limit ->
+            if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
+            val metadata = FileReferenceMetadata.read(context.contentResolver, uri, name)
+            name = metadata.name
+            size = metadata.size?.takeIf { it <= limit }
+            // Some clipboard providers grant only temporary access. Preserve a
+            // persistable grant when offered; later access still uses the provider.
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        }
+        val length = size ?: return false
+        val saved = read && pending.reading() && NativeRuntimeCapture.ingestFile(pending.token, length, name, type, uri.toString())
+        if (saved) pending.feedbackPreview(CaptureFeedbackPreview(name))
+        return saved
     }
 
     private fun filename(uri: Uri): String =

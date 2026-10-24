@@ -418,7 +418,7 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestFile(
     mut env: JNIEnv,
     _class: JClass,
     token: jlong,
-    path: JString,
+    size_bytes: jlong,
     filename: JString,
     mime_type: JString,
     source_reference: JString,
@@ -434,7 +434,6 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestFile(
     };
     let values = (|| {
         Some((
-            env.get_string(&path).ok()?.to_string_lossy().into_owned(),
             env.get_string(&filename)
                 .ok()?
                 .to_string_lossy()
@@ -450,18 +449,20 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestFile(
         ))
     })();
     drop(read);
-    let Some((path, filename, mime_type, reference)) = values else {
+    let Some((filename, mime_type, reference)) = values else {
         return JNI_FALSE;
     };
-    if runtime
-        .capture_file_operation(
-            token as u64,
-            std::path::Path::new(&path),
-            &filename,
-            &mime_type,
-            &reference,
-        )
-        .is_ok()
+    if size_bytes >= 0
+        && runtime
+            .capture_file_operation(
+                token as u64,
+                size_bytes as u64,
+                &filename,
+                &mime_type,
+                &reference,
+                None,
+            )
+            .is_ok()
     {
         JNI_TRUE
     } else {

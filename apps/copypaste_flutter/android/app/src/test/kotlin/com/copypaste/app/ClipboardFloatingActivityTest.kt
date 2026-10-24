@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class ClipboardFloatingActivityTest {
     @Test
-    fun focusedWindowHasContentAndFinishesAfterFocusDispatch() {
+    fun captureKeepsWindowFocusWithoutBecomingAnInputMethodTarget() {
         val controller = Robolectric.buildActivity(ClipboardFloatingActivity::class.java).create()
         val activity = controller.get()
         val attributes = activity.window.attributes
@@ -26,6 +26,7 @@ class ClipboardFloatingActivityTest {
         assertEquals(1, attributes.height)
         assertTrue(attributes.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
         assertFalse(attributes.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertFalse(WindowManager.LayoutParams.mayUseInputMethod(attributes.flags))
         assertNotNull(activity.findViewById<View>(android.R.id.content))
 
         activity.onWindowFocusChanged(true)

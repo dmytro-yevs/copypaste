@@ -1,5 +1,5 @@
 //! Bounded durable records; progress notifications carry no file metadata.
-use super::{Store, StoreError};
+use super::{connection::write_tx, Store, StoreError};
 use copypaste_ipc::{FileOperation, FileOperationPhase};
 use rusqlite::{params, OptionalExtension};
 
@@ -118,15 +118,53 @@ impl Store {
             .optional()?)
     }
 
-    pub fn insert_file_reference(
+    pub(crate) fn insert_file_reference(
         &self,
-        item: super::NewItem,
+        mut item: super::NewItem,
         reference: &str,
         size: u64,
         modified: Option<&str>,
-    ) -> Result<super::StoredItem, StoreError> {
+        deduplicate: bool,
+    ) -> Result<crate::Ingested, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
+        let existing: Option<(String, Option<String>)> = if deduplicate {
+            tx.query_row(
+                "SELECT i.id,i.payload_metadata FROM file_references f JOIN clipboard_items i ON i.id=f.item_id WHERE f.reference=?1 AND f.size_bytes=?2 AND f.modified IS ?3 AND i.deleted=0 ORDER BY i.created_at DESC,i.id DESC LIMIT 1",
+                params![reference, size, modified],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional()?
+        } else {
+            None
+        };
+        if let Some((id, previous)) = existing {
+            // Keep the original authenticated offer and source version on recopy.
+            if let (Some(mut next), Some(previous)) = (
+                item.payload_metadata
+                    .as_deref()
+                    .and_then(|m| crate::PayloadMetadata::from_json(m, "file")),
+                previous
+                    .as_deref()
+                    .and_then(|m| crate::PayloadMetadata::from_json(m, "file")),
+            ) {
+                next.merge_privacy(&previous);
+                if let (Some(file), Some(old)) = (&mut next.file, previous.file) {
+                    file.transfer = old.transfer;
+                }
+                item.payload_metadata = next.to_json("file");
+            }
+            tx.execute(
+                "UPDATE clipboard_items SET created_at=MAX(created_at+1,?2),app_bundle_id=?3,app_name=?4,payload_metadata=?5,content_bytes=LENGTH(content_ciphertext)+LENGTH(CAST(COALESCE(?5,'') AS BLOB)) WHERE id=?1",
+                params![id,item.created_at,item.app_bundle_id,item.app_name,item.payload_metadata],
+            )?;
+            tx.commit()?;
+            drop(conn);
+            return self
+                .get(&id)?
+                .map(crate::Ingested::Duplicate)
+                .ok_or(StoreError::NotFound);
+        }
+        let id = item.id.clone();
         tx.execute("INSERT INTO clipboard_items (id,content_ciphertext,nonce,content_type,content_hash,created_at,app_bundle_id,app_name,payload_metadata,content_bytes) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![item.id,item.content_ciphertext,item.nonce,item.content_type,item.content_hash,item.created_at,item.app_bundle_id,item.app_name,item.payload_metadata,item.content_ciphertext.len()+item.payload_metadata.as_ref().map_or(0, String::len)])?;
         tx.execute(
             "INSERT INTO file_references VALUES (?1,?2,?3,?4)",
@@ -134,7 +172,9 @@ impl Store {
         )?;
         tx.commit()?;
         drop(conn);
-        self.get(&item.id)?.ok_or(StoreError::NotFound)
+        self.get(&id)?
+            .map(crate::Ingested::Stored)
+            .ok_or(StoreError::NotFound)
     }
     pub fn retains_file_reference(&self, reference: &str) -> Result<bool, StoreError> {
         Ok(self.conn()?.query_row("SELECT EXISTS(SELECT 1 FROM file_references f JOIN clipboard_items i ON i.id=f.item_id WHERE f.reference=?1 AND i.deleted=0)", [reference], |row| row.get(0))?)

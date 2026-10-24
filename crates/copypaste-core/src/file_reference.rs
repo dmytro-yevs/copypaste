@@ -50,6 +50,91 @@ fn modified(metadata: &std::fs::Metadata) -> Option<String> {
     Some(format!("{}.{:09}", value.as_secs(), value.subsec_nanos()))
 }
 
+/// The accepted file reference owns only metadata, including across commit retries.
+pub struct FileReference {
+    reference: String,
+    size: u64,
+    modified: Option<String>,
+}
+
+impl FileReference {
+    pub fn prepare(
+        reference: &str,
+        limit: u64,
+        size_hint: Option<u64>,
+    ) -> Result<Self, FileTransferError> {
+        let (size, stamp) = if reference.starts_with("content://") {
+            (
+                size_hint.ok_or_else(|| {
+                    FileTransferError::Remote(
+                        "The file provider did not report its size. Choose a local file.".into(),
+                    )
+                })?,
+                None,
+            )
+        } else {
+            let metadata = std::fs::metadata(reference).map_err(|error| match error.kind() {
+                std::io::ErrorKind::NotFound => FileTransferError::SourceMissing,
+                std::io::ErrorKind::PermissionDenied => FileTransferError::PermissionDenied,
+                _ => FileTransferError::Read,
+            })?;
+            if !metadata.is_file() {
+                return Err(FileTransferError::NotFile);
+            }
+            (metadata.len(), modified(&metadata))
+        };
+        if size > limit {
+            return Err(FileTransferError::TooLarge { size, limit });
+        }
+        Ok(Self {
+            reference: reference.into(),
+            size,
+            modified: stamp,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish(
+        &self,
+        store: &Store,
+        key: &crate::ItemKey,
+        mut metadata: crate::FileMetadata,
+        created_at: i64,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        context: Option<&crate::PayloadMetadata>,
+        settings: &copypaste_ipc::ConfigData,
+        explicit: bool,
+    ) -> Result<crate::Ingested, FileTransferError> {
+        metadata.source_reference = Some(self.reference.clone());
+        let offer = file_transfer::FileTransfer {
+            size_bytes: self.size,
+            sha256: String::new(),
+            source_version: Some(uuid::Uuid::new_v4().simple().to_string()),
+        };
+        file_transfer::check_limit(&offer, settings.capture_limit_bytes("file"))?;
+        let item = file_transfer::offer_item(
+            &offer,
+            key,
+            metadata,
+            created_at,
+            app_bundle_id,
+            app_name,
+            context,
+            explicit,
+        )?;
+        let result = store.insert_file_reference(
+            item,
+            &self.reference,
+            self.size,
+            self.modified.as_deref(),
+            !explicit,
+        )?;
+        crate::ingest::enforce_retention(store, settings);
+        Ok(result)
+    }
+}
+
 pub fn import(
     store: &Store,
     keyring: &Keyring,
@@ -73,44 +158,24 @@ pub fn import(
         None,
     );
     let result = (|| {
-        let (size, stamp) = if reference.starts_with("content://") {
-            // Opening a provider descriptor can start a cloud download. Selection
-            // uses picker metadata only; the descriptor belongs to transfer time.
-            let size = size_hint.ok_or_else(|| {
-                FileTransferError::Remote(
-                    "The file provider did not report its size. Choose a local file.".into(),
-                )
-            })?;
-            (size, None)
-        } else {
-            let source = open(reference)?;
-            let metadata = source.metadata().map_err(|_| FileTransferError::Read)?;
-            if !metadata.is_file() {
-                return Err(FileTransferError::NotFile);
-            }
-            (metadata.len(), modified(&metadata))
-        };
-        let offer = file_transfer::FileTransfer {
-            size_bytes: size,
-            sha256: String::new(),
-            source_version: Some(uuid::Uuid::new_v4().simple().to_string()),
-        };
-        file_transfer::check_limit(&offer, settings.capture_limit_bytes("file"))?;
+        let prepared =
+            FileReference::prepare(reference, settings.capture_limit_bytes("file"), size_hint)?;
         let attributes = crate::FileMetadata::with_source_reference(name, mime, reference)
             .ok_or(FileTransferError::InvalidMetadata)?;
-        let item = file_transfer::offer_item(
-            &offer,
-            &keyring.item_key(),
-            attributes,
-            crate::now_ms(),
-            None,
-            None,
-            None,
-            true,
-        )?;
-        let row = store.insert_file_reference(item, reference, size, stamp.as_deref())?;
-        job.item(&row.id, size);
-        crate::ingest::enforce_retention(store, settings);
+        let row = prepared
+            .publish(
+                store,
+                &keyring.item_key(),
+                attributes,
+                crate::now_ms(),
+                None,
+                None,
+                None,
+                settings,
+                true,
+            )?
+            .into_item();
+        job.item(&row.id, prepared.size);
         Ok(row)
     })();
     job.finish(
@@ -203,6 +268,98 @@ impl DeferredFileSource for Source {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capturing_a_large_reference_preserves_history_and_recopy_uses_the_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.bin");
+        let size = 15 * 1024 * 1024 * 1024;
+        File::create(&path).unwrap().set_len(size).unwrap();
+        let keyring = Keyring::from_secret(&[61; 32]);
+        let store = Store::open_in_memory(&keyring.db_key()).unwrap();
+        let settings = copypaste_ipc::ConfigData {
+            storage_quota_bytes: 50 * 1024 * 1024,
+            max_file_size_bytes: 20 * 1024 * 1024 * 1024,
+            ..Default::default()
+        };
+        let older = crate::ingest_into(&store, &keyring, "keep my history", "text", 1, &settings)
+            .unwrap()
+            .into_item();
+        let metadata = crate::FileMetadata::with_source_reference(
+            "large.bin",
+            "application/octet-stream",
+            path.to_str().unwrap(),
+        )
+        .unwrap();
+        let prepared =
+            FileReference::prepare(path.to_str().unwrap(), settings.max_file_size_bytes, None)
+                .unwrap();
+        let first = prepared
+            .publish(
+                &store,
+                &keyring.item_key(),
+                metadata.clone(),
+                2,
+                None,
+                None,
+                None,
+                &settings,
+                false,
+            )
+            .unwrap()
+            .into_item();
+        assert!(store.get(&older.id).unwrap().is_some());
+        assert_eq!(store.count().unwrap(), 2);
+        assert!(!store.has_file_transfer(&first.id).unwrap());
+        assert_eq!(store.file_reference(&first.id).unwrap().unwrap().1, size);
+        store.set_pinned(&first.id, true).unwrap();
+        let recopy = prepared
+            .publish(
+                &store,
+                &keyring.item_key(),
+                metadata,
+                3,
+                None,
+                None,
+                None,
+                &settings,
+                false,
+            )
+            .unwrap();
+        assert!(matches!(recopy, crate::Ingested::Duplicate(_)));
+        let recopy = recopy.into_item();
+        assert_eq!(recopy.id, first.id);
+        assert!(recopy.pinned);
+        assert_eq!(store.count().unwrap(), 2);
+        let origin = crate::history_item::ItemOrigin {
+            device_id: "local".into(),
+            device_name: None,
+            device_class: Default::default(),
+        };
+        let copy = crate::history_actions::prepare_copy(
+            &store,
+            &keyring.item_key(),
+            crate::history_actions::open(&store, &keyring.item_key(), &first.id).unwrap(),
+            crate::history_actions::CopyOptions {
+                origin: &origin,
+                local_device_id: "local",
+                plain_text: false,
+                allow_content_uri: false,
+                max_file_size_bytes: settings.max_file_size_bytes,
+            },
+        )
+        .unwrap();
+        let crate::ClipboardPayload::File {
+            bytes,
+            metadata: Some(metadata),
+        } = copy.payload()
+        else {
+            panic!("file reference expected")
+        };
+        assert!(bytes.is_empty());
+        assert!(metadata.transfer.is_none());
+        assert_eq!(metadata.source_reference.as_deref(), path.to_str());
+    }
+
     #[test]
     fn uri_selection_registers_metadata_without_opening_the_provider() {
         let keyring = Keyring::from_secret(&[46; 32]);

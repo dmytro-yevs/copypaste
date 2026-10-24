@@ -103,6 +103,15 @@ impl StagingArea {
 
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
         let filename = safe_filename(metadata)?;
+        if bytes.is_empty() && metadata.transfer.is_none() {
+            if let Some(reference) = metadata.source_reference.as_deref() {
+                let path = PathBuf::from(reference);
+                if path.is_absolute() && path.is_file() {
+                    return Ok(path);
+                }
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+        }
         // Declared before the lock, so the worker this paste-back replaces is
         // joined only once the lock is released — including when `stage`
         // unwinds. A dying worker takes that lock for its final sweep, so a
@@ -460,6 +469,26 @@ mod tests {
     use super::testutil::CapturedLog;
     use super::worker::Doom;
     use super::*;
+
+    #[test]
+    fn original_reference_does_not_create_staging_or_start_a_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("original.bin");
+        File::create(&source)
+            .unwrap()
+            .set_len(15 * 1024 * 1024 * 1024)
+            .unwrap();
+        let staging = StagingArea::new(directory.path()).unwrap();
+        let metadata = FileMetadata::with_source_reference(
+            "original.bin",
+            "application/octet-stream",
+            source.to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(staging.materialize(&[], &metadata).unwrap(), source);
+        assert_eq!(std::fs::read_dir(staging.root()).unwrap().count(), 0);
+        assert_eq!(staging.worker_starts(), 0);
+    }
 
     impl StagingArea {
         fn has_live_cleanup(&self) -> bool {

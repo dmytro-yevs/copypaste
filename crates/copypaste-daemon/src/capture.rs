@@ -267,7 +267,7 @@ enum CaptureOutcome {
     AuthorityUnavailable,
 }
 struct PendingCapture {
-    file_snapshot: Option<copypaste_core::file_transfer::FileSnapshot>,
+    file_reference: Option<copypaste_core::file_reference::FileReference>,
     capture: crate::clipboard::Capture,
     created_at: i64,
     privacy_epoch: u64,
@@ -293,33 +293,43 @@ fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
                 let capture = state
                     .clipboard()
                     .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings));
-                let Some(mut capture) = capture else {
+                let Some(capture) = capture else {
                     return CaptureOutcome::NoCapture;
                 };
-                // A deferred desktop file becomes an immutable owned payload
-                // before it is accepted into Pending, under the same authority.
+                // Accept only the source reference and metadata; no file body is read.
                 if !crate::clipboard::CapturePolicy::new(&settings).allows_materialized(&capture) {
                     return CaptureOutcome::PolicyCancelled;
                 }
-                if let Err(reason) = normalize_file_capture(&mut capture, &settings) {
-                    reject_file_input(reason);
-                    return CaptureOutcome::InputRejected;
-                }
-                let file_snapshot = if let Some(path) = capture.file_path.as_ref() {
-                    match copypaste_core::file_transfer::FileSnapshot::prepare(
-                        &state.store,
-                        &state.keyring.item_key(),
-                        path,
+                let file_reference = if let Some(path) = capture.file_path.as_ref() {
+                    #[cfg(test)]
+                    crate::clipboard::file_capture::note_test_open();
+                    let Some(reference) = path.to_str() else {
+                        reject_file_input(
+                            crate::clipboard::file_capture::FileReadError::OpenFailed,
+                        );
+                        return CaptureOutcome::InputRejected;
+                    };
+                    match copypaste_core::file_reference::FileReference::prepare(
+                        reference,
                         settings.capture_limit_bytes("file"),
+                        None,
                     ) {
-                        Ok(snapshot) => {
-                            info!("file capture materialized");
-                            Some(snapshot)
+                        Ok(reference) => {
+                            info!("file capture reference accepted");
+                            Some(reference)
                         }
-                        Err(_) => {
-                            reject_file_input(
-                                crate::clipboard::file_capture::FileReadError::ReadFailed,
-                            );
+                        Err(error) => {
+                            use crate::clipboard::file_capture::FileReadError;
+                            use copypaste_core::file_transfer::FileTransferError;
+                            reject_file_input(match error {
+                                FileTransferError::SourceMissing => FileReadError::OpenNotFound,
+                                FileTransferError::PermissionDenied => {
+                                    FileReadError::OpenPermissionDenied
+                                }
+                                FileTransferError::NotFile => FileReadError::NonRegular,
+                                FileTransferError::TooLarge { .. } => FileReadError::TooLarge,
+                                _ => FileReadError::ReadFailed,
+                            });
                             return CaptureOutcome::InputRejected;
                         }
                     }
@@ -327,7 +337,7 @@ fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
                     None
                 };
                 *slot = Some(PendingCapture {
-                    file_snapshot,
+                    file_reference,
                     capture,
                     created_at: copypaste_core::now_ms(),
                     privacy_epoch,
@@ -360,10 +370,11 @@ fn persist_pending(
     if let Some(outcome) = test_persist_outcome() {
         return outcome;
     }
-    let ingested = if let Some(snapshot) = &pending.file_snapshot {
+    let ingested = if let Some(reference) = &pending.file_reference {
         let capture = &pending.capture;
-        snapshot
+        reference
             .publish(
+                &state.store,
                 &state.keyring.item_key(),
                 capture
                     .file_metadata
@@ -374,6 +385,7 @@ fn persist_pending(
                 capture.app_name.as_deref(),
                 capture_metadata(capture).as_ref(),
                 &settings,
+                false,
             )
             .map_err(|error| match error {
                 copypaste_core::file_transfer::FileTransferError::Storage(error) => {
@@ -492,22 +504,30 @@ pub(crate) fn ingest_capture(
         (copypaste_ipc::content_type::FILE, None, Some(path), Some(metadata))
             if metadata.is_valid() =>
         {
-            copypaste_core::file_transfer::import(
-                &state.store,
-                &state.keyring,
-                path,
-                metadata.clone(),
-                created_at,
-                capture.app_bundle_id.as_deref(),
-                capture.app_name.as_deref(),
-                payload_metadata.as_ref(),
-                settings,
-                false,
+            copypaste_core::file_reference::FileReference::prepare(
+                path.to_str().ok_or(IngestError::InvalidMetadata)?,
+                settings.capture_limit_bytes("file"),
+                None,
             )
-            .map(Ingested::Stored)
+            .and_then(|reference| {
+                reference.publish(
+                    &state.store,
+                    &state.keyring.item_key(),
+                    metadata.clone(),
+                    created_at,
+                    capture.app_bundle_id.as_deref(),
+                    capture.app_name.as_deref(),
+                    payload_metadata.as_ref(),
+                    settings,
+                    false,
+                )
+            })
             .map_err(|error| match error {
                 copypaste_core::file_transfer::FileTransferError::TooLarge { .. } => {
                     IngestError::TooLarge
+                }
+                copypaste_core::file_transfer::FileTransferError::Storage(error) => {
+                    IngestError::Storage(error)
                 }
                 _ => IngestError::InvalidMetadata,
             })
@@ -600,29 +620,6 @@ fn capture_metadata_with(
 
 fn reject_file_input(reason: crate::clipboard::file_capture::FileReadError) {
     warn!(message = reason.message());
-}
-
-fn normalize_file_capture(
-    capture: &mut crate::clipboard::Capture,
-    settings: &copypaste_ipc::ConfigData,
-) -> Result<(), crate::clipboard::file_capture::FileReadError> {
-    if let Some(path) = capture.file_path.as_ref() {
-        #[cfg(test)]
-        crate::clipboard::file_capture::note_test_open();
-        use crate::clipboard::file_capture::FileReadError;
-        let metadata = std::fs::metadata(path).map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => FileReadError::OpenNotFound,
-            std::io::ErrorKind::PermissionDenied => FileReadError::OpenPermissionDenied,
-            _ => FileReadError::OpenFailed,
-        })?;
-        if !metadata.is_file() {
-            return Err(FileReadError::NonRegular);
-        }
-        if metadata.len() > settings.capture_limit_bytes(copypaste_ipc::content_type::FILE) {
-            return Err(FileReadError::TooLarge);
-        }
-    }
-    Ok(())
 }
 
 pub fn ingest(
@@ -1314,7 +1311,7 @@ mod tests {
     }
 
     #[test]
-    fn file_capture_reads_one_bounded_local_file_and_persists_its_path() {
+    fn file_capture_registers_the_original_path_without_storing_a_body() {
         let (state, dir) = test_state("file-capture");
         let path = dir.path().join("fixture.bin");
         let bytes = b"synthetic file fixture".to_vec();
@@ -1326,7 +1323,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut capture = crate::clipboard::Capture {
+        let capture = crate::clipboard::Capture {
             privacy: Default::default(),
             content: String::new(),
             binary_content: None,
@@ -1337,7 +1334,6 @@ mod tests {
             app_name: None,
             source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
         };
-        normalize_file_capture(&mut capture, &state.settings.get()).unwrap();
         let stored = ingest_capture(
             &state,
             &state.settings.get(),
@@ -1366,17 +1362,10 @@ mod tests {
             })
         );
         assert!(state.store.search("fixture", 10).unwrap().is_empty());
-        let saved = dir.path().join("captured-copy.bin");
-        copypaste_core::file_transfer::save_local(
-            &state.store,
-            &state.keyring.item_key(),
-            &stored.id,
-            &saved,
-            u64::MAX,
-            || false,
-        )
-        .unwrap();
-        assert_eq!(std::fs::read(saved).unwrap(), bytes);
+        assert!(!state.store.has_file_transfer(&stored.id).unwrap());
+        let reference = state.store.file_reference(&stored.id).unwrap().unwrap();
+        assert_eq!(reference.0, capture.file_path.unwrap().to_str().unwrap());
+        assert_eq!(reference.1, bytes.len() as u64);
     }
 
     #[test]
@@ -1395,7 +1384,7 @@ mod tests {
         let metadata =
             copypaste_core::FileMetadata::new("oversized.bin", "application/octet-stream").unwrap();
 
-        let mut capture = crate::clipboard::Capture {
+        let capture = crate::clipboard::Capture {
             privacy: Default::default(),
             content: String::new(),
             binary_content: None,
@@ -1406,10 +1395,10 @@ mod tests {
             app_name: None,
             source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
         };
-        assert_eq!(
-            normalize_file_capture(&mut capture, &settings),
-            Err(crate::clipboard::file_capture::FileReadError::TooLarge)
-        );
+        assert!(matches!(
+            ingest_capture(&state, &settings, &capture, copypaste_core::now_ms()),
+            Err(IngestError::TooLarge)
+        ));
         assert_eq!(state.store.count().unwrap(), 0);
     }
 
@@ -1589,7 +1578,7 @@ mod tests {
     }
 
     #[test]
-    fn file_pending_freezes_bytes_metadata_evidence_and_time_across_busy_mutation_and_deletion() {
+    fn file_pending_keeps_only_reference_metadata_across_busy_mutation_and_deletion() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("private-file-token");
         let original = b"private payload token".to_vec();
@@ -1613,16 +1602,11 @@ mod tests {
             frozen.binary_content.is_none(),
             "Pending files must not retain a file-sized plaintext vector"
         );
-        let snapshot = slot.as_ref().unwrap().file_snapshot.as_ref().unwrap();
-        assert_eq!(snapshot.transfer.size_bytes, original.len() as u64);
-        assert_eq!(
-            snapshot.transfer.sha256,
-            copypaste_p2p::protocol::plaintext_content_hash(&original)
-        );
+        assert!(slot.as_ref().unwrap().file_reference.is_some());
         assert_eq!(
             state.store.count().unwrap(),
             0,
-            "An unpublished snapshot must not appear in History"
+            "An unpublished reference must not appear in History"
         );
         assert!(events.try_recv().is_err());
         std::fs::write(&path, b"replacement token").unwrap();
@@ -1644,17 +1628,14 @@ mod tests {
             .unwrap();
         assert_eq!(stored.created_at, time);
         assert_eq!(stored.app_bundle_id.as_deref(), Some("SyntheticOwner"));
-        let recovered = dir.path().join("recovered");
-        copypaste_core::file_transfer::save_local(
-            &state.store,
-            &state.keyring.item_key(),
-            &stored.id,
-            &recovered,
-            u64::MAX,
-            || false,
-        )
-        .unwrap();
-        assert_eq!(std::fs::read(recovered).unwrap(), original);
+        assert!(!state.store.has_file_transfer(&stored.id).unwrap());
+        let reference = state.store.file_reference(&stored.id).unwrap().unwrap();
+        assert_eq!(reference.0, path.to_str().unwrap());
+        assert_eq!(reference.1, original.len() as u64);
+        assert!(matches!(
+            copypaste_core::file_reference::source(&state.store, &stored.id),
+            Err(copypaste_core::file_transfer::FileTransferError::SourceMissing)
+        ));
         assert_eq!(
             stored
                 .payload_metadata
@@ -1698,7 +1679,10 @@ mod tests {
         });
         assert!(!captured.contains("secret-structured-token"));
         assert!(!captured.contains("secret-debug-token"));
-        assert_eq!(captured.matches("file capture materialized").count(), 1);
+        assert_eq!(
+            captured.matches("file capture reference accepted").count(),
+            1
+        );
         assert_eq!(captured.matches("file capture stored").count(), 1);
         for token in [
             "secret-locator-token",
@@ -1779,7 +1763,7 @@ mod tests {
         assert!(log.contains("formatter boundary control"));
     }
     #[test]
-    fn default_runtime_log_materializes_once_across_busy_and_distinguishes_duplicate_commit() {
+    fn default_runtime_log_accepts_reference_once_across_busy_and_distinguishes_duplicate_commit() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secret-retry-file");
         std::fs::write(&path, b"secret-retry-bytes").unwrap();
@@ -1798,13 +1782,16 @@ mod tests {
             *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
             assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Stored));
         });
-        assert_eq!(log.matches("file capture materialized").count(), 1);
+        assert_eq!(log.matches("file capture reference accepted").count(), 1);
         assert_eq!(log.matches("file capture stored").count(), 1);
         assert!(!log.contains("file capture deduplicated"));
         let (_, duplicate) = copypaste_runtime_log::test_support::capture(|| {
             assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Stored));
         });
-        assert_eq!(duplicate.matches("file capture materialized").count(), 1);
+        assert_eq!(
+            duplicate.matches("file capture reference accepted").count(),
+            1
+        );
         assert_eq!(duplicate.matches("file capture deduplicated").count(), 1);
         assert!(!duplicate.contains("file capture stored"));
         for output in [&log, &duplicate] {

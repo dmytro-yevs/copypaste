@@ -1200,28 +1200,25 @@ impl Runtime {
         source_reference: Option<&str>,
         source_app: Option<&CaptureSourceApp>,
     ) -> Result<(), RuntimeError> {
+        if !content_type.starts_with("image/") {
+            return self.capture_file_operation(
+                token,
+                bytes.len() as u64,
+                filename.ok_or(RuntimeError::Capture)?,
+                content_type,
+                source_reference.ok_or(RuntimeError::Capture)?,
+                source_app,
+            );
+        }
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
-        let (stored_type, metadata) = if content_type.starts_with("image/") {
-            (content_type, None)
-        } else {
-            let filename = filename.ok_or(RuntimeError::Capture)?;
-            let source_reference = source_reference.ok_or(RuntimeError::Capture)?;
-            let metadata = copypaste_core::FileMetadata::with_source_reference(
-                filename,
-                content_type,
-                source_reference,
-            )
-            .ok_or(RuntimeError::Capture)?;
-            (copypaste_ipc::content_type::FILE, Some(metadata))
-        };
         let metadata = copypaste_core::PayloadMetadata {
             secret_override: None,
             privacy: permit.privacy,
-            file: metadata,
+            file: None,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
         };
         let metadata = (!metadata.privacy.is_empty()
@@ -1232,7 +1229,7 @@ impl Runtime {
             &self.store,
             &self.keyring,
             bytes,
-            stored_type,
+            content_type,
             now_ms(),
             source_app.map(|source| source.bundle_id.as_str()),
             source_app.and_then(|source| source.name.as_deref()),
@@ -1248,10 +1245,11 @@ impl Runtime {
     pub fn capture_file_operation(
         &self,
         token: u64,
-        path: &Path,
+        size_bytes: u64,
         filename: &str,
         mime_type: &str,
         reference: &str,
+        source_app: Option<&CaptureSourceApp>,
     ) -> Result<(), RuntimeError> {
         let mut permit = self
             .capture_admission()
@@ -1262,22 +1260,29 @@ impl Runtime {
                 .ok_or(RuntimeError::Capture)?;
         let context = copypaste_core::PayloadMetadata {
             privacy: permit.privacy,
+            source_app_icon: source_app.and_then(|source| source.icon.clone()),
             ..Default::default()
         };
-        let row = copypaste_core::file_transfer::import(
-            &self.store,
-            &self.keyring,
-            path,
-            metadata,
-            now_ms(),
-            None,
-            None,
-            Some(&context),
-            &permit.config,
-            false,
+        let reference = copypaste_core::file_reference::FileReference::prepare(
+            reference,
+            permit.config.capture_limit_bytes("file"),
+            Some(size_bytes),
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(row);
+        let row = reference
+            .publish(
+                &self.store,
+                &self.keyring.item_key(),
+                metadata,
+                now_ms(),
+                source_app.map(|source| source.bundle_id.as_str()),
+                source_app.and_then(|source| source.name.as_deref()),
+                Some(&context),
+                &permit.config,
+                false,
+            )
+            .map_err(|_| RuntimeError::Capture)?;
+        self.emit_capture(row.into_item());
         permit.committed();
         Ok(())
     }
@@ -1807,8 +1812,14 @@ impl Runtime {
             self.clipboard
                 .write(prepared.payload(), &prepared.content_type)
                 .map_err(copypaste_core::history_error::HistoryError::from)?;
-            self.instant_clipboard.note_local(&self.store, now_ms());
-            Ok::<_, copypaste_core::history_error::HistoryError>(prepared.item)
+            let item = history_actions::finish_copy(&self.store, prepared)?;
+            self.instant_clipboard
+                .note_local(&self.store, item.created_at);
+            self.node.note_local_version(item.created_at);
+            self.modules.note_version(item.created_at);
+            self.peer_sync.wake();
+            self.emit(EventKind::Items);
+            Ok::<_, copypaste_core::history_error::HistoryError>(item)
         })();
         match result {
             Ok(item) => Response::ok(request_id, ResponseData::Item(item)),
@@ -2751,12 +2762,48 @@ mod tests {
         let clipboard = Arc::new(RecordingClipboard::default());
         let (runtime, _dir) = fixture_with(clipboard.clone());
         seed_text(&runtime, "text-item", "trusted text");
+        seed_text(&runtime, "z-newer", "another clip");
+        let mut events = runtime.events.subscribe();
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "z-newer");
         assert!(runtime.copy(1, "text-item", false).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "text-item");
+        let first_stamp = runtime.store.get("text-item").unwrap().unwrap().created_at;
+        let event = events.try_recv().unwrap();
+        assert_eq!(event.event, EventKind::Items);
+        assert!(!event.captured);
+        assert!(runtime.copy(2, "z-newer", false).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "z-newer");
         assert!(runtime.copy(2, "text-item", true).ok);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "text-item");
+        assert!(runtime.store.get("text-item").unwrap().unwrap().created_at > first_stamp);
+        assert_eq!(runtime.store.count().unwrap(), 2);
         assert_eq!(
             *clipboard.0.lock().unwrap(),
-            vec!["text:trusted text", "text:trusted text"]
+            vec![
+                "text:trusted text",
+                "text:another clip",
+                "text:trusted text"
+            ]
         );
+    }
+
+    #[test]
+    fn a_failed_copy_does_not_promote_history_or_emit_a_change() {
+        struct RefusingClipboard;
+        impl ClipboardWriter for RefusingClipboard {
+            fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
+                Err(ClipboardWriteError::Failed)
+            }
+        }
+        let (runtime, _dir) = fixture_with(Arc::new(RefusingClipboard));
+        seed_text(&runtime, "text-item", "trusted text");
+        let mut events = runtime.events.subscribe();
+        assert!(!runtime.copy(1, "text-item", false).ok);
+        assert_eq!(
+            runtime.store.get("text-item").unwrap().unwrap().created_at,
+            1
+        );
+        assert!(events.try_recv().is_err());
     }
 
     #[test]
@@ -3138,12 +3185,16 @@ mod tests {
             vec!["file:content://documents/paper.pdf"]
         );
         let destination = dir.path().join("paper.pdf");
+        assert!(!runtime.store.has_file_transfer(&row.id).unwrap());
+        assert!(runtime.store.file_reference(&row.id).unwrap().is_some());
+        // This fixture has no provider resolver: capture retained only the URI,
+        // so it cannot recover a hidden copy of the supplied compatibility bytes.
         assert!(
-            runtime
+            !runtime
                 .save_file(3, &row.id, &destination.to_string_lossy())
                 .ok
         );
-        assert_eq!(std::fs::read(destination).unwrap(), b"file bytes");
+        assert!(!destination.exists());
     }
 
     #[test]
@@ -3159,12 +3210,17 @@ mod tests {
             )
             .unwrap();
         let source = runtime.store.list(1, 0).unwrap().pop().unwrap();
+        let ClipboardPayload::File { bytes: offer, .. } =
+            ClipboardPayload::open(&source, &runtime.keyring.item_key()).unwrap()
+        else {
+            panic!("expected file offer")
+        };
         assert!(runtime
             .source
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "received-paper",
                 content: "",
-                binary_content: Some(b"file bytes"),
+                binary_content: Some(&offer),
                 payload_metadata: source.payload_metadata.as_deref(),
                 content_type: copypaste_ipc::content_type::FILE,
                 created_at: copypaste_core::now_ms() + 1,
@@ -3176,8 +3232,8 @@ mod tests {
             })
             .unwrap());
         clipboard.0.lock().unwrap().clear();
-        assert!(runtime.copy(1, "received-paper", false).ok);
-        assert_eq!(*clipboard.0.lock().unwrap(), ["file:"]);
+        assert!(!runtime.copy(1, "received-paper", false).ok);
+        assert!(clipboard.0.lock().unwrap().is_empty());
     }
 
     #[test]
