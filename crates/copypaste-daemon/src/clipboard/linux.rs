@@ -1796,15 +1796,15 @@ mod tests {
         };
         let (type_, value) = match request.target {
             target if target == atoms.targets => {
-                let mut targets = vec![atoms.targets, atoms.utf8];
+                let mut targets = vec![atoms.targets];
                 match payload {
                     FixturePayload::Tiff(_) => targets.push(atoms.tiff),
                     FixturePayload::File(_) => targets.push(atoms.uri_list),
-                    FixturePayload::Secret => targets.push(atoms.kde_hint),
+                    FixturePayload::Secret => targets.extend([atoms.utf8, atoms.kde_hint]),
                     FixturePayload::Text(_)
                     | FixturePayload::IncompleteIncr
                     | FixturePayload::Oversized
-                    | FixturePayload::Stalled => {}
+                    | FixturePayload::Stalled => targets.push(atoms.utf8),
                 }
                 let delivered = connection.change_property32(
                     PropMode::REPLACE,

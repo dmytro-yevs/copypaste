@@ -57,7 +57,10 @@ class WindowsOnboardingController extends OnboardingController {
   }
 
   void showSetup() {
-    if (busy || complete || disposed || _step != WindowsOnboardingStep.welcome) {
+    if (busy ||
+        complete ||
+        disposed ||
+        _step != WindowsOnboardingStep.welcome) {
       return;
     }
     _step = WindowsOnboardingStep.setup;
