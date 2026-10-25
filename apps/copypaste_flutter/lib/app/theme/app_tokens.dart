@@ -1,8 +1,10 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-enum AppStatusTone { muted, info, success, error }
+enum AppStatusTone { muted, info, success, warning, error }
 
 abstract final class AppStatusColor {
+  static const warningLight = Color(0xFFB45309);
+  static const warningDark = Color(0xFFFBBF24);
   static const infoLight = Color(0xFF2563EB);
   static const infoDark = Color(0xFF60A5FA);
   static const successLight = Color(0xFF15803D);

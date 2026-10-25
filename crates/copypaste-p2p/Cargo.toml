@@ -51,9 +51,9 @@ if-addrs = "0.15"
 sysctl = "0.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# The registry supplies the product model. Chassis class comes from Windows
-# management data, queried without adding a second Rust Windows binding.
+# The registry supplies the product model; firmware supplies the chassis class.
 winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 image.workspace = true

@@ -7,8 +7,8 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -243,6 +243,9 @@ Future<Clip> copyClip({required String id}) =>
 
 Future<Clip> copyClipAsPlainText({required String id}) =>
     RustLib.instance.api.crateApiCopyClipAsPlainText(id: id);
+
+Future<void> copyClipText({required String id, required String text}) =>
+    RustLib.instance.api.crateApiCopyClipText(id: id, text: text);
 
 Future<void> saveClipFile({
   required String id,
@@ -1344,6 +1347,10 @@ class RuntimePeerSyncStatus {
   final BigInt received;
   final BigInt skippedTooLarge;
   final String? error;
+  final DevicePresenceState connection;
+  final bool checking;
+  final bool addressKnown;
+  final List<RuntimeSyncIssue> issues;
 
   const RuntimePeerSyncStatus({
     required this.pairingId,
@@ -1355,6 +1362,10 @@ class RuntimePeerSyncStatus {
     required this.received,
     required this.skippedTooLarge,
     this.error,
+    required this.connection,
+    required this.checking,
+    required this.addressKnown,
+    required this.issues,
   });
 
   @override
@@ -1367,7 +1378,11 @@ class RuntimePeerSyncStatus {
       sent.hashCode ^
       received.hashCode ^
       skippedTooLarge.hashCode ^
-      error.hashCode;
+      error.hashCode ^
+      connection.hashCode ^
+      checking.hashCode ^
+      addressKnown.hashCode ^
+      issues.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1382,7 +1397,11 @@ class RuntimePeerSyncStatus {
           sent == other.sent &&
           received == other.received &&
           skippedTooLarge == other.skippedTooLarge &&
-          error == other.error;
+          error == other.error &&
+          connection == other.connection &&
+          checking == other.checking &&
+          addressKnown == other.addressKnown &&
+          issues == other.issues;
 }
 
 class RuntimeSettingsData {
@@ -1537,19 +1556,126 @@ class RuntimeSettingsPatch {
           soundOnCopy == other.soundOnCopy;
 }
 
+class RuntimeSyncIssue {
+  final String code;
+  final String scope;
+  final String title;
+  final String message;
+  final String severity;
+  final bool blocking;
+  final bool pending;
+  final PlatformInt64 sinceMs;
+  final BigInt count;
+
+  const RuntimeSyncIssue({
+    required this.code,
+    required this.scope,
+    required this.title,
+    required this.message,
+    required this.severity,
+    required this.blocking,
+    required this.pending,
+    required this.sinceMs,
+    required this.count,
+  });
+
+  @override
+  int get hashCode =>
+      code.hashCode ^
+      scope.hashCode ^
+      title.hashCode ^
+      message.hashCode ^
+      severity.hashCode ^
+      blocking.hashCode ^
+      pending.hashCode ^
+      sinceMs.hashCode ^
+      count.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimeSyncIssue &&
+          runtimeType == other.runtimeType &&
+          code == other.code &&
+          scope == other.scope &&
+          title == other.title &&
+          message == other.message &&
+          severity == other.severity &&
+          blocking == other.blocking &&
+          pending == other.pending &&
+          sinceMs == other.sinceMs &&
+          count == other.count;
+}
+
+class RuntimeSyncLogEntry {
+  final String pairingId;
+  final PlatformInt64 timestampMs;
+  final String kind;
+  final String? error;
+  final BigInt sent;
+  final BigInt received;
+  final String? issueTitle;
+  final String? issueSeverity;
+
+  const RuntimeSyncLogEntry({
+    required this.pairingId,
+    required this.timestampMs,
+    required this.kind,
+    this.error,
+    required this.sent,
+    required this.received,
+    this.issueTitle,
+    this.issueSeverity,
+  });
+
+  @override
+  int get hashCode =>
+      pairingId.hashCode ^
+      timestampMs.hashCode ^
+      kind.hashCode ^
+      error.hashCode ^
+      sent.hashCode ^
+      received.hashCode ^
+      issueTitle.hashCode ^
+      issueSeverity.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimeSyncLogEntry &&
+          runtimeType == other.runtimeType &&
+          pairingId == other.pairingId &&
+          timestampMs == other.timestampMs &&
+          kind == other.kind &&
+          error == other.error &&
+          sent == other.sent &&
+          received == other.received &&
+          issueTitle == other.issueTitle &&
+          issueSeverity == other.issueSeverity;
+}
+
 class RuntimeSyncStatus {
   final BigInt revision;
   final SyncPhase phase;
   final List<RuntimePeerSyncStatus> peers;
+  final List<RuntimeSyncLogEntry> log;
+  final bool diagnosticsAvailable;
 
   const RuntimeSyncStatus({
     required this.revision,
     required this.phase,
     required this.peers,
+    required this.log,
+    required this.diagnosticsAvailable,
   });
 
   @override
-  int get hashCode => revision.hashCode ^ phase.hashCode ^ peers.hashCode;
+  int get hashCode =>
+      revision.hashCode ^
+      phase.hashCode ^
+      peers.hashCode ^
+      log.hashCode ^
+      diagnosticsAvailable.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1558,7 +1684,9 @@ class RuntimeSyncStatus {
           runtimeType == other.runtimeType &&
           revision == other.revision &&
           phase == other.phase &&
-          peers == other.peers;
+          peers == other.peers &&
+          log == other.log &&
+          diagnosticsAvailable == other.diagnosticsAvailable;
 }
 
 /// Revisioned, content-free local spoiler visibility. Never synchronized to peers.

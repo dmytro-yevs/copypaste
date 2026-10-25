@@ -129,11 +129,36 @@ pub fn finish_copy(
     store: &Store,
     mut prepared: PreparedCopy,
 ) -> Result<copypaste_ipc::Item, HistoryError> {
-    prepared.item.created_at = store
-        .promote_copied(&prepared.item.id, crate::now_ms())
-        .map_err(HistoryError::Store)?
-        .ok_or(HistoryError::NotFound)?;
+    prepared.item.created_at = note_copy(store, &prepared.item.id)?;
     Ok(prepared.item)
+}
+
+/// Called only after a native writer has successfully copied content from this row.
+pub fn note_copy(store: &Store, id: &str) -> Result<i64, HistoryError> {
+    store
+        .promote_copied(id, crate::now_ms())
+        .map_err(HistoryError::Store)?
+        .ok_or(HistoryError::NotFound)
+}
+
+/// Copy a selected or derived text representation, preserving the source row.
+/// Metadata-only validation avoids loading an image/file body for an OCR copy.
+pub fn copy_text(
+    store: &Store,
+    id: &str,
+    text: &str,
+    write: impl FnOnce(&ClipboardPayload) -> Result<(), crate::ClipboardWriteError>,
+) -> Result<i64, HistoryError> {
+    store
+        .version_summary(id)
+        .map_err(HistoryError::Store)?
+        .filter(|version| !version.deleted)
+        .ok_or(HistoryError::NotFound)?;
+    if text.len() > copypaste_ipc::MAX_CONTENT_BYTES {
+        return Err(HistoryError::ContentTooLarge);
+    }
+    write(&ClipboardPayload::Text(text.to_owned().into()))?;
+    note_copy(store, id)
 }
 
 pub fn save_file(

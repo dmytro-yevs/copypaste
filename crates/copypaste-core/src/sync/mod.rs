@@ -13,6 +13,7 @@
 //! violate manifest 05 INV-C2.
 
 mod batch;
+pub(crate) mod diagnostics;
 mod instant_clipboard;
 mod merge;
 mod prepare;

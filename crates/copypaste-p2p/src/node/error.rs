@@ -31,6 +31,12 @@ pub enum NodeError {
     NoAddress,
     #[error("the sync session with the other device failed")]
     Session,
+    #[error("The connection was interrupted before synchronization finished. It will resume when the device reconnects.")]
+    ConnectionLost,
+    #[error("Clipboard history could not be read or saved on this device. Check available storage and try again.")]
+    HistoryUnavailable,
+    #[error("The other device sent invalid synchronization data. Update CopyPaste on both devices and try again.")]
+    InvalidData,
     #[error(
         "the two devices are running versions of CopyPaste that cannot sync with each other; update both and try again"
     )]
@@ -39,6 +45,10 @@ pub enum NodeError {
     Timeout,
     #[error("the paired-device list could not be updated")]
     PeerStore,
+    #[error("{0}")]
+    Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode),
+    #[error("Synchronization was cancelled.")]
+    Cancelled,
     /// [`crate::peers::MAX_PAIRINGS`] reached. The user has to decide which
     /// device to let go; nothing here will decide for them.
     #[error("this device is already paired with as many devices as it can hold; unpair one first")]
@@ -46,6 +56,33 @@ pub enum NodeError {
 }
 
 impl NodeError {
+    /// Pairing-form errors belong to that operation, not to the background
+    /// synchronization state. An unverified handshake failure proves neither
+    /// an invalid pairing nor protocol incompatibility.
+    pub(super) fn sync_issue(self) -> Option<copypaste_ipc::sync_issue::SyncIssueCode> {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        match self {
+            Self::PeerVersion => Some(Code::VersionMismatch),
+            Self::ConnectionLost => Some(Code::ConnectionLost),
+            Self::Timeout => Some(Code::TimedOut),
+            Self::HistoryUnavailable => Some(Code::HistoryUnavailable),
+            Self::InvalidData => Some(Code::InvalidPeerData),
+            Self::PeerStore => Some(Code::MembershipUnavailable),
+            Self::Session => Some(Code::UnknownFailure),
+            Self::Diagnostic(code) => Some(code),
+            Self::BadCode
+            | Self::BadAddress
+            | Self::Handshake
+            | Self::PairingBusy
+            | Self::NoPairing
+            | Self::SelfPairing
+            | Self::AlreadyPaired
+            | Self::NoPeer
+            | Self::NoAddress
+            | Self::TooManyPairings
+            | Self::Cancelled => None,
+        }
+    }
     /// Whether the caller can act on it — bad input, or a precondition they
     /// control — as opposed to something having gone wrong here. Callers map
     /// this onto their own error taxonomy.
@@ -85,9 +122,14 @@ mod tests {
         NodeError::NoPeer,
         NodeError::NoAddress,
         NodeError::Session,
+        NodeError::ConnectionLost,
+        NodeError::HistoryUnavailable,
+        NodeError::InvalidData,
         NodeError::PeerVersion,
         NodeError::Timeout,
         NodeError::PeerStore,
+        NodeError::Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode::VersionMismatch),
+        NodeError::Cancelled,
         NodeError::TooManyPairings,
     ];
 

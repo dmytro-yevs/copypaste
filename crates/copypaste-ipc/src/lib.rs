@@ -8,6 +8,7 @@ pub use clipboard_privacy::ClipboardPrivacy;
 pub mod content_type;
 pub use content_type::ContentClass;
 pub mod semantic_kind;
+pub mod sync_issue;
 pub mod sync_status;
 pub use semantic_kind::SemanticKind;
 pub use sync_status::{PeerSyncStatus, SyncPhase, SyncStatus};
@@ -162,6 +163,11 @@ pub enum Method {
     /// label such as `[image]`.
     CopyPlainText {
         id: String,
+    },
+    /// Copy selected or OCR-derived text and promote its originating history row.
+    CopyText {
+        id: String,
+        text: String,
     },
     /// One item by id, with its content, and **no side effects**.
     ///

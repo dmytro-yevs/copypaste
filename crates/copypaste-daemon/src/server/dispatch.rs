@@ -193,6 +193,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::HistoryFacets
         | Method::Copy { .. }
         | Method::CopyPlainText { .. }
+        | Method::CopyText { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
         | Method::SourceAppIcon { .. }
@@ -273,6 +274,7 @@ pub(super) fn interactive(method: &Method) -> bool {
         method,
         Method::Copy { .. }
             | Method::CopyPlainText { .. }
+            | Method::CopyText { .. }
             | Method::Add { .. }
             | Method::Delete { .. }
             | Method::Pin { .. }
@@ -582,6 +584,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         } => items::set_spoiler_revealed(state, id, item_id.as_deref(), revealed),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
+        Method::CopyText { id: item_id, text } => items::copy_text(state, id, &item_id, &text),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
         Method::ImagePreview {
             id: item_id,

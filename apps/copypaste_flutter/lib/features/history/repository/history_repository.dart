@@ -24,6 +24,7 @@ abstract interface class HistoryRepository {
   Future<HistorySourceAppIcon?> sourceAppIcon(String id);
   Future<void> copy(String id);
   Future<void> copyPlainText(String id);
+  Future<void> copyText(String id, String text);
   Future<void> saveFile(String id, String destinationPath);
   Future<void> importFile(HistoryImportFile file);
   Future<HistoryClip> setSecret(String id, bool secret);

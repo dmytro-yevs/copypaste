@@ -9,6 +9,21 @@ pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
 pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
     copy_with(state, id, item_id, true)
 }
+pub(crate) fn copy_text(state: &AppState, id: u64, item_id: &str, text: &str) -> Response {
+    match history_actions::copy_text(&state.store, item_id, text, |payload| {
+        state
+            .clipboard()
+            .write_payload(item_id, payload, copypaste_ipc::content_type::TEXT)
+    }) {
+        Ok(stamp) => {
+            state.instant_clipboard.note_local(&state.store, stamp);
+            state.p2p.node().note_local_version(stamp);
+            state.note_local_change();
+            Response::ok(id, ResponseData::Empty {})
+        }
+        Err(error) => error.response(id),
+    }
+}
 fn copy_with(state: &AppState, id: u64, item_id: &str, plain_text: bool) -> Response {
     let key = state.keyring.item_key();
     let result = (|| {

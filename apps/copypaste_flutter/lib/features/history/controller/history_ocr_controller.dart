@@ -12,15 +12,19 @@ class HistoryOcrController extends ChangeNotifier {
     required ModulesController modules,
     required HistoryImageInput imageInput,
     ClipboardWriter clipboard = const SystemClipboardWriter(),
+    Future<void> Function(String id, String text)? copyText,
   }) : _modules = modules,
        _imageInput = imageInput,
-       _clipboard = clipboard {
+       _clipboard = clipboard,
+       _copyText = copyText {
     _modules.addListener(_modulesChanged);
   }
 
   final ModulesController _modules;
   final HistoryImageInput _imageInput;
   final ClipboardWriter _clipboard;
+  final Future<void> Function(String id, String text)? _copyText;
+  String? _clipId;
   bool _busy = false;
   bool _disposed = false;
   String? _text;
@@ -45,6 +49,7 @@ class HistoryOcrController extends ChangeNotifier {
     if (!canRun || clip.contentKind != HistoryClipKind.image) return;
     _busy = true;
     _text = null;
+    _clipId = clip.id;
     _error = null;
     notifyListeners();
     try {
@@ -85,8 +90,18 @@ class HistoryOcrController extends ChangeNotifier {
   Future<bool> copyText() async {
     final text = _text;
     if (_disposed || _busy || text == null || text.trim().isEmpty) return false;
+    return copySelection(text);
+  }
+
+  Future<bool> copySelection(String text) async {
+    if (_disposed || _busy || text.isEmpty) return false;
+    final id = _clipId;
     try {
-      await _clipboard.writeText(text);
+      if (id != null && _copyText != null) {
+        await _copyText(id, text);
+      } else {
+        await _clipboard.writeText(text);
+      }
       return true;
     } catch (_) {
       return false;

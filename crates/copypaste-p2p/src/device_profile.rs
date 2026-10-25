@@ -6,6 +6,10 @@ use copypaste_ipc::{DeviceClass, DevicePlatform};
 
 use crate::protocol::PROTOCOL_VERSION;
 
+#[cfg(any(target_os = "windows", test))]
+#[cfg_attr(target_os = "windows", allow(unsafe_code))]
+mod windows_firmware;
+
 /// Claims made by a device about itself. Trust comes from the channel carrying
 /// the value: mDNS is unverified, while the same value inside Noise is
 /// authenticated to the pairing key.
@@ -322,7 +326,7 @@ fn windows_hardware() -> NativeMetadata {
 #[cfg(target_os = "windows")]
 fn read_windows_hardware() -> NativeMetadata {
     NativeMetadata {
-        device_class: windows_chassis_class(),
+        device_class: windows_firmware::device_class(),
         model: windows_model(),
         ..NativeMetadata::default()
     }
@@ -340,36 +344,10 @@ fn windows_model() -> Option<String> {
         .and_then(|model| bounded_text(model, 128))
 }
 
-#[cfg(target_os = "windows")]
-fn windows_chassis_class() -> DeviceClass {
-    use std::os::windows::process::CommandExt;
-    let mut command = std::process::Command::new("powershell.exe");
-    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-    command.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "(Get-CimInstance -ClassName Win32_SystemEnclosure).ChassisTypes -join ','",
-    ]);
-    let output = command_output_with_timeout(&mut command, std::time::Duration::from_millis(250))
-        .filter(|output| output.status.success());
-    let Some(output) = output else {
-        return DeviceClass::Unknown;
-    };
-    let chassis_types = String::from_utf8_lossy(&output.stdout);
-    let types = chassis_types
-        .trim()
-        .split(',')
-        .filter_map(|value| value.trim().parse::<u8>().ok());
-    windows_device_class_from_chassis(types)
-}
-
 /// Runs a platform probe without ever allowing a child process to hold up
 /// discovery or runtime startup. A timed-out child is killed and reaped before
 /// returning the fallback value.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", test))]
 fn command_output_with_timeout(
     command: &mut std::process::Command,
     timeout: std::time::Duration,
@@ -384,7 +362,7 @@ fn command_output_with_timeout(
     child_output_with_timeout(child, timeout)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(any(target_os = "macos", test))]
 fn child_output_with_timeout(
     mut child: std::process::Child,
     timeout: std::time::Duration,
@@ -400,20 +378,6 @@ fn child_output_with_timeout(
             }
             None => std::thread::sleep(std::time::Duration::from_millis(5)),
         }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn windows_device_class_from_chassis(types: impl Iterator<Item = u8>) -> DeviceClass {
-    let types = types.collect::<Vec<_>>();
-    if types.iter().any(|kind| matches!(kind, 30 | 31 | 32)) {
-        DeviceClass::Tablet
-    } else if types.iter().any(|kind| matches!(kind, 8..=14)) {
-        DeviceClass::Laptop
-    } else if types.iter().any(|kind| matches!(kind, 3..=7 | 15..=24)) {
-        DeviceClass::Desktop
-    } else {
-        DeviceClass::Unknown
     }
 }
 
@@ -494,26 +458,5 @@ mod tests {
                 .is_none()
         );
         assert!(started.elapsed() < std::time::Duration::from_millis(500));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn maps_windows_chassis_types_without_model_heuristics() {
-        assert_eq!(
-            windows_device_class_from_chassis([10].into_iter()),
-            DeviceClass::Laptop
-        );
-        assert_eq!(
-            windows_device_class_from_chassis([30].into_iter()),
-            DeviceClass::Tablet
-        );
-        assert_eq!(
-            windows_device_class_from_chassis([3].into_iter()),
-            DeviceClass::Desktop
-        );
-        assert_eq!(
-            windows_device_class_from_chassis([1].into_iter()),
-            DeviceClass::Unknown
-        );
     }
 }

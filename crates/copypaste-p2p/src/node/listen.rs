@@ -155,29 +155,51 @@ async fn serve_peer<S, F, P>(
         return;
     }
 
+    node.note_authenticated(&pairing_id);
     let membership_only = session.is_membership_only();
     let listen_addr = node.session_listen_addr(session.local_addr());
     let mut channel = NoiseChannel::new(session);
     let mut first = match channel.recv().await {
         Ok(message) => message,
         Err(error) => {
+            let condition = super::dial::session_error(error.clone());
+            if condition.sync_issue().is_some_and(|code| code.blocking()) {
+                node.sync_activity.failure(&pairing_id, condition);
+            }
             debug!(%pairing_id, error = %error, "peer sent no valid application message");
             channel.close().await;
             return;
         }
     };
+    if matches!(
+        first,
+        SyncMessage::Group { .. }
+            | SyncMessage::Probe { .. }
+            | SyncMessage::Hello { .. }
+            | SyncMessage::FileRequest { .. }
+    ) {
+        node.sync_activity.evidence(
+            &pairing_id,
+            copypaste_ipc::sync_issue::SyncEvidence::CompatibleProtocol,
+        );
+    }
     if membership_only {
         if let SyncMessage::Group { snapshot, .. } = first {
-            if matches!(
-                tokio::time::timeout(
-                    SESSION_TIMEOUT,
-                    node.respond_group(&mut channel, source, &pairing_id, snapshot, false)
-                )
-                .await,
-                Ok(Ok(()))
-            ) {
-                on_probe();
+            match tokio::time::timeout(
+                SESSION_TIMEOUT,
+                node.respond_group(&mut channel, source, &pairing_id, snapshot, false),
+            )
+            .await
+            {
+                Ok(Ok(())) => on_probe(),
+                Ok(Err(error)) => node.sync_activity.failure(&pairing_id, error),
+                Err(_) => node
+                    .sync_activity
+                    .failure(&pairing_id, super::NodeError::Timeout),
             }
+        } else {
+            node.sync_activity
+                .failure(&pairing_id, super::NodeError::InvalidData);
         }
         channel.close().await;
         return;
@@ -221,14 +243,26 @@ async fn serve_peer<S, F, P>(
             node.respond_group(&mut channel, source, &pairing_id, snapshot, false),
         )
         .await;
-        if !matches!(exchanged, Ok(Ok(()))) {
-            channel.close().await;
-            return;
+        match exchanged {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                node.sync_activity.failure(&pairing_id, error);
+                channel.close().await;
+                return;
+            }
+            Err(_) => {
+                node.sync_activity
+                    .failure(&pairing_id, super::NodeError::Timeout);
+                channel.close().await;
+                return;
+            }
         }
         on_probe();
         first = match channel.recv().await {
             Ok(message) => message,
-            Err(_) => {
+            Err(error) => {
+                node.sync_activity
+                    .failure(&pairing_id, super::dial::session_error(error));
                 channel.close().await;
                 return;
             }
@@ -236,6 +270,8 @@ async fn serve_peer<S, F, P>(
     } else {
         // Current nodes always exchange membership before history. A bare
         // legacy Hello must not silently bypass the group protocol.
+        node.sync_activity
+            .failure(&pairing_id, super::NodeError::InvalidData);
         channel.close().await;
         return;
     }
@@ -253,6 +289,11 @@ async fn serve_peer<S, F, P>(
         state: Arc::clone(&active.state),
     };
     let observation = node.sync_activity.begin(&pairing_id);
+    let activity = Arc::clone(&node.sync_activity);
+    let transfer_pairing_id = pairing_id.clone();
+    let token = active.id;
+    let _transfer = activity.transfer_scope(&pairing_id, token);
+    channel = channel.on_transfer(move || activity.transferring(&transfer_pairing_id, token));
     let cursor = node.cursors().get(&pairing_id);
     let outcome = tokio::select! {
         _ = active_cancel.cancelled() => None,
@@ -265,7 +306,7 @@ async fn serve_peer<S, F, P>(
 
     match outcome {
         None => {
-            observation.finish(None, Some("Peer synchronization was cancelled.".into()));
+            observation.finish(None, Some(super::NodeError::Cancelled));
         }
         Some(Ok(Ok(outcome))) => {
             if outcome.peer_device_id == source.device_id() {
@@ -304,16 +345,16 @@ async fn serve_peer<S, F, P>(
                 on_session(&pairing_id, &outcome);
                 observation.finish(Some(&outcome.stats), None);
             } else {
-                observation.finish(None, Some("Peer synchronization was cancelled.".into()));
+                observation.finish(None, Some(super::NodeError::Cancelled));
             }
         }
         Some(Ok(Err(e))) => {
             warn!(%pairing_id, error = %e, "peer sync session failed");
-            observation.finish(None, Some("Peer synchronization failed.".into()));
+            observation.finish(None, Some(super::dial::session_error(e)));
         }
         Some(Err(_)) => {
             warn!(%pairing_id, "peer sync session timed out");
-            observation.finish(None, Some("Peer synchronization timed out.".into()));
+            observation.finish(None, Some(super::NodeError::Timeout));
         }
     }
 }

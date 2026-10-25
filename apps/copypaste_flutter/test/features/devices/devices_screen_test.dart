@@ -12,6 +12,78 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'device cards use the shared typed icons on every shipped platform',
+    (tester) async {
+      final now = DateTime.utc(2026, 10, 3, 12);
+      final controller = DevicesController(
+        gateway: _ScreenGateway(
+          peers: [
+            DevicePeer(
+              id: 'windows',
+              name: 'Windows laptop',
+              lastSeen: now,
+              online: true,
+              details: _details(
+                name: 'Windows laptop',
+                platform: DevicePlatform.windows,
+                deviceClass: DeviceClass.laptop,
+                osName: 'Windows',
+                osVersion: '11',
+                presence: DevicePresence.online,
+              ),
+            ),
+            DevicePeer(
+              id: 'android',
+              name: 'Android phone',
+              lastSeen: now,
+              online: true,
+              details: _details(
+                name: 'Android phone',
+                platform: DevicePlatform.android,
+                deviceClass: DeviceClass.phone,
+                osName: 'Android',
+                osVersion: '16',
+                presence: DevicePresence.online,
+              ),
+            ),
+          ],
+          discovered: const [],
+        ),
+        captureProtection: _CaptureProtection(),
+        now: () => now,
+      );
+      try {
+        await _pumpDevices(tester, controller);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('this-device-card')),
+            matching: find.byIcon(LucideIcons.monitor),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('peer-device-card-windows')),
+            matching: find.byIcon(LucideIcons.laptop),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('peer-device-card-android')),
+            matching: find.byIcon(LucideIcons.smartphone),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byIcon(LucideIcons.circleHelp), findsNothing);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
   for (final dark in [false, true]) {
     for (final width in [320.0, 1100.0]) {
       testWidgets(

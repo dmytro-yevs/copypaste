@@ -512,6 +512,23 @@ pub struct RuntimePeerSyncStatus {
     pub received: u64,
     pub skipped_too_large: u64,
     pub error: Option<String>,
+    pub connection: DevicePresenceState,
+    pub checking: bool,
+    pub address_known: bool,
+    pub issues: Vec<RuntimeSyncIssue>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSyncIssue {
+    pub code: String,
+    pub scope: String,
+    pub title: String,
+    pub message: String,
+    pub severity: String,
+    pub blocking: bool,
+    pub pending: bool,
+    pub since_ms: i64,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -519,6 +536,35 @@ pub struct RuntimeSyncStatus {
     pub revision: u64,
     pub phase: SyncPhase,
     pub peers: Vec<RuntimePeerSyncStatus>,
+    pub log: Vec<RuntimeSyncLogEntry>,
+    pub diagnostics_available: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSyncLogEntry {
+    pub pairing_id: String,
+    pub timestamp_ms: i64,
+    pub kind: String,
+    pub error: Option<String>,
+    pub sent: u64,
+    pub received: u64,
+    pub issue_title: Option<String>,
+    pub issue_severity: Option<String>,
+}
+
+fn issue_severity(value: copypaste_ipc::sync_issue::SyncIssueSeverity) -> &'static str {
+    match value {
+        copypaste_ipc::sync_issue::SyncIssueSeverity::Info => "info",
+        copypaste_ipc::sync_issue::SyncIssueSeverity::Warning => "warning",
+        copypaste_ipc::sync_issue::SyncIssueSeverity::Error => "error",
+    }
+}
+fn device_presence_state(value: copypaste_ipc::DevicePresence) -> DevicePresenceState {
+    match value {
+        copypaste_ipc::DevicePresence::Online => DevicePresenceState::Online,
+        copypaste_ipc::DevicePresence::Offline => DevicePresenceState::Offline,
+        copypaste_ipc::DevicePresence::Unknown => DevicePresenceState::Unknown,
+    }
 }
 
 pub(crate) fn runtime_sync_status(status: copypaste_ipc::SyncStatus) -> RuntimeSyncStatus {
@@ -533,12 +579,56 @@ pub(crate) fn runtime_sync_status(status: copypaste_ipc::SyncStatus) -> RuntimeS
         }
     }
     RuntimeSyncStatus {
+        diagnostics_available: status.diagnostics_available,
+        log: status
+            .log
+            .into_iter()
+            .map(|entry| RuntimeSyncLogEntry {
+                pairing_id: entry.pairing_id,
+                timestamp_ms: entry.timestamp_ms,
+                kind: match entry.kind {
+                    copypaste_ipc::sync_status::SyncLogKind::Offline => "offline",
+                    copypaste_ipc::sync_status::SyncLogKind::Online => "online",
+                    copypaste_ipc::sync_status::SyncLogKind::Failed => "failed",
+                    copypaste_ipc::sync_status::SyncLogKind::Recovered => "recovered",
+                    copypaste_ipc::sync_status::SyncLogKind::Transferred => "transferred",
+                    copypaste_ipc::sync_status::SyncLogKind::ProblemDetected => "problem_detected",
+                    copypaste_ipc::sync_status::SyncLogKind::ProblemResolved => "problem_resolved",
+                }
+                .into(),
+                issue_title: entry.issue_code.map(|code| code.title().into()),
+                issue_severity: entry
+                    .issue_code
+                    .map(|code| issue_severity(code.severity()).into()),
+                error: entry.error,
+                sent: entry.sent,
+                received: entry.received,
+            })
+            .collect(),
         revision: status.revision,
         phase: phase(status.phase),
         peers: status
             .peers
             .into_iter()
             .map(|peer| RuntimePeerSyncStatus {
+                connection: device_presence_state(peer.connection),
+                checking: peer.checking,
+                address_known: peer.address_known,
+                issues: peer
+                    .issues
+                    .into_iter()
+                    .map(|issue| RuntimeSyncIssue {
+                        code: issue.code.as_str().into(),
+                        scope: issue.code.scope().into(),
+                        title: issue.code.title().into(),
+                        message: issue.code.message().into(),
+                        severity: issue_severity(issue.code.severity()).into(),
+                        blocking: issue.code.blocking(),
+                        pending: issue.code.pending(),
+                        since_ms: issue.since_ms,
+                        count: issue.count,
+                    })
+                    .collect(),
                 pairing_id: peer.pairing_id,
                 name: peer.name,
                 phase: phase(peer.phase),
@@ -1027,6 +1117,10 @@ pub async fn copy_clip(id: String) -> Result<Clip, RuntimeError> {
 
 pub async fn copy_clip_as_plain_text(id: String) -> Result<Clip, RuntimeError> {
     item_response(Method::CopyPlainText { id }).await
+}
+
+pub async fn copy_clip_text(id: String, text: String) -> Result<(), RuntimeError> {
+    empty_response(Method::CopyText { id, text }).await
 }
 
 pub async fn save_clip_file(

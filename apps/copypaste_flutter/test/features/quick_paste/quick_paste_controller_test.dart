@@ -3504,6 +3504,9 @@ class _Repository implements HistoryRepository {
   }
 
   @override
+  Future<void> copyText(String id, String text) async {}
+
+  @override
   Future<void> copyPlainText(String id) async {
     plainCopied.add(id);
     await copy(id);

@@ -484,6 +484,9 @@ class _GestureRepository implements HistoryRepository {
   @override
   Future<void> copy(String id) async {}
   @override
+  Future<void> copyText(String id, String text) async {}
+
+  @override
   Future<void> copyPlainText(String id) async {}
   @override
   Future<void> saveFile(String id, String destinationPath) async {}

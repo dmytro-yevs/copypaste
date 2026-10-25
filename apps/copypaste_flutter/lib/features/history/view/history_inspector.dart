@@ -1,8 +1,12 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import '../../transfers/file_operations_view.dart';
 import '../../../shared/format_bytes.dart';
 
 import 'dart:async';
+
+import 'history_selectable_text.dart';
+
 import 'dart:math' as math;
 
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
@@ -264,9 +268,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 itemBuilder: (context, _) => AppIconFrame(
                                   child: Icon(
                                     LucideIcons.chevronDown,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primaryForeground,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primaryForeground,
                                   ),
                                 ),
                                 onChanged: (plainText) {
@@ -366,8 +370,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                     AppToast.show(
                                       context,
                                       title: 'Update failed',
-                                      message:
-                                          'The clip secrecy could not be updated.',
+                                      message: 'The clip secrecy could not be updated.',
                                       tone: AppToastTone.error,
                                     );
                                   }
@@ -552,9 +555,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
       final painter = TextPainter(
         text: TextSpan(
           text: label,
-          style: DefaultTextStyle.of(
-            context,
-          ).style.merge(style.textStyle(context, const {})),
+          style: DefaultTextStyle.of(context).style
+              .merge(style.textStyle(context, const {})),
         ),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context),
@@ -878,8 +880,9 @@ class _HistoryDetailContent extends StatelessWidget {
           HistoryColorSwatch(rgba: clip.colorRgba!, size: 48),
           const Gap(AppSpacing.md),
           Expanded(
-            child: SelectableText(
+            child: HistorySelectableText(
               body,
+              onCopy: (text) => controller.copyTextFrom(clip.id, text),
               style: Theme.of(context).typography.mono,
             ),
           ),
@@ -887,11 +890,15 @@ class _HistoryDetailContent extends StatelessWidget {
       );
     }
     if (highlighted != null) {
-      return SelectableText.rich(highlighted!.span);
+      return HistorySelectableText.rich(
+        highlighted!.span,
+        onCopy: (text) => controller.copyTextFrom(clip.id, text),
+      );
     }
     if (clip.contentKind != HistoryClipKind.image) {
-      return SelectableText(
+      return HistorySelectableText(
         body,
+        onCopy: (text) => controller.copyTextFrom(clip.id, text),
         style:
             clip.contentKind == HistoryClipKind.path ||
                 clip.contentKind == HistoryClipKind.file
@@ -904,7 +911,10 @@ class _HistoryDetailContent extends StatelessWidget {
       children: [
         _DetailImagePreview(clip: clip, controller: controller),
         const Gap(AppSpacing.lg),
-        SelectableText(body),
+        HistorySelectableText(
+          body,
+          onCopy: (text) => controller.copyTextFrom(clip.id, text),
+        ),
       ],
     );
   }
@@ -946,8 +956,9 @@ class _HistoryMetadataTable extends StatelessWidget {
                     controller: controller,
                     style: textStyle,
                   )
-                : SelectableText(
+                : HistorySelectableText(
                     row.value,
+                    onCopy: (text) => controller.copyTextFrom(clip.id, text),
                     style: textStyle.copyWith(
                       color: row.warning ? theme.colorScheme.destructive : null,
                     ),

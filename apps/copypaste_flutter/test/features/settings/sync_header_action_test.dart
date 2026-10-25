@@ -120,7 +120,21 @@ void main() {
       SyncPhase.disabled,
     ]) {
       revision++;
-      repository.syncChanges.add(SyncStatus(revision: revision, phase: phase));
+      repository.syncChanges.add(
+        SyncStatus(
+          revision: revision,
+          phase: phase,
+          peers: [
+            PeerSyncStatus(
+              id: 'phone',
+              name: 'Phone',
+              phase: phase,
+              connection: DeviceConnectionState.online,
+              issues: phase == SyncPhase.failed ? [_versionIssue()] : const [],
+            ),
+          ],
+        ),
+      );
       await tester.pumpAndSettle();
       final buttonContext = tester.element(
         find.byKey(const ValueKey<String>('sync-header-open')),
@@ -146,7 +160,7 @@ void main() {
     'pending items keep the completed phase and show an item warning',
     (tester) async {
       final repository = FakeSettingsRepository()
-        ..capture = const CaptureSettingsState(
+        ..capture = CaptureSettingsState(
           running: true,
           paused: false,
           epoch: 0,
@@ -158,7 +172,19 @@ void main() {
                 id: 'phone',
                 name: 'Android phone',
                 phase: SyncPhase.synced,
-                error: '5 items remain pending synchronization.',
+                connection: DeviceConnectionState.online,
+                issues: [
+                  SyncIssue(
+                    code: 'items_unavailable',
+                    title: 'Some clips are unavailable',
+                    message: 'Requested clips could not be supplied.',
+                    severity: 'warning',
+                    blocking: false,
+                    pending: true,
+                    since: DateTime(2026, 10, 25),
+                    count: 5,
+                  ),
+                ],
               ),
             ],
           ),
@@ -170,12 +196,17 @@ void main() {
       await tester.tap(find.byKey(const ValueKey<String>('sync-header-open')));
       await tester.pumpAndSettle();
       expect(controller.syncStatus.phase, SyncPhase.synced);
-      expect(find.text('Items pending synchronization'), findsOneWidget);
       expect(
-        find.text('5 items remain pending synchronization.'),
+        find.text('Partially synchronized', findRichText: true),
+        findsNWidgets(2),
+      );
+      expect(find.text('Up to date'), findsNothing);
+      expect(find.text('Some clips are unavailable (5)'), findsOneWidget);
+      expect(
+        find.text('Requested clips could not be supplied.'),
         findsOneWidget,
       );
-      expect(find.text('Last sync problem'), findsNothing);
+      expect(find.text('Synchronization needs attention'), findsNothing);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
@@ -199,15 +230,16 @@ void main() {
             phase: SyncPhase.syncing,
             peers: [
               PeerSyncStatus(
+                connection: DeviceConnectionState.online,
                 id: 'phone',
                 name: 'Android phone',
                 phase: SyncPhase.syncing,
               ),
               PeerSyncStatus(
+                connection: DeviceConnectionState.offline,
                 id: 'windows',
                 name: 'Windows desktop',
-                phase: SyncPhase.failed,
-                error: 'The device stopped responding.',
+                phase: SyncPhase.waiting,
               ),
             ],
           ),
@@ -246,6 +278,10 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(find.text('17 ms'), findsNothing);
+      expect(find.text('192.168.1.2:47654'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('sync-peer-details-phone')));
+      await tester.pumpAndSettle();
       expect(find.text('17 ms'), findsOneWidget);
       expect(find.byType(InspectorTable), findsWidgets);
       expect(find.text('Clips sent'), findsNothing);
@@ -276,10 +312,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Offline'), findsOneWidget);
-      expect(find.text('Waiting for sync'), findsOneWidget);
-      expect(find.text('Sync failed'), findsNothing);
-      expect(find.text('Last sync problem'), findsNothing);
+      expect(
+        find.textContaining('Offline', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('Waiting for sync'), findsNothing);
+      expect(find.text('Needs attention'), findsNothing);
+      expect(find.text('Synchronization needs attention'), findsNothing);
       expect(find.text('The device stopped responding.'), findsNothing);
       expect(find.text('Syncing'), findsWidgets);
       expect(tester.takeException(), isNull);
@@ -301,75 +340,95 @@ void main() {
     }),
   );
 
-  testWidgets('offline failure does not make the header or drawer an error', (
-    tester,
-  ) async {
-    final now = DateTime(2026, 10, 21, 22, 29);
-    final repository = FakeSettingsRepository()
-      ..capture = CaptureSettingsState(
-        running: true,
-        paused: false,
-        epoch: 0,
-        syncStatus: SyncStatus(
-          revision: 1,
-          phase: SyncPhase.failed,
-          peers: [
-            PeerSyncStatus(
-              id: 'windows',
-              name: 'Windows desktop',
-              phase: SyncPhase.failed,
-              lastSuccess: now,
-              error: 'the other device did not accept this pairing code',
-            ),
-          ],
+  testWidgets(
+    'version blockers remain current while offline and disappear only after compatible evidence',
+    (tester) async {
+      final repository = FakeSettingsRepository();
+      final controller = _controller(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final history = [
+        SyncLogEntry(
+          peerId: 'phone',
+          timestamp: DateTime(2026, 10, 25, 10, 10),
+          kind: 'problem_detected',
+          issueTitle: 'Update required',
+          issueSeverity: 'error',
         ),
-      );
-    final controller = _controller(repository);
-    final gateway = _Devices(now);
-    final devices = DevicesController(
-      gateway: gateway,
-      captureProtection: _Protection(),
-      now: () => now,
-    );
-    addTearDown(controller.dispose);
-    await controller.initialize();
-    await devices.start();
-    await tester.pumpWidget(_app(controller, devices: devices));
-    final header = find.byKey(const ValueKey<String>('sync-header-open'));
-    final semantics = tester.ensureSemantics();
-    expect(
-      find.bySemanticsLabel('Synchronization: Waiting for sync'),
-      findsOneWidget,
-    );
-    semantics.dispose();
-    final icon = tester.widget<Icon>(find.byIcon(LucideIcons.network));
-    expect(
-      icon.color,
-      AppTheme.statusColor(tester.element(header), AppStatusTone.muted),
-    );
-    await tester.tap(header);
-    await tester.pumpAndSettle();
-    expect(find.text('Offline'), findsOneWidget);
-    expect(find.text('Sync failed'), findsNothing);
-    expect(find.text('Last sync problem'), findsNothing);
-    expect(find.text('Last successful sync'), findsOneWidget);
-    expect(controller.syncStatus.peers.single.error, isNotNull);
+      ];
+      void publish(
+        int revision, {
+        required DeviceConnectionState connection,
+        required bool blocked,
+        SyncPhase phase = SyncPhase.failed,
+      }) {
+        repository.syncChanges.add(
+          SyncStatus(
+            revision: revision,
+            phase: phase,
+            log: history,
+            peers: [
+              PeerSyncStatus(
+                id: 'phone',
+                name: 'Phone',
+                phase: phase,
+                connection: connection,
+                issues: blocked ? [_versionIssue()] : const [],
+              ),
+            ],
+          ),
+        );
+      }
 
-    gateway.windowsOnline = true;
-    await devices.refresh();
-    await tester.pumpAndSettle();
-    expect(find.text('Available'), findsOneWidget);
-    expect(find.text('Sync failed'), findsWidgets);
-    expect(find.text('Last sync problem'), findsOneWidget);
-    expect(
-      find.text('the other device did not accept this pairing code'),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
-    await tester.tap(find.byKey(const ValueKey<String>('close-sync-details')));
-    await tester.pumpAndSettle();
-    devices.dispose();
-  });
+      publish(1, connection: DeviceConnectionState.online, blocked: true);
+      await tester.pumpWidget(_app(controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sync-header-open')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Update required'),
+        findsNWidgets(2),
+      ); // Current condition and its historical event.
+      expect(
+        find.text('Update CopyPaste on the paired devices.'),
+        findsOneWidget,
+      );
+      publish(2, connection: DeviceConnectionState.offline, blocked: true);
+      await tester.pumpAndSettle();
+      expect(find.text('Update required'), findsNWidgets(2));
+      expect(
+        find.textContaining('Offline', findRichText: true),
+        findsOneWidget,
+      );
+      expect(find.text('1 device needs attention'), findsOneWidget);
+      publish(
+        3,
+        connection: DeviceConnectionState.online,
+        blocked: false,
+        phase: SyncPhase.waiting,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Update required'),
+        findsOneWidget,
+      ); // History alone remains after resolution.
+      expect(
+        find.text('Update CopyPaste on the paired devices.'),
+        findsNothing,
+      );
+      expect(find.text('Up to date'), findsNothing);
+      publish(
+        4,
+        connection: DeviceConnectionState.online,
+        blocked: false,
+        phase: SyncPhase.synced,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Up to date', findRichText: true), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('close-sync-details')));
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets('sync details fit a narrow phone with enlarged text', (
     tester,
@@ -406,6 +465,16 @@ void main() {
     await tester.pumpAndSettle();
   });
 }
+
+SyncIssue _versionIssue() => SyncIssue(
+  code: 'version_mismatch',
+  title: 'Update required',
+  message: 'Update CopyPaste on the paired devices.',
+  severity: 'error',
+  blocking: true,
+  pending: false,
+  since: DateTime(2026, 10, 25, 10, 10),
+);
 
 SettingsController _controller(FakeSettingsRepository repository) =>
     SettingsController(

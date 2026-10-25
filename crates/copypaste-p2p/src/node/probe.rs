@@ -234,6 +234,7 @@ impl Node {
         if candidates.is_empty() {
             return Err(NodeError::NoAddress);
         }
+        let probe_started = crate::now_ms();
         let mut last_error = NodeError::Handshake;
         for candidate in candidates {
             let result = timeout(PROBE_TIMEOUT, probe_session(self, candidate.addr, &peer)).await;
@@ -259,10 +260,23 @@ impl Node {
                 Ok(Ok(_)) => unreachable!("successful probe returned above"),
             };
         }
-        self.record_reachability(
-            &peer.pairing_id,
-            AuthenticatedReachability::offline(crate::now_ms()),
-        );
+        // A successful authenticated transport followed by an application
+        // protocol failure is an online device with a condition, not Offline.
+        if self
+            .sync_activity
+            .authenticated_since(&peer.pairing_id, probe_started)
+        {
+            self.sync_activity.failure(&peer.pairing_id, last_error);
+            self.record_reachability(
+                &peer.pairing_id,
+                AuthenticatedReachability::online(None, crate::now_ms()),
+            );
+        } else {
+            self.record_reachability(
+                &peer.pairing_id,
+                AuthenticatedReachability::offline(crate::now_ms()),
+            );
+        }
         Err(last_error)
     }
 }
@@ -284,7 +298,7 @@ pub(super) async fn respond(
             profile: Some(crate::DeviceProfile::current()),
         })
         .await
-        .map_err(|_| NodeError::Session)
+        .map_err(super::dial::session_error)
 }
 
 async fn probe_session(
@@ -305,19 +319,25 @@ async fn probe_session(
                 profile: Some(profile),
             })
             .await
-            .map_err(|_| NodeError::Session)?;
-        match channel.recv().await.map_err(|_| NodeError::Session)? {
+            .map_err(super::dial::session_error)?;
+        match channel.recv().await.map_err(super::dial::session_error)? {
             SyncMessage::ProbeAck {
                 protocol_version,
                 nonce: received,
                 profile,
-            } if protocol_version == PROTOCOL_VERSION && received == nonce => Ok((
-                u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-                profile,
-                current,
-            )),
-            SyncMessage::ProbeAck { .. } => Err(NodeError::Session),
-            _ => Err(NodeError::Session),
+            } if protocol_version == PROTOCOL_VERSION && received == nonce => {
+                node.sync_activity.evidence(
+                    &current.pairing_id,
+                    copypaste_ipc::sync_issue::SyncEvidence::CompatibleProtocol,
+                );
+                Ok((
+                    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    profile,
+                    current,
+                ))
+            }
+            SyncMessage::ProbeAck { .. } => Err(NodeError::InvalidData),
+            _ => Err(NodeError::InvalidData),
         }
     }
     .await;
@@ -384,6 +404,60 @@ mod tests {
             node.authenticated_reachability("peer").unwrap().state,
             ProbeState::Offline
         );
+    }
+
+    #[tokio::test]
+    async fn an_incompatible_authenticated_peer_stays_online_and_only_compatibility_evidence_clears_its_version_condition(
+    ) {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let dir = tempfile::tempdir().unwrap();
+        let client = node(&dir);
+        let token = PairingToken::generate();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let trusted = peer(&token, Some(listener.local_addr().unwrap()));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let server = tokio::spawn(async move {
+            for version in [PROTOCOL_VERSION - 1, PROTOCOL_VERSION] {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut session = Session::accept(socket, &token.psk()).await.unwrap();
+                let bytes = session.recv_bytes().await.unwrap().unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                let reply = serde_json::json!({"t": "probe_ack", "protocol_version": version, "nonce": request["nonce"]});
+                session
+                    .send_bytes(zeroize::Zeroizing::new(serde_json::to_vec(&reply).unwrap()))
+                    .await
+                    .unwrap();
+                session.close().await.unwrap();
+            }
+        });
+        assert_eq!(
+            client.probe_one(&trusted).await,
+            Err(NodeError::PeerVersion)
+        );
+        let blocked = client.sync_status(true);
+        assert_eq!(
+            blocked.peers[0].connection,
+            copypaste_ipc::DevicePresence::Online
+        );
+        assert!(blocked.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        client.sync_activity.failure(
+            &trusted.pairing_id,
+            NodeError::Diagnostic(Code::StorageFull),
+        );
+        client.probe_one(&trusted).await.unwrap();
+        let after = client.sync_status(true);
+        assert!(!after.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(after.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::StorageFull));
+        server.await.unwrap();
     }
 
     #[tokio::test]

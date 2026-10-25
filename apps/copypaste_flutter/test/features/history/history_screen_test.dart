@@ -2610,6 +2610,9 @@ class _ScreenRepository implements HistoryRepository {
   Future<void> copy(String id) async => copiedIds.add(id);
 
   @override
+  Future<void> copyText(String id, String text) async {}
+
+  @override
   Future<void> copyPlainText(String id) async => plainTextCopiedIds.add(id);
 
   @override

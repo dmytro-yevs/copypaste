@@ -43,6 +43,7 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
                     let Some(promised) = wanted.get(&item.item_id) else {
                         tracing::warn!("peer sent an item that was not requested; dropping it");
                         stats.skipped += 1;
+                        stats.skipped_invalid += 1;
                         continue;
                     };
                     received.insert(item.item_id.clone());
@@ -51,6 +52,7 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
                             "peer sent an item that does not match its summary; dropping it"
                         );
                         stats.skipped += 1;
+                        stats.skipped_invalid += 1;
                         continue;
                     }
                     let payload = if item.binary_content.is_empty() {
@@ -69,6 +71,7 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
                             "peer sent an item whose content does not match its hash; dropping it"
                         );
                         stats.skipped += 1;
+                        stats.skipped_invalid += 1;
                         continue;
                     }
                     if !applied.insert(item.item_id.clone()) {

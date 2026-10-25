@@ -138,6 +138,7 @@ Future<void> quickPasteMain() async {
       host: host,
       fileDownloader: const FileSelectorHistoryFileDownloader(),
       ocr: HistoryOcrController(
+        copyText: repository.copyText,
         modules: modules,
         imageInput: TemporaryHistoryImageInput(repository: repository),
       ),
@@ -444,6 +445,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           fileDownloader: const FileSelectorHistoryFileDownloader(),
           filePicker: const SystemHistoryFilePicker(),
           ocr: HistoryOcrController(
+            copyText: _historyRepository!.copyText,
             modules: _modulesController!,
             imageInput: TemporaryHistoryImageInput(
               repository: _historyRepository!,
@@ -917,8 +919,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting =>
-          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.starting => 'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
         _RuntimeState.failed => _runtimeFailureMessage,
         _RuntimeState.idle || _RuntimeState.ready => null,
       },

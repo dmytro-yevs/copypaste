@@ -340,11 +340,20 @@ pub fn node_error_code(error: &NodeError) -> ErrorCode {
         NodeError::PairingBusy => ErrorCode::RateLimited,
         NodeError::NoPairing => ErrorCode::NotReady,
         NodeError::BadAddress => ErrorCode::PairingAddress,
-        NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
+        NodeError::NoAddress | NodeError::Timeout | NodeError::ConnectionLost => {
+            ErrorCode::PeerUnreachable
+        }
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
-        NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
+        NodeError::Session
+        | NodeError::PeerStore
+        | NodeError::HistoryUnavailable
+        | NodeError::InvalidData => ErrorCode::PeerFailed,
         NodeError::PeerVersion => ErrorCode::PeerVersion,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
+        NodeError::Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode::VersionMismatch) => {
+            ErrorCode::PeerVersion
+        }
+        NodeError::Diagnostic(_) | NodeError::Cancelled => ErrorCode::PeerFailed,
     }
 }
 
@@ -378,6 +387,7 @@ mod tests {
                 skipped: 3,
                 skipped_too_large,
                 skipped_unavailable: 0,
+                ..Default::default()
             },
             peer_device_id: "device-1".into(),
             peer_device_name: "Phone".into(),

@@ -113,8 +113,26 @@ impl SyncMessage {
         if bytes.starts_with(&FILE_CHUNK_MAGIC) {
             return decode_file_chunk(bytes);
         }
-        let mut msg: Self =
-            serde_json::from_slice(bytes).map_err(|e| ProtocolError::Decode(e.to_string()))?;
+        let mut msg: Self = match serde_json::from_slice(bytes) {
+            Ok(message) => message,
+            Err(error) => {
+                // A future protocol may introduce an unknown message tag.
+                // Preserve a declared version mismatch instead of calling it
+                // corrupt data. Ignored fields are skipped without retaining
+                // their payload, and healthy messages keep the single parse.
+                #[derive(serde::Deserialize)]
+                struct Header {
+                    protocol_version: Option<u32>,
+                }
+                if let Ok(Header {
+                    protocol_version: Some(version),
+                }) = serde_json::from_slice::<Header>(bytes)
+                {
+                    check_protocol_version(version)?;
+                }
+                return Err(ProtocolError::Decode(error.to_string()));
+            }
+        };
         msg.clamp_timestamps();
         if let Err(error) = msg.validate() {
             zeroize_file_chunk(&mut msg);
@@ -773,6 +791,13 @@ mod tests {
         let raw = br#"{"t":"hello","protocol_version":99,"device_id":"d","device_name":"n"}"#;
         assert_eq!(
             SyncMessage::decode(raw),
+            Err(ProtocolError::VersionMismatch {
+                ours: PROTOCOL_VERSION,
+                theirs: 99
+            })
+        );
+        assert_eq!(
+            SyncMessage::decode(br#"{"t":"future_message","protocol_version":99}"#),
             Err(ProtocolError::VersionMismatch {
                 ours: PROTOCOL_VERSION,
                 theirs: 99

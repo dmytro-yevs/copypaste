@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -38,16 +39,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   OverlayCompleter<void>? _drawer;
   bool _opening = false;
 
-  SyncStatus get _status {
-    final devices = widget.devices;
-    return widget.controller.syncStatus.withOfflinePeers({
-      if (devices != null)
-        for (final peer in devices.snapshot?.peers ?? <DevicePeer>[])
-          if (devices.peerConnectionState(peer) ==
-              DeviceConnectionState.offline)
-            peer.id,
-    });
-  }
+  SyncStatus get _status => widget.controller.syncStatus;
 
   @override
   void dispose() {
@@ -60,10 +52,9 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([widget.controller, ?widget.devices]),
     builder: (context, _) {
-      final phase = _status.phase;
       return Tooltip(
         showDuration: AppMotion.resolve(context, AppMotion.standard),
-        tooltip: (context) => TooltipContainer(child: Text(phase.label)),
+        tooltip: (context) => TooltipContainer(child: Text(_status.label)),
         child: Button.secondary(
           key: const ValueKey<String>('sync-header-open'),
           style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
@@ -71,11 +62,11 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
               ? null
               : _open,
           child: Semantics(
-            label: 'Synchronization: ${phase.label}',
+            label: 'Synchronization: ${_status.label}',
             child: AppIconFrame(
               child: Icon(
                 LucideIcons.network,
-                color: _phaseColor(context, phase),
+                color: _toneColor(context, _status.tone),
               ),
             ),
           ),
@@ -134,15 +125,15 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   }
 }
 
-Color _phaseColor(BuildContext context, SyncPhase phase) =>
-    AppTheme.statusColor(context, switch (phase) {
-      SyncPhase.syncing => AppStatusTone.info,
-      SyncPhase.synced => AppStatusTone.success,
-      SyncPhase.failed => AppStatusTone.error,
-      SyncPhase.unavailable ||
-      SyncPhase.disabled ||
-      SyncPhase.waiting => AppStatusTone.muted,
-    });
+AppStatusTone _statusTone(SyncTone tone) => switch (tone) {
+  SyncTone.muted => AppStatusTone.muted,
+  SyncTone.info => AppStatusTone.info,
+  SyncTone.success => AppStatusTone.success,
+  SyncTone.warning => AppStatusTone.warning,
+  SyncTone.error => AppStatusTone.error,
+};
+Color _toneColor(BuildContext context, SyncTone tone) =>
+    AppTheme.statusColor(context, _statusTone(tone));
 
 class _SyncDetails extends StatelessWidget {
   const _SyncDetails({
@@ -160,15 +151,10 @@ class _SyncDetails extends StatelessWidget {
     headers: [
       AppBar(
         title: const Text('Synchronization'),
-        subtitle: Text(status.phase.label),
-        leading: [
-          AppIconFrame(
-            child: Icon(
-              LucideIcons.network,
-              color: _phaseColor(context, status.phase),
-            ),
-          ),
-        ],
+        subtitle: Text(
+          status.label,
+          style: AppTheme.deviceMetadataTextStyle(context),
+        ),
         trailing: [
           Tooltip(
             tooltip: (context) => const TooltipContainer(
@@ -198,21 +184,71 @@ class _SyncDetails extends StatelessWidget {
                   title: 'No paired devices',
                   message: 'Pair a device to synchronize clipboard history.',
                 )
-        : ListView.separated(
+        : ListView.builder(
             padding: const EdgeInsets.all(AppSpacing.lg),
-            itemCount: status.peers.length,
-            separatorBuilder: (context, index) => const Gap(AppSpacing.md),
+            itemCount:
+                status.peers.length +
+                (status.diagnosticsAvailable ? 2 : 3) +
+                (status.log.isEmpty ? 1 : status.log.length),
             itemBuilder: (context, index) {
-              final peer = status.peers[index];
-              DevicePeer? device;
-              for (final candidate
-                  in devices?.snapshot?.peers ?? <DevicePeer>[]) {
-                if (candidate.id == peer.id) {
-                  device = candidate;
-                  break;
+              if (!status.diagnosticsAvailable) {
+                if (index == 0) {
+                  return const Padding(
+                    padding: EdgeInsets.only(bottom: AppSpacing.lg),
+                    child: Alert(
+                      title: Text('Activity log unavailable'),
+                      content: Text(
+                        'Sync activity could not be read or saved.',
+                      ),
+                    ),
+                  );
                 }
+                index -= 1;
               }
-              return _SyncPeerCard(
+              if (index == 0) {
+                return Text(
+                  'Devices',
+                  style: AppTheme.deviceCardTextStyle(context, muted: true),
+                ).semiBold();
+              }
+              index -= 1;
+              if (index == status.peers.length) {
+                return Padding(
+                  padding: const EdgeInsets.only(
+                    top: AppSpacing.xxl,
+                    bottom: AppSpacing.md,
+                  ),
+                  child: Text(
+                    'Activity',
+                    style: AppTheme.deviceCardTextStyle(context, muted: true),
+                  ).semiBold(),
+                );
+              }
+              if (index > status.peers.length) {
+                if (status.log.isEmpty) {
+                  return Text(
+                    'No recent activity',
+                    style: AppTheme.deviceMetadataTextStyle(context),
+                  );
+                }
+                final entry = status.log[index - status.peers.length - 1];
+                final peer = status.peers
+                    .where((peer) => peer.id == entry.peerId)
+                    .firstOrNull;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                  child: _SyncLogRow(
+                    entry: entry,
+                    name: peer?.name ?? 'Paired device',
+                  ),
+                );
+              }
+              final peer = status.peers[index];
+              final device = devices?.snapshot?.peers
+                  .where((device) => device.id == peer.id)
+                  .firstOrNull;
+              return _SyncPeerRow(
+                key: ValueKey('sync-peer-${peer.id}'),
                 peer: peer,
                 deviceClass:
                     device?.details?.profile?.deviceClass ??
@@ -223,24 +259,25 @@ class _SyncDetails extends StatelessWidget {
                 ping: device == null
                     ? '— ms'
                     : devices!.peerLatencyLabel(device),
-                presence: device == null
-                    ? 'Status unknown'
-                    : devices!.peerStateLabel(device),
+                presence: peer.connectionLabel,
                 endpoint: device?.details?.endpoint?.lanEndpoint,
+                lastSeen: device?.lastSeen,
               );
             },
           ),
   );
 }
 
-class _SyncPeerCard extends StatelessWidget {
-  const _SyncPeerCard({
+class _SyncPeerRow extends StatelessWidget {
+  const _SyncPeerRow({
+    super.key,
     required this.peer,
     required this.deviceClass,
     required this.phase,
     required this.ping,
     required this.presence,
     this.endpoint,
+    this.lastSeen,
   });
 
   final PeerSyncStatus peer;
@@ -249,51 +286,198 @@ class _SyncPeerCard extends StatelessWidget {
   final String ping;
   final String presence;
   final String? endpoint;
+  final DateTime? lastSeen;
 
   @override
   Widget build(BuildContext context) {
     final rows = <({String label, String value})>[
-      (label: 'Sync', value: phase.label),
       (label: 'Connection', value: presence),
       (label: 'Ping', value: ping),
       if (endpoint case final value?) (label: 'LAN endpoint', value: value),
       if (peer.startedAt case final value?)
-        (label: 'Session started', value: formatSystemDateTime(context, value)),
-      if (peer.lastSuccess case final value?)
         (
-          label: 'Last successful sync',
+          label: 'Last check started',
           value: formatSystemDateTime(context, value),
+        ),
+      for (final issue in peer.issues)
+        (
+          label: issue.title,
+          value:
+              '${issue.code} · ${formatSystemDateTime(context, issue.since)}',
         ),
       if (peer.skippedTooLarge > 0)
         (label: 'Items over the size limit', value: '${peer.skippedTooLarge}'),
     ];
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          DeviceLabel(name: peer.name, deviceClass: deviceClass).semiBold(),
-          const Gap(AppSpacing.md),
-          if (peer.error case final error?) ...[
-            Alert.destructive(
-              leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-              title: Text(
-                phase == SyncPhase.synced
-                    ? 'Items pending synchronization'
-                    : 'Last sync problem',
+    final statusLabel = peer.blocker != null
+        ? peer.connectionLabel
+        : phase == SyncPhase.unavailable
+        ? phase.label
+        : peer.label;
+    final time = peer.offline
+        ? lastSeen == null
+              ? null
+              : 'Last seen ${formatSystemRecentTime(context, lastSeen!)}'
+        : peer.lastSuccess == null
+        ? null
+        : 'Last synced ${formatSystemRecentTime(context, peer.lastSuccess!)}';
+    if (peer.lastSuccess case final success?) {
+      rows.add((
+        label: 'Last successful sync',
+        value: formatSystemDateTime(context, success),
+      ));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+          child: Collapsible(
+            children: [
+              Builder(
+                builder: (context) {
+                  final expanded = Data.of<CollapsibleStateData>(context);
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            DeviceLabel(
+                              name: peer.name,
+                              deviceClass: deviceClass,
+                            ).semiBold(),
+                            const Gap(AppSpacing.xs),
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: statusLabel,
+                                    style: AppTheme.deviceCardTextStyle(context)
+                                        .copyWith(
+                                          color: _toneColor(
+                                            context,
+                                            peer.blocker != null
+                                                ? SyncTone.muted
+                                                : peer.tone,
+                                          ),
+                                        ),
+                                  ),
+                                  if (time != null)
+                                    TextSpan(
+                                      text: ' · $time',
+                                      style: AppTheme.deviceMetadataTextStyle(
+                                        context,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Gap(AppSpacing.sm),
+                      Tooltip(
+                        tooltip: (context) => const TooltipContainer(
+                          child: Text('Connection details'),
+                        ),
+                        child: Semantics(
+                          label: 'Connection details for ${peer.name}',
+                          button: true,
+                          expanded: expanded.isExpanded,
+                          child: Button.ghost(
+                            key: ValueKey('sync-peer-details-${peer.id}'),
+                            style: AppTheme.controlButtonStyle(
+                              const ButtonStyle.ghostIcon(),
+                            ),
+                            onPressed: expanded.handleTap,
+                            child: AppIconFrame(
+                              child: Icon(
+                                expanded.isExpanded
+                                    ? LucideIcons.chevronUp
+                                    : LucideIcons.chevronDown,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
-              content: Text(error),
-            ),
-            const Gap(AppSpacing.md),
-          ],
-          InspectorTable(
-            tableKey: ValueKey<String>('sync-peer-metadata-${peer.id}'),
-            rows: [
-              for (final row in rows)
-                (label: row.label, value: SelectableText(row.value)),
+              for (final issue in peer.visibleIssues) ...[
+                const Gap(AppSpacing.md),
+                Alert(
+                  destructive: issue.blocking,
+                  theme: AppTheme.statusAlertTheme(
+                    context,
+                    _statusTone(issue.tone),
+                  ),
+                  leading: AppIconFrame(
+                    child: Icon(
+                      LucideIcons.circleAlert,
+                      color: _toneColor(context, issue.tone),
+                    ),
+                  ),
+                  title: Text(
+                    '${issue.title}${issue.count > 0 ? ' (${issue.count})' : ''}',
+                    style: AppTheme.deviceCardTextStyle(context)
+                        .copyWith(color: _toneColor(context, issue.tone)),
+                  ).semiBold(),
+                  content: issue.blocking || issue.pending
+                      ? Text(
+                          issue.message,
+                          style: AppTheme.deviceCardTextStyle(context).copyWith(
+                            color: Theme.of(context).colorScheme.foreground,
+                          ),
+                        )
+                      : null,
+                ),
+              ],
+              if (peer.legacyProblem) ...[
+                const Gap(AppSpacing.md),
+                Alert(
+                  content: Text(
+                    peer.error!,
+                    style: AppTheme.deviceCardTextStyle(context),
+                  ),
+                ),
+              ],
+              CollapsibleContent(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.md),
+                  child: InspectorTable(
+                    tableKey: ValueKey('sync-peer-metadata-${peer.id}'),
+                    rows: [
+                      for (final row in rows)
+                        (label: row.label, value: SelectableText(row.value)),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
-        ],
-      ),
+        ),
+        const Divider(),
+      ],
     );
   }
+}
+
+class _SyncLogRow extends StatelessWidget {
+  const _SyncLogRow({required this.entry, required this.name});
+  final SyncLogEntry entry;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        '${formatSystemRecentTime(context, entry.timestamp)} · $name',
+        style: AppTheme.deviceMetadataTextStyle(context),
+      ),
+      const Gap(AppSpacing.xs),
+      Text(entry.message, style: AppTheme.deviceCardTextStyle(context)),
+    ],
+  );
 }

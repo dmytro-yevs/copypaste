@@ -1,3 +1,5 @@
+import '../../devices/devices_gateway.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -163,11 +165,55 @@ class RuntimeSettingsRepository
       );
 
   SyncStatus _syncStatus(runtime.RuntimeSyncStatus status) => SyncStatus(
+    diagnosticsAvailable: status.diagnosticsAvailable,
+    log: status.log
+        .map(
+          (entry) => SyncLogEntry(
+            peerId: entry.pairingId,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              entry.timestampMs.toInt(),
+            ),
+            kind: entry.kind,
+            issueTitle: entry.issueTitle,
+            issueSeverity: entry.issueSeverity,
+            error: entry.error,
+            sent: entry.sent.toInt(),
+            received: entry.received.toInt(),
+          ),
+        )
+        .toList(growable: false),
     revision: status.revision.toInt(),
     phase: _syncPhase(status.phase),
     peers: status.peers
         .map(
           (peer) => PeerSyncStatus(
+            connection: switch (peer.connection) {
+              runtime.DevicePresenceState.online =>
+                DeviceConnectionState.online,
+              runtime.DevicePresenceState.offline =>
+                DeviceConnectionState.offline,
+              runtime.DevicePresenceState.unknown =>
+                DeviceConnectionState.unknown,
+            },
+            checking: peer.checking,
+            addressKnown: peer.addressKnown,
+            issues: peer.issues
+                .map(
+                  (issue) => SyncIssue(
+                    code: issue.code,
+                    scope: issue.scope,
+                    title: issue.title,
+                    message: issue.message,
+                    severity: issue.severity,
+                    blocking: issue.blocking,
+                    pending: issue.pending,
+                    since: DateTime.fromMillisecondsSinceEpoch(
+                      issue.sinceMs.toInt(),
+                    ),
+                    count: issue.count.toInt(),
+                  ),
+                )
+                .toList(growable: false),
             id: peer.pairingId,
             name: peer.name,
             phase: _syncPhase(peer.phase),

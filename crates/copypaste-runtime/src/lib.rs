@@ -850,6 +850,27 @@ impl Runtime {
             },
             Method::Copy { id: item_id } => self.copy(id, &item_id, false),
             Method::CopyPlainText { id: item_id } => self.copy(id, &item_id, true),
+            Method::CopyText { id: item_id, text } => {
+                match copypaste_core::history_actions::copy_text(
+                    &self.store,
+                    &item_id,
+                    &text,
+                    |payload| {
+                        self.clipboard
+                            .write(payload, copypaste_ipc::content_type::TEXT)
+                    },
+                ) {
+                    Ok(stamp) => {
+                        self.instant_clipboard.note_local(&self.store, stamp);
+                        self.node.note_local_version(stamp);
+                        self.modules.note_version(stamp);
+                        self.peer_sync.wake();
+                        self.emit(EventKind::Items);
+                        Response::ok(id, ResponseData::Empty {})
+                    }
+                    Err(error) => error.response(id),
+                }
+            }
             Method::HistoryCeiling => match self.store.max_rowid() {
                 Ok(value) => Response::ok(id, ResponseData::Count(value.max(0) as u64)),
                 Err(_) => {
@@ -2803,6 +2824,60 @@ mod tests {
             runtime.store.get("text-item").unwrap().unwrap().created_at,
             1
         );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn selection_copy_promotes_its_source_only_after_a_successful_native_write() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        seed_text(&runtime, "source", "full original text");
+        seed_text(&runtime, "z-newer", "newer text");
+        let original = runtime.store.get("source").unwrap().unwrap();
+        let mut events = runtime.events.subscribe();
+        assert!(
+            runtime
+                .request(
+                    1,
+                    Method::CopyText {
+                        id: "source".into(),
+                        text: "original".into()
+                    }
+                )
+                .await
+                .ok
+        );
+        assert_eq!(*clipboard.0.lock().unwrap(), ["text:original"]);
+        assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "source");
+        let copied = runtime.store.get("source").unwrap().unwrap();
+        assert_eq!(copied.content_ciphertext, original.content_ciphertext);
+        assert_eq!(runtime.store.count().unwrap(), 2);
+        assert_eq!(events.try_recv().unwrap().event, EventKind::Items);
+        let stamp = copied.created_at;
+        assert!(copypaste_core::history_actions::copy_text(
+            &runtime.store,
+            "source",
+            "refused",
+            |_| Err(ClipboardWriteError::Failed)
+        )
+        .is_err());
+        assert_eq!(
+            runtime.store.get("source").unwrap().unwrap().created_at,
+            stamp
+        );
+        assert!(
+            !runtime
+                .request(
+                    2,
+                    Method::CopyText {
+                        id: "missing".into(),
+                        text: "never written".into()
+                    }
+                )
+                .await
+                .ok
+        );
+        assert_eq!(clipboard.0.lock().unwrap().len(), 1);
         assert!(events.try_recv().is_err());
     }
 

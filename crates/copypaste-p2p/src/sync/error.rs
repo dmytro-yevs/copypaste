@@ -15,6 +15,10 @@ pub enum SyncError {
     /// The channel underneath failed — closed, timed out, or refused a frame.
     #[error("sync channel error: {0}")]
     Channel(String),
+    #[error("Synchronization was cancelled.")]
+    Cancelled,
+    #[error("{0}")]
+    Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode),
 
     #[error("peer sent a {got} message where a {expected} was expected")]
     Unexpected {

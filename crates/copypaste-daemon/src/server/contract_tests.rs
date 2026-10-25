@@ -87,6 +87,7 @@ fn expected(method: &Method) -> Expected {
         }
         Method::Copy { .. }
         | Method::CopyPlainText { .. }
+        | Method::CopyText { .. }
         | Method::SaveFile { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
@@ -140,6 +141,10 @@ fn cases(root: &Path) -> Vec<Method> {
         },
         Method::CopyPlainText {
             id: "missing".into(),
+        },
+        Method::CopyText {
+            id: "missing".into(),
+            text: "selection".into(),
         },
         Method::Get {
             id: "missing".into(),
@@ -311,7 +316,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        52,
+        53,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

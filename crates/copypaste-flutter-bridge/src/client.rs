@@ -318,6 +318,8 @@ mod tests {
                     revision: 7,
                     phase: copypaste_ipc::SyncPhase::Syncing,
                     peers: Vec::new(),
+                    log: Vec::new(),
+                    diagnostics_available: true,
                 }),
                 event,
                 item_count: 3,

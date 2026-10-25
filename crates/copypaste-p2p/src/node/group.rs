@@ -29,6 +29,7 @@ impl Node {
             let session = crate::Session::connect(addr, &peer.psk)
                 .await
                 .map_err(|_| NodeError::Handshake)?;
+            self.note_authenticated(&peer.pairing_id);
             return Ok((session, peer.clone()));
         };
         for epoch_refresh in 0..=1 {
@@ -50,10 +51,10 @@ impl Node {
                 .filter(|peer| peer.pairing_id != current.pairing_id);
             match (epoch_refresh, updated) {
                 (0, Some(peer)) => current = peer,
-                _ => return Err(NodeError::Session),
+                _ => return Err(NodeError::Cancelled),
             }
         }
-        Err(NodeError::Session)
+        Err(NodeError::Cancelled)
     }
     async fn connect_peer_once(
         &self,
@@ -62,6 +63,7 @@ impl Node {
     ) -> Result<(crate::Session, crate::Peer), NodeError> {
         let peer = self.current_peer(peer).unwrap_or_else(|| peer.clone());
         if let Ok(session) = crate::Session::connect(addr, &peer.psk).await {
+            self.note_authenticated(&peer.pairing_id);
             return Ok((session, peer));
         }
         let key = peer
@@ -72,12 +74,10 @@ impl Node {
         let session = crate::Session::connect_membership(addr, &key)
             .await
             .map_err(|_| NodeError::Handshake)?;
+        self.note_authenticated(&peer.pairing_id);
         let mut channel = NoiseChannel::new(session);
         let refreshed = tokio::time::timeout(super::SESSION_TIMEOUT, async {
-            let snapshot = self
-                .peers
-                .stored_group()
-                .map_err(|_| NodeError::PeerStore)?;
+            let snapshot = self.peers.stored_group().map_err(group_error)?;
             channel
                 .send(SyncMessage::Group {
                     protocol_version: PROTOCOL_VERSION,
@@ -88,10 +88,10 @@ impl Node {
             let SyncMessage::Group { snapshot, .. } =
                 channel.recv().await.map_err(super::dial::session_error)?
             else {
-                return Err(NodeError::Session);
+                return Err(NodeError::InvalidData);
             };
             self.apply_group(&snapshot, Some(&peer.pairing_id), false)
-                .map_err(|_| NodeError::PeerStore)?;
+                .map_err(group_error)?;
             channel.wait_for_close().await;
             Ok::<_, NodeError>(())
         })
@@ -116,17 +116,16 @@ impl Node {
                     .clone(),
                 self.listen_addr().and_then(|addr| addr.parse().ok()),
             )
-            .map_err(|_| NodeError::PeerStore)
+            .map_err(group_error)
     }
     pub fn export_group<S: SyncSource>(&self, source: &S) -> Result<Option<String>, NodeError> {
         let snapshot = self.prepare_group(source)?;
         if !self.peers.group_active() {
             return Ok(None);
         }
-        snapshot
-            .encode()
-            .map(Some)
-            .map_err(|_| NodeError::PeerStore)
+        snapshot.encode().map(Some).map_err(|_| {
+            NodeError::Diagnostic(copypaste_ipc::sync_issue::SyncIssueCode::LocalProtocolError)
+        })
     }
     /// The cloud provider calls this only after account authentication and
     /// ciphertext authentication with the existing sync passphrase.
@@ -160,7 +159,7 @@ impl Node {
             Ok(true)
         })
         .map(|_| ())
-        .map_err(|_| NodeError::PeerStore)
+        .map_err(group_error)
     }
     fn change_group(
         &self,
@@ -211,14 +210,18 @@ impl Node {
                 snapshot: self.prepare_group(source)?,
             })
             .await
-            .map_err(|_| NodeError::Session)?;
+            .map_err(super::dial::session_error)?;
         let SyncMessage::Group { snapshot, .. } =
             channel.recv().await.map_err(super::dial::session_error)?
         else {
-            return Err(NodeError::PeerVersion);
+            return Err(NodeError::InvalidData);
         };
         self.apply_group(&snapshot, Some(pairing_id), explicit)
-            .map_err(|_| NodeError::PeerStore)?;
+            .map_err(group_error)?;
+        self.sync_activity.evidence(
+            pairing_id,
+            copypaste_ipc::sync_issue::SyncEvidence::GroupAccepted,
+        );
         if !self.peers.group_active() {
             return Err(NodeError::NoPeer);
         }
@@ -234,7 +237,11 @@ impl Node {
     ) -> Result<(), NodeError> {
         self.prepare_group(source)?;
         self.apply_group(&snapshot, Some(pairing_id), explicit)
-            .map_err(|_| NodeError::PeerStore)?;
+            .map_err(group_error)?;
+        self.sync_activity.evidence(
+            pairing_id,
+            copypaste_ipc::sync_issue::SyncEvidence::GroupAccepted,
+        );
         // The response includes new admissions and removals learned above.
         channel
             .send(SyncMessage::Group {
@@ -242,12 +249,34 @@ impl Node {
                 snapshot: self.prepare_group(source)?,
             })
             .await
-            .map_err(|_| NodeError::Session)?;
+            .map_err(super::dial::session_error)?;
         if !self.peers.group_active() {
             return Err(NodeError::NoPeer);
         }
         Ok(())
     }
+}
+
+fn group_error(error: crate::PeerStoreError) -> NodeError {
+    use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+    let code = match error {
+        crate::PeerStoreError::Invalid(_) | crate::PeerStoreError::Revoked => {
+            Code::MembershipRejected
+        }
+        crate::PeerStoreError::Io(error) => match error.kind() {
+            std::io::ErrorKind::StorageFull => Code::StorageFull,
+            std::io::ErrorKind::PermissionDenied => Code::StoragePermissionDenied,
+            _ => Code::MembershipUnavailable,
+        },
+        crate::PeerStoreError::Corrupt
+        | crate::PeerStoreError::Encrypt
+        | crate::PeerStoreError::AlreadyPaired
+        | crate::PeerStoreError::TooManyPairings
+        | crate::PeerStoreError::TooManyRevocations
+        | crate::PeerStoreError::Contended
+        | crate::PeerStoreError::Poisoned => Code::MembershipUnavailable,
+    };
+    NodeError::Diagnostic(code)
 }
 
 #[cfg(test)]

@@ -15,8 +15,22 @@ use super::Store;
 const MEMORY_BUDGET: usize = 4 * 1024 * 1024;
 const ERROR: &str = "the sync session workspace is unavailable";
 
-fn failed(_: impl std::fmt::Display) -> SyncError {
-    SyncError::Source(ERROR.into())
+fn failed(error: impl std::error::Error + 'static) -> SyncError {
+    let error = &error as &(dyn std::error::Error + 'static);
+    let code = if let Some(error) = error.downcast_ref::<rusqlite::Error>() {
+        crate::sync::diagnostics::sqlite(error)
+    } else if let Some(error) = error.downcast_ref::<std::io::Error>() {
+        crate::sync::diagnostics::io(error)
+    } else if let Some(error) = error.downcast_ref::<crate::StoreError>() {
+        crate::sync::diagnostics::store(error)
+    } else if error.is::<rand::Error>() {
+        copypaste_ipc::sync_issue::SyncIssueCode::EncryptionUnavailable
+    } else if error.is::<serde_json::Error>() {
+        copypaste_ipc::sync_issue::SyncIssueCode::LocalPayloadInvalid
+    } else {
+        copypaste_ipc::sync_issue::SyncIssueCode::HistoryUnavailable
+    };
+    SyncError::Diagnostic(code)
 }
 
 impl Store {

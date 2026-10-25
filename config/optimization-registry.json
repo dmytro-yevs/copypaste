@@ -3238,6 +3238,107 @@
       ],
       "supersedes": [],
       "functional_validation": "Maintained Robolectric API 36 regression fails on the original Activity and passes on the patched Activity in an isolated harness. Android 14 arm64 emulator reproduces baseline keyboard hiding; six patched hand-offs preserve initially visible/hidden keyboard state, read every clip with focus and leave editor text unchanged. The probe uses the exact production Activity/theme with an observed native-read boundary; full-app sync and physical-device evidence are not established."
+    },
+    {
+      "id": "RUN-069",
+      "title": "Read Windows device chassis directly from firmware",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p device profile",
+      "platforms": [
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/device_profile.rs",
+        "crates/copypaste-p2p/src/device_profile/windows_firmware.rs",
+        "apps/copypaste_flutter/test/features/devices/devices_screen_test.dart"
+      ],
+      "invariant": "Determine Windows chassis through GetSystemFirmwareTable instead of launching PowerShell/CIM with a 250 ms timeout. Cache only the derived class and existing bounded model. Allocate at most 1 MiB of transient firmware data, validate lengths, release it after classification, and preserve Unknown when firmware is unavailable. No child process, retry, background service or polling is introduced. Shared typed icons and wire values remain common to macOS, Android and Windows.",
+      "allocation_lifetime": "One temporary firmware buffer per process hardware initialization; dropped before the derived metadata enters the existing OnceLock.",
+      "next_step": "Collect exact-build native Windows device-profile and application/daemon/worker peak, steady-state and growth evidence. CPU, wakeup, I/O and growth budgets remain unresolved in runtime-resource-budgets.json.",
+      "native_resource_qualification": {
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "profile-snapshot-tests.log",
+          "sha256": "7bea9f66ef917f2d9704484a8ef2da7d7558b7ff868256d2b244fc55f3b812d3",
+          "source_state": "HEAD_plus_device_profile_patch",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "firmware-tests.log",
+          "sha256": "79475936ec7cca49c82ebc2820e5e9d0f13c6ffb8af4c54617b99b9014229e75",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-device-regression.log",
+          "sha256": "3952eef2832579f5e095ce539d65f92e41695a0bddf2442067f8ba9352f95eb3",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "windows-adapter-check.log",
+          "sha256": "566d86202faa696526d436414c2fdf2a21cb7abafe9f6ac8e1f6654cd54bf51a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "windows-adapter-clippy.log",
+          "sha256": "03b46f994b852ffcb1d2af731dcabf30e35f49e497654fa0a941d1f01963d8d0",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-analyze.log",
+          "sha256": "bdc560540189b7533456b66279ad6a3dbd793803d00940f958c9018f4097ac51",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "117 shared Flutter device/gateway tests and Dart analysis passed in an isolated Flutter harness. Eleven device-profile tests passed against HEAD plus this patch, excluding unrelated in-progress changes; four firmware parser tests also passed directly against the current IPC contract. The exact Windows adapter compiled and passed Clippy with warnings denied for x86_64-pc-windows-msvc. Full current-workspace Rust tests are blocked by an unrelated moved-value error in node/journal.rs; broader sync-drawer tests have unrelated status/ping expectation failures. No installed Windows/native UI or resource measurement is established."
+    },
+    {
+      "id": "RUN-070",
+      "title": "Bounded synchronization activity history",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P synchronization activity",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/journal.rs",
+        "crates/copypaste-p2p/src/node/activity.rs",
+        "apps/copypaste_flutter/lib/features/settings/view/sync_header_action.dart",
+        "crates/copypaste-ipc/src/sync_issue.rs",
+        "crates/copypaste-core/src/sync/diagnostics.rs",
+        "docs/engineering/synchronization-status-contract.json"
+      ],
+      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions and empty successful polls do not write the journal. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
+      "allocation_lifetime": "One bounded journal per node; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
+      "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "342 P2P tests, 43 core sync tests, four protected-workspace tests, five IPC transport contract tests, 50 settings/UI tests plus the fixture renderer, and 13 final drawer/layout checks passed. Dart analysis clean. New-build native and resource qualification is not established."
     }
   ]
 }

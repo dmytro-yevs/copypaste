@@ -29,14 +29,11 @@ use super::batch::{apply_remote_p2p_versions, P2pPin};
 use super::merge::{
     apply_remote_version, open_version, MergeError, OpenVersionError, RemoteVersion,
 };
-use super::MSG_STORE;
 use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
 
 type ClipReceivedHook = Arc<dyn Fn(&StoredItem) + Send + Sync>;
-
-const MSG_SYNC_DISABLED: &str = "sync is disabled";
 
 const MAX_SUMMARIES_PER_SESSION: i64 =
     (MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION) as i64;
@@ -328,14 +325,14 @@ impl StoreSource {
         if settings.sync_enabled {
             Ok(settings)
         } else {
-            Err(SyncError::Source(MSG_SYNC_DISABLED.to_string()))
+            Err(SyncError::Cancelled)
         }
     }
 }
 
 fn store_error(e: crate::StoreError, what: &str) -> SyncError {
     warn!(error = ?e, "{what}");
-    SyncError::Source(MSG_STORE.to_string())
+    SyncError::Diagnostic(super::diagnostics::store(&e))
 }
 
 fn summary_from_version(version: crate::storage::Version, device_id: &str) -> ItemSummary {
@@ -360,7 +357,7 @@ impl SyncSource for StoreSource {
         let row = self
             .store
             .get(id)
-            .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+            .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
             .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
             .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
         let source = super::blocking(|| crate::file_reference::source(&self.store, &row.id))
@@ -411,7 +408,7 @@ impl SyncSource for StoreSource {
             let row = self
                 .store
                 .get(id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
                 .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
                 .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
             if !self.store.has_file_transfer(&row.id).unwrap_or(false) {
@@ -434,7 +431,7 @@ impl SyncSource for StoreSource {
             let row = self
                 .store
                 .get(id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
                 .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
                 .ok_or_else(|| SyncError::Source("The file is unavailable.".into()))?;
             let descriptor = crate::file_transfer::row_offer(&row, &self.keyring.item_key())
@@ -542,7 +539,18 @@ impl SyncSource for StoreSource {
                 &versions,
                 &pins,
             )
-            .map_err(|e| SyncError::Source(e.message().to_string()))?;
+            .map_err(|error| {
+                SyncError::Diagnostic(match error {
+                    MergeError::Store => {
+                        copypaste_ipc::sync_issue::SyncIssueCode::HistoryUnavailable
+                    }
+                    MergeError::StoreCause(code) => code,
+                    MergeError::Encrypt => {
+                        copypaste_ipc::sync_issue::SyncIssueCode::EncryptionUnavailable
+                    }
+                    MergeError::TooLarge => copypaste_ipc::sync_issue::SyncIssueCode::ItemsTooLarge,
+                })
+            })?;
             let floor = items
                 .iter()
                 .zip(&outcomes)
@@ -622,17 +630,17 @@ impl SharedFileSource {
         super::blocking(|| {
             let settings = (self.settings)();
             if !settings.sync_enabled {
-                return Err(SyncError::Source(MSG_SYNC_DISABLED.into()));
+                return Err(SyncError::Cancelled);
             }
             self.store
                 .get(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
                 .filter(|row| !row.deleted && row.clipboard_privacy().allows(&settings))
                 .ok_or_else(|| SyncError::Source("The file is no longer shared.".into()))?;
             if self
                 .store
                 .file_reference(&self.id)
-                .map_err(|_| SyncError::Source(MSG_STORE.into()))?
+                .map_err(|error| SyncError::Diagnostic(super::diagnostics::store(&error)))?
                 .is_none()
             {
                 return Err(SyncError::Source("The source file changed.".into()));
@@ -952,10 +960,7 @@ mod tests {
                 .apply(peer_item("peer-item", "not stored", 1_700_000_000_000))
                 .map(|_| ()),
         ] {
-            assert_eq!(
-                result,
-                Err(SyncError::Source(MSG_SYNC_DISABLED.to_string()))
-            );
+            assert_eq!(result, Err(SyncError::Cancelled));
         }
         assert!(f.store.get("peer-item").unwrap().is_none());
     }

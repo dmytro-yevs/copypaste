@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import '../../support/temporary_payloads.dart';
 
 import 'dart:async';
@@ -61,7 +62,7 @@ Future<
     _Clipboard clipboard,
   })
 >
-_fixture() async {
+_fixture({Future<void> Function(String id, String text)? copyText}) async {
   final repository = _OcrModulesRepository()..modules = [_ocrModule()];
   final modules = ModulesController(
     repository: repository,
@@ -74,6 +75,7 @@ _fixture() async {
     modules: modules,
     imageInput: input,
     clipboard: clipboard,
+    copyText: copyText,
   );
   return (
     modules: modules,
@@ -116,9 +118,8 @@ void main() {
               builder: (context, child) => AppTheme.builder(
                 context,
                 MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(textScaler: TextScaler.linear(scale)),
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(scale)),
                   child: child!,
                 ),
               ),
@@ -221,6 +222,24 @@ void main() {
     expect(await f.ocr.copyText(), isTrue);
     expect(f.clipboard.values, ['Розпізнаний текст\nText']);
   });
+
+  test(
+    'OCR copy retains the originating clip in the shared native copy path',
+    () async {
+      final copied = <(String, String)>[];
+      final f = await _fixture(
+        copyText: (id, text) async {
+          copied.add((id, text));
+        },
+      );
+      addTearDown(f.modules.dispose);
+      addTearDown(f.ocr.dispose);
+      await f.ocr.recognize(_image);
+      expect(await f.ocr.copySelection('Recognized'), isTrue);
+      expect(copied, [('screenshot', 'Recognized')]);
+      expect(f.clipboard.values, isEmpty);
+    },
+  );
 
   test('failed invocation cleans input and supports a fresh retry', () async {
     final f = await _fixture();

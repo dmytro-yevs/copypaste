@@ -1,5 +1,8 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import 'dart:async';
+
+import 'history_selectable_text.dart';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -37,7 +40,12 @@ Future<void> showHistoryOcrDialog(
               )
             : text == null || text.trim().isEmpty
             ? const StateView.empty(title: 'No text found')
-            : SingleChildScrollView(child: SelectableText(text));
+            : SingleChildScrollView(
+                child: HistorySelectableText(
+                  text,
+                  onCopy: controller.copySelection,
+                ),
+              );
         return AppOverlays.alertDialog(
           icon: LucideIcons.scanText,
           title: const Text('Image text'),

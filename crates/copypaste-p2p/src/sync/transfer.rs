@@ -75,6 +75,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 // Refuse only this version before the channel sees it. An
                 // invalid member must never poison an otherwise valid frame.
                 tracing::warn!("local item violates the sync wire contract; withholding it");
+                stats.skipped_invalid += 1;
                 continue;
             }
             unavailable.remove(item.item_id.as_str());

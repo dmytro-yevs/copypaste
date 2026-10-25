@@ -15,7 +15,8 @@
 //! could never open it — and re-encrypting per peer would mean sharing local
 //! storage keys between devices.
 
-#![forbid(unsafe_code)]
+#![cfg_attr(not(target_os = "windows"), forbid(unsafe_code))]
+#![cfg_attr(target_os = "windows", deny(unsafe_code))]
 
 pub mod device_profile;
 pub mod discovery;

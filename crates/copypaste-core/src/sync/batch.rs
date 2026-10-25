@@ -106,7 +106,7 @@ fn apply_page(
     let ids: Vec<&str> = incoming.iter().map(|item| item.item_id).collect();
     let mut snapshot = store.version_summaries(&ids).map_err(|e| {
         warn!(error = ?e, "could not read the local versions of an incoming page");
-        MergeError::Store
+        MergeError::StoreCause(super::diagnostics::store(&e))
     })?;
 
     for _ in 0..SNAPSHOT_ATTEMPTS {
@@ -142,7 +142,7 @@ fn apply_page(
                         )
                         .map_err(|e| {
                             warn!(error = ?e, "could not store incoming P2P pin state");
-                            MergeError::Store
+                            MergeError::StoreCause(super::diagnostics::store(&e))
                         })?;
                 }
                 redo_after_refusals(
@@ -163,13 +163,15 @@ fn apply_page(
             }
             Err(MergePageError::Store(e)) => {
                 warn!(error = ?e, "could not merge an incoming page");
-                return Err(MergeError::Store);
+                return Err(MergeError::StoreCause(super::diagnostics::store(&e)));
             }
         }
     }
 
     warn!("the merge snapshot changed on every attempt");
-    Err(MergeError::Store)
+    Err(MergeError::StoreCause(
+        copypaste_ipc::sync_issue::SyncIssueCode::HistoryBusy,
+    ))
 }
 
 /// Decide the whole page against `local`, threading each id's own decisions

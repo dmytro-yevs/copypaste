@@ -38,6 +38,7 @@ pub const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct NoiseChannel {
     session: Session,
     read_timeout: Duration,
+    on_transfer: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl NoiseChannel {
@@ -45,6 +46,20 @@ impl NoiseChannel {
         Self {
             session,
             read_timeout: READ_TIMEOUT,
+            on_transfer: None,
+        }
+    }
+
+    pub(super) fn on_transfer(mut self, callback: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_transfer = Some(Box::new(callback));
+        self
+    }
+
+    fn observe_transfer(&self, message: &SyncMessage) {
+        if matches!(message, SyncMessage::Items { items } if !items.is_empty()) {
+            if let Some(callback) = &self.on_transfer {
+                callback();
+            }
         }
     }
 
@@ -81,34 +96,53 @@ impl SyncChannel for NoiseChannel {
     async fn send(&mut self, mut msg: SyncMessage) -> Result<(), SyncError> {
         // Handed down verbatim, so what reaches the wire is exactly the bytes
         // `encode` validated.
-        let encoded = msg.encode();
+        let encoded = msg.encode()?;
+        self.observe_transfer(&msg);
         if let SyncMessage::FileChunk { bytes, .. } = &mut msg {
             zeroize::Zeroize::zeroize(bytes);
         }
-        let bytes = Zeroizing::new(encoded?);
+        let bytes = Zeroizing::new(encoded);
 
         self.session
             .send_bytes(bytes)
             .await
-            .map_err(|e| SyncError::Channel(e.to_string()))
+            .map_err(transport_error)
     }
 
     async fn recv(&mut self) -> Result<SyncMessage, SyncError> {
         let received = tokio::time::timeout(self.read_timeout, self.session.recv_bytes()).await;
 
         match received {
-            Err(_) => Err(SyncError::Channel(
-                "the peer stopped responding".to_string(),
+            Err(_) => Err(SyncError::Diagnostic(
+                copypaste_ipc::sync_issue::SyncIssueCode::TimedOut,
             )),
             // A clean close at a message boundary. The session functions expect
             // a message; ending here is the peer walking away mid-protocol.
-            Ok(Ok(None)) => Err(SyncError::Channel(
-                "the peer closed the session".to_string(),
+            Ok(Ok(None)) => Err(SyncError::Diagnostic(
+                copypaste_ipc::sync_issue::SyncIssueCode::ConnectionLost,
             )),
-            Ok(Ok(Some(raw))) => Ok(SyncMessage::decode(&raw)?),
-            Ok(Err(e)) => Err(SyncError::Channel(e.to_string())),
+            Ok(Ok(Some(raw))) => {
+                let message = SyncMessage::decode(&raw)?;
+                self.observe_transfer(&message);
+                Ok(message)
+            }
+            Ok(Err(e)) => Err(transport_error(e)),
         }
     }
+}
+
+fn transport_error(error: crate::transport::TransportError) -> SyncError {
+    use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+    let code = match error {
+        crate::transport::TransportError::Io(_) | crate::transport::TransportError::Handshake => {
+            Code::ConnectionLost
+        }
+        crate::transport::TransportError::Malformed
+        | crate::transport::TransportError::Codec
+        | crate::transport::TransportError::InvalidCode => Code::SecureChannelInterrupted,
+        crate::transport::TransportError::TooLarge => Code::ProtocolLimit,
+    };
+    SyncError::Diagnostic(code)
 }
 
 #[cfg(test)]
@@ -208,7 +242,7 @@ mod tests {
             .recv()
             .await
             .expect_err("a silent peer must time out");
-        assert!(matches!(err, SyncError::Channel(_)), "{err:?}");
+        assert!(matches!(err, SyncError::Diagnostic(_)), "{err:?}");
         accepting.abort();
     }
 
@@ -220,7 +254,7 @@ mod tests {
             .recv()
             .await
             .expect_err("a closed session is not a message");
-        assert!(matches!(err, SyncError::Channel(_)), "{err:?}");
+        assert!(matches!(err, SyncError::Diagnostic(_)), "{err:?}");
     }
 
     #[tokio::test]

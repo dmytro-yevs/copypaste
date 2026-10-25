@@ -502,9 +502,8 @@ class HistoryController extends ChangeNotifier {
     if (repository is HistoryFileDownloadCancellation) {
       final cancellation = repository as HistoryFileDownloadCancellation;
       unawaited(
-        Future<void>.sync(
-          () => cancellation.cancelFileDownload(id),
-        ).catchError((Object _) {}),
+        Future<void>.sync(() => cancellation.cancelFileDownload(id))
+            .catchError((Object _) {}),
       );
     }
     notifyListeners();
@@ -879,13 +878,12 @@ class HistoryController extends ChangeNotifier {
   Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
     late final Future<void> refresh;
     refresh =
-        _refreshVisibleItemsAndFacets(
-          resetWatchBackoff: resetWatchBackoff,
-        ).whenComplete(() {
-          if (identical(_visibleItemsRefresh, refresh)) {
-            _visibleItemsRefresh = null;
-          }
-        });
+        _refreshVisibleItemsAndFacets(resetWatchBackoff: resetWatchBackoff)
+            .whenComplete(() {
+              if (identical(_visibleItemsRefresh, refresh)) {
+                _visibleItemsRefresh = null;
+              }
+            });
     _visibleItemsRefresh = refresh;
     return refresh;
   }
@@ -1511,6 +1509,21 @@ class HistoryController extends ChangeNotifier {
         action: HistoryAction.copy,
       );
       notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> copyTextFrom(String id, String text) async {
+    if (_disposed || text.isEmpty) return false;
+    try {
+      await _repository.copyText(id, text);
+      return true;
+    } catch (_) {
+      _reportOperationError(
+        'This text could not be copied.',
+        action: HistoryAction.copy,
+      );
+      if (!_disposed) notifyListeners();
       return false;
     }
   }

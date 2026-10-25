@@ -48,6 +48,7 @@ pub(super) fn plan_workspace(
                     "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
                 );
                 stats.skipped += 1;
+                stats.skipped_future += 1;
                 workspace.defer(&r.item_id)?;
                 continue;
             }
@@ -68,6 +69,7 @@ pub(super) fn plan_workspace(
             "more wanted items than one session transfers; the rest follow next session"
         );
         stats.skipped += dropped;
+        stats.deferred += dropped;
     }
     Ok(selected
         .into_iter()
@@ -104,6 +106,7 @@ pub(super) fn plan(
                 "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
             );
             stats.skipped += 1;
+            stats.skipped_future += 1;
             deferred.insert(r.item_id.clone());
             continue;
         }
@@ -150,6 +153,7 @@ pub(super) fn plan(
         }
         wanted.retain(|id, _| keep.contains(id.as_str()));
         stats.skipped += dropped;
+        stats.deferred += dropped;
     }
 
     Plan { wanted, deferred }

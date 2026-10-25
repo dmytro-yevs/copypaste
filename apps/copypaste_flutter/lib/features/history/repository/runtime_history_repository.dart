@@ -160,6 +160,12 @@ class RuntimeHistoryRepository
   }
 
   @override
+  Future<void> copyText(String id, String text) async {
+    _ensureActive();
+    await runtime.copyClipText(id: id, text: text);
+  }
+
+  @override
   Future<void> saveFile(String id, String destinationPath) async {
     _ensureActive();
     final random = Random.secure();
@@ -209,9 +215,9 @@ class RuntimeHistoryRepository
       try {
         do {
           checkAgain = false;
-          final records =
-              jsonDecode(await runtime.fileOperations(clear: false, id: token))
-                  as List;
+          final records = jsonDecode(
+            await runtime.fileOperations(clear: false, id: token),
+          ) as List;
           final record = records.cast<Map>().firstOrNull;
           if (record == null) continue;
           onProgress(record['written'] as int, record['total'] as int);

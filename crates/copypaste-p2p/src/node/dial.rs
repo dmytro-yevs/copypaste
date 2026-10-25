@@ -40,7 +40,7 @@ impl Node {
         let result = self.sync_one_observed(peer, source, cycle).await;
         match &result {
             Ok(outcome) => observation.finish(Some(&outcome.stats), None),
-            Err(error) => observation.finish(None, Some(error.to_string())),
+            Err(error) => observation.finish(None, Some(*error)),
         }
         result
     }
@@ -59,9 +59,10 @@ impl Node {
         }
         let mut session = None;
         let mut addr = None;
+        let mut authenticated_error = None;
         for candidate in candidates {
             let connected = tokio::select! {
-                _ = cancel.cancelled() => return Err(NodeError::Session),
+                _ = cancel.cancelled() => return Err(NodeError::Cancelled),
                 result = self.connect_peer(candidate.addr, &peer) => result,
             };
             match connected {
@@ -71,6 +72,9 @@ impl Node {
                     break;
                 }
                 Err(error) => {
+                    if error.sync_issue().is_some() {
+                        authenticated_error = Some(error);
+                    }
                     if candidate.source == DialCandidateSource::Discovery {
                         self.record_discovery_candidate_failure(&peer.pairing_id, candidate.addr);
                     }
@@ -85,7 +89,7 @@ impl Node {
         }
         let (session, peer, addr) = match (session, addr) {
             (Some((session, peer)), Some(addr)) => (session, peer, addr),
-            _ => return Err(NodeError::Handshake),
+            _ => return Err(authenticated_error.unwrap_or(NodeError::Handshake)),
         };
         let active = self
             .begin_active_sync(&peer.pairing_id)
@@ -119,7 +123,7 @@ impl Node {
             })
         });
         if committed.flatten().is_none() {
-            return Err(NodeError::Session);
+            return Err(NodeError::Cancelled);
         }
         info!(
             pairing_id = %peer.pairing_id,
@@ -144,7 +148,12 @@ impl Node {
         active: &super::ActiveSync<'_>,
     ) -> Result<SyncOutcome, NodeError> {
         let listen_addr = self.session_listen_addr(session.local_addr());
-        let mut channel = NoiseChannel::new(session);
+        let activity = std::sync::Arc::clone(&self.sync_activity);
+        let pairing_id = active.pairing_id.clone();
+        let token = active.id;
+        let _transfer = activity.transfer_scope(&pairing_id, token);
+        let mut channel = NoiseChannel::new(session)
+            .on_transfer(move || activity.transferring(&pairing_id, token));
         let guarded_source = super::ActiveSyncSource {
             source,
             state: std::sync::Arc::clone(&active.state),
@@ -167,7 +176,7 @@ impl Node {
         channel.close().await;
 
         let Some(outcome) = outcome else {
-            return Err(NodeError::Session);
+            return Err(NodeError::Cancelled);
         };
 
         match outcome {
@@ -182,9 +191,29 @@ impl Node {
 }
 
 pub(super) fn session_error(e: SyncError) -> NodeError {
+    use copypaste_ipc::sync_issue::SyncIssueCode as Code;
     match e {
-        SyncError::Protocol(ProtocolError::VersionMismatch { .. }) => NodeError::PeerVersion,
-        _ => NodeError::Session,
+        SyncError::Cancelled => NodeError::Cancelled,
+        SyncError::Diagnostic(code) => NodeError::Diagnostic(code),
+        SyncError::Protocol(error) => match error {
+            ProtocolError::VersionMismatch { .. } => NodeError::PeerVersion,
+            ProtocolError::MessageTooLarge { .. }
+            | ProtocolError::TooManyEntries { .. }
+            | ProtocolError::ContentTooLarge { .. }
+            | ProtocolError::BatchTooLarge { .. } => NodeError::Diagnostic(Code::ProtocolLimit),
+            ProtocolError::FieldTooLong { .. }
+            | ProtocolError::FieldEmpty { .. }
+            | ProtocolError::InvalidListenAddr
+            | ProtocolError::NegativeTimestamp { .. }
+            | ProtocolError::InvalidPinState
+            | ProtocolError::Decode(_) => NodeError::InvalidData,
+            ProtocolError::Encode(_) => NodeError::Diagnostic(Code::LocalProtocolError),
+        },
+        SyncError::Channel(_) => NodeError::ConnectionLost,
+        SyncError::Source(_) => NodeError::HistoryUnavailable,
+        SyncError::SelfSync => NodeError::SelfPairing,
+        SyncError::Unexpected { .. } | SyncError::PeerOverran => NodeError::InvalidData,
+        SyncError::TooManySummaryPages => NodeError::Diagnostic(Code::ProtocolLimit),
     }
 }
 
@@ -404,7 +433,7 @@ mod tests {
         );
         cycle.set_enabled(false);
         pause.release();
-        assert_eq!(session.await, Err(NodeError::Session));
+        assert_eq!(session.await, Err(NodeError::Cancelled));
         assert_eq!(b.cursors().get(&pairing_id), SyncCursor::default());
         assert!(b.authenticated_profile(&pairing_id).is_none());
         assert_eq!(b.peers().get(&pairing_id).unwrap().last_seen_ms, 1);

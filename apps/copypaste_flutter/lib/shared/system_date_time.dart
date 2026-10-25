@@ -28,3 +28,23 @@ String formatSystemDateTime(BuildContext context, DateTime value) {
   );
   return '$date $time';
 }
+
+/// Recent activity uses the system clock format; older events retain the date.
+String formatSystemRecentTime(BuildContext context, DateTime value) {
+  final local = value.toLocal();
+  final now = DateTime.now();
+  final localizations = Localizations.of<MaterialLocalizations>(
+    context,
+    MaterialLocalizations,
+  );
+  if (localizations == null ||
+      local.year != now.year ||
+      local.month != now.month ||
+      local.day != now.day) {
+    return formatSystemDateTime(context, value);
+  }
+  return localizations.formatTimeOfDay(
+    TimeOfDay.fromDateTime(local),
+    alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+  );
+}

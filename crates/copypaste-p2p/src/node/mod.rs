@@ -26,6 +26,7 @@ mod dial;
 mod error;
 mod files;
 mod group;
+mod journal;
 mod listen;
 mod pairing;
 mod pairing_ceremony;
@@ -359,7 +360,7 @@ impl<S: SyncSource> ActiveSyncSource<'_, S> {
     fn operation(&self) -> Result<ActiveSourceOperation, SyncError> {
         self.state
             .enter_operation()
-            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))
+            .ok_or_else(|| SyncError::Cancelled)
     }
 }
 
@@ -372,14 +373,14 @@ impl crate::sync::DeferredFileSource for ActiveDeferredFileSource {
         let _operation = self
             .state
             .enter_operation()
-            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))?;
+            .ok_or_else(|| SyncError::Cancelled)?;
         self.source.read_chunk()
     }
     fn verify(&mut self) -> Result<(), SyncError> {
         let _operation = self
             .state
             .enter_operation()
-            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))?;
+            .ok_or_else(|| SyncError::Cancelled)?;
         self.source.verify()
     }
 }
@@ -549,7 +550,9 @@ impl Node {
         );
         let node = Self {
             group_profile: std::sync::OnceLock::new(),
-            sync_activity: activity::SyncActivity::new(),
+            sync_activity: activity::SyncActivity::open(Some(
+                peers.path().with_file_name("sync-log.json"),
+            )),
             peers,
             cursors,
             discovery,
@@ -582,7 +585,35 @@ impl Node {
     }
 
     pub fn sync_status(&self, enabled: bool) -> copypaste_ipc::SyncStatus {
-        self.sync_activity.snapshot(&self.peers.list(), enabled)
+        let mut status = self.sync_activity.snapshot(&self.peers.list(), enabled);
+        for peer in &mut status.peers {
+            peer.address_known = self
+                .peers
+                .get(&peer.pairing_id)
+                .is_some_and(|known| !self.dial_candidates(&known).is_empty());
+            peer.checking |= self
+                .probe_flights
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .contains(&peer.pairing_id);
+            peer.connection = self
+                .authenticated_reachability(&peer.pairing_id)
+                .map(|observation| match observation.state_at(crate::now_ms()) {
+                    ProbeState::Online => copypaste_ipc::DevicePresence::Online,
+                    ProbeState::Offline => copypaste_ipc::DevicePresence::Offline,
+                    ProbeState::Unknown => copypaste_ipc::DevicePresence::Unknown,
+                })
+                .unwrap_or_default();
+        }
+        status
+    }
+
+    fn note_authenticated(&self, pairing_id: &str) {
+        self.sync_activity.authenticated(pairing_id);
+        self.record_reachability(
+            pairing_id,
+            AuthenticatedReachability::online(None, crate::now_ms()),
+        );
     }
 
     pub fn subscribe_sync_changes(&self) -> tokio::sync::watch::Receiver<()> {
@@ -596,6 +627,7 @@ impl Node {
 
     /// Makes a locally written version visible below every peer's cursor.
     pub fn note_local_version(&self, floor_ms: i64) {
+        self.sync_activity.local_changed(None);
         self.cursors.note_local(floor_ms);
     }
 
@@ -604,6 +636,7 @@ impl Node {
     /// session would wipe the floor this exchange just established.
     pub(crate) fn record_cursor(&self, pairing_id: &str, outcome: &SyncOutcome) {
         if let Some(floor) = outcome.applied_floor {
+            self.sync_activity.local_changed(Some(pairing_id));
             self.cursors.note_applied(pairing_id, floor);
         }
         self.cursors
@@ -1012,7 +1045,15 @@ impl Node {
         {
             return;
         }
+        let changed = reachability
+            .get(pairing_id)
+            .is_none_or(|old| old.state != observation.state);
+        let online = observation.state == ProbeState::Online;
         reachability.insert(pairing_id.to_string(), observation);
+        drop(reachability);
+        if changed {
+            self.sync_activity.connection(pairing_id, online);
+        }
     }
 
     /// Re-advertise after the set of pairings changed.
@@ -1177,6 +1218,7 @@ impl Node {
 
     /// Shared cleanup for local actions and imported group removals.
     fn forget_peer_state(&self, pairing_id: &str) {
+        self.sync_activity.forget(pairing_id);
         self.cursors.forget(pairing_id);
         self.profiles
             .write()

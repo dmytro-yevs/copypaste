@@ -134,6 +134,7 @@ pub struct RemoteVersion<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeError {
     Store,
+    StoreCause(copypaste_ipc::sync_issue::SyncIssueCode),
     Encrypt,
     TooLarge,
 }
@@ -158,6 +159,7 @@ impl MergeError {
     pub fn message(self) -> &'static str {
         match self {
             MergeError::Store => MSG_STORE,
+            MergeError::StoreCause(code) => code.message(),
             MergeError::Encrypt => MSG_ENCRYPT,
             MergeError::TooLarge => "incoming content exceeds the product limit",
         }
@@ -186,7 +188,7 @@ pub fn apply_remote_version(
 fn local_version(store: &Store, item_id: &str) -> Result<Option<Version>, MergeError> {
     store.version_summary(item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
-        MergeError::Store
+        MergeError::StoreCause(super::diagnostics::store(&e))
     })
 }
 
@@ -357,7 +359,7 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
             .apply_pin_state(incoming.item_id, pinned, pin_order, pin_updated_at)
             .map_err(|e| {
                 warn!(error = ?e, "could not store incoming P2P pin state");
-                MergeError::Store
+                MergeError::StoreCause(super::diagnostics::store(&e))
             })?
     } else {
         false
@@ -382,7 +384,7 @@ fn apply_remote_version_with_pin_state(
     };
     let stored = store.upsert(&prepared.as_incoming()).map_err(|e| {
         warn!(error = ?e, "could not store an incoming item");
-        MergeError::Store
+        MergeError::StoreCause(super::diagnostics::store(&e))
     })?;
     if stored {
         debug!(id = %incoming.item_id, deleted = incoming.deleted, "applied a remote version");

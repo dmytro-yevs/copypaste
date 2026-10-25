@@ -1089,6 +1089,9 @@ class _HistoryRepository implements HistoryRepository {
   Future<void> copy(String id) async {}
 
   @override
+  Future<void> copyText(String id, String text) async {}
+
+  @override
   Future<void> copyPlainText(String id) async {}
 
   @override

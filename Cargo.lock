@@ -980,6 +980,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
  "winreg",
  "x25519-dalek",
  "zeroize",

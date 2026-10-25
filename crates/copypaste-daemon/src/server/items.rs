@@ -21,7 +21,7 @@ use tracing::{error, warn};
 mod copy;
 mod wire;
 
-pub(super) use self::copy::{copy, copy_plain_text, save_file};
+pub(super) use self::copy::{copy, copy_plain_text, copy_text, save_file};
 use self::wire::{
     bound_item_preview, decrypt_rows, is_oversized_text, preview_rows, to_wire, to_wire_and_payload,
 };
@@ -1578,6 +1578,37 @@ mod tests {
                 "{expected}"
             );
         }
+    }
+
+    #[test]
+    fn copying_ocr_text_promotes_the_image_without_replacing_its_payload() {
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("ocr-copy");
+        let image = binary_item(
+            &state,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            b"image bytes",
+            None,
+        );
+        let original = state.store.get(&image.id).unwrap().unwrap();
+        assert!(add(&state, 1, "newer text").ok);
+        assert!(copy_text(&state, 2, &image.id, "recognized text").ok);
+        assert_eq!(state.store.list(10, 0).unwrap()[0].id, image.id);
+        assert_eq!(
+            state
+                .store
+                .get(&image.id)
+                .unwrap()
+                .unwrap()
+                .content_ciphertext,
+            original.content_ciphertext
+        );
+        assert_eq!(
+            writes.entries(),
+            [crate::testutil::WrittenPayload::Text(
+                "recognized text".into()
+            )]
+        );
+        assert_eq!(state.store.count().unwrap(), 2);
     }
 
     #[test]

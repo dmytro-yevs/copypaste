@@ -612,9 +612,29 @@ class SettingsController extends ChangeNotifier {
   }
 
   SyncStatus _snapshotSync(SyncStatus status) => SyncStatus(
+    diagnosticsAvailable: status.diagnosticsAvailable,
+    log: List.unmodifiable(status.log),
     revision: status.revision,
     phase: status.phase,
-    peers: List.unmodifiable(status.peers),
+    peers: List.unmodifiable(
+      status.peers.map(
+        (peer) => PeerSyncStatus(
+          id: peer.id,
+          name: peer.name,
+          phase: peer.phase,
+          startedAt: peer.startedAt,
+          lastSuccess: peer.lastSuccess,
+          sent: peer.sent,
+          received: peer.received,
+          skippedTooLarge: peer.skippedTooLarge,
+          error: peer.error,
+          connection: peer.connection,
+          checking: peer.checking,
+          addressKnown: peer.addressKnown,
+          issues: List.unmodifiable(peer.issues),
+        ),
+      ),
+    ),
   );
 
   bool _sameCapture(CaptureSettingsState? a, CaptureSettingsState? b) {
@@ -637,6 +657,8 @@ class SettingsController extends ChangeNotifier {
   bool _sameSync(SyncStatus a, SyncStatus b) {
     if (a.revision != b.revision ||
         a.phase != b.phase ||
+        a.diagnosticsAvailable != b.diagnosticsAvailable ||
+        !listEquals(a.log, b.log) ||
         a.peers.length != b.peers.length) {
       return false;
     }
@@ -651,7 +673,11 @@ class SettingsController extends ChangeNotifier {
           x.sent != y.sent ||
           x.received != y.received ||
           x.skippedTooLarge != y.skippedTooLarge ||
-          x.error != y.error) {
+          x.error != y.error ||
+          x.connection != y.connection ||
+          x.checking != y.checking ||
+          x.addressKnown != y.addressKnown ||
+          !listEquals(x.issues, y.issues)) {
         return false;
       }
     }
@@ -666,6 +692,8 @@ class SettingsController extends ChangeNotifier {
 
   void _invalidateSyncStatus() {
     _syncStatus = SyncStatus(
+      diagnosticsAvailable: _syncStatus.diagnosticsAvailable,
+      log: _syncStatus.log,
       revision: _syncStatus.revision,
       peers: _syncStatus.peers,
     );
