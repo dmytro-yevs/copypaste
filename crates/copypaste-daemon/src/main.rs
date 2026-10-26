@@ -201,9 +201,13 @@ async fn run() -> anyhow::Result<()> {
     ));
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
     let pairing_changes = state.p2p.node().subscribe_pairing_changes();
+    let sync_changes = state.p2p.node().subscribe_sync_changes();
+    let group_changes = state.p2p.peers().subscribe_group_changes();
     let pairing_events = tokio::spawn(p2p::forward_pairing_changes(
         Arc::clone(&state),
         pairing_changes,
+        sync_changes,
+        group_changes,
         shutdown_rx.clone(),
     ));
     let peers_task = peer_listener.map(|listener| {

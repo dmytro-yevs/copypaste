@@ -955,7 +955,10 @@ impl Runtime {
         let runtime = Arc::clone(self);
         let callback_runtime = Arc::clone(self);
         let probe_callback_runtime = Arc::clone(self);
-        let shutdown = self.shutdown.subscribe();
+        let pairing_changes = self.node.subscribe_pairing_changes();
+        let sync_changes = self.node.subscribe_sync_changes();
+        let group_changes = self.node.peers().subscribe_group_changes();
+        let listener_shutdown = self.shutdown.subscribe();
         let node = Arc::clone(&self.node);
         let source = Arc::clone(&self.source);
         tokio::spawn(async move {
@@ -975,15 +978,15 @@ impl Runtime {
                         probe_callback_runtime.emit(EventKind::Peers);
                     }
                 },
-                shutdown,
+                listener_shutdown,
             )
             .await;
             runtime.listener_started.store(false, Ordering::Release);
         });
         let runtime = Arc::clone(self);
-        let mut pairing_changes = self.node.subscribe_pairing_changes();
-        let mut sync_changes = self.node.subscribe_sync_changes();
-        let mut group_changes = self.node.peers().subscribe_group_changes();
+        let mut pairing_changes = pairing_changes;
+        let mut sync_changes = sync_changes;
+        let mut group_changes = group_changes;
         let mut shutdown = self.shutdown.subscribe();
         tokio::spawn(async move {
             loop {

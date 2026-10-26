@@ -150,7 +150,9 @@ pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch
     };
     let probe_state = Arc::clone(&state);
     let on_probe = move |sync_status_changed: bool| {
-        if !sync_status_changed {
+        if sync_status_changed {
+            probe_state.note_sync_status_changed();
+        } else {
             probe_state.note_peers_changed();
         }
     };
@@ -163,10 +165,10 @@ pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch
 pub async fn forward_pairing_changes(
     state: Arc<AppState>,
     mut changes: watch::Receiver<()>,
+    mut sync_changes: watch::Receiver<()>,
+    mut group_changes: watch::Receiver<u64>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let mut sync_changes = state.p2p.node().subscribe_sync_changes();
-    let mut group_changes = state.p2p.peers().subscribe_group_changes();
     loop {
         tokio::select! {
             _ = shutdown.changed() => return,
@@ -308,14 +310,15 @@ mod tests {
         let mut events = responder.subscribe();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let changes = responder.p2p.node().subscribe_pairing_changes();
-        let bridge = tokio::spawn(forward_pairing_changes(
-            Arc::clone(&responder),
-            changes,
-            shutdown_rx.clone(),
-        ));
+        let sync_changes = responder.p2p.node().subscribe_sync_changes();
+        let group_changes = responder.p2p.peers().subscribe_group_changes();
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("listener address");
-        tokio::spawn(listen(listener, Arc::clone(&responder), shutdown_rx));
+        tokio::spawn(listen(
+            listener,
+            Arc::clone(&responder),
+            shutdown_rx.clone(),
+        ));
 
         let invite = match crate::p2p::handlers::pair_create_invite(&responder, 1)
             .await
@@ -324,6 +327,13 @@ mod tests {
             Some(ResponseData::PairingInvite(invite)) => invite,
             other => panic!("expected pairing invite, got {other:?}"),
         };
+        let bridge = tokio::spawn(forward_pairing_changes(
+            Arc::clone(&responder),
+            changes,
+            sync_changes,
+            group_changes,
+            shutdown_rx.clone(),
+        ));
         assert_eq!(
             tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
                 .await
@@ -365,18 +375,30 @@ mod tests {
         let (sender, _sender_dir) = test_state("sender");
         let mut events = receiver.subscribe();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let pairing_changes = receiver.p2p.node().subscribe_pairing_changes();
+        let sync_changes = receiver.p2p.node().subscribe_sync_changes();
+        let group_changes = receiver.p2p.peers().subscribe_group_changes();
+        let bridge = tokio::spawn(forward_pairing_changes(
+            Arc::clone(&receiver),
+            pairing_changes,
+            sync_changes,
+            group_changes,
+            shutdown_rx.clone(),
+        ));
         let (pairing_id, addr) = pair(&receiver, &sender, shutdown_rx).await;
 
         let peer = sender.p2p.peers().get(&pairing_id).unwrap();
         sender.p2p.node().probe_one(&peer).await.unwrap();
-        assert_eq!(
-            tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
-                .await
-                .unwrap()
-                .unwrap()
-                .event,
-            EventKind::Peers
-        );
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.event, EventKind::Peers);
+        assert!(event.sync_status.is_some());
+        let observed = receiver.p2p.peers().get(&pairing_id).unwrap();
+        assert!(observed.profile.is_some());
+        assert!(observed.profile_observed_at_ms > 0);
+        assert!(observed.last_seen_ms > 0);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(25), events.recv())
                 .await
@@ -384,6 +406,7 @@ mod tests {
         );
         assert_eq!(receiver.p2p.node().listen_addr(), Some(addr.to_string()));
         let _ = shutdown_tx.send(true);
+        bridge.await.expect("peer event bridge stopped");
     }
 
     /// The whole thing, in process: a listener, a dialler, two databases with

@@ -3333,7 +3333,7 @@
         "docs/engineering/synchronization-status-contract.json"
       ],
       "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
-      "allocation_lifetime": "One bounded journal per node; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
+      "allocation_lifetime": "One bounded journal per node and one atomic last-published sync revision per daemon; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
       "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
       "native_resource_qualification": {
         "macOS": "not_established",
