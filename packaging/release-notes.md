@@ -1,8 +1,6 @@
-Improve reliability and reduce unnecessary background work.
-
 - Bound synchronization activity and runtime log retention.
-- Improve clipboard history, synchronization status, and desktop paste handling.
+- Fix duplicate or missed device status notifications.
+- Fix Windows menu icon size calculations.
 - Update OCR, Semantic Search, and Supabase Sync packages.
 
-Paired-device synchronization uses protocol v10. Update paired devices together;
-protocol v9 devices cannot connect to this release.
+Device synchronization uses protocol v10; protocol v9 devices require an update.
