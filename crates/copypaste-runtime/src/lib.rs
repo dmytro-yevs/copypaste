@@ -970,7 +970,11 @@ impl Runtime {
                     }
                     callback_runtime.emit(EventKind::Peers);
                 },
-                move || probe_callback_runtime.emit(EventKind::Peers),
+                move |sync_status_changed: bool| {
+                    if !sync_status_changed {
+                        probe_callback_runtime.emit(EventKind::Peers);
+                    }
+                },
                 shutdown,
             )
             .await;
@@ -3740,7 +3744,7 @@ mod tests {
             })
             .unwrap();
         let peer = copypaste_p2p::Peer {
-            pairing_id,
+            pairing_id: pairing_id.clone(),
             device_id: None,
             name: "receiver".into(),
             psk: token.psk(),
@@ -3759,6 +3763,10 @@ mod tests {
                 .event,
             EventKind::Peers
         );
+        let observed = receiver.node.peers().get(&pairing_id).unwrap();
+        assert!(observed.profile.is_some());
+        assert!(observed.profile_observed_at_ms > 0);
+        assert!(observed.last_seen_ms > 0);
         assert!(
             tokio::time::timeout(Duration::from_millis(25), events.recv())
                 .await

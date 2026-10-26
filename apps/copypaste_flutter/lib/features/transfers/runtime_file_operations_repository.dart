@@ -28,8 +28,13 @@ class RuntimeFileOperationsRepository implements FileOperationsRepository {
     String? id,
   }) async =>
       (jsonDecode(
-            await runtime.fileOperations(clear: clear, before: before, id: id),
-          ) as List)
+                await runtime.fileOperations(
+                  clear: clear,
+                  before: before,
+                  id: id,
+                ),
+              )
+              as List)
           .map((value) {
             final record = Map<String, dynamic>.from(value as Map);
             return FileOperation(

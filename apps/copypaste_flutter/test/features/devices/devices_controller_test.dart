@@ -376,25 +376,28 @@ void main() {
     expect(controller.canConfirmPairing, isFalse);
   });
 
-  test('preserves a joined ceremony timeout until dismissed and cleans the session', () async {
-    await controller.openCodeEntry();
-    await controller.joinFromProtectedInput(
-      code: 'A1B2C3D4',
-      address: '192.0.2.1:47654',
-    );
-    gateway.session.emit(
-      const PairingCeremony(state: PairingState.awaitingConfirmation),
-    );
-    await Future<void>.delayed(Duration.zero);
-    gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
-    await Future<void>.delayed(Duration.zero);
+  test(
+    'preserves a joined ceremony timeout until dismissed and cleans the session',
+    () async {
+      await controller.openCodeEntry();
+      await controller.joinFromProtectedInput(
+        code: 'A1B2C3D4',
+        address: '192.0.2.1:47654',
+      );
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
 
-    expect(controller.pairing!.state, PairingState.timedOut);
-    expect(gateway.session.disposeCalls, 1);
+      expect(controller.pairing!.state, PairingState.timedOut);
+      expect(gateway.session.disposeCalls, 1);
 
-    await controller.closePairing();
-    expect(controller.pairing, isNull);
-  });
+      await controller.closePairing();
+      expect(controller.pairing, isNull);
+    },
+  );
 
   test(
     'an expired invitation confirmation starts fresh without reusing its SAS',

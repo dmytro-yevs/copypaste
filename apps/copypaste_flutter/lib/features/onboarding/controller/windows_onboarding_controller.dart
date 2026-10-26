@@ -124,7 +124,8 @@ class WindowsOnboardingController extends OnboardingController {
       _launchAtLogin = _registered;
       if (_registered != enabled ||
           _startupStatus == LaunchAtLoginStatus.requiresApproval) {
-        _noticeMessage = 'Start at login could not be updated. You can change it later in Settings.';
+        _noticeMessage =
+            'Start at login could not be updated. You can change it later in Settings.';
       }
     } catch (_) {
       _launchAtLogin = _registered;

@@ -149,7 +149,11 @@ pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch
         }
     };
     let probe_state = Arc::clone(&state);
-    let on_probe = move || probe_state.note_peers_changed();
+    let on_probe = move |sync_status_changed: bool| {
+        if !sync_status_changed {
+            probe_state.note_peers_changed();
+        }
+    };
     copypaste_p2p::node::listen(node, listener, source, on_session, on_probe, shutdown).await;
 }
 

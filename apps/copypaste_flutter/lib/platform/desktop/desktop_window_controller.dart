@@ -21,7 +21,8 @@ extension DesktopWindowSetupIssueMessage on DesktopWindowSetupIssue {
   String get message => switch (this) {
     DesktopWindowSetupIssue.windowUnavailable =>
       'Desktop window controls are unavailable. CopyPaste will stay visible.',
-    DesktopWindowSetupIssue.trayUnavailable => 'The system tray is unavailable. Keep CopyPaste open, then retry or quit.',
+    DesktopWindowSetupIssue.trayUnavailable =>
+      'The system tray is unavailable. Keep CopyPaste open, then retry or quit.',
     DesktopWindowSetupIssue.quitUnavailable =>
       'CopyPaste could not quit. Please try again.',
   };

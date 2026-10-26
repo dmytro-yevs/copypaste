@@ -502,8 +502,9 @@ class HistoryController extends ChangeNotifier {
     if (repository is HistoryFileDownloadCancellation) {
       final cancellation = repository as HistoryFileDownloadCancellation;
       unawaited(
-        Future<void>.sync(() => cancellation.cancelFileDownload(id))
-            .catchError((Object _) {}),
+        Future<void>.sync(
+          () => cancellation.cancelFileDownload(id),
+        ).catchError((Object _) {}),
       );
     }
     notifyListeners();
@@ -878,12 +879,13 @@ class HistoryController extends ChangeNotifier {
   Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
     late final Future<void> refresh;
     refresh =
-        _refreshVisibleItemsAndFacets(resetWatchBackoff: resetWatchBackoff)
-            .whenComplete(() {
-              if (identical(_visibleItemsRefresh, refresh)) {
-                _visibleItemsRefresh = null;
-              }
-            });
+        _refreshVisibleItemsAndFacets(
+          resetWatchBackoff: resetWatchBackoff,
+        ).whenComplete(() {
+          if (identical(_visibleItemsRefresh, refresh)) {
+            _visibleItemsRefresh = null;
+          }
+        });
     _visibleItemsRefresh = refresh;
     return refresh;
   }

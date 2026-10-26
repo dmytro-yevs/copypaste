@@ -268,9 +268,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 itemBuilder: (context, _) => AppIconFrame(
                                   child: Icon(
                                     LucideIcons.chevronDown,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primaryForeground,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primaryForeground,
                                   ),
                                 ),
                                 onChanged: (plainText) {
@@ -370,7 +370,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                     AppToast.show(
                                       context,
                                       title: 'Update failed',
-                                      message: 'The clip secrecy could not be updated.',
+                                      message:
+                                          'The clip secrecy could not be updated.',
                                       tone: AppToastTone.error,
                                     );
                                   }
@@ -555,8 +556,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
       final painter = TextPainter(
         text: TextSpan(
           text: label,
-          style: DefaultTextStyle.of(context).style
-              .merge(style.textStyle(context, const {})),
+          style: DefaultTextStyle.of(
+            context,
+          ).style.merge(style.textStyle(context, const {})),
         ),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context),

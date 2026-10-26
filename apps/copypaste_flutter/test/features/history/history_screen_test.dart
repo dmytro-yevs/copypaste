@@ -304,8 +304,9 @@ void main() {
           builder: (context, child) => AppTheme.builder(
             context,
             MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: TextScaler.linear(2)),
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(2)),
               child: child!,
             ),
           ),
@@ -1849,11 +1850,13 @@ void main() {
         .first;
     final selectContext = tester.element(firstSelectFinder);
     final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
-    final selectDecoration = selectTheme.decoration!(
-      tester.element(firstSelectFinder),
-      const {},
-      const BoxDecoration(),
-    ) as BoxDecoration;
+    final selectDecoration =
+        selectTheme.decoration!(
+              tester.element(firstSelectFinder),
+              const {},
+              const BoxDecoration(),
+            )
+            as BoxDecoration;
     expect(searchDecoration.color, selectDecoration.color);
     expect(searchDecoration.borderRadius, selectDecoration.borderRadius);
   });
@@ -1871,8 +1874,9 @@ void main() {
             ShadcnApp(
               theme: AppTheme.light,
               builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(scale)),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
                 child: Builder(
                   builder: (context) => AppTheme.builder(context, child),
                 ),
@@ -1987,8 +1991,9 @@ void main() {
             builder: (context, child) => AppTheme.builder(
               context,
               MediaQuery(
-                data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(textScale)),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
                 child: child!,
               ),
             ),
@@ -2285,11 +2290,13 @@ void main() {
           final selectTheme = ComponentTheme.maybeOf<SelectTheme>(
             selectContext,
           )!;
-          final decoration = selectTheme.decoration!(
-            selectContext,
-            states,
-            const BoxDecoration(),
-          ) as BoxDecoration;
+          final decoration =
+              selectTheme.decoration!(
+                    selectContext,
+                    states,
+                    const BoxDecoration(),
+                  )
+                  as BoxDecoration;
           expect(decoration.border?.top.style, BorderStyle.none);
         }
         await tester.tap(find.byWidget(select));

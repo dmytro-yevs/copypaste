@@ -420,8 +420,9 @@ class _SyncPeerRow extends StatelessWidget {
                   ),
                   title: Text(
                     '${issue.title}${issue.count > 0 ? ' (${issue.count})' : ''}',
-                    style: AppTheme.deviceCardTextStyle(context)
-                        .copyWith(color: _toneColor(context, issue.tone)),
+                    style: AppTheme.deviceCardTextStyle(
+                      context,
+                    ).copyWith(color: _toneColor(context, issue.tone)),
                   ).semiBold(),
                   content: issue.blocking || issue.pending
                       ? Text(

@@ -40,24 +40,27 @@ void main() {
     },
   );
 
-  test('completion serializes persistence and retries only after an actual failure', () async {
-    final controller = _Controller();
-    final pending = Completer<void>();
-    final first = controller.finish(() => pending.future);
-    expect(controller.busy, isTrue);
-    expect(
-      await controller.finish(() async => fail('duplicate persistence')),
-      isFalse,
-    );
-    pending.completeError(StateError('storage failed'));
-    expect(await first, isFalse);
-    expect(controller.complete, isFalse);
-    expect(controller.errorMessage, isNotNull);
-    expect(await controller.finish(() async {}), isTrue);
-    expect(controller.complete, isTrue);
-    expect(controller.errorMessage, isNull);
-    controller.dispose();
-  });
+  test(
+    'completion serializes persistence and retries only after an actual failure',
+    () async {
+      final controller = _Controller();
+      final pending = Completer<void>();
+      final first = controller.finish(() => pending.future);
+      expect(controller.busy, isTrue);
+      expect(
+        await controller.finish(() async => fail('duplicate persistence')),
+        isFalse,
+      );
+      pending.completeError(StateError('storage failed'));
+      expect(await first, isFalse);
+      expect(controller.complete, isFalse);
+      expect(controller.errorMessage, isNotNull);
+      expect(await controller.finish(() async {}), isTrue);
+      expect(controller.complete, isTrue);
+      expect(controller.errorMessage, isNull);
+      controller.dispose();
+    },
+  );
 
   test(
     'late completion after disposal never completes the setup flow',

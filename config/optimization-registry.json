@@ -3324,12 +3324,15 @@
       "source_references": [
         "crates/copypaste-p2p/src/node/journal.rs",
         "crates/copypaste-p2p/src/node/activity.rs",
+        "crates/copypaste-p2p/src/node/listen.rs",
+        "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/settings/view/sync_header_action.dart",
         "crates/copypaste-ipc/src/sync_issue.rs",
         "crates/copypaste-core/src/sync/diagnostics.rs",
         "docs/engineering/synchronization-status-contract.json"
       ],
-      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
+      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
       "allocation_lifetime": "One bounded journal per node; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
       "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
       "native_resource_qualification": {
@@ -3339,7 +3342,7 @@
       },
       "measured_saving": null,
       "evidence_refs": [],
-      "functional_validation": "2026-10-26 activity noise fix: all 343 P2P library tests passed, including historical noise pruning, routine-event write suppression, problem retention/recovery and live presence notifications. Native UI/resource evidence for this change is not established. Prior validation: 342 P2P tests, 43 core sync tests, four protected-workspace tests, five IPC transport contract tests, 50 settings/UI tests plus the fixture renderer, and 13 final drawer/layout checks passed. Dart analysis clean. New-build native and resource qualification is not established."
+      "functional_validation": "2026-10-26 activity noise fix: 344 P2P library tests and 58 runtime tests passed, including historical noise pruning, routine-event write suppression, problem retention/recovery, live presence notifications, and post-persistence inbound probe events. Native UI/resource evidence for this change is not established."
     },
     {
       "id": "RUN-071",

@@ -177,8 +177,10 @@ class _IntegrationSetup extends StatelessWidget {
                   description: switch (status.remoteDesktop) {
                     LinuxRemoteDesktopState.active =>
                       'Keyboard control is allowed for Quick Paste.',
-                    LinuxRemoteDesktopState.consentRequired => 'Allow keyboard control so Quick Paste can return to the previous app.',
-                    LinuxRemoteDesktopState.unsupported => 'Keyboard control is unavailable in this desktop session.',
+                    LinuxRemoteDesktopState.consentRequired =>
+                      'Allow keyboard control so Quick Paste can return to the previous app.',
+                    LinuxRemoteDesktopState.unsupported =>
+                      'Keyboard control is unavailable in this desktop session.',
                   },
                   statusIcon:
                       status.remoteDesktop == LinuxRemoteDesktopState.active
@@ -200,7 +202,9 @@ class _IntegrationSetup extends StatelessWidget {
               SetupSettingRow(
                 icon: LucideIcons.clipboard,
                 title: 'Quick Paste',
-                description: status.quickPaste ? 'Quick Paste is ready.' : 'Quick Paste will be ready after the required desktop integration is active.',
+                description: status.quickPaste
+                    ? 'Quick Paste is ready.'
+                    : 'Quick Paste will be ready after the required desktop integration is active.',
                 statusIcon: status.quickPaste
                     ? LucideIcons.circleCheck
                     : LucideIcons.circleAlert,
@@ -245,7 +249,8 @@ class _IntegrationSetup extends StatelessWidget {
               const SetupSettingRow(
                 icon: LucideIcons.cameraOff,
                 title: 'Screenshot blocking',
-                description: 'Screenshot blocking is unavailable on Linux. Protected stored data remains encrypted.',
+                description:
+                    'Screenshot blocking is unavailable on Linux. Protected stored data remains encrypted.',
                 statusIcon: LucideIcons.circleAlert,
               ),
             ],

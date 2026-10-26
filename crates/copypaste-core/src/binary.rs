@@ -344,6 +344,11 @@ mod tests {
     use crate::Keyring;
     use std::ops::Range;
 
+    fn random_item_key() -> ItemKey {
+        let secret: [u8; 32] = OsRng.gen();
+        Keyring::from_secret(&secret).item_key()
+    }
+
     fn assert_auth_failed(result: Result<Zeroizing<Vec<u8>>, CryptoError>) {
         assert!(matches!(result, Err(CryptoError::AuthFailed)));
     }
@@ -386,7 +391,7 @@ mod tests {
     #[test]
     fn chunks_round_trip_and_are_content_addressed() {
         let bytes = vec![42; CHUNK_BYTES + 17];
-        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let key = random_item_key();
         let id = item_id(&bytes);
         let sealed = seal(&bytes, &key, &id).unwrap();
         assert_eq!(open(&sealed, &key, &id).unwrap().as_slice(), bytes);
@@ -398,7 +403,7 @@ mod tests {
     fn open_plaintext_is_zeroizing() {
         fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>(_: &T) {}
         let bytes = b"binary secret";
-        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let key = random_item_key();
         let id = item_id(bytes);
         let sealed = seal(bytes, &key, &id).unwrap();
         let out = open(&sealed, &key, &id).unwrap();
@@ -446,7 +451,7 @@ mod tests {
     #[test]
     fn sealing_with_a_precomputed_digest_writes_the_same_header() {
         let bytes = vec![0x6c; CHUNK_BYTES + 11];
-        let key = Keyring::from_secret(&[15; 32]).item_key();
+        let key = random_item_key();
         let id = item_id(&bytes);
         let threaded = seal_with_digest(&bytes, &content_digest(&bytes), &key, &id).unwrap();
         let hashed = seal(&bytes, &key, &id).unwrap();
@@ -461,7 +466,7 @@ mod tests {
 
     #[test]
     fn maximum_payload_round_trips_and_one_extra_byte_is_rejected() {
-        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let key = random_item_key();
         let maximum = vec![0; MAX_BINARY_BYTES as usize];
         let sealed = seal(&maximum, &key, "maximum").unwrap();
         assert_eq!(open(&sealed, &key, "maximum").unwrap().as_slice(), maximum);
@@ -475,7 +480,7 @@ mod tests {
 
     #[test]
     fn empty_and_exact_boundary_payloads_round_trip() {
-        let key = Keyring::from_secret(&[4; 32]).item_key();
+        let key = random_item_key();
         for (size, expected_chunks) in [(0, 1), (CHUNK_BYTES, 1), (2 * CHUNK_BYTES, 2)] {
             let bytes = vec![0x5a; size];
             let id = item_id(&bytes);
@@ -491,7 +496,7 @@ mod tests {
         let known_prefix = vec![0x41; CHUNK_BYTES];
         let mut bytes = known_prefix.clone();
         bytes.extend_from_slice(b"unknown authenticated suffix");
-        let key = Keyring::from_secret(&[5; 32]).item_key();
+        let key = random_item_key();
         let id = "chosen-stream";
         let sealed = seal(&bytes, &key, id).unwrap();
         let first = chunk_records(&sealed)[0].clone();
@@ -511,7 +516,7 @@ mod tests {
     #[test]
     fn missing_chunk_fails_authentication() {
         let bytes = three_chunk_payload();
-        let key = Keyring::from_secret(&[6; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "missing").unwrap();
 
         assert_auth_failed(open(&select_records(&sealed, &[0, 2]), &key, "missing"));
@@ -520,7 +525,7 @@ mod tests {
     #[test]
     fn duplicated_chunk_fails_authentication() {
         let bytes = three_chunk_payload();
-        let key = Keyring::from_secret(&[7; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "duplicated").unwrap();
 
         assert_auth_failed(open(
@@ -533,7 +538,7 @@ mod tests {
     #[test]
     fn reordered_chunks_fail_authentication() {
         let bytes = three_chunk_payload();
-        let key = Keyring::from_secret(&[8; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "reordered").unwrap();
 
         assert_auth_failed(open(
@@ -545,7 +550,7 @@ mod tests {
 
     #[test]
     fn cross_stream_chunk_injection_fails_authentication() {
-        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let key = random_item_key();
         let source = seal(&vec![0x11; CHUNK_BYTES + 19], &key, "source").unwrap();
         let target = seal(&vec![0x22; CHUNK_BYTES + 19], &key, "target").unwrap();
         let source_records = chunk_records(&source);
@@ -559,7 +564,7 @@ mod tests {
     #[test]
     fn every_header_byte_is_tamper_evident() {
         let bytes = vec![0x33; CHUNK_BYTES + 7];
-        let key = Keyring::from_secret(&[10; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "header").unwrap();
 
         for offset in 0..HEADER_BYTES {
@@ -572,8 +577,11 @@ mod tests {
     #[test]
     fn wrong_key_and_wrong_aad_fail_authentication() {
         let bytes = b"bound binary";
-        let key = Keyring::from_secret(&[11; 32]).item_key();
-        let wrong_key = Keyring::from_secret(&[12; 32]).item_key();
+        let secret: [u8; 32] = OsRng.gen();
+        let key = Keyring::from_secret(&secret).item_key();
+        let mut wrong_secret = secret;
+        wrong_secret[0] ^= 1;
+        let wrong_key = Keyring::from_secret(&wrong_secret).item_key();
         let sealed = seal(bytes, &key, "right-id").unwrap();
 
         assert_auth_failed(open(&sealed, &wrong_key, "right-id"));
@@ -583,7 +591,7 @@ mod tests {
     #[test]
     fn tampered_chunk_fails_authentication() {
         let bytes = vec![7; CHUNK_BYTES + 3];
-        let key = Keyring::from_secret(&[3; 32]).item_key();
+        let key = random_item_key();
         let id = item_id(&bytes);
         let mut sealed = seal(&bytes, &key, &id).unwrap();
         let first = HEADER_BYTES;
@@ -594,7 +602,7 @@ mod tests {
     #[test]
     fn truncation_and_trailing_bytes_fail_authentication() {
         let bytes = vec![0x44; CHUNK_BYTES + 23];
-        let key = Keyring::from_secret(&[13; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "bounded").unwrap();
 
         assert_auth_failed(open(&sealed[..sealed.len() - 1], &key, "bounded"));
@@ -606,7 +614,7 @@ mod tests {
     #[test]
     fn stream_envelope_has_only_header_ciphertext_and_tags() {
         let bytes = vec![0x21; CHUNK_BYTES + 3];
-        let key = Keyring::from_secret(&[14; 32]).item_key();
+        let key = random_item_key();
         let sealed = seal(&bytes, &key, "minimal").unwrap();
         let resealed = seal(&bytes, &key, "minimal").unwrap();
 
@@ -622,7 +630,7 @@ mod tests {
 
     #[test]
     fn an_absurd_untrusted_byte_length_fails_without_allocating() {
-        let key = Keyring::from_secret(&[8; 32]).item_key();
+        let key = random_item_key();
         let nonce: [u8; STREAM_NONCE_LEN] = OsRng.gen();
         let mut envelope = Vec::from(MAGIC.as_slice());
         envelope.push(VERSION);
@@ -638,7 +646,7 @@ mod tests {
 
     #[test]
     fn obsolete_manual_format_version_is_rejected() {
-        let key = Keyring::from_secret(&[8; 32]).item_key();
+        let key = random_item_key();
         let mut envelope = seal(b"old framing is not supported", &key, "version").unwrap();
         envelope[4] = 2;
 

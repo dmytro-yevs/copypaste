@@ -440,8 +440,9 @@ class _AppShellState extends State<AppShell> {
                 const Gap(AppSpacing.sm),
                 Text(
                   'CopyPaste',
-                  style: AppTheme.navigationTextStyle(context)
-                      .copyWith(color: theme.colorScheme.foreground),
+                  style: AppTheme.navigationTextStyle(
+                    context,
+                  ).copyWith(color: theme.colorScheme.foreground),
                 ),
               ],
             ],

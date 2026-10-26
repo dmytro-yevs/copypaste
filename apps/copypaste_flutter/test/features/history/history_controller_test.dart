@@ -280,41 +280,44 @@ void main() {
       },
     );
 
-    test('stale media cannot repopulate caches or erase resumed in-flight requests', () async {
-      final repository = _HistoryRepository();
-      final oldIcon = Completer<HistorySourceAppIcon?>();
-      final newIcon = Completer<HistorySourceAppIcon?>();
-      final oldImage = Completer<HistoryImagePreview?>();
-      repository.sourceIconFuture = oldIcon.future;
-      repository.imagePreviewFutures.add(oldImage.future);
-      final controller = HistoryController(repository);
-      addTearDown(controller.dispose);
-      final staleIconRequest = controller.requestSourceIcon('icon');
-      final staleImageRequest = controller.requestImagePreview('image');
-      controller.suspend();
-      expect(await controller.requestSourceIcon('icon'), isNull);
-      expect(await controller.requestImagePreview('image'), isNull);
-      expect(repository.sourceIconCalls, 1);
-      repository.pages.add(Future.value(const HistoryClipPage(items: [])));
-      await controller.initialize();
-      repository.sourceIconFuture = newIcon.future;
-      final resumedIconRequest = controller.requestSourceIcon('icon');
-      oldIcon.complete(HistorySourceAppIcon(Uint8List(1024)));
-      oldImage.complete(
-        HistoryImagePreview(Uint8List(1024), width: 16, height: 16),
-      );
-      expect(await staleIconRequest, isNull);
-      expect(await staleImageRequest, isNull);
-      expect(
-        identical(controller.requestSourceIcon('icon'), resumedIconRequest),
-        isTrue,
-      );
-      final icon = HistorySourceAppIcon(Uint8List(64));
-      newIcon.complete(icon);
-      expect(await resumedIconRequest, same(icon));
-      expect(await controller.requestSourceIcon('icon'), same(icon));
-      expect(repository.sourceIconCalls, 2);
-    });
+    test(
+      'stale media cannot repopulate caches or erase resumed in-flight requests',
+      () async {
+        final repository = _HistoryRepository();
+        final oldIcon = Completer<HistorySourceAppIcon?>();
+        final newIcon = Completer<HistorySourceAppIcon?>();
+        final oldImage = Completer<HistoryImagePreview?>();
+        repository.sourceIconFuture = oldIcon.future;
+        repository.imagePreviewFutures.add(oldImage.future);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final staleIconRequest = controller.requestSourceIcon('icon');
+        final staleImageRequest = controller.requestImagePreview('image');
+        controller.suspend();
+        expect(await controller.requestSourceIcon('icon'), isNull);
+        expect(await controller.requestImagePreview('image'), isNull);
+        expect(repository.sourceIconCalls, 1);
+        repository.pages.add(Future.value(const HistoryClipPage(items: [])));
+        await controller.initialize();
+        repository.sourceIconFuture = newIcon.future;
+        final resumedIconRequest = controller.requestSourceIcon('icon');
+        oldIcon.complete(HistorySourceAppIcon(Uint8List(1024)));
+        oldImage.complete(
+          HistoryImagePreview(Uint8List(1024), width: 16, height: 16),
+        );
+        expect(await staleIconRequest, isNull);
+        expect(await staleImageRequest, isNull);
+        expect(
+          identical(controller.requestSourceIcon('icon'), resumedIconRequest),
+          isTrue,
+        );
+        final icon = HistorySourceAppIcon(Uint8List(64));
+        newIcon.complete(icon);
+        expect(await resumedIconRequest, same(icon));
+        expect(await controller.requestSourceIcon('icon'), same(icon));
+        expect(repository.sourceIconCalls, 2);
+      },
+    );
 
     test(
       'query and facet responses completing while suspended are discarded',

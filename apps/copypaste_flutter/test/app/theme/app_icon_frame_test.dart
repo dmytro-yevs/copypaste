@@ -14,8 +14,9 @@ void main() {
         builder: (context, child) => AppTheme.builder(
           context,
           MediaQuery(
-            data: MediaQuery.of(context)
-                .copyWith(textScaler: const TextScaler.linear(2)),
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
             child: child!,
           ),
         ),

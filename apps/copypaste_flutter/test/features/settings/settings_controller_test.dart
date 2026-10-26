@@ -845,13 +845,16 @@ void main() {
   );
 
   for (final entry in <TargetPlatform, String>{
-    TargetPlatform.macOS: 'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+    TargetPlatform.macOS:
+        'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
     TargetPlatform.windows:
         'Skip automatic capture from identified clipboard owners in this list.',
-    TargetPlatform.android: 'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+    TargetPlatform.android:
+        'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
     TargetPlatform.iOS:
         'Application exclusions are supported on macOS, Windows, and Android.',
-    TargetPlatform.linux: 'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+    TargetPlatform.linux:
+        'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
     TargetPlatform.fuchsia:
         'Application exclusions are supported on macOS, Windows, and Android.',
   }.entries) {
@@ -1599,7 +1602,8 @@ class _RejectedExclusionRepository extends FakeSettingsRepository {
     if (change.excludedAppIds != null) {
       throw const runtime.RuntimeError(
         code: 'invalid_request',
-        message: 'excluded_app_bundle_ids contains an entry that is empty or too long',
+        message:
+            'excluded_app_bundle_ids contains an entry that is empty or too long',
       );
     }
     return super.updateSettings(change);

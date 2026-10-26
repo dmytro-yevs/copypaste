@@ -1375,10 +1375,9 @@ void main() {
     );
     final selectedCard = tester.widget<Button>(selectedCardFinder);
     final selectedCardContext = tester.element(selectedCardFinder);
-    final cardDecoration = selectedCard.style.decoration(
-      selectedCardContext,
-      const {},
-    ) as BoxDecoration;
+    final cardDecoration =
+        selectedCard.style.decoration(selectedCardContext, const {})
+            as BoxDecoration;
     expect(cardDecoration.border, isNotNull);
     expect(
       cardDecoration.color,

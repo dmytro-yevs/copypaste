@@ -1,9 +1,8 @@
-Improve synchronization status, clipboard History, and Windows device identification.
+Improve reliability and reduce unnecessary background work.
 
-- Show synchronization activity and issues in History.
-- Improve text selection, copying, OCR results, and shared controls.
-- Identify Windows device chassis from firmware.
-- Update the OCR, Semantic Search, and Supabase modules.
+- Bound synchronization activity and runtime log retention.
+- Improve clipboard history, synchronization status, and desktop paste handling.
+- Update OCR, Semantic Search, and Supabase Sync packages.
 
 Paired-device synchronization uses protocol v10. Update paired devices together;
 protocol v9 devices cannot connect to this release.

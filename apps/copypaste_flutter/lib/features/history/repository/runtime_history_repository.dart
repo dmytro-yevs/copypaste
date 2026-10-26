@@ -215,9 +215,9 @@ class RuntimeHistoryRepository
       try {
         do {
           checkAgain = false;
-          final records = jsonDecode(
-            await runtime.fileOperations(clear: false, id: token),
-          ) as List;
+          final records =
+              jsonDecode(await runtime.fileOperations(clear: false, id: token))
+                  as List;
           final record = records.cast<Map>().firstOrNull;
           if (record == null) continue;
           onProgress(record['written'] as int, record['total'] as int);

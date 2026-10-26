@@ -173,8 +173,9 @@ class _PreviewPanelState extends State<_PreviewPanel> {
           const Gap(AppSpacing.lg),
           Text(
             'Completed',
-            style: Theme.of(context).typography.xSmall
-                .copyWith(color: Theme.of(context).colorScheme.mutedForeground),
+            style: Theme.of(context).typography.xSmall.copyWith(
+              color: Theme.of(context).colorScheme.mutedForeground,
+            ),
           ),
           const Gap(AppSpacing.sm),
           if (_showCompleted) record(completed),

@@ -33,22 +33,25 @@ void main() {
     devices.dispose();
     visible.dispose();
   });
-  test('one background notification opens the current request and rejects stale actions', () async {
-    devices.emit('request', PairingState.awaitingConfirmation);
-    devices.emit('request', PairingState.awaitingConfirmation);
-    await Future<void>.delayed(Duration.zero);
-    expect(platform.shown, ['request']);
-    expect(inbox.unread, 1);
-    platform.responses.add('request');
-    await Future<void>.delayed(Duration.zero);
-    expect(opened, 1);
-    devices.emit('request', PairingState.timedOut);
-    platform.responses.add('request');
-    await Future<void>.delayed(Duration.zero);
-    expect(opened, 1);
-    expect(inbox.items.single.title, 'Connection request expired');
-    expect(platform.dismissed, 1);
-  });
+  test(
+    'one background notification opens the current request and rejects stale actions',
+    () async {
+      devices.emit('request', PairingState.awaitingConfirmation);
+      devices.emit('request', PairingState.awaitingConfirmation);
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.shown, ['request']);
+      expect(inbox.unread, 1);
+      platform.responses.add('request');
+      await Future<void>.delayed(Duration.zero);
+      expect(opened, 1);
+      devices.emit('request', PairingState.timedOut);
+      platform.responses.add('request');
+      await Future<void>.delayed(Duration.zero);
+      expect(opened, 1);
+      expect(inbox.items.single.title, 'Connection request expired');
+      expect(platform.dismissed, 1);
+    },
+  );
   test(
     'foreground requests open pairing; closing updates the bounded inbox',
     () {

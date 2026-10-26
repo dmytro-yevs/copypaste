@@ -315,7 +315,7 @@ mod tests {
                 listener,
                 Arc::clone(&source),
                 |_, _| {},
-                || {},
+                |_| {},
                 rx,
             ));
             Self {
