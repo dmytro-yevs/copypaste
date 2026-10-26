@@ -608,12 +608,12 @@ impl Node {
         status
     }
 
-    fn note_authenticated(&self, pairing_id: &str) {
+    fn note_authenticated(&self, pairing_id: &str) -> bool {
         self.sync_activity.authenticated(pairing_id);
         self.record_reachability(
             pairing_id,
             AuthenticatedReachability::online(None, crate::now_ms()),
-        );
+        )
     }
 
     pub fn subscribe_sync_changes(&self) -> tokio::sync::watch::Receiver<()> {
@@ -1030,7 +1030,7 @@ impl Node {
         &self,
         pairing_id: &str,
         observation: AuthenticatedReachability,
-    ) {
+    ) -> bool {
         let mut reachability = self
             .reachability
             .write()
@@ -1043,7 +1043,7 @@ impl Node {
                 previous.latency_ms.is_some() && previous.is_current_at(observation.observed_at_ms)
             })
         {
-            return;
+            return false;
         }
         let changed = reachability
             .get(pairing_id)
@@ -1053,6 +1053,7 @@ impl Node {
         if changed {
             self.sync_activity.connection_changed();
         }
+        changed
     }
 
     /// Re-advertise after the set of pairings changed.

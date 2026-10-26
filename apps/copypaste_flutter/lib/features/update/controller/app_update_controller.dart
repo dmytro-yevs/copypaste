@@ -222,8 +222,10 @@ class AppUpdateController extends ChangeNotifier {
         break;
       case AppUpdateInstallResult.permissionRequired:
         _message = switch (_platform.target) {
-          AppUpdateTarget.android => 'Allow CopyPaste to install apps in Android settings, then continue.',
-          AppUpdateTarget.linux => 'Authenticate in your system package manager to install this update.',
+          AppUpdateTarget.android =>
+            'Allow CopyPaste to install apps in Android settings, then continue.',
+          AppUpdateTarget.linux =>
+            'Authenticate in your system package manager to install this update.',
           _ => 'Allow CopyPaste to install this update, then continue.',
         };
         _setPhase(AppUpdatePhase.permissionRequired);

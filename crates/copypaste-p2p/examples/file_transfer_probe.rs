@@ -187,7 +187,7 @@ async fn serve(options: Options) -> Result<(), String> {
         listener,
         source,
         |_, _| {},
-        || {},
+        |_| {},
         shutdown_rx,
     ));
     println!(

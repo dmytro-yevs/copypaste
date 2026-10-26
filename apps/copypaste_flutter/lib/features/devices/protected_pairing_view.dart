@@ -51,7 +51,8 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
         if (!controller.isProtectedHostActive) {
           return StateView.error(
             title: 'Protected pairing is unavailable',
-            message: 'This pairing session must open in a dedicated protected window.',
+            message:
+                'This pairing session must open in a dedicated protected window.',
             actionLabel: 'Close',
             onAction: _close,
           );
@@ -230,7 +231,8 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
   };
 
   String _descriptionFor(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => 'Reveal a QR code, scan one, or enter a pairing code in this protected window.',
+    PairingState.waitingForPeer =>
+      'Reveal a QR code, scan one, or enter a pairing code in this protected window.',
     PairingState.handshaking =>
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>

@@ -245,10 +245,12 @@ class ModulesController extends ChangeNotifier {
             // _perform refreshes again before it presents this error.
           }
           throw ModulesException(switch (persistedEnabled) {
-            true => 'SMS monitoring could not be started. The module is still enabled; disable it again to retry.',
+            true =>
+              'SMS monitoring could not be started. The module is still enabled; disable it again to retry.',
             false =>
               'SMS monitoring could not be started. The module was disabled.',
-            null => 'SMS monitoring could not be started. The module enabled state could not be confirmed.',
+            null =>
+              'SMS monitoring could not be started. The module enabled state could not be confirmed.',
           });
         }
       }

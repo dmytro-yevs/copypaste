@@ -90,41 +90,44 @@ void main() {
     },
   );
 
-  test('unknown-length oversized, truncated, wrong-digest and interrupted streams remove partial files', () async {
-    final cases = [
-      _Response([
-        [1, 2],
-        [3, 4],
-      ], contentLength: -1),
-      _Response([
-        [1],
-      ], contentLength: -1),
-      _Response([
-        [2, 2, 2],
-      ], contentLength: -1),
-      _Response(
-        [
+  test(
+    'unknown-length oversized, truncated, wrong-digest and interrupted streams remove partial files',
+    () async {
+      final cases = [
+        _Response([
+          [1, 2],
+          [3, 4],
+        ], contentLength: -1),
+        _Response([
           [1],
-        ],
-        contentLength: -1,
-        failure: const SocketException('interrupted'),
-      ),
-    ];
-    for (final response in cases) {
-      client.routes[asset] = response;
-      await expectLater(
-        downloader.download(
-          asset,
-          destination,
-          maximumBytes: 3,
-          expectedSize: 3,
-          expectedSha256: sha256.convert([1, 2, 3]).toString(),
+        ], contentLength: -1),
+        _Response([
+          [2, 2, 2],
+        ], contentLength: -1),
+        _Response(
+          [
+            [1],
+          ],
+          contentLength: -1,
+          failure: const SocketException('interrupted'),
         ),
-        throwsA(isA<Object>()),
-      );
-      expect(await destination.exists(), isFalse);
-    }
-  });
+      ];
+      for (final response in cases) {
+        client.routes[asset] = response;
+        await expectLater(
+          downloader.download(
+            asset,
+            destination,
+            maximumBytes: 3,
+            expectedSize: 3,
+            expectedSha256: sha256.convert([1, 2, 3]).toString(),
+          ),
+          throwsA(isA<Object>()),
+        );
+        expect(await destination.exists(), isFalse);
+      }
+    },
+  );
 
   test('only an explicitly optional 404 is treated as missing', () async {
     client.routes[asset] = _Response([], statusCode: 404);

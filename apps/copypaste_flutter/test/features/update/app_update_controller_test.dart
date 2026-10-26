@@ -201,48 +201,54 @@ void main() {
     },
   );
 
-  test('Linux retains the GitHub release page when automatic updates are unavailable', () async {
-    final release = _release();
-    final platform = _FakeUpdatePlatform(
-      target: AppUpdateTarget.linux,
-      availabilityResult: const AppUpdateAvailability.unavailable(
-        'This Linux installation cannot update automatically.',
-      ),
-    );
-    final controller = AppUpdateController(
-      repository: _FakeUpdateRepository(release: release),
-      platform: platform,
-    );
-    addTearDown(controller.dispose);
+  test(
+    'Linux retains the GitHub release page when automatic updates are unavailable',
+    () async {
+      final release = _release();
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: release),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
 
-    await controller.initialize();
-    await controller.openReleasePage();
+      await controller.initialize();
+      await controller.openReleasePage();
 
-    expect(controller.phase, AppUpdatePhase.unavailable);
-    expect(controller.release, same(release));
-    expect(platform.openedReleasePages, [release.releaseUri]);
-  });
+      expect(controller.phase, AppUpdatePhase.unavailable);
+      expect(controller.release, same(release));
+      expect(platform.openedReleasePages, [release.releaseUri]);
+    },
+  );
 
-  test('Linux opens the trusted latest release fallback when no newer metadata exists', () async {
-    final platform = _FakeUpdatePlatform(
-      target: AppUpdateTarget.linux,
-      availabilityResult: const AppUpdateAvailability.unavailable(
-        'This Linux installation cannot update automatically.',
-      ),
-    );
-    final controller = AppUpdateController(
-      repository: _FakeUpdateRepository(),
-      platform: platform,
-    );
-    addTearDown(controller.dispose);
+  test(
+    'Linux opens the trusted latest release fallback when no newer metadata exists',
+    () async {
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
 
-    await controller.initialize();
-    await controller.openReleasePage();
+      await controller.initialize();
+      await controller.openReleasePage();
 
-    expect(platform.openedReleasePages, [
-      Uri.https('github.com', '/dmytro-yevs/copypaste/releases/latest'),
-    ]);
-  });
+      expect(platform.openedReleasePages, [
+        Uri.https('github.com', '/dmytro-yevs/copypaste/releases/latest'),
+      ]);
+    },
+  );
 
   test(
     'Linux PackageKit permission requests use package manager copy',

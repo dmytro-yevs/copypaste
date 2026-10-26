@@ -96,6 +96,56 @@ class ReleasePipelineTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "compositor runtime source"):
                     main()
 
+    def test_tag_baseline_fallback_uses_the_existing_prior_source_verifier(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "PREVIOUS_LINUX_ARTIFACT_RUN_ID: ${{ inputs.previous_linux_artifact_run_id || (github.ref_type == 'tag' && vars.PREVIOUS_LINUX_ARTIFACT_RUN_ID) || '' }}",
+            workflow,
+        )
+        main = load("preflight-sources.py")["main"]
+        source_run = {"head_sha": "b" * 40}
+        verified = []
+
+        def inventory(_repository, run_id, kind):
+            self.assertEqual(run_id, "123")
+            return source_run if kind == "run" else {"kind": kind}
+
+        def run_path(path):
+            self.assertTrue(str(path).endswith("verify-linux-artifact-source-run.py"))
+            return {"verify": lambda *args: verified.append(args)}
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "BUILD": "false", "PUBLISH": "false", "GITHUB_REPOSITORY": "owner/repo",
+                "RELEASE_COMMIT": "a" * 40, "PREVIOUS_LINUX_ARTIFACT_RUN_ID": "123",
+                "RUNNER_TEMP": directory, "GITHUB_OUTPUT": str(Path(directory) / "outputs"),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.dict(
+                main.__globals__, {"inventory": inventory, "runpy": SimpleNamespace(run_path=run_path)}
+            ):
+                main()
+        self.assertEqual(verified, [
+            (source_run, {"kind": "jobs"}, {"kind": "artifacts"}, "owner/repo", "b" * 40),
+        ])
+
+    def test_tag_baseline_fallback_rejects_an_invalid_prior_source(self):
+        main = load("preflight-sources.py")["main"]
+
+        def inventory(_repository, _run_id, kind):
+            return {"head_sha": "b" * 40} if kind == "run" else {"kind": kind}
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "BUILD": "false", "PUBLISH": "false", "GITHUB_REPOSITORY": "owner/repo",
+                "RELEASE_COMMIT": "a" * 40, "PREVIOUS_LINUX_ARTIFACT_RUN_ID": "123",
+                "RUNNER_TEMP": directory, "GITHUB_OUTPUT": str(Path(directory) / "outputs"),
+            }
+            rejected = SimpleNamespace(run_path=lambda _path: {"verify": lambda *_args: (_ for _ in ()).throw(ValueError("rejected"))})
+            with patch.dict(os.environ, environment, clear=True), patch.dict(
+                main.__globals__, {"inventory": inventory, "runpy": rejected}
+            ), self.assertRaisesRegex(ValueError, "rejected"):
+                main()
+
     def test_partial_module_matrix_can_never_publish(self):
         matrix = runpy.run_path(str(ROOT / "scripts/ci/module-matrix.py"))["matrix"]
         contract = {"schema": 1, "desktop": {"provider": [{"platform": "linux", "architecture": "x86_64"}, {"platform": "macos", "architecture": "aarch64"}]}}

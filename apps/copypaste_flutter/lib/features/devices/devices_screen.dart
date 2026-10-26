@@ -1182,8 +1182,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
       children: [
         const Text('Pairing code').semiBold(),
         const Gap(AppSpacing.xs),
-        const Text('Enter the 8-character code shown on the other device.')
-            .muted(),
+        const Text(
+          'Enter the 8-character code shown on the other device.',
+        ).muted(),
         const Gap(AppSpacing.md),
         Semantics(
           label: 'Pairing code',
@@ -1193,9 +1194,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
             scrollDirection: Axis.horizontal,
             child: Theme(
               data: Theme.of(context).copyWith(
-                colorScheme: () =>
-                    Theme.of(context).colorScheme
-                        .copyWith(border: () => Colors.transparent),
+                colorScheme: () => Theme.of(
+                  context,
+                ).colorScheme.copyWith(border: () => Colors.transparent),
               ),
               child: InputOTP(
                 key: const ValueKey<String>('pairing-code-input'),
@@ -1213,8 +1214,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
         const Gap(AppSpacing.xl),
         const Text('Device address').semiBold(),
         const Gap(AppSpacing.xs),
-        const Text('Use the host:port address reported by the other device.')
-            .muted(),
+        const Text(
+          'Use the host:port address reported by the other device.',
+        ).muted(),
         const Gap(AppSpacing.sm),
         TextField(
           key: const ValueKey<String>('pairing-address-input'),
@@ -1439,14 +1441,16 @@ class _PairingInspectorState extends State<_PairingInspector> {
               children: [
                 const Text('Verification code').semiBold(),
                 const Gap(AppSpacing.sm),
-                const Text('Confirm only if this code matches on both devices.')
-                    .muted(),
+                const Text(
+                  'Confirm only if this code matches on both devices.',
+                ).muted(),
                 const Gap(AppSpacing.sm),
                 Text(
                   verificationCode,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).typography.h2
-                      .copyWith(letterSpacing: 6),
+                  style: Theme.of(
+                    context,
+                  ).typography.h2.copyWith(letterSpacing: 6),
                 ),
               ],
             ),

@@ -727,6 +727,41 @@ class ReleaseSafetyTest(unittest.TestCase):
                     artifact.touch()
 
 
+class PriorLinuxReceiptTest(unittest.TestCase):
+    def test_prior_linux_version_requires_the_authenticated_producer_identity(self):
+        read_version = runpy.run_path(
+            str(ROOT / "scripts/release/previous-linux-version.py")
+        )["version"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            version = "1.0.37"
+            commit = "a" * 40
+            expected = {
+                f"CopyPaste-v{version}-linux-x86_64.{extension}"
+                for extension in ("AppImage", "deb", "rpm")
+            }
+            expected.add(f"CopyPaste-v{version}-linux-x86_64.runtime-baseline.json")
+            expected.update(f"{name}{suffix}" for name in tuple(expected) if name.endswith((".AppImage", ".deb", ".rpm")) for suffix in (".sig", ".sha256"))
+            expected.add(f"CopyPaste-v{version}-linux-x86_64.rpm.installation.json")
+            records = []
+            for name in sorted(expected):
+                artifact = root / name
+                artifact.write_bytes(name.encode())
+                records.append({"name": name, "bytes": artifact.stat().st_size,
+                                "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest()})
+            receipt = root / "production-receipt.json"
+            payload = {"schema": 2, "platform": "linux", "version": version,
+                       "commit": commit, "run_id": "40193798919", "inventory_complete": True,
+                       "artifacts": records}
+            receipt.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(read_version(receipt, "40193798919", commit), version)
+            for change in ({"schema": 1}, {"run_id": "1"}, {"commit": "b" * 40},
+                           {"inventory_complete": False}):
+                receipt.write_text(json.dumps(payload | change), encoding="utf-8")
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    read_version(receipt, "40193798919", commit)
+
+
 class AndroidReleaseArtifactsTest(unittest.TestCase):
     def test_apk_variants_require_exact_abis_and_complete_runtime_libraries(self):
         module = runpy.run_path(str(ROOT / "scripts/release/verify-android-abis.py"))

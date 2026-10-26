@@ -4,8 +4,8 @@
   "id": "copypaste.semantic-search",
   "title": "Semantic Search",
   "description": "Find clips by meaning with a local model selected for your languages.",
-  "version": "0.1.28",
-  "app_versions": ">=1.0.37, <2.0.0",
+  "version": "0.1.29",
+  "app_versions": ">=1.1.0, <2.0.0",
   "supported_platforms": [
     "macos",
     "windows",

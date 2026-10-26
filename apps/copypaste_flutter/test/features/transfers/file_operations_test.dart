@@ -36,59 +36,62 @@ FileOperation operation(
 );
 
 void main() {
-  test('independent screens share progress and reconnect without cancelling the worker', () async {
-    final repository = _Repository()
-      ..records = [operation('report', 'running')];
-    final first = FileOperationsController(repository);
-    final second = FileOperationsController(repository);
-    await first.initialize();
-    await second.initialize();
-    final queries = repository.loads;
-    repository.changes.add(
-      const FileOperationsChange(
-        id: 'report',
-        written: 512 * 1024,
-        total: 1024 * 1024,
-        finished: false,
-      ),
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(first.forClip('clip-report')!.progress, 0.5);
-    expect(second.forClip('clip-report')!.progress, 0.5);
-    expect(
-      repository.loads,
-      queries,
-      reason: 'Byte progress must not reload history',
-    );
-    first.dispose();
-    expect(repository.cancelled, isEmpty);
-    repository.records = [
-      operation(
-        'report',
-        'completed',
-        written: 1024 * 1024,
-        path: '/saved/report.pdf',
-      ),
-    ];
-    repository.changes.add(const FileOperationsChange(id: 'report'));
-    await Future<void>.delayed(Duration.zero);
-    expect(second.forClip('clip-report')!.localPath, '/saved/report.pdf');
-    final reopened = FileOperationsController(repository);
-    await reopened.initialize();
-    expect(reopened.forClip('clip-report')!.phase, 'completed');
-    await reopened.openFile(reopened.items.single);
-    expect(repository.opened, ['/saved/report.pdf']);
-    repository.records = [
-      ...repository.records,
-      operation('another', 'running'),
-    ];
-    await reopened.clearHistory();
-    expect(reopened.items.single.id, 'another');
-    expect(repository.cancelled, isEmpty);
-    reopened.dispose();
-    second.dispose();
-    await repository.changes.close();
-  });
+  test(
+    'independent screens share progress and reconnect without cancelling the worker',
+    () async {
+      final repository = _Repository()
+        ..records = [operation('report', 'running')];
+      final first = FileOperationsController(repository);
+      final second = FileOperationsController(repository);
+      await first.initialize();
+      await second.initialize();
+      final queries = repository.loads;
+      repository.changes.add(
+        const FileOperationsChange(
+          id: 'report',
+          written: 512 * 1024,
+          total: 1024 * 1024,
+          finished: false,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(first.forClip('clip-report')!.progress, 0.5);
+      expect(second.forClip('clip-report')!.progress, 0.5);
+      expect(
+        repository.loads,
+        queries,
+        reason: 'Byte progress must not reload history',
+      );
+      first.dispose();
+      expect(repository.cancelled, isEmpty);
+      repository.records = [
+        operation(
+          'report',
+          'completed',
+          written: 1024 * 1024,
+          path: '/saved/report.pdf',
+        ),
+      ];
+      repository.changes.add(const FileOperationsChange(id: 'report'));
+      await Future<void>.delayed(Duration.zero);
+      expect(second.forClip('clip-report')!.localPath, '/saved/report.pdf');
+      final reopened = FileOperationsController(repository);
+      await reopened.initialize();
+      expect(reopened.forClip('clip-report')!.phase, 'completed');
+      await reopened.openFile(reopened.items.single);
+      expect(repository.opened, ['/saved/report.pdf']);
+      repository.records = [
+        ...repository.records,
+        operation('another', 'running'),
+      ];
+      await reopened.clearHistory();
+      expect(reopened.items.single.id, 'another');
+      expect(repository.cancelled, isEmpty);
+      reopened.dispose();
+      second.dispose();
+      await repository.changes.close();
+    },
+  );
 
   test(
     'newest failure survives refresh, a second screen and reconnect',
@@ -313,8 +316,9 @@ void main() {
                       as RenderRepaintBoundary)
                   .toImage();
           final bytes = await pixels.toByteData(format: ui.ImageByteFormat.png);
-          await File('$evidence/file-transfer-manager.png')
-              .writeAsBytes(bytes!.buffer.asUint8List());
+          await File(
+            '$evidence/file-transfer-manager.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
           pixels.dispose();
         });
       }

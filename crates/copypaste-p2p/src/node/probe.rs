@@ -5,7 +5,7 @@
 //! the encrypted application channel. The latter is the only input to an
 //! authenticated latency value.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -115,7 +115,7 @@ impl Node {
         on_complete: F,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) where
-        F: Fn() + Send + Sync + Clone + 'static,
+        F: Fn(bool) + Send + Sync + Clone + 'static,
     {
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -129,9 +129,9 @@ impl Node {
                 _ = tick.tick() => {
                     let notify = on_complete.clone();
                     let completion_shutdown = shutdown.clone();
-                    self.refresh_reachability(self.peers().list(), move || {
+                    self.refresh_reachability(self.peers().list(), move |state_changed| {
                         if !*completion_shutdown.borrow() {
-                            notify();
+                            notify(state_changed);
                         }
                     });
                 }
@@ -139,25 +139,19 @@ impl Node {
         }
     }
 
-    /// Starts at most one content-free probe for each stale or nearly stale
-    /// trusted peer.
+    /// Starts one probe per peer needing renewal and returns immediately.
+    /// `on_complete` runs once after the batch records its observations and
+    /// reports whether any reachability state changed. Discovery addresses
+    /// precede stored addresses; every candidate must pass Noise authentication.
     ///
-    /// This intentionally returns immediately: a `Peers` read must never wait
-    /// behind several sleeping devices. `on_complete` runs once after the
-    /// whole newly-started batch records its observations, so hosts can publish
-    /// one peers event rather than polling or emitting per device. Current
-    /// discovery is preferred over the last authenticated address; discovery
-    /// remains only a hint because every candidate must pass Noise.
-    ///
-    /// Returns false when every peer remains outside the renewal window or has
-    /// an in-flight probe, in which case `on_complete` is not called.
+    /// Returns false without a callback when all peers are fresh or probing.
     pub fn refresh_reachability<F>(
         self: &Arc<Self>,
         peers: impl IntoIterator<Item = Peer>,
         on_complete: F,
     ) -> bool
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce(bool) + Send + 'static,
     {
         let now = crate::now_ms();
         let claimed: Vec<_> = peers
@@ -170,10 +164,12 @@ impl Node {
             return false;
         }
         let remaining = Arc::new(AtomicUsize::new(claimed.len()));
+        let state_changed = Arc::new(AtomicBool::new(false));
         let completion = Arc::new(Mutex::new(Some(on_complete)));
         for peer in claimed {
             let node = Arc::clone(self);
             let remaining = Arc::clone(&remaining);
+            let state_changed = Arc::clone(&state_changed);
             let completion = Arc::clone(&completion);
             tokio::spawn(async move {
                 let _permit = node
@@ -182,7 +178,9 @@ impl Node {
                     .acquire_owned()
                     .await
                     .expect("probe semaphore is never closed");
-                let _ = node.probe_claimed(&peer).await;
+                if node.probe_claimed(&peer).await {
+                    state_changed.store(true, Ordering::Release);
+                }
                 node.release_probe(&peer.pairing_id);
                 if remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
                     if let Some(callback) = completion
@@ -190,7 +188,7 @@ impl Node {
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .take()
                     {
-                        callback();
+                        callback(state_changed.load(Ordering::Acquire));
                     }
                 }
             });
@@ -224,8 +222,16 @@ impl Node {
             .remove(pairing_id);
     }
 
-    async fn probe_claimed(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
-        self.probe(peer).await
+    async fn probe_claimed(&self, peer: &Peer) -> bool {
+        let now = crate::now_ms();
+        let before = self
+            .authenticated_reachability(&peer.pairing_id)
+            .map(|observation| observation.state_at(now));
+        let _ = self.probe(peer).await;
+        let after = self
+            .authenticated_reachability(&peer.pairing_id)
+            .map(|observation| observation.state_at(crate::now_ms()));
+        before != after
     }
 
     async fn probe(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
@@ -241,7 +247,6 @@ impl Node {
             if let Ok(Ok((latency_ms, profile, current))) = result {
                 let observation =
                     AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
-                self.record_reachability(&current.pairing_id, observation.clone());
                 self.record_authenticated_profile(&current.pairing_id, profile.as_ref());
                 self.touch_peer(
                     &current,
@@ -249,6 +254,7 @@ impl Node {
                     Some(super::ListenerEndpoint::dialled(candidate.addr)),
                     None,
                 );
+                self.record_reachability(&current.pairing_id, observation.clone());
                 return Ok(observation);
             }
             if candidate.source == DialCandidateSource::Discovery {
@@ -476,7 +482,7 @@ mod tests {
             listener,
             Arc::clone(&source),
             |_, _| {},
-            || {},
+            |_| {},
             shutdown_rx.clone(),
         ));
         let client = node(&client_dir);
@@ -484,7 +490,7 @@ mod tests {
         client.peers().upsert(trusted.clone()).unwrap();
         let (complete_tx, mut complete_rx) = tokio::sync::mpsc::unbounded_channel();
         let monitor = tokio::spawn(Arc::clone(&client).monitor_reachability(
-            move || {
+            move |_| {
                 complete_tx.send(()).unwrap();
             },
             shutdown_rx,
@@ -498,7 +504,7 @@ mod tests {
             .unwrap();
         assert!(first.latency_ms.is_some());
         assert!(first.is_current_at(crate::now_ms()));
-        assert!(!client.refresh_reachability([trusted.clone()], || panic!(
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
             "fresh RTT must not be probed twice"
         )));
 
@@ -582,7 +588,7 @@ mod tests {
             listener,
             Arc::clone(&source),
             |_, _| {},
-            move || {
+            move |_| {
                 probe_notifications_callback.fetch_add(1, Ordering::Relaxed);
             },
             shutdown_rx,
@@ -667,7 +673,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            || {},
+            |_| {},
             shutdown_rx,
         ));
 
@@ -804,7 +810,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            || {},
+            |_| {},
             shutdown_rx,
         ));
 
@@ -873,14 +879,17 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            || {},
+            |_| {},
             shutdown_rx,
         ));
         let client = node(&client_dir);
         let (complete_tx, complete_rx) = oneshot::channel();
-        assert!(client.refresh_reachability([trusted.clone()], move || {
-            let _ = complete_tx.send(());
-        }));
+        assert!(
+            client.refresh_reachability([trusted.clone()], move |state_changed| {
+                assert!(state_changed);
+                let _ = complete_tx.send(());
+            })
+        );
         tokio::time::timeout(Duration::from_secs(1), complete_rx)
             .await
             .expect("the completed batch notifies its host")
@@ -894,7 +903,7 @@ mod tests {
         );
 
         let (unexpected_tx, mut unexpected_rx) = oneshot::channel::<()>();
-        assert!(!client.refresh_reachability([trusted], move || {
+        assert!(!client.refresh_reachability([trusted], move |_| {
             let _ = unexpected_tx.send(());
         }));
         assert!(unexpected_rx.try_recv().is_err());

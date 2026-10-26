@@ -196,7 +196,9 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.history: historyController == null
                     ? StateView.error(
                         title: 'History runtime is unavailable',
-                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening history.',
+                        message:
+                            runtimeUnavailableMessage ??
+                            'Start the application runtime before opening history.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )
@@ -209,7 +211,9 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.devices: devicesController == null
                     ? StateView.error(
                         title: 'Devices runtime is unavailable',
-                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening devices.',
+                        message:
+                            runtimeUnavailableMessage ??
+                            'Start the application runtime before opening devices.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )
@@ -224,7 +228,9 @@ class CopyPasteApp extends StatelessWidget {
                 AppDestination.settings: settingsController == null
                     ? StateView.error(
                         title: 'Settings runtime is unavailable',
-                        message: runtimeUnavailableMessage ?? 'Start the application runtime before opening settings.',
+                        message:
+                            runtimeUnavailableMessage ??
+                            'Start the application runtime before opening settings.',
                         actionLabel: onRetryRuntime == null ? null : 'Retry',
                         onAction: onRetryRuntime,
                       )

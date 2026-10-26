@@ -156,29 +156,32 @@ void main() {
     expect(await controller.deleteBulkSelection(), isTrue);
     expect(repo.deleted.toSet(), {'0', '200'});
   });
-  test('rebuilds changed cursor boundaries around resident rows while preserving selection', () async {
-    final repo = _MutableRepository();
-    final controller = HistoryController(repo, includeFacets: false);
-    addTearDown(controller.dispose);
-    addTearDown(repo.events.close);
-    await controller.initialize();
-    controller.reportPageExtent(0, 100);
-    await controller.select('0');
-    for (var i = 0; i < 4; i++) {
-      await controller.loadMore();
-      controller.reportPageExtent(i + 1, 100);
-    }
-    final anchor = controller.items.first.id;
-    repo.clips.insert(0, _clip(10000));
-    repo.events.add(HistoryRuntimeEvent.itemsChanged);
-    for (var i = 0; i < 20; i++) {
-      await Future<void>.delayed(Duration.zero);
-    }
-    expect(controller.items.any((clip) => clip.id == anchor), isTrue);
-    expect(controller.selectedId, '0');
-    expect(controller.selectedClip?.id, '0');
-    expect(controller.items.length, lessThanOrEqualTo(150));
-  });
+  test(
+    'rebuilds changed cursor boundaries around resident rows while preserving selection',
+    () async {
+      final repo = _MutableRepository();
+      final controller = HistoryController(repo, includeFacets: false);
+      addTearDown(controller.dispose);
+      addTearDown(repo.events.close);
+      await controller.initialize();
+      controller.reportPageExtent(0, 100);
+      await controller.select('0');
+      for (var i = 0; i < 4; i++) {
+        await controller.loadMore();
+        controller.reportPageExtent(i + 1, 100);
+      }
+      final anchor = controller.items.first.id;
+      repo.clips.insert(0, _clip(10000));
+      repo.events.add(HistoryRuntimeEvent.itemsChanged);
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(controller.items.any((clip) => clip.id == anchor), isTrue);
+      expect(controller.selectedId, '0');
+      expect(controller.selectedClip?.id, '0');
+      expect(controller.items.length, lessThanOrEqualTo(150));
+    },
+  );
   test('range across evicted pages excludes collapsed date sections', () async {
     final repo = _MutableRepository();
     final now = DateTime.now();

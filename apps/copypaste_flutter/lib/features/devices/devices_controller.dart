@@ -14,10 +14,8 @@ abstract interface class DevicesFreshnessTimer {
   void cancel();
 }
 
-typedef DevicesFreshnessTimerFactory = DevicesFreshnessTimer Function(
-  Duration delay,
-  VoidCallback callback,
-);
+typedef DevicesFreshnessTimerFactory =
+    DevicesFreshnessTimer Function(Duration delay, VoidCallback callback);
 
 class _SystemDevicesFreshnessTimer implements DevicesFreshnessTimer {
   _SystemDevicesFreshnessTimer(Duration delay, VoidCallback callback)

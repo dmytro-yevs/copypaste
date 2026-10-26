@@ -141,7 +141,7 @@ impl Fixture {
             listener,
             Arc::clone(&source),
             |_, _| {},
-            || {},
+            |_| {},
             receiver,
         ));
 

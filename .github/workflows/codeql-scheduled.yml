@@ -152,9 +152,11 @@ jobs:
           languages: java-kotlin
           build-mode: manual
       - name: Build Android Java and Kotlin sources for CodeQL
-        run: ./scripts/ci/verify-flutter-foundation.sh
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build apk --debug --no-pub
         env:
-          COPYPASTE_FLUTTER_BUILD_TARGET: apk
           CARGO_BUILD_JOBS: "2"
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2

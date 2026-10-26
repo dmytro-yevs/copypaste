@@ -558,8 +558,9 @@ Future<void> _openActionDialog(
     ShadcnApp(
       theme: AppTheme.light,
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context)
-            .copyWith(textScaler: TextScaler.linear(scale)),
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(scale)),
         child: Builder(builder: (context) => AppTheme.builder(context, child)),
       ),
       home: Builder(
@@ -597,8 +598,9 @@ Future<void> _openConfirmation(
       darkTheme: AppTheme.dark,
       themeMode: mode,
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context)
-            .copyWith(textScaler: TextScaler.linear(scale)),
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(scale)),
         child: Builder(builder: (context) => AppTheme.builder(context, child)),
       ),
       home: Builder(

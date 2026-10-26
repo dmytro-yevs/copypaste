@@ -36,7 +36,8 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
 /// what it moved, so the caller can wake whatever it keeps in step with the
 /// history. It is deliberately not part of [`SyncSource`]: applying an item and
 /// noticing that a round happened are different jobs, and only the second one
-/// needs to reach a UI.
+/// needs to reach a UI. `on_probe` receives whether the probe also changed the
+/// reachability state, which already has a synchronization-status notification.
 pub async fn listen<S, F, P>(
     node: Arc<Node>,
     listener: TcpListener,
@@ -47,7 +48,7 @@ pub async fn listen<S, F, P>(
 ) where
     S: SyncSource + Send + Sync + 'static,
     F: Fn(&str, &SyncOutcome) + Send + Sync + Clone + 'static,
-    P: Fn() + Send + Sync + Clone + 'static,
+    P: Fn(bool) + Send + Sync + Clone + 'static,
 {
     match listener.local_addr() {
         Ok(addr) => node.set_listen_addr(addr),
@@ -99,7 +100,7 @@ async fn serve_peer<S, F, P>(
 ) where
     S: SyncSource,
     F: Fn(&str, &SyncOutcome),
-    P: Fn(),
+    P: Fn(bool),
 {
     let mut candidates = node.peers().psks();
     // Tentative Stored slots cannot admit another connection before commit.
@@ -155,13 +156,13 @@ async fn serve_peer<S, F, P>(
         return;
     }
 
-    node.note_authenticated(&pairing_id);
     let membership_only = session.is_membership_only();
     let listen_addr = node.session_listen_addr(session.local_addr());
     let mut channel = NoiseChannel::new(session);
     let mut first = match channel.recv().await {
         Ok(message) => message,
         Err(error) => {
+            node.note_authenticated(&pairing_id);
             let condition = super::dial::session_error(error.clone());
             if condition.sync_issue().is_some_and(|code| code.blocking()) {
                 node.sync_activity.failure(&pairing_id, condition);
@@ -170,6 +171,11 @@ async fn serve_peer<S, F, P>(
             channel.close().await;
             return;
         }
+    };
+    let authentication_changed = if !matches!(first, SyncMessage::Probe { .. }) {
+        node.note_authenticated(&pairing_id)
+    } else {
+        false
     };
     if matches!(
         first,
@@ -191,7 +197,13 @@ async fn serve_peer<S, F, P>(
             )
             .await
             {
-                Ok(Ok(())) => on_probe(),
+                Ok(Ok(())) => on_probe(
+                    authentication_changed
+                        || node.record_reachability(
+                            &pairing_id,
+                            AuthenticatedReachability::online(None, crate::now_ms()),
+                        ),
+                ),
                 Ok(Err(error)) => node.sync_activity.failure(&pairing_id, error),
                 Err(_) => node
                     .sync_activity
@@ -215,15 +227,14 @@ async fn serve_peer<S, F, P>(
         match result {
             Ok(()) => {
                 if let Some(peer) = node.peers().get(&pairing_id) {
-                    node.record_reachability(
-                        &pairing_id,
-                        AuthenticatedReachability::online(None, crate::now_ms()),
-                    );
                     node.record_authenticated_profile(&pairing_id, profile.as_ref());
                     // The inbound source port belongs to this probe, not to
                     // the peer listener. Preserve the authenticated endpoint.
                     node.touch_peer(&peer, None, None, None);
-                    on_probe();
+                    on_probe(node.record_reachability(
+                        &pairing_id,
+                        AuthenticatedReachability::online(None, crate::now_ms()),
+                    ));
                 }
             }
             Err(error) => debug!(%pairing_id, %error, "peer liveness probe failed"),
@@ -231,10 +242,16 @@ async fn serve_peer<S, F, P>(
         return;
     }
     if matches!(first, SyncMessage::FileRequest { .. }) {
-        let _ = node
+        let served = node
             .serve_file(&pairing_id, source, &mut channel, first)
             .await;
         channel.close().await;
+        if served.is_ok() {
+            node.record_reachability(
+                &pairing_id,
+                AuthenticatedReachability::online(None, crate::now_ms()),
+            );
+        }
         return;
     }
     if let SyncMessage::Group { snapshot, .. } = first {
@@ -257,7 +274,6 @@ async fn serve_peer<S, F, P>(
                 return;
             }
         }
-        on_probe();
         first = match channel.recv().await {
             Ok(message) => message,
             Err(error) => {
@@ -405,17 +421,20 @@ mod tests {
             TcpListener::from_std(receiver_listener).unwrap(),
             Arc::new(TestSource::new("receiver", vec![])),
             |_, _| {},
-            move || {
-                let _ = completed.send(());
+            move |state_changed| {
+                let _ = completed.send(state_changed);
             },
             rx,
         ));
-        for _ in 0..2 {
+        for expected_state_change in [true, false] {
             sender.probe_one(&outgoing_peer).await.unwrap();
-            tokio::time::timeout(std::time::Duration::from_secs(1), receipts.recv())
-                .await
-                .unwrap()
-                .unwrap();
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(1), receipts.recv())
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                expected_state_change
+            );
             assert_eq!(
                 receiver.peers().get(&pairing_id).unwrap().last_addr,
                 Some(expected)
@@ -465,7 +484,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &SyncOutcome| {},
-            || {},
+            |_| {},
             shutdown,
         ));
         (addr, token.to_code())
@@ -506,7 +525,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("empty", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            || {},
+            |_| {},
             rx,
         ));
 
@@ -555,7 +574,7 @@ mod tests {
             listener,
             Arc::clone(&a_source),
             |_: &str, _: &SyncOutcome| {},
-            || {},
+            |_| {},
             shutdown_rx,
         ));
 
@@ -654,7 +673,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("desktop", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            || {},
+            |_| {},
             shutdown,
         ));
 
@@ -745,7 +764,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("stopper", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            || {},
+            |_| {},
             rx,
         ));
         tx.send(true).unwrap();

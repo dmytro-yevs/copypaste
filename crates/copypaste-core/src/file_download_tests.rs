@@ -180,7 +180,7 @@ async fn exercise_download(deferred: bool) {
         listener,
         Arc::clone(&source_view),
         |_: &str, _: &copypaste_p2p::sync::SyncOutcome| {},
-        || {},
+        |_| {},
         shutdown,
     ));
     receiver.sync_one(&peer, &target_view).await.unwrap();

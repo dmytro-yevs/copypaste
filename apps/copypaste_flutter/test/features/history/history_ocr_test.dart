@@ -118,8 +118,9 @@ void main() {
               builder: (context, child) => AppTheme.builder(
                 context,
                 MediaQuery(
-                  data: MediaQuery.of(context)
-                      .copyWith(textScaler: TextScaler.linear(scale)),
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: TextScaler.linear(scale)),
                   child: child!,
                 ),
               ),

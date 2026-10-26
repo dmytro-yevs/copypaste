@@ -147,8 +147,9 @@ class _ActiveRecord extends StatelessWidget {
           children: [
             Text(
               speedLabel ?? operation.label,
-              style: Theme.of(context).typography.small
-                  .copyWith(color: statusColor),
+              style: Theme.of(
+                context,
+              ).typography.small.copyWith(color: statusColor),
             ),
             const Spacer(),
             Text(
@@ -201,8 +202,9 @@ class _CompletedRecord extends StatelessWidget {
           operation.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).typography.small
-              .copyWith(fontWeight: FontWeight.w600),
+          style: Theme.of(
+            context,
+          ).typography.small.copyWith(fontWeight: FontWeight.w600),
         ),
         const Gap(AppSpacing.xs),
         Text(

@@ -92,13 +92,15 @@ class RuntimeModulesRepository implements ModulesRepository {
     String command,
     Map<String, Object> arguments,
   ) => _guard(() async {
-    final result = jsonDecode(
-      await runtime.moduleInvoke(
-        id: id,
-        command: command,
-        argumentsJson: jsonEncode(arguments),
-      ),
-    ) as Map<String, dynamic>;
+    final result =
+        jsonDecode(
+              await runtime.moduleInvoke(
+                id: id,
+                command: command,
+                argumentsJson: jsonEncode(arguments),
+              ),
+            )
+            as Map<String, dynamic>;
     return switch (result['kind']) {
       'text' => ModuleResult(result['text'] as String),
       'message' => ModuleResult(result['message'] as String),

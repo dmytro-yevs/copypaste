@@ -246,7 +246,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           LINUX_REQUIRED: ${{ steps.version.outputs.linux_required }}
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
-          PREVIOUS_LINUX_ARTIFACT_RUN_ID: ${{ inputs.previous_linux_artifact_run_id }}
+          PREVIOUS_LINUX_ARTIFACT_RUN_ID: ${{ inputs.previous_linux_artifact_run_id || (github.ref_type == 'tag' && vars.PREVIOUS_LINUX_ARTIFACT_RUN_ID) || '' }}
           COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           BUILD: ${{ steps.version.outputs.reuse_qualified != 'true' && steps.version.outputs.linux_qualification_only != 'true' }}
           PUBLISH: ${{ steps.version.outputs.publish }}
@@ -844,6 +844,13 @@ jobs:
           path: exact-artifacts/x86_64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        if: needs.preflight.outputs.previous_linux_artifact_run_id != ''
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: ${{ needs.preflight.outputs.previous_linux_artifact_run_id }}
+          github-token: ${{ github.token }}
       - name: Verify prior Linux artifact source
         id: previous-linux
         if: needs.preflight.outputs.previous_linux_artifact_run_id != ''
@@ -861,18 +868,10 @@ jobs:
           python3 scripts/release/verify-linux-artifact-source-run.py \
             --run "$RUNNER_TEMP/previous-run.json" --jobs "$RUNNER_TEMP/previous-jobs.json" \
             --artifacts "$RUNNER_TEMP/previous-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$previous_commit"
-          git fetch --depth=1 origin "$previous_commit"
-          previous_version="$(git show "$previous_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
-          previous_version="${previous_version%%+*}"
-          [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          previous_version="$(python3 scripts/release/previous-linux-version.py \
+            --receipt previous-artifacts/x86_64/production-receipt.json --run-id "$PREVIOUS_RUN_ID" \
+            --commit "$previous_commit")"
           echo "version=$previous_version" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/download-verified-artifact
-        if: needs.preflight.outputs.previous_linux_artifact_run_id != ''
-        with:
-          name: production-linux-x86_64
-          path: previous-artifacts/x86_64
-          run-id: ${{ needs.preflight.outputs.previous_linux_artifact_run_id }}
-          github-token: ${{ github.token }}
       - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.compositor_runtime_required == 'true'
         with:

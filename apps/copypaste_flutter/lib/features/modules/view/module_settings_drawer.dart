@@ -204,7 +204,8 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                   controller.canRestart))
                             const StateView.empty(
                               title: 'No additional settings',
-                              message: 'This module does not need extra configuration.',
+                              message:
+                                  'This module does not need extra configuration.',
                             ),
                           if (module.error ?? controller.errorMessage
                               case final error?) ...[
