@@ -56,6 +56,7 @@ pub struct AppState {
     capture_running: AtomicBool,
     observed_clipboard_available: AtomicBool,
     capture_revision: AtomicU64,
+    last_published_sync_revision: AtomicU64,
     started_at: Instant,
 }
 
@@ -117,6 +118,7 @@ impl AppState {
             capture_running: AtomicBool::new(false),
             observed_clipboard_available: AtomicBool::new(clipboard_available),
             capture_revision: AtomicU64::new(0),
+            last_published_sync_revision: AtomicU64::new(u64::MAX),
             started_at: Instant::now(),
         }
     }
@@ -217,12 +219,22 @@ impl AppState {
     }
 
     pub fn note_sync_status_changed(&self) {
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let sync_status = self
+            .p2p
+            .node()
+            .sync_status(self.settings.get().sync_enabled);
+        if self
+            .last_published_sync_revision
+            .swap(sync_status.revision, Ordering::AcqRel)
+            == sync_status.revision
+        {
+            return;
+        }
         let _ = self.events.send(EventData {
-            sync_status: Some(
-                self.p2p
-                    .node()
-                    .sync_status(self.settings.get().sync_enabled),
-            ),
+            sync_status: Some(sync_status),
             event: EventKind::Peers,
             item_count: self.store.count().unwrap_or(0),
             captured: false,
@@ -402,6 +414,19 @@ mod tests {
     #[test]
     fn event_buffer_capacity_is_two_fifty_six() {
         assert_eq!(EVENT_BUFFER, 256);
+    }
+
+    #[test]
+    fn sync_status_revision_is_published_once_after_subscription() {
+        let (state, _dir) = test_state("sync-status-events");
+        state.note_sync_status_changed();
+        let mut events = state.subscribe();
+        state.note_sync_status_changed();
+        let event = events.try_recv().unwrap();
+        assert_eq!(event.event, EventKind::Peers);
+        assert_eq!(event.sync_status.unwrap().revision, 0);
+        state.note_sync_status_changed();
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
