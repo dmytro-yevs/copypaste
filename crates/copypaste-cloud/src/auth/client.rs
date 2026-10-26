@@ -200,7 +200,7 @@ impl SupabaseAuth {
 #[cfg(test)]
 mod tests {
     use super::super::stub::{header as request_header, json as request_json, Reply, Stub};
-    use super::super::testkit::{client, fast_retry, session_body, ANON, INVALID_GRANT};
+    use super::super::testkit::{client, fast_retry, password, session_body, ANON, INVALID_GRANT};
     use super::*;
     use wiremock::matchers::{
         body_json, header as header_match, method, path, query_param, query_param_is_missing,
@@ -211,6 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn sign_in_posts_the_password_grant_with_both_auth_headers() {
+        let password = password();
         let mock = Mock::given(method("POST"))
             .and(path("/auth/v1/token"))
             .and(query_param("grant_type", "password"))
@@ -218,7 +219,7 @@ mod tests {
             .and(header_match("authorization", format!("Bearer {ANON}")))
             .and(body_json(json!({
                 "email": "alice@example.com",
-                "password": "hunter2"
+                "password": password.clone()
             })));
         let stub = Stub::start_matching(
             mock,
@@ -227,7 +228,7 @@ mod tests {
         )
         .await;
         client(&stub)
-            .sign_in("alice@example.com", "hunter2")
+            .sign_in("alice@example.com", &password)
             .await
             .expect("sign-in");
 
@@ -241,7 +242,7 @@ mod tests {
             Some(format!("Bearer {ANON}").as_str())
         );
         assert_eq!(request_json(&request)["email"], "alice@example.com");
-        assert_eq!(request_json(&request)["password"], "hunter2");
+        assert_eq!(request_json(&request)["password"], password);
     }
 
     #[tokio::test]
@@ -268,6 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn sign_up_posts_to_the_signup_endpoint() {
+        let password = password();
         let mock = Mock::given(method("POST"))
             .and(path("/auth/v1/signup"))
             .and(query_param_is_missing("grant_type"));
@@ -278,7 +280,7 @@ mod tests {
         )
         .await;
         client(&stub)
-            .sign_up("new@example.com", "pw")
+            .sign_up("new@example.com", &password)
             .await
             .expect("sign-up");
         let request = stub.only_request().await;
@@ -323,7 +325,7 @@ mod tests {
             CloudConfig::new_loopback(format!("{}/", stub.base_url), ANON).unwrap(),
         )
         .with_retry_policy(fast_retry());
-        auth.sign_in("a@b.co", "x").await.expect("sign-in");
+        auth.sign_in("a@b.co", &password()).await.expect("sign-in");
         let request = stub.only_request().await;
         assert_eq!(request.url.path(), "/auth/v1/token");
         assert_eq!(request.url.query(), Some("grant_type=password"));
@@ -351,7 +353,10 @@ mod tests {
     async fn a_session_carries_the_tokens_and_a_computed_expiry() {
         let stub = Stub::start(vec![Reply::json(200, &session_body("acc", "ref", 3600))], 1).await;
         let before = now_ms();
-        let session = client(&stub).sign_in("a@b.co", "x").await.expect("sign-in");
+        let session = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .expect("sign-in");
 
         assert_eq!(session.access_token, "acc");
         assert_eq!(session.refresh_token, "ref");
@@ -373,7 +378,7 @@ mod tests {
         )
         .await;
         let err = client(&stub)
-            .sign_up("new@example.com", "pw")
+            .sign_up("new@example.com", &password())
             .await
             .unwrap_err();
         assert!(
@@ -385,14 +390,20 @@ mod tests {
     #[tokio::test]
     async fn a_2xx_that_is_not_a_session_is_malformed() {
         let stub = Stub::start(vec![Reply::json(200, r#"{"nonsense":true}"#)], 1).await;
-        let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+        let err = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .unwrap_err();
         assert!(matches!(err, AuthError::Malformed), "{err:?}");
     }
 
     #[tokio::test]
     async fn a_non_json_2xx_is_malformed_not_a_panic() {
         let stub = Stub::start(vec![Reply::text(200, "<html>hello</html>")], 1).await;
-        let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+        let err = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .unwrap_err();
         assert!(matches!(err, AuthError::Malformed), "{err:?}");
     }
 

@@ -43,18 +43,14 @@ confidence-threshold = 0.8
 [bans]
 # Duplicate detection. "warn" rather than "deny": platform-targeted upstream
 # dependencies can impose multiple versions, so a hard gate would be permanently
-# red. The value is the report — AGENTS.md rule 1 is a rule about duplication,
-# and `--show-stats` in the CI job prints the count so it is visible whether it
-# is trending up or down.
+# red. `--show-stats` prints the count in CI.
 multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 
-# AGENTS.md's third dependency exemption is "it would pull a second crypto or
-# TLS stack into the tree", and Cargo.toml states the intent directly: reqwest
-# and tokio-tungstenite are configured for rustls "so no OpenSSL C build enters
-# the tree". This is what stops a future `default-features = true` somewhere
-# from quietly undoing it.
+# Avoid a second crypto or TLS stack. Cargo.toml configures reqwest and
+# tokio-tungstenite for rustls, which prevents a future `default-features = true`
+# from quietly enabling OpenSSL.
 #
 # openssl-sys is scoped rather than banned outright. SQLCipher's only portable
 # crypto backend is OpenSSL; neither the Android NDK sysroot nor a Windows host
@@ -68,9 +64,9 @@ highlight = "all"
 # is unaudited by this file. Adding one is a decision for the ADR that makes
 # Windows a shipping platform, not a side effect of getting it to compile.
 #
-# This is the cheap half of rule 1: a stated invariant that a machine checks.
+# Keep this invariant machine-checked.
 deny = [
-    { name = "openssl", reason = "second TLS stack; the workspace is rustls-only (AGENTS.md rule 1, exemption 3)" },
+    { name = "openssl", reason = "second TLS stack; the workspace uses rustls" },
     { name = "openssl-sys", wrappers = ["libsqlite3-sys"], reason = "C OpenSSL build; permitted only as SQLCipher's Android crypto backend (ADR-0007)" },
     { name = "native-tls", reason = "delegates to the platform/OpenSSL TLS stack; use rustls" },
 ]

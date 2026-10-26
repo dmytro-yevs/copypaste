@@ -175,8 +175,7 @@ void main() {
             data: const MediaQueryData(textScaler: TextScaler.linear(2)),
             child: const StateView.empty(
               title: 'Nothing copied yet',
-              message:
-                  'Copied text, links, and images will appear here when they are available.',
+              message: 'Copied text, links, and images will appear here when they are available.',
             ),
           ),
         ),
@@ -200,8 +199,7 @@ void main() {
               data: const MediaQueryData(textScaler: TextScaler.linear(2)),
               child: StateView.error(
                 title: 'Synchronization requires your attention',
-                message:
-                    'The connection was interrupted before your encrypted clipboard history could be synchronized. Check your network connection, then try again.',
+                message: 'The connection was interrupted before your encrypted clipboard history could be synchronized. Check your network connection, then try again.',
                 actionLabel:
                     'Reconnect this device and try synchronization again',
                 onAction: () => retries += 1,

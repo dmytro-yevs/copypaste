@@ -166,7 +166,7 @@ pub(super) fn warn_if_permissive(path: &Path) {
     if let Ok(meta) = std::fs::metadata(path) {
         let mode = meta.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
-            // The path itself is deliberately not in the message (rule 4).
+            // The path itself is deliberately not in the message (the privacy contract).
             tracing::warn!(
                 mode = format!("{mode:o}"),
                 "the paired-devices file is readable beyond its owner"
@@ -345,8 +345,10 @@ mod tests {
         let store = PeerStore::open(&path, &crate::peers::testutil::KEY).unwrap();
         store.upsert(peer("Laptop")).unwrap();
         let original = std::fs::read(&path).unwrap();
+        let mut wrong_key = *crate::peers::testutil::KEY;
+        wrong_key[0] ^= 1;
         assert!(matches!(
-            PeerStore::open(&path, &[18; 32]),
+            PeerStore::open(&path, &wrong_key),
             Err(PeerStoreError::Corrupt)
         ));
         assert_eq!(std::fs::read(&path).unwrap(), original);

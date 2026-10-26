@@ -53,7 +53,7 @@ impl From<Ingest> for Ingested {
 ///
 /// The `Display` text is deliberately free of detail: these strings can end up
 /// in an IPC error, and the underlying `StoreError` may carry a database path,
-/// which discloses the local username (AGENTS.md rule 4). The full error is
+/// which discloses the local username (the privacy contract). The full error is
 /// kept as the `source` and goes to the local log, never to a client.
 #[derive(Debug, thiserror::Error)]
 pub enum IngestError {

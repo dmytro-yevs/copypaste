@@ -2,8 +2,7 @@
 //!
 //! # Why last-write-wins, and why it is not a library
 //!
-//! The structural CRDT crates (`automerge`, `yrs`) cannot be used here, under
-//! `AGENTS.md` rule 1 exemption 2: a structural CRDT merges *inside* a value,
+//! Structural CRDT crates (`automerge`, `yrs`) merge *inside* a value,
 //! and our items are opaque ciphertext at rest with the merge running over
 //! metadata alone, so there is nothing for it to operate on. Last-write-wins
 //! over four metadata keys is not a shortcut, it is the only thing that works.

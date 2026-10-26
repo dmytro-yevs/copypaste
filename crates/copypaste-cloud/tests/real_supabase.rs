@@ -7,8 +7,9 @@ use copypaste_cloud::{
     SupabaseAuth, SupabaseRest,
 };
 
-const PASSWORD: &str = "copypaste-dev";
-const PASSPHRASE: &str = "correct horse battery staple";
+fn secret(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
+}
 
 struct Source {
     items: Vec<LocalItem>,
@@ -65,17 +66,19 @@ fn stamp() -> i64 {
 #[ignore = "requires the disposable local Supabase stack"]
 async fn real_supabase_contract() {
     let config = config();
+    let password = secret("SUPABASE_TEST_PASSWORD");
+    let passphrase = secret("SUPABASE_TEST_PASSPHRASE");
     let auth = SupabaseAuth::new(config.clone());
     let alice = auth
-        .sign_in("dev-a@example.test", PASSWORD)
+        .sign_in("dev-a@example.test", &password)
         .await
         .expect("Alice signs in through GoTrue");
     let bob = auth
-        .sign_in("dev-b@example.test", PASSWORD)
+        .sign_in("dev-b@example.test", &password)
         .await
         .expect("Bob signs in through GoTrue");
     let rest = SupabaseRest::new(config.clone());
-    let crypto = CloudCrypto::derive(PASSPHRASE, &alice.user_id).expect("derive sync key");
+    let crypto = CloudCrypto::derive(&passphrase, &alice.user_id).expect("derive sync key");
     let created_at = stamp();
 
     let mut realtime = RealtimeSubscription::connect(&config, &alice.access_token)
@@ -189,7 +192,7 @@ async fn real_supabase_contract() {
     let sync = CloudSync::new(
         rest.clone(),
         auth,
-        copypaste_cloud::derive_sync_key(PASSPHRASE, &alice.user_id).expect("sync key"),
+        copypaste_cloud::derive_sync_key(&passphrase, &alice.user_id).expect("sync key"),
         config,
         alice,
     );

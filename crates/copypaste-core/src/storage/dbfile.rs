@@ -46,7 +46,7 @@ pub enum RestoreError {
 /// Open `path` with `db_key` and prove the key and schema before returning.
 ///
 /// Fails closed: a key that does not open the file is [`StoreError::InvalidKey`],
-/// never a fallback to an unkeyed read (AGENTS.md rule 4).
+/// never a fallback to an unkeyed read (the privacy contract).
 ///
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
     let mut conn = Connection::open_with_flags(

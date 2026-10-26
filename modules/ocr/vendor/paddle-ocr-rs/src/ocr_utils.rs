@@ -20,7 +20,7 @@ impl OcrUtils {
 
         let mut input_tensor = Array::zeros((1, channels as usize, rows as usize, cols as usize));
 
-        // 获取图像数据
+        // Read image pixels.
         unsafe {
             for r in 0..rows {
                 for c in 0..cols {
@@ -77,7 +77,7 @@ impl OcrUtils {
     ) -> image::RgbImage {
         let mut points = box_points.to_vec();
 
-        // 计算边界框
+        // Calculate the bounding box.
         let (min_x, min_y, max_x, max_y) = points.iter().fold(
             (u32::MAX, u32::MAX, 0u32, 0u32),
             |(min_x, min_y, max_x, max_y), point| {
@@ -90,7 +90,7 @@ impl OcrUtils {
             },
         );
 
-        // 裁剪图像
+        // Crop the image.
         let img_crop =
             imageops::crop_imm(img_src, min_x, min_y, max_x - min_x, max_y - min_y).to_image();
 
@@ -132,7 +132,7 @@ impl OcrUtils {
             &mut part_img,
         );
 
-        // 根据需要旋转图像
+        // Rotate portrait crops when needed.
         if part_img.height() >= part_img.width() * 3 / 2 {
             let mut rotated = image::RgbImage::new(part_img.height(), part_img.width());
 

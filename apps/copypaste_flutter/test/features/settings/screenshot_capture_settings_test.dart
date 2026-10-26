@@ -148,9 +148,8 @@ void main() {
             builder: AppTheme.builder,
             home: Builder(
               builder: (context) => MediaQuery(
-                data: MediaQuery.of(
-                  context,
-                ).copyWith(textScaler: TextScaler.linear(textScale)),
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(textScale)),
                 child: Scaffold(child: SettingsScreen(controller: settings)),
               ),
             ),

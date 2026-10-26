@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+
 import '../../platform/notifications/pairing_notification_port.dart';
 import '../devices/devices_controller.dart';
 import '../devices/devices_gateway.dart';
@@ -70,13 +72,10 @@ class NotificationsController extends ChangeNotifier {
     try {
       final allowed = await _platform.requestPermission();
       if (_disposed) return;
-      _deliveryError = allowed
-          ? null
-          : 'Allow system notifications in your OS settings to receive requests in the background.';
+      _deliveryError = allowed ? null : 'Allow system notifications in your OS settings to receive requests in the background.';
     } catch (_) {
       if (_disposed) return;
-      _deliveryError =
-          'System notifications are unavailable. Connection requests remain here.';
+      _deliveryError = 'System notifications are unavailable. Connection requests remain here.';
     }
     notifyListeners();
   }
@@ -136,8 +135,7 @@ class NotificationsController extends ChangeNotifier {
       if (_disposed || _shownRequest != item.id) await _platform.dismiss();
     } catch (_) {
       if (_disposed) return;
-      _deliveryError =
-          'System notifications are unavailable. Connection requests remain here.';
+      _deliveryError = 'System notifications are unavailable. Connection requests remain here.';
       notifyListeners();
     }
   }

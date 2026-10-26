@@ -458,7 +458,7 @@ impl ClipboardSource for MacOsClipboard {
             if !ok {
                 // §3.3 step 5.
                 self.tracker.sentinel.clear();
-                // I-9 / AGENTS.md rule 4: no paths, no content.
+                // I-9 / the privacy contract: no paths, no content.
                 return Err(anyhow::anyhow!("the pasteboard rejected the write"));
             }
 

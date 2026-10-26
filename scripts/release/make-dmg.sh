@@ -6,14 +6,8 @@
 # Output: dist/CopyPaste-v<version>-macos-<arch>.dmg
 #         dist/CopyPaste-v<version>-macos-<arch>.dmg.sha256
 #
-# macOS only (hdiutil). Never executed on a Mac by its author.
-#
-# Why hdiutil by hand rather than a packaging crate or Tauri's own DMG bundler:
-# Tauri's bundler is where tauri-apps/tauri#13804 fails intermittently under an
-# ad-hoc identity, and we need the extra step below (stripping xattrs from the
-# staged copy) that no bundler exposes. This is roughly twenty lines of
-# hdiutil, is the documented Apple path, and does not pull a dependency in to
-# call the same two commands.
+# macOS only. The staged copy must have its extended attributes stripped before
+# it is packaged, so the script uses hdiutil directly.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -88,7 +82,7 @@ hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$OUT" -ov
 echo "==> Checksum"
 # Bare `shasum -a 256 <file>` embeds the full path, which then appears in the
 # published .sha256 and discloses the runner layout. cd into the directory so
-# the recorded name is just the filename. (AGENTS.md rule 4: no paths in
+# the recorded name is just the filename. (the privacy contract: no paths in
 # anything a user sees.)
 ( cd "$DIST" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
 cat "${OUT}.sha256"

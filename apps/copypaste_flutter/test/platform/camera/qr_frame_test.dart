@@ -113,9 +113,8 @@ void main() {
       ],
     );
 
-    final normalized = const QrFrameNormalizer(
-      maximumDimension: 4,
-    ).normalize(frame);
+    final normalized = const QrFrameNormalizer(maximumDimension: 4)
+        .normalize(frame);
 
     expect(normalized.width, 4);
     expect(normalized.height, 2);

@@ -42,7 +42,7 @@ const MAX_SEALED_LEN: usize = 4096;
 /// The blob sits in the data directory it opens, not in a user-scoped store:
 /// security review F-11, and what makes `--data-dir` a separate install rather
 /// than two databases sharing one secret. Never surfaced in an error
-/// (`AGENTS.md` rule 4) — the path contains the local username.
+/// (the privacy contract) — the path contains the local username.
 fn blob_path(data_dir: &Path) -> PathBuf {
     data_dir.join(SECRET_BLOB_NAME)
 }
@@ -226,7 +226,7 @@ fn classify(code: u32) -> CryptoError {
         // A master key that is not loaded — a service account with no profile,
         // a password reset performed without the old one — may well unseal on
         // the next start. Calling that permanent tells a user their history is
-        // gone and invites them to delete it, which is rule 4's worst outcome
+        // gone and invites them to delete it, which is the privacy contract's worst outcome
         // reached by a message rather than by code.
         CryptoError::KeystoreUnavailable("the device secret could not be unsealed")
     }

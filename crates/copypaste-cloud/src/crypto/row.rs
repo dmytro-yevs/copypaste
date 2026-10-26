@@ -34,7 +34,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use zeroize::Zeroizing;
 
 use super::error::CloudCryptoError;
@@ -91,8 +91,7 @@ pub fn encrypt_row(
 ) -> Result<(String, String), CloudCryptoError> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key.material()));
 
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce_bytes: [u8; NONCE_LEN] = OsRng.gen();
 
     let aad = cloud_aad(item_id);
     let ciphertext = cipher

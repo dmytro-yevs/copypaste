@@ -52,11 +52,13 @@ fi
 
 REST="$REST_BASE/clipboard_items"
 fail() { echo "smoke: FAIL — $*" >&2; exit 1; }
+PASSWORD="${SMOKE_TEST_PASSWORD:-}"
 
 sign_in() { # email -> access token
+    [[ -n "$PASSWORD" ]] || fail "set SMOKE_TEST_PASSWORD or provide pre-minted tokens"
     curl -sS -X POST "$URL/auth/v1/token?grant_type=password" \
         -H "apikey: $ANON" -H 'Content-Type: application/json' \
-        -d "{\"email\":\"$1\",\"password\":\"copypaste-dev\"}" \
+        -d "{\"email\":\"$1\",\"password\":\"$PASSWORD\"}" \
     | jq -er '.access_token' || fail "could not sign in as $1 (is the seed applied?)"
 }
 

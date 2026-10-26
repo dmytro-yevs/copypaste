@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Enforce the repository commit message contract.
 #
-# One implementation, two callers: .githooks/commit-msg and CI. A rule with no
-# check is how the previous guidance failed — twelve commits averaged 25 body
-# lines against a 12-line budget.
+# Used by .githooks/commit-msg and CI.
 #
 # Usage: check-commit-msg.sh <file-with-message>
 set -euo pipefail

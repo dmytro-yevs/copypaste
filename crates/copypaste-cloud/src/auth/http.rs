@@ -1,7 +1,7 @@
 //! The pieces this module shares with [`crate::rest`].
 //!
 //! This module is the single owner of the retry policy, `Retry-After` parsing,
-//! email masking, and the wall clock (`AGENTS.md` rule 1).
+//! email masking, and the wall clock (the dependency policy).
 //!
 //! `rest` reaches in here rather than owning a copy. That direction is
 //! deliberate: `auth` is the module that must exist for `rest` to have a bearer

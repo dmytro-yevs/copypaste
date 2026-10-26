@@ -1,7 +1,7 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
 use chacha20poly1305::aead::Buffer;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -179,8 +179,7 @@ pub fn seal_with_digest(
         return Err(CryptoError::AuthFailed);
     }
     let chunk_count = chunk_count(bytes.len());
-    let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
-    OsRng.fill_bytes(&mut stream_nonce);
+    let stream_nonce: [u8; STREAM_NONCE_LEN] = OsRng.gen();
     let header = header(digest, bytes.len() as u64, &stream_nonce);
     let aad = stream_aad(id, &header);
     let tag_bytes = (chunk_count as usize).saturating_mul(TAG_LEN);
@@ -624,11 +623,12 @@ mod tests {
     #[test]
     fn an_absurd_untrusted_byte_length_fails_without_allocating() {
         let key = Keyring::from_secret(&[8; 32]).item_key();
+        let nonce: [u8; STREAM_NONCE_LEN] = OsRng.gen();
         let mut envelope = Vec::from(MAGIC.as_slice());
         envelope.push(VERSION);
         envelope.extend_from_slice(&u64::MAX.to_be_bytes());
         envelope.extend_from_slice(&[0; 32]);
-        envelope.extend_from_slice(&[0; STREAM_NONCE_LEN]);
+        envelope.extend_from_slice(&nonce);
 
         assert!(matches!(
             open(&envelope, &key, "binary-id"),

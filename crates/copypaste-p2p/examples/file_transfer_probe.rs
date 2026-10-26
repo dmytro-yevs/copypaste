@@ -1,7 +1,7 @@
 //! Bounded cross-device file-transfer probe for engineering validation.
 //!
-//! This is intentionally not a product server. Both modes use a fixed,
-//! test-only pairing key, accept only private-LAN endpoints, generate their own
+//! This is intentionally not a product server. Both modes require an explicit,
+//! one-time pairing code supplied out of band, accept only private-LAN endpoints, generate their own
 //! deterministic fixture, and keep at most one 64 KiB plaintext block resident.
 //! The source exits after the configured deadline; the receiver removes its
 //! temporary output after verifying the byte count and SHA-256.
@@ -29,8 +29,6 @@ const DEFAULT_TIMEOUT_SECONDS: u64 = 180;
 const MIN_TIMEOUT_SECONDS: u64 = 15;
 const MAX_TIMEOUT_SECONDS: u64 = 600;
 const ITEM_ID: &str = "file-transfer-probe-v1";
-const STORE_KEY: [u8; 32] = [0x51; 32];
-const TEST_PAIRING_BYTES: [u8; 32] = [0xA7; 32];
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -44,6 +42,7 @@ struct Options {
     work_dir: PathBuf,
     bytes: usize,
     timeout: Duration,
+    pairing_code: Option<String>,
 }
 
 struct FixtureSource {
@@ -164,10 +163,16 @@ async fn run(options: Options) -> Result<(), String> {
 async fn serve(options: Options) -> Result<(), String> {
     let (source, fixture_path) = FixtureSource::create(&options.work_dir, options.bytes)?;
     let source = Arc::new(source);
-    let token = PairingToken::from_bytes(&TEST_PAIRING_BYTES);
+    let pairing_code = options
+        .pairing_code
+        .as_deref()
+        .ok_or_else(|| "--pairing-code is required for serve".to_string())?;
+    let token =
+        PairingToken::parse(pairing_code).map_err(|_| "invalid pairing code".to_string())?;
+    let store_key = PairingToken::generate().psk();
     let store_dir = tempfile::tempdir()
         .map_err(|error| format!("could not create isolated peer store: {error}"))?;
-    let store = PeerStore::open(&store_dir.path().join("peers"), &STORE_KEY)
+    let store = PeerStore::open(&store_dir.path().join("peers"), &store_key)
         .map_err(|error| format!("could not open isolated peer store: {error}"))?;
     let node = Arc::new(Node::new(store, None, options.endpoint.port(), false));
     node.peers()
@@ -191,8 +196,7 @@ async fn serve(options: Options) -> Result<(), String> {
         options.bytes,
         options.timeout.as_secs(),
     );
-    // The hash is deterministic and emitted separately to keep the ready line
-    // machine-readable without exposing the test-only key.
+    // The hash is deterministic and keeps the fixture line machine-readable.
     println!(
         "FIXTURE path={} sha256={}",
         fixture_path.display(),
@@ -224,9 +228,15 @@ async fn receive(options: Options) -> Result<(), String> {
     let output = Arc::new(Mutex::new(output));
     let store_dir = tempfile::tempdir()
         .map_err(|error| format!("could not create isolated peer store: {error}"))?;
-    let store = PeerStore::open(&store_dir.path().join("peers"), &STORE_KEY)
+    let store_key = PairingToken::generate().psk();
+    let store = PeerStore::open(&store_dir.path().join("peers"), &store_key)
         .map_err(|error| format!("could not open isolated peer store: {error}"))?;
-    let token = PairingToken::from_bytes(&TEST_PAIRING_BYTES);
+    let pairing_code = options
+        .pairing_code
+        .as_deref()
+        .ok_or_else(|| "--pairing-code is required for receive".to_string())?;
+    let token =
+        PairingToken::parse(pairing_code).map_err(|_| "invalid pairing code".to_string())?;
     let node = Node::new(store, None, 0, false);
     let remote = peer(&token, "probe source", Some(options.endpoint));
     node.peers()
@@ -348,6 +358,7 @@ fn parse_options(arguments: Vec<String>) -> Result<Options, String> {
     let mut work_dir = None;
     let mut mib = DEFAULT_MIB;
     let mut timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    let mut pairing_code = None;
     let mut values = rest.iter();
     while let Some(flag) = values.next() {
         let value = values.next().ok_or_else(usage)?;
@@ -369,6 +380,7 @@ fn parse_options(arguments: Vec<String>) -> Result<Options, String> {
                     .parse()
                     .map_err(|_| "--timeout-seconds must be an integer".to_string())?
             }
+            "--pairing-code" => pairing_code = Some(value.to_string()),
             _ => return Err(usage()),
         }
     }
@@ -383,6 +395,7 @@ fn parse_options(arguments: Vec<String>) -> Result<Options, String> {
         work_dir: work_dir.ok_or_else(usage)?,
         bytes: usize::try_from(mib.saturating_mul(1024 * 1024)).map_err(|_| usage())?,
         timeout: Duration::from_secs(timeout_seconds),
+        pairing_code,
     })
 }
 
@@ -401,5 +414,5 @@ fn parse_private_endpoint(value: &str) -> Result<SocketAddr, String> {
 }
 
 fn usage() -> String {
-    "usage: file_transfer_probe serve --bind PRIVATE_IP:PORT --work-dir PATH [--size-mib 1..128] [--timeout-seconds 15..600] | file_transfer_probe receive --source PRIVATE_IP:PORT --work-dir PATH [--size-mib 1..128] [--timeout-seconds 15..600]".into()
+    "usage: file_transfer_probe serve --bind PRIVATE_IP:PORT --work-dir PATH --pairing-code CODE [--size-mib 1..128] [--timeout-seconds 15..600] | file_transfer_probe receive --source PRIVATE_IP:PORT --work-dir PATH --pairing-code CODE [--size-mib 1..128] [--timeout-seconds 15..600]".into()
 }

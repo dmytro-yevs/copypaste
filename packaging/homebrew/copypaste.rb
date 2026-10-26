@@ -109,7 +109,7 @@ cask "copypaste" do
   #
   # This looks gratuitous. It is not: it is the difference between a bad
   # upgrade being self-healing and needing `brew reinstall --force` typed by
-  # hand (AGENTS.md rule 2).
+  # hand (the project policy).
   uninstall_preflight_steps do
     unless_path_exists "CopyPaste.app", base: :appdir do
       mkdir_p "CopyPaste.app/Contents/MacOS", base: :appdir

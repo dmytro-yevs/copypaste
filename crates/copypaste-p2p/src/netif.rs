@@ -4,7 +4,7 @@
 //! is that address on the wire in fact ours? `getifaddrs(3)` behind a
 //! maintained crate rather than a `SIOCGIFCONF` walk or the "connect a UDP
 //! socket and read its local end" trick; the crate-backed enumeration works on
-//! all three shipped platforms (AGENTS.md rule 7).
+//! all three shipped platforms (the platform contract).
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;

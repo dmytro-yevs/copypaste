@@ -165,7 +165,6 @@ rg -F 'runtime output must be empty' "$root/run-fedora-build.sh" >/dev/null
 rg -F 'runtime output must be an ordinary mounted directory' "$root/verify-build.sh" >/dev/null
 rg -F 'runtime output must be empty' "$root/verify-build.sh" >/dev/null
 rg -F 'cmake --build' "$root/verify-build.sh" >/dev/null
-rg -F 'Version() == 2' "$root/DISTRIBUTION.md" >/dev/null
 fake_engine="$work/container-engine"
 fake_log="$work/container-engine.log"
 cat > "$fake_engine" <<'EOF'

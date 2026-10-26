@@ -257,48 +257,45 @@ void main() {
     variant: TargetPlatformVariant({TargetPlatform.windows}),
   );
 
-  test(
-    'inspector refreshes completed metadata on each opening, not in the background',
-    () async {
-      var loads = 0;
-      final repository = MemoryModulesRepository();
-      final modules = ModulesController(
-        repository: repository,
-        marketplace: MemoryModuleMarketplace(),
-      );
-      final controller = QuickPasteController(
-        repository: _Repository(),
-        preferencesStore: MemoryQuickPastePreferencesStore(),
-        host: _ContextHost(),
-        initializeInspector: () {
-          loads++;
-          return modules.initialize();
-        },
-      );
-      addTearDown(controller.dispose);
-      addTearDown(modules.dispose);
-      await controller.initialize();
-      await controller.opened(1, inspectorVisible: true);
-      await Future<void>.delayed(Duration.zero);
-      expect(loads, 1);
-      expect(modules.modules, isEmpty);
-      // Another engine installs/enables a module while the popup is closed.
-      repository.modules = [testModule];
-      await controller.opened(2, inspectorVisible: true);
-      await Future<void>.delayed(Duration.zero);
-      expect(loads, 2);
-      expect(modules.modules.single.id, testModule.id);
-      await controller.toggleInspector();
-      repository.modules = [];
-      await controller.toggleInspector();
-      await Future<void>.delayed(Duration.zero);
-      expect(loads, 3);
-      expect(modules.modules, isEmpty);
-      await controller.close();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-      expect(loads, 3);
-    },
-  );
+  test('inspector refreshes completed metadata on each opening, not in the background', () async {
+    var loads = 0;
+    final repository = MemoryModulesRepository();
+    final modules = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+    );
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+      initializeInspector: () {
+        loads++;
+        return modules.initialize();
+      },
+    );
+    addTearDown(controller.dispose);
+    addTearDown(modules.dispose);
+    await controller.initialize();
+    await controller.opened(1, inspectorVisible: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(loads, 1);
+    expect(modules.modules, isEmpty);
+    // Another engine installs/enables a module while the popup is closed.
+    repository.modules = [testModule];
+    await controller.opened(2, inspectorVisible: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(loads, 2);
+    expect(modules.modules.single.id, testModule.id);
+    await controller.toggleInspector();
+    repository.modules = [];
+    await controller.toggleInspector();
+    await Future<void>.delayed(Duration.zero);
+    expect(loads, 3);
+    expect(modules.modules, isEmpty);
+    await controller.close();
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(loads, 3);
+  });
 
   testWidgets('Quick Paste exposes repeated copy, pin and delete failures', (
     tester,
@@ -623,49 +620,46 @@ void main() {
     },
   );
 
-  test(
-    'background file transfer leaves other clips usable and cannot paste after another action',
-    () async {
-      final repository = _Repository();
-      final file = HistoryClip(
-        id: 'background-file',
-        contentType: 'file',
-        preview: 'file.bin',
-        createdAt: DateTime.utc(2026),
-        pinned: false,
-        file: const HistoryFileDetails(name: 'file.bin', sizeBytes: 4),
-      );
-      final text = HistoryClip(
-        id: 'other-text',
-        contentType: 'text',
-        preview: 'Other text',
-        createdAt: DateTime.utc(2026),
-        pinned: false,
-      );
-      repository.clips
-        ..clear()
-        ..addAll([file, text]);
-      final transfer = _WaitingFileTransfer(repository);
-      final controller = QuickPasteController(
-        repository: repository,
-        preferencesStore: MemoryQuickPastePreferencesStore(),
-        host: _ContextHost(),
-        fileTransfer: transfer,
-      );
-      await controller.initialize();
-      await controller.opened(1);
-      final pending = controller.activate(file);
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.activating, isFalse);
-      expect(controller.history.isDownloadPending(file.id), isTrue);
-      await controller.activate(text);
-      expect(repository.copied, [text.id]);
-      transfer.finish.complete('/downloaded/file.bin');
-      await pending;
-      expect(repository.copied, [text.id]);
-      controller.dispose();
-    },
-  );
+  test('background file transfer leaves other clips usable and cannot paste after another action', () async {
+    final repository = _Repository();
+    final file = HistoryClip(
+      id: 'background-file',
+      contentType: 'file',
+      preview: 'file.bin',
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      file: const HistoryFileDetails(name: 'file.bin', sizeBytes: 4),
+    );
+    final text = HistoryClip(
+      id: 'other-text',
+      contentType: 'text',
+      preview: 'Other text',
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+    );
+    repository.clips
+      ..clear()
+      ..addAll([file, text]);
+    final transfer = _WaitingFileTransfer(repository);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+      fileTransfer: transfer,
+    );
+    await controller.initialize();
+    await controller.opened(1);
+    final pending = controller.activate(file);
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.activating, isFalse);
+    expect(controller.history.isDownloadPending(file.id), isTrue);
+    await controller.activate(text);
+    expect(repository.copied, [text.id]);
+    transfer.finish.complete('/downloaded/file.bin');
+    await pending;
+    expect(repository.copied, [text.id]);
+    controller.dispose();
+  });
 
   testWidgets(
     'Quick Paste explains transfer failure above metadata and separates the shortcut',
@@ -1194,9 +1188,10 @@ void main() {
             {WidgetState.focused},
             {WidgetState.pressed},
           ]) {
-            final decoration =
-                button.style.decoration(tester.element(buttons.first), states)
-                    as BoxDecoration;
+            final decoration = button.style.decoration(
+              tester.element(buttons.first),
+              states,
+            ) as BoxDecoration;
             expect(decoration.border?.top.style, BorderStyle.none);
           }
         }

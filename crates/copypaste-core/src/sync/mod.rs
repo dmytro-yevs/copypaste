@@ -33,7 +33,7 @@ pub use round::{RoundGate, RoundGuard};
 pub use source::StoreSource;
 
 /// Fixed, pathless sentences: these reach a peer's log and a user's screen
-/// (AGENTS.md rule 4).
+/// (the privacy contract).
 pub const MSG_STORE: &str = "the history database could not be read";
 pub const MSG_ENCRYPT: &str = "the incoming item could not be encrypted";
 

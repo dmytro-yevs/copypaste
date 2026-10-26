@@ -1,4 +1,5 @@
 import '../../../shared/format_bytes.dart';
+
 import 'package:pub_semver/pub_semver.dart';
 
 import 'module_models.dart';

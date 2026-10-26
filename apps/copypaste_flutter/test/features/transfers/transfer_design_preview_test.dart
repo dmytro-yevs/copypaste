@@ -35,9 +35,8 @@ void main() {
                     as RenderRepaintBoundary)
                 .toImage(pixelRatio: 2);
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File(
-          '$output/$name.png',
-        ).writeAsBytes(bytes!.buffer.asUint8List());
+        await File('$output/$name.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();
       });
     }

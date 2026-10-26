@@ -45,8 +45,6 @@ class PlatformManifestTest(unittest.TestCase):
 
     def test_compatibility_table_tracks_every_declared_target(self):
         table = platform_manifest.table()
-        documentation = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn(table, documentation)
         for target in platform_manifest.TARGETS:
             self.assertIn(f"{target['distribution']} {target['version']}", table)
         self.assertIn("not yet qualified", table)

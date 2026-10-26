@@ -976,7 +976,7 @@ mod tests {
     /// B5. Re-pairing a device that is already stored writes over its record
     /// before the other side has agreed. Losing that exchange used to delete the
     /// pairing outright — the working device, its key and all — which is the
-    /// data-loss outcome rule 4 rules out. The pre-ceremony record must come
+    /// data-loss outcome the privacy contract rules out. The pre-ceremony record must come
     /// back, and the tentative key must not.
     #[tokio::test]
     async fn a_failed_re_pair_restores_the_device_that_was_already_paired() {

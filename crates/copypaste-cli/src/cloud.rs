@@ -72,9 +72,11 @@ mod tests {
 
     #[test]
     fn both_secrets_are_required() {
-        assert!(check("pw".into(), "phrase".into()).is_ok());
-        assert!(check(String::new(), "phrase".into()).is_err());
-        assert!(check("pw".into(), String::new()).is_err());
+        let password = format!("test-password-{}", std::process::id());
+        let passphrase = format!("test-passphrase-{}", std::process::id());
+        assert!(check(password.clone(), passphrase.clone()).is_ok());
+        assert!(check(String::new(), passphrase).is_err());
+        assert!(check(password, String::new()).is_err());
     }
 
     #[test]

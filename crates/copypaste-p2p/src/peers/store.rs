@@ -374,7 +374,7 @@ impl PeerStore {
     }
 }
 
-/// Peer count only. The path is not printed — `AGENTS.md` rule 4 keeps paths
+/// Peer count only. The path is not printed — the privacy contract keeps paths
 /// away from users, and a `Debug` line ends up in the same log as everything
 /// else.
 impl fmt::Debug for PeerStore {
@@ -840,7 +840,7 @@ mod tests {
     }
 
     /// Security review F-13. The bound is a refusal, and refusing must never be
-    /// a way to lose a device the user still owns (`AGENTS.md` rule 4).
+    /// a way to lose a device the user still owns (the privacy contract).
     #[test]
     fn the_pairing_list_is_capped_by_refusing_not_by_evicting() {
         let dir = tempfile::tempdir().expect("tempdir");

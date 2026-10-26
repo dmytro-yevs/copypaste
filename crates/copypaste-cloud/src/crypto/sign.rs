@@ -73,7 +73,7 @@
 //! add per-device attribution, but they need per-device keypairs and a way to
 //! decide which device keys are legitimate; that is pairing, and the cloud path
 //! has none. It would also put a second signature stack in the tree
-//! (`AGENTS.md` rule 1, exemption 3) for a property nothing here uses.
+//! (the dependency policy) for a property nothing here uses.
 //!
 //! The server can verify none of this and is not meant to: the signature is
 //! opaque to it, exactly like the ciphertext.

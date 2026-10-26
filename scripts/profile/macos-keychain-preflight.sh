@@ -50,7 +50,7 @@ security show-keychain-info "$HOME/Library/Keychains/login.keychain-db" 2>&1 |
 
 head_ "Is there a real install on this Mac?"
 # The question that decides whether the device-secret item may be touched at
-# all. Deleting it leaves an installed history unopenable, and AGENTS.md rule 4
+# all. Deleting it leaves an installed history unopenable, and the privacy contract
 # puts data loss above every other outcome.
 if [ -f "$REAL_DATA_DIR/copypaste-v2.db" ]; then
     say "YES — a v2 history database is in the application-support directory."

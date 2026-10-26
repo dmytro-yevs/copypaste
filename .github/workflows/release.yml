@@ -824,7 +824,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
-            echo "ERROR: provide linux_evidence_run_id from the real desktop qualification run described in packaging/linux/native-qualification.md" >&2
+            echo "ERROR: provide linux_evidence_run_id from a completed .github/workflows/linux-native-qualification.yml run" >&2
             exit 1
           }
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$RUNNER_TEMP/linux-evidence-run.json"

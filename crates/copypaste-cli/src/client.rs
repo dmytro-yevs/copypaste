@@ -65,7 +65,7 @@ impl Connection {
 
     async fn open(path: &Path, deadline: Instant) -> Result<Self, CliError> {
         // The path is never surfaced to the user: it discloses the local
-        // username (AGENTS.md rule 4). Every failure here collapses to one
+        // username (the privacy contract). Every failure here collapses to one
         // pathless variant.
         let stream = before(deadline, transport::connect(path))
             .await?
@@ -125,7 +125,7 @@ async fn before<T>(deadline: Instant, future: impl Future<Output = T>) -> Result
 /// It used to be a `match` here naming three methods, so `sync`, `cloud sync`
 /// and `pair` ran on the five-second budget: a sync over a slow LAN reported a
 /// failure the daemon had not had — and reported it as *unreachable*, about a
-/// daemon that was working. One list, shared with the app (AGENTS.md rule 1).
+/// daemon that was working. One list, shared with the app (the dependency policy).
 fn timeout_for(method: &Method) -> Duration {
     if method.is_long_running() {
         TRANSFER_TIMEOUT

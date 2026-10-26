@@ -1,6 +1,6 @@
 //! The Windows backend: the system clipboard and `GetClipboardSequenceNumber`.
 //!
-//! `arboard`, already in the tree behind Tauri, exposes no sequence number, no
+//! `arboard` exposes no sequence number, no
 //! arbitrary registered format and no size before read — so polling it means
 //! reading the clipboard's *content* every tick, which is what I-1 forbids and
 //! what the do-not-record formats exist to prevent. `clipboard-win` is
@@ -29,7 +29,7 @@ use read::{Reading, Representation};
 /// is ordinary on a machine running a second clipboard tool. Retried inside the
 /// crate, and a change we still could not open is left unacknowledged so the
 /// next tick sees it again — dropping it would lose a copy the user made, which
-/// is the outcome AGENTS.md rule 4 ranks worst.
+/// is the outcome the privacy contract ranks worst.
 const OPEN_ATTEMPTS: usize = 10;
 
 /// The largest sequence-number delta a write of ours may claim as its own.
@@ -148,7 +148,7 @@ impl WindowsClipboard {
     fn write(&mut self, set: impl FnOnce() -> clipboard_win::SysResult<()>) -> anyhow::Result<()> {
         let before = self.sequence_number();
         let clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS)
-            // I-9 / AGENTS.md rule 4: no paths, no content, no user name.
+            // I-9 / the privacy contract: no paths, no content, no user name.
             .map_err(|_| anyhow::anyhow!("the clipboard could not be opened"))?;
         let written = set();
         drop(clipboard);

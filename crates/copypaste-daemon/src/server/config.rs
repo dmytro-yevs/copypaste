@@ -177,14 +177,14 @@ mod tests {
     fn applied(response: Response) -> ConfigApplied {
         match response.data {
             Some(ResponseData::Config(applied)) => applied,
-            other => panic!("{other:?}"),
+            _ => panic!("expected config response"),
         }
     }
 
     fn private_mode_data(response: Response) -> PrivateModeData {
         match response.data {
             Some(ResponseData::PrivateMode(mode)) => mode,
-            other => panic!("{other:?}"),
+            _ => panic!("expected private mode response"),
         }
     }
 
@@ -506,8 +506,8 @@ mod tests {
         );
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         let message = response.error.expect("a reason");
-        assert!(message.contains("poll_interval_ms"), "{message}");
-        assert!(!message.contains('/'), "{message}");
+        assert!(message.contains("poll_interval_ms"));
+        assert!(!message.contains('/'));
         assert_eq!(
             state.settings.get().poll_interval_ms,
             ConfigData::default().poll_interval_ms
@@ -559,7 +559,7 @@ mod tests {
 
         let status = match call(&state, Method::Status).data {
             Some(ResponseData::Status(status)) => status,
-            other => panic!("{other:?}"),
+            _ => panic!("expected status response"),
         };
         assert_eq!(status.private_mode, read.private_mode);
         assert_eq!(status.private_mode_epoch, read.private_mode_epoch);

@@ -206,17 +206,15 @@ class _ActiveFileOperation extends StatelessWidget {
                       child: Text(
                         '${formatBytes(operation.written)} / ${formatBytes(operation.total)}',
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).typography.xSmall.copyWith(
-                          color: colors.mutedForeground,
-                        ),
+                        style: Theme.of(context).typography.xSmall
+                            .copyWith(color: colors.mutedForeground),
                       ),
                     ),
                     const Gap(AppSpacing.sm),
                     Text(
                       _percentage(operation.progress),
-                      style: Theme.of(context).typography.xSmall.copyWith(
-                        color: colors.mutedForeground,
-                      ),
+                      style: Theme.of(context).typography.xSmall
+                          .copyWith(color: colors.mutedForeground),
                     ),
                   ],
                 ),
@@ -296,9 +294,8 @@ class _CompletedFileOperation extends StatelessWidget {
               children: [
                 Text(
                   formatBytes(operation.total),
-                  style: Theme.of(
-                    context,
-                  ).typography.xSmall.copyWith(color: colors.mutedForeground),
+                  style: Theme.of(context).typography.xSmall
+                      .copyWith(color: colors.mutedForeground),
                 ),
                 const Spacer(),
                 if (onOpenFile != null)
@@ -412,9 +409,8 @@ class _OperationName extends StatelessWidget {
     operation.name,
     maxLines: lines,
     overflow: TextOverflow.ellipsis,
-    style: Theme.of(
-      context,
-    ).typography.small.copyWith(fontWeight: FontWeight.w600),
+    style: Theme.of(context).typography.small
+        .copyWith(fontWeight: FontWeight.w600),
   );
 }
 
@@ -431,9 +427,8 @@ class _RouteLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textStyle = Theme.of(context).typography.xSmall.copyWith(
-      color: Theme.of(context).colorScheme.mutedForeground,
-    );
+    final textStyle = Theme.of(context).typography.xSmall
+        .copyWith(color: Theme.of(context).colorScheme.mutedForeground);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

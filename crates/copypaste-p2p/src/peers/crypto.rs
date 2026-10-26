@@ -4,7 +4,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use zeroize::Zeroizing;
 
 use super::PeerStoreError;
@@ -17,8 +17,7 @@ const AAD: &[u8] = b"copypaste/v2/peer-store|1";
 
 pub(super) fn seal(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, PeerStoreError> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key));
-    let mut nonce = [0; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    let nonce: [u8; NONCE_LEN] = OsRng.gen();
     let ciphertext = cipher
         .encrypt(
             XNonce::from_slice(&nonce),

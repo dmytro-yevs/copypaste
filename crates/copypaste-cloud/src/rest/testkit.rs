@@ -45,10 +45,11 @@ pub(super) fn client(stub: &Stub) -> SupabaseRest {
 
 /// A signed row, because an unsigned one is not a row this client will send.
 pub(super) fn item(id: &str) -> CloudItem {
+    let nonce: [u8; 12] = rand::random();
     let mut row = CloudItem::sealed(
         id,
         b"sealed-bytes",
-        b"nonce12",
+        &nonce,
         "text",
         1_700_000_000_000,
         "device-a",

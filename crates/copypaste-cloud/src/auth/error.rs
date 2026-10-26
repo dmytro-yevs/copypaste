@@ -167,7 +167,7 @@ pub(super) async fn classify(response: Response, grant: GrantKind) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::super::stub::{Reply, Stub};
-    use super::super::testkit::{client, fast_retry, session_body, ANON, INVALID_GRANT};
+    use super::super::testkit::{client, fast_retry, password, session_body, ANON, INVALID_GRANT};
     use super::*;
     use crate::auth::SupabaseAuth;
     use crate::CloudConfig;
@@ -178,7 +178,7 @@ mod tests {
     async fn invalid_grant_on_the_password_grant_is_bad_credentials() {
         let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)], 1).await;
         let err = client(&stub)
-            .sign_in("alice@example.com", "wrong")
+            .sign_in("alice@example.com", &password())
             .await
             .expect_err("should fail");
         assert!(
@@ -204,7 +204,10 @@ mod tests {
     async fn the_disambiguation_holds_for_422_and_401_too() {
         for status in [422, 401] {
             let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)], 1).await;
-            let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+            let err = client(&stub)
+                .sign_in("a@b.co", &password())
+                .await
+                .unwrap_err();
             assert!(matches!(err, AuthError::InvalidCredentials), "{status}");
 
             let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)], 1).await;
@@ -216,7 +219,7 @@ mod tests {
     #[tokio::test]
     async fn a_grant_failure_is_not_retried() {
         let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)], 1).await;
-        let _ = client(&stub).sign_in("a@b.co", "x").await;
+        let _ = client(&stub).sign_in("a@b.co", &password()).await;
         assert_eq!(
             stub.request_count().await,
             1,
@@ -234,7 +237,10 @@ mod tests {
             1,
         )
         .await;
-        let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+        let err = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .unwrap_err();
         match err {
             AuthError::RateLimited { retry_after_secs } => {
                 assert_eq!(retry_after_secs, Some(42));
@@ -251,7 +257,10 @@ mod tests {
     #[tokio::test]
     async fn a_429_without_the_header_still_reports_rate_limiting() {
         let stub = Stub::start(vec![Reply::json(429, "{}")], 1).await;
-        let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+        let err = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .unwrap_err();
         assert!(
             matches!(
                 err,
@@ -275,7 +284,10 @@ mod tests {
             2,
         )
         .await;
-        let session = client(&stub).sign_in("a@b.co", "x").await.expect("sign-in");
+        let session = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .expect("sign-in");
         assert_eq!(session.access_token, "at");
         assert_eq!(stub.request_count().await, 2);
     }
@@ -283,7 +295,10 @@ mod tests {
     #[tokio::test]
     async fn a_permanent_5xx_gives_up_and_reports_the_status() {
         let stub = Stub::start(vec![Reply::text(503, "down")], 1..).await;
-        let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
+        let err = client(&stub)
+            .sign_in("a@b.co", &password())
+            .await
+            .unwrap_err();
         assert!(matches!(err, AuthError::Server { status: 503 }), "{err:?}");
         assert!(
             stub.request_count().await > 1,
@@ -302,7 +317,7 @@ mod tests {
         )
         .await;
         let err = client(&stub)
-            .sign_up("taken@example.com", "pw")
+            .sign_up("taken@example.com", &password())
             .await
             .unwrap_err();
         assert!(
@@ -319,7 +334,7 @@ mod tests {
         let auth =
             SupabaseAuth::new(CloudConfig::new_loopback("http://127.0.0.1:1", ANON).unwrap())
                 .with_retry_policy(fast_retry());
-        let err = auth.sign_in("a@b.co", "x").await.unwrap_err();
+        let err = auth.sign_in("a@b.co", &password()).await.unwrap_err();
         assert!(matches!(err, AuthError::Network(_)), "{err:?}");
         let rendered = format!("{err}");
         assert!(!rendered.contains('/'), "no path-shaped text: {rendered}");

@@ -9,8 +9,17 @@ foreach(_source IN LISTS _nativeapi_sources)
     if(_match EQUAL -1)
       message(FATAL_ERROR "Review cnativeapi native menu bitmap size patch")
     endif()
+    set(_clear "memset(pixels, 0, iconSize * iconSize * sizeof(DWORD));")
+    string(FIND "${_menu_source}" "${_clear}" _clear_match)
+    if(_clear_match EQUAL -1)
+      message(FATAL_ERROR "Review cnativeapi native menu bitmap clear-size patch")
+    endif()
     string(REPLACE "${_old}"
-      "const int iconSize = GetSystemMetrics(SM_CXSMICON);"
+      "const int systemIconSize = GetSystemMetrics(SM_CXSMICON);
+    const int iconSize = systemIconSize > 0 && systemIconSize <= 256 ? systemIconSize : 32;"
+      _menu_source "${_menu_source}")
+    string(REPLACE "${_clear}"
+      "memset(pixels, 0, static_cast<size_t>(iconSize) * static_cast<size_t>(iconSize) * sizeof(DWORD));"
       _menu_source "${_menu_source}")
     set(_patched "${CMAKE_CURRENT_BINARY_DIR}/menu_windows_sized.cpp")
     file(WRITE "${_patched}" "${_menu_source}")

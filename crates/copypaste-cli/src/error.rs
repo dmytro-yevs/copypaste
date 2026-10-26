@@ -1,8 +1,8 @@
 //! CLI error type, exit-code mapping, and the user-facing message rules.
 //!
-//! Two rules from AGENTS.md are enforced here rather than at each call site:
+//! Two user-facing constraints are enforced here rather than at each call site:
 //!
-//! * **Errors shown to users must never contain paths** (rule 4). The daemon
+//! * **Errors shown to users must never contain paths** (the privacy contract). The daemon
 //!   socket lives under the user's home directory, so printing it discloses the
 //!   local username. Nothing in this module ever formats [`socket_path`], and
 //!   [`scrub_paths`] is a belt-and-braces pass over daemon-supplied text so a
@@ -85,7 +85,7 @@ impl CliError {
         match self {
             CliError::DaemonUnreachable => {
                 // Deliberately no path: naming the socket would disclose the
-                // local username (AGENTS.md rule 4).
+                // local username (the privacy contract).
                 "cannot reach the CopyPaste daemon. Start it with `copypaste-daemon`, \
                  then run this command again."
                     .to_string()

@@ -43,7 +43,7 @@ pub enum RealtimeEvent {
 /// Failures this module can produce.
 ///
 /// Payloads are `&'static str`. No variant can carry the socket URL, the
-/// access token, the anon key or a frame body: `AGENTS.md` rule 4 plus the
+/// access token, the anon key or a frame body: the privacy contract plus the
 /// sync-path rule that a token is never rendered. A closed set of literals
 /// leaves nothing to interpolate into.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

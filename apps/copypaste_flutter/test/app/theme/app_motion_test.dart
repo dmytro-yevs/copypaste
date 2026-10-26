@@ -149,8 +149,7 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason:
-          'Application-owned motion must use AppMotion tokens and reusable effects.',
+      reason: 'Application-owned motion must use AppMotion tokens and reusable effects.',
     );
   });
 }

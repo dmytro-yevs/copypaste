@@ -21,7 +21,7 @@ const WINDOW_BYTES: u64 = 256 * 1024;
 ///
 /// `day` is the date `tracing_appender` puts in the filename, not the filename
 /// and not the directory. It survives rotation, sorts chronologically, and
-/// discloses nothing about where the logs live (AGENTS.md rule 4).
+/// discloses nothing about where the logs live (the privacy contract).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Position {
     pub(crate) day: String,

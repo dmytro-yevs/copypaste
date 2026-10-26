@@ -41,7 +41,8 @@
     "codeql-scheduled.yml": {
       "analyze-no-build": "analyze-no-build",
       "analyze-swift": "analyze-swift",
-      "analyze-cpp": "analyze-cpp"
+      "analyze-cpp": "analyze-cpp",
+      "analyze-java-kotlin": "Android Java/Kotlin"
     },
     "linux-native-qualification.yml": {
       "source": "Verify exact artifact sources",

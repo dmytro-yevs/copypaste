@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+
 import '../android/android_capture_setup_gateway.dart';
 import '../../features/modules/models/module_models.dart';
 import '../../features/modules/repository/module_access_repository.dart';

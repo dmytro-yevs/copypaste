@@ -28,9 +28,8 @@ void main() {
             ShadcnApp(
               theme: dark ? AppTheme.dark : AppTheme.light,
               builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(
-                  context,
-                ).copyWith(textScaler: TextScaler.linear(dark ? 2 : 1)),
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(dark ? 2 : 1)),
                 child: Builder(
                   builder: (context) => AppTheme.builder(context, child),
                 ),

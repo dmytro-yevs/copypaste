@@ -365,7 +365,7 @@ mod tests {
     fn invalid_local_metadata_never_replaces_a_readable_group_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("peers.json");
-        let store = PeerStore::open(&path, &[7; 32]).unwrap();
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).unwrap();
         let profile = DeviceProfile::current();
         store
             .group_snapshot("device", "original", profile.clone(), None)
@@ -378,7 +378,7 @@ mod tests {
                 None
             )
             .is_err());
-        let reopened = PeerStore::open(&path, &[7; 32]).unwrap();
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).unwrap();
         assert_eq!(
             reopened
                 .group_snapshot("device", "original", profile, None)
@@ -394,8 +394,16 @@ mod tests {
     fn imported_exclusion_releases_pending_admission_markers() {
         let directory = tempfile::tempdir().unwrap();
         let profile = DeviceProfile::current();
-        let a = PeerStore::open(&directory.path().join("a.json"), &[7; 32]).unwrap();
-        let b = PeerStore::open(&directory.path().join("b.json"), &[7; 32]).unwrap();
+        let a = PeerStore::open(
+            &directory.path().join("a.json"),
+            &crate::peers::testutil::KEY,
+        )
+        .unwrap();
+        let b = PeerStore::open(
+            &directory.path().join("b.json"),
+            &crate::peers::testutil::KEY,
+        )
+        .unwrap();
         let sa = a.group_snapshot("a", "a", profile.clone(), None).unwrap();
         let sb = b.group_snapshot("b", "b", profile.clone(), None).unwrap();
         a.merge_group(&sb, None, false).unwrap();
@@ -410,8 +418,11 @@ mod tests {
         b.merge_group(&removal, None, false).unwrap();
         assert!(b.state.read().unwrap().group_admissions.is_empty());
         assert!(b.is_empty());
-        assert!(!PeerStore::open(&directory.path().join("b.json"), &[7; 32])
-            .unwrap()
-            .group_active());
+        assert!(!PeerStore::open(
+            &directory.path().join("b.json"),
+            &crate::peers::testutil::KEY
+        )
+        .unwrap()
+        .group_active());
     }
 }

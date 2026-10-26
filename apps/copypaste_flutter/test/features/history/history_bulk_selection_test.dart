@@ -55,25 +55,22 @@ void main() {
     },
   );
 
-  test(
-    'held range reverses without toggling clips or losing its original selection',
-    () async {
-      controller.beginBulkSelection('two');
-      expect(controller.beginBulkDragSelection('one'), isTrue);
-      expect(controller.canSuspend, isFalse);
-      await controller.loadMore();
-      const order = ['one', 'two', 'three'];
-      controller.updateBulkDragSelection('three', orderedIds: order);
-      expect(controller.bulkSelectedIds, {'one', 'two', 'three'});
-      controller.updateBulkDragSelection('one', orderedIds: order);
-      expect(controller.bulkSelectedIds, {'one', 'two'});
-      expect(await controller.deleteBulkSelection(), isFalse);
-      controller.endBulkDragSelection();
-      expect(controller.isBulkDragSelecting, isFalse);
-      expect(controller.isBulkSelecting, isTrue);
-      expect(controller.canSuspend, isTrue);
-    },
-  );
+  test('held range reverses without toggling clips or losing its original selection', () async {
+    controller.beginBulkSelection('two');
+    expect(controller.beginBulkDragSelection('one'), isTrue);
+    expect(controller.canSuspend, isFalse);
+    await controller.loadMore();
+    const order = ['one', 'two', 'three'];
+    controller.updateBulkDragSelection('three', orderedIds: order);
+    expect(controller.bulkSelectedIds, {'one', 'two', 'three'});
+    controller.updateBulkDragSelection('one', orderedIds: order);
+    expect(controller.bulkSelectedIds, {'one', 'two'});
+    expect(await controller.deleteBulkSelection(), isFalse);
+    controller.endBulkDragSelection();
+    expect(controller.isBulkDragSelecting, isFalse);
+    expect(controller.isBulkSelecting, isTrue);
+    expect(controller.canSuspend, isTrue);
+  });
 
   test('held selection defers live refresh until release', () async {
     controller.beginBulkDragSelection('one');

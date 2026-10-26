@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Field *names* only. A value that would not parse is exactly the value most
 /// likely to be a fragment of a user's clipboard or a path, so none of it
-/// crosses this boundary (AGENTS.md rule 4).
+/// crosses this boundary (the privacy contract).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettingsHealth {
     /// The whole record was unreadable, so every field fell back at once.

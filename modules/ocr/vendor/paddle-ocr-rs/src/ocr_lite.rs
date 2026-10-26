@@ -149,17 +149,7 @@ impl OcrLite {
         )
     }
 
-    /// 检测图片
-    ///
-    /// # Arguments
-    ///
-    /// - `&self` (`undefined`) - Describe this parameter.
-    /// - `img_src` (`&image`) - 图片
-    /// - `padding` (`u32`) - 变换图片时添加边框的宽度（提高检测效果）
-    /// - `max_side_len` (`u32`) - 变换图片后图片宽和高保留的最大边长（超出该尺寸的图片将缩小）
-    /// - `box_score_thresh` (`f32`) - 检测存在文本的区域的分值阈值
-    /// - `do_angle` (`bool`) - 是否进行角度检测
-    /// ```
+    /// Detect text in an image.
     pub fn detect(
         &mut self,
         img_src: &image::RgbImage,
@@ -185,19 +175,8 @@ impl OcrLite {
         )
     }
 
-    /// 支持角度回滚的检测图片
-    /// 在 do_angle 为 true 时生效，如果图片经过了角度纠正，但识别效果过差，则取消角度纠正
-    ///
-    /// # Arguments
-    ///
-    /// - `&self` (`undefined`) - Describe this parameter.
-    /// - `img_src` (`&image`) - 图片
-    /// - `padding` (`u32`) - 变换图片时添加的边框的宽度（提高检测效果）
-    /// - `max_side_len` (`u32`) - 变换图片后图片宽和高保留的最大边长（超出该尺寸的图片将缩小）
-    /// - `box_score_thresh` (`f32`) - 检测存在文本的区域的分值阈值
-    /// - `do_angle` (`bool`) - 是否进行角度检测
-    /// - `angle_rollback_threshold` (`f32`) - 角度回滚的阈值，如果识别到的文字得分低于该值（或等于 NaN），则取消角度回滚
-    /// ```
+    /// Detect text and restore the original orientation when confidence falls
+    /// below `angle_rollback_threshold`.
     pub fn detect_angle_rollback(
         &mut self,
         img_src: &image::RgbImage,
@@ -278,14 +257,14 @@ impl OcrLite {
 
         let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
 
-        // 角度纠正回滚
+        // Track images eligible for orientation rollback.
         let mut angle_rollback_records =
             HashMap::<usize, ImageBuffer<image::Rgb<u8>, Vec<u8>>>::new();
 
         for (index, (angle, mut part_image)) in angles.iter().zip(part_images).enumerate() {
             if angle.index == 1 {
                 if angle_rollback {
-                    // 保留原始副本
+                    // Keep the original image for rollback.
                     angle_rollback_records.insert(index, part_image.clone());
                 }
 

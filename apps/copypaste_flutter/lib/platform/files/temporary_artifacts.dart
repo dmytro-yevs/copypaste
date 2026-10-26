@@ -20,9 +20,8 @@ class TemporaryDirectoryLease {
   }
 
   static Future<TemporaryDirectoryLease> acquire(Directory directory) async {
-    final lock = await File(
-      '${directory.path}/$_marker',
-    ).open(mode: FileMode.append);
+    final lock = await File('${directory.path}/$_marker')
+        .open(mode: FileMode.append);
     try {
       await lock.lock();
       // POSIX advisory locks are process-wide, so another Flutter engine in

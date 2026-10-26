@@ -48,6 +48,12 @@ def _is_realtime(path):
     return path == "/realtime/v1/websocket" or path.startswith("/realtime/v1/")
 
 
+def _parse_item_ids(raw):
+    if not raw.startswith("in.(") or not raw.endswith(")") or "\n" in raw:
+        return []
+    return [item_id for item_id in raw[4:-1].split(",") if item_id]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -132,11 +138,8 @@ class Handler(BaseHTTPRequestHandler):
 
         query = parse_qs(url.query)
         patch = self._body() or {}
-        ids = []
         raw = (query.get("item_id") or [""])[0]
-        match = re.fullmatch(r"in\.\((.*)\)", raw)
-        if match:
-            ids = [i for i in match.group(1).split(",") if i]
+        ids = _parse_item_ids(raw)
 
         with STATE_LOCK:
             for item_id in ids:
@@ -280,6 +283,11 @@ def self_test():
         else:
             failed += 1
             print(f"  FAIL  {name}")
+
+    check("item filter parser accepts a comma list",
+          _parse_item_ids("in.(first,,second)") == ["first", "second"])
+    check("item filter parser rejects malformed filters",
+          _parse_item_ids("in.(first") == [] and _parse_item_ids("in.(first\n)") == [])
 
     server = _start_stub(verbose=True)
     port = server.server_address[1]

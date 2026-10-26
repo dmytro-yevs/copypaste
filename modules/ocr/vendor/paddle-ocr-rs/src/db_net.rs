@@ -242,13 +242,13 @@ impl DbNet {
         contour: &imageproc::contours::Contour<i32>,
         f_map_mat: &image::ImageBuffer<image::Luma<f32>, Vec<f32>>,
     ) -> Result<f32, OcrError> {
-        // 初始化边界值
+        // Initialize the bounding values.
         let mut xmin = i32::MAX;
         let mut xmax = i32::MIN;
         let mut ymin = i32::MAX;
         let mut ymax = i32::MIN;
 
-        // 找到轮廓的边界框
+        // Find the contour bounds.
         for point in contour.points.iter() {
             let x = point.x;
             let y = point.y;

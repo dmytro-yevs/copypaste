@@ -4,7 +4,7 @@
 //!
 //! The record lives in `sync_device_state` inside the SQLCipher database, as
 //! one JSON value under `settings`. A file beside the database would need a
-//! path in every error (AGENTS.md rule 4 says it may not have one), its own
+//! path in every error (the privacy contract says it may not have one), its own
 //! permissions, and its own answer to what a restore does to it. The KV table
 //! already exists, is encrypted at rest, and is deliberately the one thing
 //! `server::dbadmin` leaves alone when it restores a backup — so a restore
@@ -595,7 +595,7 @@ mod tests {
     /// `copypaste-ipc` cannot depend on `copypaste-core` — the CLI depends on
     /// the wire crate and must not be able to open a database — so the defaults
     /// are written out there and pinned to the core constants here. Two numbers
-    /// for one decision is the duplication AGENTS.md rule 1 is about; this test
+    /// for one decision is the duplication the dependency policy is about; this test
     /// is what keeps them one decision.
     #[test]
     fn defaults_agree_with_the_core_constants() {

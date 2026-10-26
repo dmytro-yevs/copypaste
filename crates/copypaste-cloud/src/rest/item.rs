@@ -294,6 +294,7 @@ mod tests {
     use super::super::testkit::{item, key};
     use super::super::SELECT_COLUMNS;
     use super::*;
+    use rand::random;
 
     #[test]
     fn imported_file_identities_cross_the_cloud_identifier_contract() {
@@ -324,7 +325,7 @@ mod tests {
     #[test]
     fn sealed_bytes_round_trip_through_base64() {
         let ciphertext: Vec<u8> = (0u8..=255).collect();
-        let nonce = [7u8; 12];
+        let nonce: [u8; 12] = random();
         let row = CloudItem::sealed("a1", &ciphertext, &nonce, "image", 1, "device-a");
 
         assert_eq!(row.ciphertext_bytes().expect("decode"), ciphertext);
@@ -336,18 +337,20 @@ mod tests {
 
     #[test]
     fn junk_base64_decodes_to_malformed_rather_than_panicking() {
-        let mut row = CloudItem::sealed("a1", b"x", b"y", "text", 1, "device-a");
+        let nonce: [u8; 12] = random();
+        let mut row = CloudItem::sealed("a1", b"x", &nonce, "text", 1, "device-a");
         row.ciphertext = "not base64 !!".to_string();
         assert!(matches!(row.ciphertext_bytes(), Err(RestError::Malformed)));
     }
 
     #[test]
     fn a_row_can_be_built_from_payloads_that_are_already_base64() {
-        let sealed = CloudItem::sealed("a1", b"ct", b"nc", "text", 9, "device-a");
+        let nonce: [u8; 12] = random();
+        let sealed = CloudItem::sealed("a1", b"ct", &nonce, "text", 9, "device-a");
         let mut same = CloudItem::from_sealed_b64(
             "a1",
             BASE64.encode(b"ct"),
-            BASE64.encode(b"nc"),
+            BASE64.encode(nonce),
             "text",
             9,
             "device-a",
@@ -372,7 +375,8 @@ mod tests {
         // The send-side half of the fail-closed rule: every device verifies on
         // arrival, so uploading an unsigned row would publish a version that
         // nothing — including this device — can accept.
-        let row = CloudItem::sealed("a1", b"ct", b"nc", "text", 9, "device-a");
+        let nonce: [u8; 12] = random();
+        let row = CloudItem::sealed("a1", b"ct", &nonce, "text", 9, "device-a");
         assert!(row.signature.is_empty());
         assert!(matches!(row.validate(), Err(RestError::InvalidItem { .. })));
     }

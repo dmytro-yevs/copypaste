@@ -40,6 +40,7 @@ if [ "$mode" = --self-test ]; then
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
     printf 'aws_access_key_id = "%s%s%s"\n' 'AKIA' 'ZZ4TESTSEED' 'GUARD' > "$dir/seeded.txt"
+    printf 'stripe_key = "%s%s%s%s%s%s"\n' 'sk' '_' 'test_' 'NotARealToken' '0123456789' 'ABCDEF' >> "$dir/seeded.txt"
 
     if gitleaks dir "$dir" --config "$config" --no-banner \
         --report-format json --report-path "$dir/report.json" >/dev/null 2>&1; then
@@ -48,6 +49,10 @@ if [ "$mode" = --self-test ]; then
     fi
     grep -q 'aws-access-token' "$dir/report.json" || {
         printf 'self-test: seeded secret was not reported as aws-access-token\n' >&2
+        exit 1
+    }
+    grep -q 'stripe-access-token' "$dir/report.json" || {
+        printf 'self-test: seeded secret was not reported as stripe-access-token\n' >&2
         exit 1
     }
     printf 'self-test: seeded secret reported; the scan can still fail\n'

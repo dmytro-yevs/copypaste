@@ -245,7 +245,7 @@ pub struct ImportData {
 }
 
 /// A completed backup. No path: the client supplied it and already knows it,
-/// and echoing one back is how it ends up in a log (AGENTS.md rule 4).
+/// and echoing one back is how it ends up in a log (the privacy contract).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct BackupData {
     pub size_bytes: u64,
@@ -395,7 +395,7 @@ pub struct SyncResult {
 ///
 /// **Counts, and nothing else.** No ids, no timestamps of individual events, no
 /// text. A diagnostics report built from this cannot carry clipboard content
-/// because there is none here to carry (AGENTS.md rule 4).
+/// because there is none here to carry (the privacy contract).
 ///
 /// Cumulative since the process started and never reset, so `uptime_secs` is
 /// the only thing they can honestly be read against.

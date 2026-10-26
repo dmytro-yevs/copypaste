@@ -252,7 +252,7 @@ delegate_write!(OwnedWriteHalf);
 mod tests {
     use super::*;
 
-    /// The message reaches users, so rule 4 applies to it whether or not a
+    /// The message reaches users, so the privacy contract applies to it whether or not a
     /// platform is currently returning it.
     #[test]
     fn the_unsupported_failure_names_no_path() {

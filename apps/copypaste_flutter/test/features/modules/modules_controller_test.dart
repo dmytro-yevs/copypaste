@@ -1,10 +1,12 @@
 import 'dart:async';
+
 import 'package:pub_semver/pub_semver.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
+
 import 'modules_test_support.dart';
 
 void main() {
@@ -144,30 +146,27 @@ void main() {
     },
   );
 
-  test(
-    'failed download has no install side effect and failed installation releases staging',
-    () async {
-      final repository = MemoryModulesRepository();
-      final marketplace = MemoryModuleMarketplace()
-        ..downloadFailure = const ModulesException('Download failed.');
-      final controller = ModulesController(
-        repository: repository,
-        marketplace: marketplace,
-      );
-      await controller.initialize();
-      await controller.loadMarketplace();
-      await controller.install(testMarketplaceModule);
-      expect(repository.calls, isEmpty);
-      marketplace.downloadFailure = null;
-      repository.failure = const ModulesException('Invalid signature.');
-      await controller.install(testMarketplaceModule);
-      expect(controller.errorMessage, 'Invalid signature.');
-      expect(marketplace.disposedPackages, 1);
-      expect(controller.busy, false);
-      expect(controller.modules, isEmpty);
-      controller.dispose();
-    },
-  );
+  test('failed download has no install side effect and failed installation releases staging', () async {
+    final repository = MemoryModulesRepository();
+    final marketplace = MemoryModuleMarketplace()
+      ..downloadFailure = const ModulesException('Download failed.');
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: marketplace,
+    );
+    await controller.initialize();
+    await controller.loadMarketplace();
+    await controller.install(testMarketplaceModule);
+    expect(repository.calls, isEmpty);
+    marketplace.downloadFailure = null;
+    repository.failure = const ModulesException('Invalid signature.');
+    await controller.install(testMarketplaceModule);
+    expect(controller.errorMessage, 'Invalid signature.');
+    expect(marketplace.disposedPackages, 1);
+    expect(controller.busy, false);
+    expect(controller.modules, isEmpty);
+    controller.dispose();
+  });
 
   test(
     'disposal while installation is pending does not notify disposed state',

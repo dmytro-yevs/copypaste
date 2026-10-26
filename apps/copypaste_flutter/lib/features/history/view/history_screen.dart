@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -1291,9 +1292,8 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       query.sort.label,
     ];
     final theme = Theme.of(context);
-    final style = DefaultTextStyle.of(
-      context,
-    ).style.merge(const ButtonStyle.secondary().textStyle(context, const {}));
+    final style = DefaultTextStyle.of(context).style
+        .merge(const ButtonStyle.secondary().textStyle(context, const {}));
     final textScaler = MediaQuery.textScalerOf(context);
     final filterChromeWidth =
         (AppSpacing.sm * 3) +
@@ -1633,8 +1633,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                               },
                               child: Semantics(
                                 label: 'Reorder pinned clip',
-                                hint:
-                                    'Drag to move. Alt + Up or Down moves one position.',
+                                hint: 'Drag to move. Alt + Up or Down moves one position.',
                                 onIncrease: controller.canReorderPinned
                                     ? () => unawaited(
                                         controller.shiftPinned(
@@ -1658,9 +1657,8 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                                   data: MediaQuery.of(context).copyWith(
                                     gestureSettings: DeviceGestureSettings(
                                       touchSlop:
-                                          (MediaQuery.gestureSettingsOf(
-                                                context,
-                                              ).touchSlop ??
+                                          (MediaQuery.gestureSettingsOf(context)
+                                                  .touchSlop ??
                                               kTouchSlop) /
                                           2,
                                     ),

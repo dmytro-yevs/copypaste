@@ -534,10 +534,7 @@ mod tests {
         let item = ring.item_key();
 
         for rendered in [format!("{ring:?}"), format!("{item:?}")] {
-            assert!(
-                !rendered.contains('7'),
-                "secret byte value leaked: {rendered}"
-            );
+            assert!(!rendered.contains('7'), "secret byte value leaked");
             for byte in ring.db_key().iter() {
                 assert!(!rendered.contains(&byte.to_string()));
             }

@@ -1,4 +1,5 @@
 import '../../support/temporary_payloads.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
@@ -314,39 +315,36 @@ void main() {
     },
   );
 
-  test(
-    'rejects duplicate modules, duplicate targets, invalid metadata and foreign URLs',
-    () {
-      final malformed = <Map<String, Object>>[];
-      final duplicate = catalog();
-      (duplicate['modules'] as List).add((duplicate['modules'] as List).first);
-      malformed.add(duplicate);
-      for (final mutation in [
-        (Map module) => module['version'] = '0.2.0-beta',
-        (Map module) => module['title'] = '',
-        (Map module) => module['id'] = 'third-party.ocr',
-        (Map module) => (module['artifacts'] as List).add(
-          (module['artifacts'] as List).first,
-        ),
-        (Map module) => (module['artifacts'] as List).first['url'] =
-            'https://example.com/ocr.cpmodule',
-        (Map module) => (module['artifacts'] as List).first['size_bytes'] =
-            maximumModulePackageBytes + 1,
-        (Map module) =>
-            (module['artifacts'] as List).first['sha256'] = 'incorrect',
-      ]) {
-        final value = catalog();
-        mutation((value['modules'] as List).first as Map);
-        malformed.add(value);
-      }
-      for (final value in malformed) {
-        expect(
-          () => const ModuleCatalogParser().parse(jsonEncode(value), target),
-          throwsA(isA<ModulesException>()),
-        );
-      }
-    },
-  );
+  test('rejects duplicate modules, duplicate targets, invalid metadata and foreign URLs', () {
+    final malformed = <Map<String, Object>>[];
+    final duplicate = catalog();
+    (duplicate['modules'] as List).add((duplicate['modules'] as List).first);
+    malformed.add(duplicate);
+    for (final mutation in [
+      (Map module) => module['version'] = '0.2.0-beta',
+      (Map module) => module['title'] = '',
+      (Map module) => module['id'] = 'third-party.ocr',
+      (Map module) => (module['artifacts'] as List).add(
+        (module['artifacts'] as List).first,
+      ),
+      (Map module) => (module['artifacts'] as List).first['url'] =
+          'https://example.com/ocr.cpmodule',
+      (Map module) => (module['artifacts'] as List).first['size_bytes'] =
+          maximumModulePackageBytes + 1,
+      (Map module) =>
+          (module['artifacts'] as List).first['sha256'] = 'incorrect',
+    ]) {
+      final value = catalog();
+      mutation((value['modules'] as List).first as Map);
+      malformed.add(value);
+    }
+    for (final value in malformed) {
+      expect(
+        () => const ModuleCatalogParser().parse(jsonEncode(value), target),
+        throwsA(isA<ModulesException>()),
+      );
+    }
+  });
 
   test(
     'maps all supported process ABIs without guessing from the device name',
@@ -374,62 +372,54 @@ void main() {
     },
   );
 
-  test(
-    'creates missing cache directories, authenticates downloads, and cleans private staging',
-    () async {
-      final client = _Client();
-      final directory = await Directory.systemTemp.createTemp(
-        'marketplace-test-',
-      );
-      addTearDown(() => directory.delete(recursive: true));
-      final cache = Directory('${directory.path}/missing/cache');
-      expect(await cache.exists(), isFalse);
-      final body = utf8.encode(jsonEncode(catalog()));
-      final (publicKey, signature) = await _sign(body);
-      client.routes[moduleCatalogName] = _Response(body);
-      client.routes['$moduleCatalogName.sig'] = _Response(
-        utf8.encode(signature),
-      );
-      final repository = GitHubModuleMarketplaceRepository(
-        temporaryDirectory: () async => cache,
-        currentTarget: () async => target,
-        client: client,
-        signatureVerifier: MinisignVerifier(publicKeyBase64: publicKey),
-      );
-      addTearDown(repository.dispose);
-      final module = (await repository.list()).single;
-      expect(await cache.exists(), isTrue);
-      expect(await temporaryPayloads(cache), isEmpty);
-      await cache.delete(recursive: true);
-      client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
-        utf8.encode('package'),
-      );
-      final progress = <double>[];
-      final package = await repository.download(
-        module,
-        onProgress: progress.add,
-      );
-      expect(await File(package.path).readAsString(), 'package');
-      expect(progress.last, 1);
-      await package.dispose();
-      expect(await cache.exists(), isTrue);
-      expect(await temporaryPayloads(cache), isEmpty);
+  test('creates missing cache directories, authenticates downloads, and cleans private staging', () async {
+    final client = _Client();
+    final directory = await Directory.systemTemp.createTemp(
+      'marketplace-test-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final cache = Directory('${directory.path}/missing/cache');
+    expect(await cache.exists(), isFalse);
+    final body = utf8.encode(jsonEncode(catalog()));
+    final (publicKey, signature) = await _sign(body);
+    client.routes[moduleCatalogName] = _Response(body);
+    client.routes['$moduleCatalogName.sig'] = _Response(utf8.encode(signature));
+    final repository = GitHubModuleMarketplaceRepository(
+      temporaryDirectory: () async => cache,
+      currentTarget: () async => target,
+      client: client,
+      signatureVerifier: MinisignVerifier(publicKeyBase64: publicKey),
+    );
+    addTearDown(repository.dispose);
+    final module = (await repository.list()).single;
+    expect(await cache.exists(), isTrue);
+    expect(await temporaryPayloads(cache), isEmpty);
+    await cache.delete(recursive: true);
+    client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
+      utf8.encode('package'),
+    );
+    final progress = <double>[];
+    final package = await repository.download(module, onProgress: progress.add);
+    expect(await File(package.path).readAsString(), 'package');
+    expect(progress.last, 1);
+    await package.dispose();
+    expect(await cache.exists(), isTrue);
+    expect(await temporaryPayloads(cache), isEmpty);
 
-      client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
-        utf8.encode('changed'),
-      );
-      await expectLater(
-        repository.download(module, onProgress: (_) {}),
-        throwsA(isA<ModulesException>()),
-      );
-      expect(await temporaryPayloads(cache), isEmpty);
-      client.routes[moduleCatalogName] = _Response(
-        utf8.encode(jsonEncode({'schema_version': 1, 'modules': []})),
-      );
-      await expectLater(repository.list(), throwsA(isA<ModulesException>()));
-      expect(await temporaryPayloads(cache), isEmpty);
-    },
-  );
+    client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
+      utf8.encode('changed'),
+    );
+    await expectLater(
+      repository.download(module, onProgress: (_) {}),
+      throwsA(isA<ModulesException>()),
+    );
+    expect(await temporaryPayloads(cache), isEmpty);
+    client.routes[moduleCatalogName] = _Response(
+      utf8.encode(jsonEncode({'schema_version': 1, 'modules': []})),
+    );
+    await expectLater(repository.list(), throwsA(isA<ModulesException>()));
+    expect(await temporaryPayloads(cache), isEmpty);
+  });
 
   test(
     'rejects untrusted redirects and oversized streams before installation',

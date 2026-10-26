@@ -48,7 +48,7 @@ impl CursorStore {
         // Resetting every cursor is safe but expensive — a full re-exchange with
         // every peer — so it is said out loud. Only a missing file is ordinary;
         // it is what the first run looks like. The kind is logged rather than
-        // the error, because an `io::Error` may render the path (rule 4).
+        // the error, because an `io::Error` may render the path (the privacy contract).
         let peers = match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice::<CursorFile>(&bytes)
                 .map(|file| file.peers)
@@ -406,7 +406,7 @@ mod tests {
     }
 
     /// The store's path contains the local username, so the corruption warning
-    /// is asserted on rather than read (`AGENTS.md` rule 4).
+    /// is asserted on rather than read (the privacy contract).
     #[test]
     fn the_corruption_warning_names_no_path() {
         let dir = tempfile::tempdir().unwrap();

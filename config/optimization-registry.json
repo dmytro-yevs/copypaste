@@ -3106,9 +3106,10 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart"
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart",
+        "apps/copypaste_flutter/windows/cmake/native_menu_icons.cmake"
       ],
-      "invariant": "The native Win32 text menu uses OS font, spacing and DPI metrics rather than the dependency hardcoded 32-pixel bitmap rows. No unused menu glyph raster images are allocated on this backend; action ordering and callbacks remain shared.",
+      "invariant": "The native Win32 text menu uses OS font, spacing and DPI metrics. Bitmap dimensions accept positive system metrics up to 256 pixels and otherwise use the upstream 32-pixel default. Bitmap byte counts use size_t multiplication. Action ordering and callbacks remain shared.",
       "native_resource_qualification": {
         "Windows": "not_established"
       },

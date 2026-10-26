@@ -30,7 +30,7 @@ pub struct CloudStatusData {
     pub poll_interval_secs: u64,
     /// Local rows this device could not open, so they are not going to the
     /// account. A count and nothing else: the id, the path and the content of
-    /// such a row never reach a client (`AGENTS.md` rule 4).
+    /// such a row never reach a client (the privacy contract).
     ///
     /// Not an error — the rest of sync is working — but it is the only thing
     /// that separates "everything is uploaded" from "everything but these".

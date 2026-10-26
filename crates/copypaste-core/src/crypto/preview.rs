@@ -3,7 +3,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     Key, XChaCha20Poly1305, XNonce,
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use zeroize::Zeroizing;
 
 use super::{CryptoError, PreviewKey, NONCE_LEN, TAG_LEN};
@@ -24,8 +24,7 @@ pub(crate) fn seal_preview(
     fingerprint: &[u8; 32],
 ) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key.0.as_ref()));
-    let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    let nonce: [u8; NONCE_LEN] = OsRng.gen();
     let ciphertext = cipher
         .encrypt(
             XNonce::from_slice(&nonce),

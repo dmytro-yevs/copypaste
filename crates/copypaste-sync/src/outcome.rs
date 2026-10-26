@@ -58,7 +58,7 @@ impl SyncStats {
 ///
 /// Every payload is a `&'static str`, so no variant can carry a filesystem
 /// path, an access token, a refresh token, a passphrase or row content. That is
-/// `AGENTS.md` rule 4 enforced by the type rather than by review. Implementors
+/// the privacy contract enforced by the type rather than by review. Implementors
 /// of [`CloudSource`](super::CloudSource) must hold to the same rule when they
 /// build [`SyncError::Source`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

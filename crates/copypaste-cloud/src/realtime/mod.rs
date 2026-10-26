@@ -42,7 +42,7 @@
 //!
 //! # Why this speaks Phoenix by hand
 //!
-//! `AGENTS.md` rule 1 says reach for a crate first. There is no maintained Rust
+//! the dependency policy says reach for a crate first. There is no maintained Rust
 //! client for Supabase Realtime, and the Phoenix subset actually used here is
 //! five message shapes: `phx_join`, `phx_reply`, `heartbeat`, `access_token`,
 //! `phx_leave`, plus the `postgres_changes` payload. This subset is the entire

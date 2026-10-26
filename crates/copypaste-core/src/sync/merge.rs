@@ -115,7 +115,7 @@ pub struct RemoteVersion<'a> {
     /// hash of the item it deletes and no content to hash (manifest 05 T-4).
     /// Taking it on trust is bounded rather than merely tolerated — a forged
     /// value either deletes exactly what an honest one would, or deletes less,
-    /// never more, and the direction is what matters under rule 4.
+    /// never more, and the direction is what matters under the privacy contract.
     /// `a_forged_tombstone_hash_can_only_delete_less_than_an_honest_one` pins
     /// it.
     ///
@@ -670,7 +670,7 @@ mod tests {
     /// deletes exactly what an honest one would (`>` the local hash, or equal,
     /// where key 3 `deleted` decides) or deletes *less* (`<`, where key 2 keeps
     /// the local copy). It can never destroy something an honest tombstone
-    /// would have left alone, which is the only direction rule 4 cares about.
+    /// would have left alone, which is the only direction the privacy contract cares about.
     #[test]
     fn a_forged_tombstone_hash_can_only_delete_less_than_an_honest_one() {
         let outcome = |forged: &str| {

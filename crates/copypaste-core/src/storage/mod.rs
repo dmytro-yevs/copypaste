@@ -27,7 +27,7 @@
 //!   content hash and content type both match, across all history and not only a
 //!   recent window (manifest 01 I-23). Explicit file imports retain separate
 //!   named records and share their encrypted binary payload.
-//! * **Errors never contain a filesystem path** (AGENTS.md rule 4 — the path
+//! * **Errors never contain a filesystem path** (the privacy contract — the path
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
 //!

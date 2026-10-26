@@ -36,25 +36,22 @@ void main() {
     if (!disposed) controller.dispose();
   });
 
-  test(
-    'same shortcut recording restores one callback without rewriting preferences',
-    () async {
-      final saved = controller.shortcut;
-      expect(await controller.beginShortcutRecording(), isTrue);
-      expect(registrar.callback, isNull);
+  test('same shortcut recording restores one callback without rewriting preferences', () async {
+    final saved = controller.shortcut;
+    expect(await controller.beginShortcutRecording(), isTrue);
+    expect(registrar.callback, isNull);
 
-      expect(await controller.setShortcut(saved), isFalse);
+    expect(await controller.setShortcut(saved), isFalse);
 
-      expect(registrar.registered, saved);
-      expect(registrar.registerCalls, 2);
-      expect(store.writes, 0);
-      await registrar.callback!();
-      expect(host.openCalls, 1);
-      expect(controller.errorMessage, isNull);
-      await controller.cancelShortcutRecording();
-      expect(registrar.registerCalls, 2);
-    },
-  );
+    expect(registrar.registered, saved);
+    expect(registrar.registerCalls, 2);
+    expect(store.writes, 0);
+    await registrar.callback!();
+    expect(host.openCalls, 1);
+    expect(controller.errorMessage, isNull);
+    await controller.cancelShortcutRecording();
+    expect(registrar.registerCalls, 2);
+  });
 
   test(
     'unchanged shortcut outside recording does not replace registration',

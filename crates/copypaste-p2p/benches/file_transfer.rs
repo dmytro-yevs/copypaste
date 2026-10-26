@@ -21,7 +21,6 @@ use copypaste_p2p::sync::{SyncError, SyncSource};
 use copypaste_p2p::{Node, PairingToken};
 
 const TRANSFER_BYTES: usize = 32 * 1024 * 1024;
-const STORE_KEY: [u8; 32] = [7; 32];
 const ITEM_ID: &str = "benchmark-file";
 
 struct GeneratedFile {
@@ -100,12 +99,13 @@ impl Fixture {
         let token = PairingToken::generate();
         let pairing_id = token.pairing_id();
         let psk = token.psk();
+        let store_key = PairingToken::generate().psk();
         let server_dir = tempfile::tempdir().expect("server tempdir");
         let client_dir = tempfile::tempdir().expect("client tempdir");
         let server_store =
-            PeerStore::open(&server_dir.path().join("peers"), &STORE_KEY).expect("server peers");
+            PeerStore::open(&server_dir.path().join("peers"), &store_key).expect("server peers");
         let client_store =
-            PeerStore::open(&client_dir.path().join("peers"), &STORE_KEY).expect("client peers");
+            PeerStore::open(&client_dir.path().join("peers"), &store_key).expect("client peers");
         let server = Arc::new(Node::new(server_store, None, 0, false));
         let client = Node::new(client_store, None, 0, false);
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");

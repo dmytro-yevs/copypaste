@@ -14,7 +14,7 @@
 //! reported and the defaults are used, rather than refusing to start.
 //!
 //! **No error names the file.** [`ConfigError`] carries a field name and a
-//! bound, never a path (AGENTS.md rule 4).
+//! bound, never a path (the privacy contract).
 
 use serde::{Deserialize, Serialize};
 
@@ -76,7 +76,7 @@ pub enum Liveness {
 /// * `relay_url`, `sync_on_wifi_only`, `max_bandwidth_kbps`, `collect_public_ip`
 ///   — no relay and no STUN in v2.
 /// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
-///   unnecessary without backward compatibility (AGENTS.md rule 3).
+///   unnecessary without backward compatibility (the compatibility policy).
 ///
 /// `sound_on_copy` and `notify_on_copy` are separate live settings. Platform
 /// feedback never depends on notification permission.
@@ -725,7 +725,7 @@ mod tests {
         .is_err());
     }
 
-    /// AGENTS.md rule 4: a settings error is shown to a user, and the config
+    /// the privacy contract: a settings error is shown to a user, and the config
     /// file lives under the user's home directory.
     #[test]
     fn no_error_message_looks_like_a_path() {

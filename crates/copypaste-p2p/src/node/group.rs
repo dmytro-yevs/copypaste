@@ -300,7 +300,8 @@ mod tests {
         async fn new(id: &str) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let node = Arc::new(Node::new(
-                PeerStore::open(&dir.path().join("peers.json"), &[7; 32]).unwrap(),
+                PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY)
+                    .unwrap(),
                 None,
                 0,
                 true,
@@ -461,7 +462,11 @@ mod tests {
         );
 
         // Keys and group identity survive reopening, without another ceremony.
-        let reopened = PeerStore::open(&mac._dir.path().join("peers.json"), &[7; 32]).unwrap();
+        let reopened = PeerStore::open(
+            &mac._dir.path().join("peers.json"),
+            &crate::peers::testutil::KEY,
+        )
+        .unwrap();
         assert_eq!(reopened.len(), 2);
         let m = reopened
             .list()

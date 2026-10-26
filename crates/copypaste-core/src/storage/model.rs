@@ -165,7 +165,7 @@ impl StoredItem {
 
 /// Storage failures.
 ///
-/// No variant carries a filesystem path (AGENTS.md rule 4). `rusqlite` and
+/// No variant carries a filesystem path (the privacy contract). `rusqlite` and
 /// `r2d2` errors do not embed one either, so these are safe to show a user.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

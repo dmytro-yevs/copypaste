@@ -79,7 +79,7 @@ impl CrnnNet {
     }
 
     fn get_keys(&mut self) -> Result<Vec<String>, OcrError> {
-        // 简单处理下报错，模型正确的话并无概率出错
+        // Model metadata must provide the character list.
         let model_charater_list = self
             .session
             .as_ref()
@@ -89,7 +89,7 @@ impl CrnnNet {
             .custom("character")
             .expect("crnn_net character not initialized");
 
-        // 大概估一个数即可
+        // Reserve approximately one entry per character.
         let mut keys = Vec::with_capacity((model_charater_list.len() as f32 / 3.9) as usize);
 
         keys.push("#".to_string());

@@ -131,8 +131,10 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   }
 }
 
-typedef QuickPasteOpenedHandler =
-    Future<void> Function(int presentationId, {required bool inspectorVisible});
+typedef QuickPasteOpenedHandler = Future<void> Function(
+  int presentationId, {
+  required bool inspectorVisible,
+});
 
 abstract interface class QuickPasteContextHost {
   Future<void> signalReady();

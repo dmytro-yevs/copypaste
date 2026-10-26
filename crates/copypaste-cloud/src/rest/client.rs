@@ -458,6 +458,7 @@ mod tests {
 
         let stub = Stub::start(vec![Reply::empty(201)], 1).await;
         let mut live = item("a1");
+        let expected_nonce = live.nonce.clone();
         live.deleted = false;
         client(&stub).upsert(TOKEN, &[live]).await.expect("upsert");
 
@@ -467,7 +468,7 @@ mod tests {
         let row = &rows[0];
         assert_eq!(row["item_id"], "a1");
         assert_eq!(row["ciphertext"], BASE64.encode(b"sealed-bytes"));
-        assert_eq!(row["nonce"], BASE64.encode(b"nonce12"));
+        assert_eq!(row["nonce"], expected_nonce);
         assert_eq!(row["content_type"], "text");
         assert_eq!(row["created_at"], 1_700_000_000_000i64);
         assert_eq!(
@@ -562,7 +563,8 @@ mod tests {
     #[tokio::test]
     async fn an_unsigned_row_never_reaches_the_network() {
         let stub = Stub::start(vec![Reply::empty(201)], 0).await;
-        let unsigned = CloudItem::sealed("a1", b"ct", b"nc", "text", 1, "device-a");
+        let nonce: [u8; 12] = rand::random();
+        let unsigned = CloudItem::sealed("a1", b"ct", &nonce, "text", 1, "device-a");
         let err = client(&stub).upsert(TOKEN, &[unsigned]).await.unwrap_err();
         assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
         assert_eq!(stub.request_count().await, 0);

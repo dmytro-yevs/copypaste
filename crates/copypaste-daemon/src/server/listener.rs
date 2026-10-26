@@ -1876,7 +1876,7 @@ mod tests {
         assert_eq!(response.error.as_deref(), Some(MSG_TOO_LARGE));
         assert!(
             !response.error.unwrap_or_default().contains('/'),
-            "rule 4: no path in a user message"
+            "the privacy contract: no path in a user message"
         );
         assert_connection_closed(&mut client).await;
 

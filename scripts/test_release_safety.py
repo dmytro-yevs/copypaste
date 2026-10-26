@@ -628,10 +628,6 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn('ARTIFACT="$(cd', smoke)
         self.assertIn('rpm2cpio "$ARTIFACT"', smoke)
         self.assertIn("Linux full parity evidence gate", workflow)
-        qualification = (ROOT / "packaging/linux/native-qualification.md").read_text(encoding="utf-8")
-        self.assertIn("GNOME", qualification)
-        self.assertIn("KDE", qualification)
-        self.assertIn("Wayland", qualification)
         self.assertIn("AppImage deb", workflow)
         self.assertIn("AppImage deb rpm", workflow)
         linux_job = workflow.split("\n  linux:\n", 1)[1].split("\n  compositor-runtime-build:\n", 1)[0]
@@ -656,6 +652,16 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn("linux-wayland-quick-paste.py", fixture)
         self.assertIn("portal_keyboard_grant", fixture)
         self.assertNotIn("Wayland companion authentication and portal keyboard grant require", fixture)
+
+    def test_windows_menu_icon_patch_bounds_the_shipped_bitmap_allocation(self):
+        patch = (ROOT / "apps/copypaste_flutter/windows/cmake/native_menu_icons.cmake").read_text(encoding="utf-8")
+        self.assertIn("GetSystemMetrics(SM_CXSMICON)", patch)
+        self.assertIn("systemIconSize > 0 && systemIconSize <= 256 ? systemIconSize : 32", patch)
+        self.assertIn(
+            "static_cast<size_t>(iconSize) * static_cast<size_t>(iconSize) * sizeof(DWORD)",
+            patch,
+        )
+        self.assertIn("Review cnativeapi native menu bitmap clear-size patch", patch)
 
     def test_linux_arm64_flutter_bootstrap_uses_the_pinned_source_revision(self):
         action = (ROOT / ".github/actions/setup-flutter/action.yml").read_text(encoding="utf-8")
@@ -704,13 +710,14 @@ class ReleaseSafetyTest(unittest.TestCase):
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
                 self.assertEqual(len(rows), 6)
-                self.assertEqual(rows[0], "| Architecture | macOS | Android | Windows | Linux |")
-                self.assertEqual(rows[2].count("[Download]("), 2)
-                self.assertEqual(rows[2].count("[AppImage](") + rows[2].count("[deb](") + rows[2].count("[rpm]("), 0)
-                self.assertEqual(rows[3].count("[Download]("), 1)
-                self.assertEqual(rows[4].count("[Download]("), 1)
-                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 3)
-                self.assertEqual(rows[5].count("[Download]("), 1)
+                self.assertEqual(rows[0], "| Platform | Download |")
+                self.assertEqual(
+                    [row.split("|")[1].strip() for row in rows[2:]],
+                    ["macOS", "Android", "Windows", "Linux"],
+                )
+                self.assertEqual(
+                    [row.count("](") for row in rows[2:]], [1, 3, 1, 3]
+                )
                 self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe", ".AppImage", ".deb", ".rpm")) for link in links))
                 for suffix in ("", "-arm64", "-armv7"):
                     artifact = artifacts / f"CopyPaste-v{version}-android{suffix}.apk"

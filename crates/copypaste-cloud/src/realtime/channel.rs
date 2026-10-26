@@ -301,7 +301,7 @@ fn confirms_subscription(payload: &Value, user_id: &str) -> Result<(), RealtimeE
 /// that the channel filter can be built. Reading one claim is a base64url
 /// decode and a JSON lookup; pulling a full JWT crate in would add a second
 /// signature-verification stack to the tree for a value we deliberately do not
-/// verify (`AGENTS.md` rule 1, exemption 3).
+/// verify (the dependency policy).
 ///
 /// Returns `None` unless the token has exactly three non-empty base64url
 /// segments and an object payload carrying a non-empty string `sub`. The caller

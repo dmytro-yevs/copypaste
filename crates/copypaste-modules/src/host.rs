@@ -551,7 +551,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn group_exclusion_releases_a_running_native_sync_provider() {
-        use copypaste_p2p::{DeviceProfile, Node, PeerStore};
+        use copypaste_p2p::{DeviceProfile, Node, PairingToken, PeerStore};
         use std::time::{Duration, Instant};
         use wiremock::{
             matchers::{method, path},
@@ -560,13 +560,21 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let node = Arc::new(Node::new(
-            PeerStore::open(&directory.path().join("peers.json"), &[9; 32]).unwrap(),
+            PeerStore::open(
+                &directory.path().join("peers.json"),
+                &PairingToken::generate().psk(),
+            )
+            .unwrap(),
             None,
             0,
             true,
         ));
         let sponsor = Node::new(
-            PeerStore::open(&directory.path().join("sponsor.json"), &[8; 32]).unwrap(),
+            PeerStore::open(
+                &directory.path().join("sponsor.json"),
+                &PairingToken::generate().psk(),
+            )
+            .unwrap(),
             None,
             0,
             true,

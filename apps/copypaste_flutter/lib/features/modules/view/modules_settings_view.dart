@@ -1,8 +1,11 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+
 import '../../../shared/format_bytes.dart';
+
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
 import '../../../app/theme/app_theme.dart';
 
 import '../../../app/theme/app_overlays.dart';
@@ -222,9 +225,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
               const Gap(AppSpacing.lg),
               Text(installed?.title ?? marketplace!.title).semiBold(),
               const Gap(AppSpacing.sm),
-              Text(
-                installed?.description ?? marketplace!.description,
-              ).small().muted(),
+              Text(installed?.description ?? marketplace!.description)
+                  .small()
+                  .muted(),
               const Gap(AppSpacing.md),
               Text(
                 [

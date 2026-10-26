@@ -714,10 +714,7 @@ mod tests {
         );
         let rendered = format!("{ceremony:?}");
         for secret in ["123456", "pairing-id", "peer-id", "192.0.2.1"] {
-            assert!(
-                !rendered.contains(secret),
-                "secret escaped ceremony: {secret}"
-            );
+            assert!(!rendered.contains(secret), "secret escaped ceremony");
         }
     }
 

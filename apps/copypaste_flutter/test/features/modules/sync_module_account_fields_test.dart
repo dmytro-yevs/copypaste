@@ -5,6 +5,7 @@ import 'package:copypaste_flutter/features/modules/controller/modules_controller
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
+
 import 'modules_test_support.dart';
 
 class _AccountRepository extends MemoryModulesRepository {

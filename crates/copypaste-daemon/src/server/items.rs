@@ -761,7 +761,7 @@ mod tests {
                     source_reference: None,
                 },
             );
-            assert!(response.ok, "{response:?}");
+            assert!(response.ok, "file import failed");
         }
         assert_eq!(state.store.count().unwrap(), 2);
         let Some(ResponseData::Page(page)) = list(&state, 2, 10, None).data else {
@@ -1222,7 +1222,7 @@ mod tests {
         };
         for secret in [true, false] {
             let response = set_secret(&state, 2, &item.id, secret);
-            assert!(response.ok, "{response:?}");
+            assert!(response.ok, "secret update failed");
             let Some(ResponseData::Item(updated)) = response.data else {
                 panic!("expected item");
             };
@@ -1458,7 +1458,7 @@ mod tests {
             );
             match response.data {
                 Some(ResponseData::Item(item)) => item,
-                other => panic!("expected an item, got {other:?}"),
+                _ => panic!("expected an item"),
             }
         };
 

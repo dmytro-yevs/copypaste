@@ -101,10 +101,10 @@ mod tests {
         let dest = dir.path().join("history.backup");
 
         let response = backup_to(&state, &dest);
-        assert!(response.ok, "{:?}", response.error);
+        assert!(response.ok, "backup failed");
         match response.data {
             Some(ResponseData::Backup(data)) => assert!(data.size_bytes > 0),
-            other => panic!("{other:?}"),
+            _ => panic!("expected backup response"),
         }
 
         #[cfg(unix)]
@@ -215,7 +215,7 @@ mod tests {
     }
 
     /// A backup taken on another device is encrypted under another key. It must
-    /// fail authentication, never be half-read (AGENTS.md rule 4).
+    /// fail authentication, never be half-read (the privacy contract).
     #[test]
     fn a_backup_from_another_device_is_refused_and_history_survives() {
         let (theirs, their_dir) = test_state("beta");
@@ -356,7 +356,7 @@ mod tests {
         state.store.delete_all().unwrap();
         let response = restore_from(&state, &backup, true);
 
-        assert!(response.ok, "{:?}", response.error);
+        assert!(response.ok, "restore failed");
         assert!(!deleted(&state, &leaked), "the restored row was committed");
         assert!(state.store.get(&leaked).unwrap().is_some());
         assert_eq!(fts_rows(&state, &leaked), 1);

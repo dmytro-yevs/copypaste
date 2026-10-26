@@ -34,9 +34,8 @@ void main() {
               ShadcnApp(
                 theme: dark ? AppTheme.dark : AppTheme.light,
                 builder: (context, child) => MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(textScaler: TextScaler.linear(scale)),
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(scale)),
                   child: Builder(
                     builder: (context) => AppTheme.builder(context, child),
                   ),
@@ -235,17 +234,15 @@ void main() {
         if (entity is! File || !entity.path.endsWith('.dart')) continue;
         if (entity.path.replaceAll('\\', '/').contains('/app/theme/')) continue;
         final source = entity.readAsStringSync();
-        if (RegExp(
-          r'\b(?:SelectTheme|ButtonStyleOverride)\s*\(',
-        ).hasMatch(source)) {
+        if (RegExp(r'\b(?:SelectTheme|ButtonStyleOverride)\s*\(')
+            .hasMatch(source)) {
           offenders.add(entity.path);
         }
       }
       expect(
         offenders,
         isEmpty,
-        reason:
-            'Screens must use AppTheme select variants and style concrete action buttons.',
+        reason: 'Screens must use AppTheme select variants and style concrete action buttons.',
       );
     },
   );

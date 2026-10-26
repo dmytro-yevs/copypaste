@@ -10,6 +10,10 @@ use crate::CloudConfig;
 
 pub(super) const ANON: &str = "anon-key-abc";
 
+pub(super) fn password() -> String {
+    format!("test-{}", hex::encode(rand::random::<[u8; 16]>()))
+}
+
 /// The body GoTrue returns for a wrong password *and* for a dead refresh
 /// token. Byte-identical on purpose: it is the whole point.
 pub(super) const INVALID_GRANT: &str =

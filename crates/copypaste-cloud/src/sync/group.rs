@@ -254,7 +254,11 @@ mod tests {
         fn new(id: &str) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let node = Node::new(
-                PeerStore::open(&dir.path().join("peers.json"), &[7; 32]).unwrap(),
+                PeerStore::open(
+                    &dir.path().join("peers.json"),
+                    &copypaste_p2p::PairingToken::generate().psk(),
+                )
+                .unwrap(),
                 None,
                 0,
                 true,

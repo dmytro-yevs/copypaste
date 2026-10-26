@@ -5,8 +5,11 @@
 -- Two accounts, so that "device A cannot see device B's rows" can be exercised
 -- against a real PostgREST rather than only in the SQL assertions:
 --
---     dev-a@example.test / copypaste-dev
---     dev-b@example.test / copypaste-dev
+--     dev-a@example.test
+--     dev-b@example.test
+--
+-- Seeded passwords are random. A test harness sets the same temporary password
+-- after reset when it needs to authenticate either account.
 --
 -- No clipboard rows are seeded, and none can be: a row's payload is sealed
 -- under an Argon2id key derived from a passphrase this database has never seen
@@ -46,7 +49,7 @@ begin
             'authenticated',
             'authenticated',
             account.email,
-            extensions.crypt('copypaste-dev', extensions.gen_salt('bf')),
+            extensions.crypt(gen_random_uuid()::text, extensions.gen_salt('bf')),
             now(), now(), now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
             '{}'::jsonb,

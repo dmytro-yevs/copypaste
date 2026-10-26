@@ -55,7 +55,7 @@ mod tests {
             println!("text: {} score: {}", item.text, item.text_score);
         });
 
-        // 通过 image 读取图片
+        // Read the image with the image crate.
         println!("===test_3===");
         let test_three_img = image::open("./docs/test_images/test_3.png")
             .unwrap()

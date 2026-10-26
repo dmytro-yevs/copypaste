@@ -142,7 +142,10 @@ mod tests {
 
         let shown = format!("{second:#}");
         assert!(shown.contains("already listening"), "{shown}");
-        assert!(!shown.contains('\\'), "rule 4: no path in a user message");
+        assert!(
+            !shown.contains('\\'),
+            "the privacy contract: no path in a user message"
+        );
 
         drop(first);
         bind(&path).expect("the name is free once the listener is dropped");
@@ -244,7 +247,7 @@ mod tests {
         assert_eq!(response.error.as_deref(), Some(MSG_TOO_LARGE));
         assert!(
             !response.error.unwrap_or_default().contains('\\'),
-            "rule 4: no path in a user message"
+            "the privacy contract: no path in a user message"
         );
 
         let next = tokio::time::timeout(Duration::from_secs(10), lines.next())

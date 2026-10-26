@@ -74,7 +74,7 @@ fi
 # identity and make Keychain and Accessibility ask again during the 1.0 upgrade.
 SOURCE_KEYCHAIN_HELPER="${APP}/Contents/MacOS/copypaste-keychain"
 
-# AGENTS.md rule 4: nothing shown to the user may contain a path that discloses
+# the privacy contract: nothing shown to the user may contain a path that discloses
 # the local username. Everything printed goes through this.
 say() {
     local message="$*"

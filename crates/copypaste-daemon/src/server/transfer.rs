@@ -143,7 +143,7 @@ mod tests {
                 assert_eq!(result.inserted, 2);
                 assert_eq!(result.skipped, 0);
             }
-            other => panic!("{other:?}"),
+            _ => panic!("expected import response"),
         }
         let mut round_tripped = crate::testutil::contents(&target);
         round_tripped.sort();
@@ -262,7 +262,7 @@ mod tests {
             .unwrap();
         match import_of(&state, exported.items).data {
             Some(ResponseData::Import(result)) => assert_eq!(result.inserted, 0),
-            other => panic!("{other:?}"),
+            _ => panic!("expected import response"),
         }
 
         assert_eq!(
