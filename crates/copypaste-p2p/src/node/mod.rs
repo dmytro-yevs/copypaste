@@ -1048,11 +1048,10 @@ impl Node {
         let changed = reachability
             .get(pairing_id)
             .is_none_or(|old| old.state != observation.state);
-        let online = observation.state == ProbeState::Online;
         reachability.insert(pairing_id.to_string(), observation);
         drop(reachability);
         if changed {
-            self.sync_activity.connection(pairing_id, online);
+            self.sync_activity.connection_changed();
         }
     }
 

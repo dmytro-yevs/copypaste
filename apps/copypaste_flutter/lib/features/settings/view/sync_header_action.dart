@@ -227,7 +227,7 @@ class _SyncDetails extends StatelessWidget {
               if (index > status.peers.length) {
                 if (status.log.isEmpty) {
                   return Text(
-                    'No recent activity',
+                    'No recent synchronization problems',
                     style: AppTheme.deviceMetadataTextStyle(context),
                   );
                 }

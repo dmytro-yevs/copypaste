@@ -55,24 +55,9 @@ impl SyncActivity {
         drop(state);
         self.changes.send_replace(());
     }
-    pub(super) fn connection(&self, id: &str, online: bool) {
-        self.mutate(|state| {
-            state
-                .journal
-                .record(copypaste_ipc::sync_status::SyncLogEntry {
-                    pairing_id: id.into(),
-                    timestamp_ms: crate::now_ms(),
-                    kind: if online {
-                        copypaste_ipc::sync_status::SyncLogKind::Online
-                    } else {
-                        copypaste_ipc::sync_status::SyncLogKind::Offline
-                    },
-                    issue_code: None,
-                    error: None,
-                    sent: 0,
-                    received: 0,
-                })
-        });
+    pub(super) fn connection_changed(&self) {
+        // Presence still updates live status without becoming a journal event.
+        self.mutate(|_| true);
     }
     pub(super) fn authenticated(&self, id: &str) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -313,17 +298,6 @@ impl SessionObservation {
                 ] {
                     state.journal.pending(&self.pairing_id, code, count as u64);
                 }
-                state
-                    .journal
-                    .record(copypaste_ipc::sync_status::SyncLogEntry {
-                        pairing_id: self.pairing_id.clone(),
-                        timestamp_ms: crate::now_ms(),
-                        kind: copypaste_ipc::sync_status::SyncLogKind::Transferred,
-                        sent: stats.sent as u64,
-                        received: stats.received as u64,
-                        error: None,
-                        issue_code: None,
-                    });
             }
             true
         });
@@ -356,6 +330,10 @@ mod tests {
             profile_observed_at_ms: 0,
         };
         let peers = [peer];
+        let changes = activity.subscribe();
+        activity.connection_changed();
+        assert!(changes.has_changed().unwrap());
+        assert!(activity.snapshot(&peers, true).log.is_empty());
         let session = activity.begin("peer");
         assert_eq!(activity.snapshot(&peers, true).phase, SyncPhase::Waiting);
         let transfer = activity.transfer_scope("peer", 1);
@@ -383,11 +361,11 @@ mod tests {
         );
         let completed = activity.snapshot(&peers, true);
         assert_eq!(completed.phase, SyncPhase::Synced);
-        assert_eq!(completed.log.len(), 3);
+        assert_eq!(completed.log.len(), 2);
         let idle = activity.begin("peer");
         assert_eq!(activity.snapshot(&peers, true).phase, SyncPhase::Synced);
         idle.finish(Some(&SyncStats::default()), None);
-        assert_eq!(activity.snapshot(&peers, true).log.len(), 3);
+        assert_eq!(activity.snapshot(&peers, true).log.len(), 2);
         let running = activity.begin("peer");
         activity.local_changed(None);
         running.finish(Some(&SyncStats::default()), None);

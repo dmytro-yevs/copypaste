@@ -44,7 +44,7 @@ impl Default for Journal {
 impl Journal {
     pub(super) fn open(path: Option<PathBuf>) -> Self {
         let mut available = path.is_none();
-        let file = path
+        let mut file = path
             .as_ref()
             .and_then(|path| {
                 let mut bytes = Vec::new();
@@ -88,6 +88,9 @@ impl Journal {
                 }
             })
             .unwrap_or_default();
+        let previous_entries = file.entries.len();
+        file.entries.retain(activity_event);
+        let migrated = file.entries.len() != previous_entries;
         let observation = file
             .conditions
             .values()
@@ -99,7 +102,7 @@ impl Journal {
             observation,
             path,
             file,
-            dirty: false,
+            dirty: migrated,
             available,
         }
     }
@@ -238,10 +241,7 @@ impl Journal {
             }
             safe
         });
-        if !valid_event(&entry) {
-            return false;
-        }
-        if entry.kind == SyncLogKind::Transferred && entry.sent == 0 && entry.received == 0 {
+        if !valid_event(&entry) || !activity_event(&entry) {
             return false;
         }
         if self
@@ -254,7 +254,6 @@ impl Journal {
                 old.kind == entry.kind
                     && old.issue_code == entry.issue_code
                     && old.error == entry.error
-                    && entry.kind != SyncLogKind::Transferred
             })
         {
             return false;
@@ -309,6 +308,17 @@ fn problem_event(id: &str, code: SyncIssueCode, kind: SyncLogKind) -> SyncLogEnt
         received: 0,
     }
 }
+// Legacy failure/recovery entries remain readable; routine presence and
+// transfers never consume the bounded problem history or trigger disk writes.
+fn activity_event(entry: &SyncLogEntry) -> bool {
+    matches!(
+        entry.kind,
+        SyncLogKind::Failed
+            | SyncLogKind::Recovered
+            | SyncLogKind::ProblemDetected
+            | SyncLogKind::ProblemResolved
+    ) && entry.issue_code != Some(SyncIssueCode::MorePending)
+}
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
 }
@@ -325,6 +335,55 @@ fn valid_event(entry: &SyncLogEntry) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn routine_events_do_not_write_or_evict_problems_and_old_noise_is_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync-log.json");
+        let mut journal = Journal::open(Some(path.clone()));
+        journal.condition("peer", SyncIssueCode::StorageFull, 0);
+        journal.condition("peer", SyncIssueCode::StorageFull, 0);
+        journal.flush();
+        let saved = std::fs::read(&path).unwrap();
+        let mut routine = Vec::new();
+        for kind in [
+            SyncLogKind::Online,
+            SyncLogKind::Offline,
+            SyncLogKind::Transferred,
+        ] {
+            let event = SyncLogEntry {
+                pairing_id: "peer".into(),
+                timestamp_ms: 1,
+                kind,
+                sent: 123,
+                received: 1,
+                error: None,
+                issue_code: None,
+            };
+            assert!(!journal.record(event.clone()));
+            routine.push(event);
+        }
+        assert!(!journal.dirty);
+        assert_eq!(journal.file.entries.len(), 1);
+        journal.flush();
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+
+        // Simulate a journal written by the previous version.
+        journal.file.entries.extend(routine);
+        std::fs::write(&path, serde_json::to_vec(&journal.file).unwrap()).unwrap();
+        let mut restored = Journal::open(Some(path.clone()));
+        assert!(restored.available());
+        assert_eq!(restored.file.entries.len(), 1);
+        assert_eq!(restored.issues("peer")[0].code, SyncIssueCode::StorageFull);
+        restored.flush();
+        let mut restored = Journal::open(Some(path));
+        assert_eq!(restored.file.entries.len(), 1);
+        restored.evidence("peer", SyncEvidence::HistoryComplete);
+        assert!(restored.issues("peer").is_empty());
+        assert_eq!(restored.file.entries.len(), 2);
+        assert_eq!(restored.file.entries[1].kind, SyncLogKind::ProblemResolved);
+        assert!(!restored.evidence("peer", SyncEvidence::HistoryComplete));
+    }
+
+    #[test]
     fn active_blockers_survive_offline_restart_and_event_eviction_until_relevant_evidence() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sync-log.json");
@@ -339,15 +398,8 @@ mod tests {
         journal.condition("peer", SyncIssueCode::VersionMismatch, 0);
         assert_eq!(journal.file.entries.len(), 4);
         for i in 0..110 {
-            journal.record(SyncLogEntry {
-                pairing_id: "peer".into(),
-                timestamp_ms: i,
-                kind: SyncLogKind::Transferred,
-                sent: 1,
-                received: 0,
-                error: None,
-                issue_code: None,
-            });
+            journal.condition("other", SyncIssueCode::TimedOut, i);
+            journal.evidence("other", SyncEvidence::CompatibleProtocol);
         }
         journal.flush();
         let mut journal = Journal::open(Some(path));

@@ -13,6 +13,11 @@
     "ocr_ai_peak"
   ],
   "minimum_samples": 2,
+  "runtime_logs": {
+    "max_files_per_process": 7,
+    "max_file_bytes": 1048576,
+    "export_bytes_per_process": 1000000
+  },
   "platforms": {
     "macos": {
       "memory_metric": "physical_footprint_bytes",

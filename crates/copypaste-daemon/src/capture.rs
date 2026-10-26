@@ -144,6 +144,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
     // The first timer checks the current clipboard, even when no event arrives
     // after listener registration. Failed reads and pending writes keep retries.
     let mut retry = true;
+    let mut storage_retry = StorageRetryLog::default();
 
     let result = 'capture: loop {
         let wait = Duration::from_millis(state.settings.get().poll_interval_ms);
@@ -153,12 +154,13 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                     let worker_state = Arc::clone(&state);
                     let worker_pending = Arc::clone(&pending);
                     let result = tokio::task::spawn_blocking(move || drain_pending(&worker_state, &worker_pending)).await;
+                    if let Ok(outcome) = &result {
+                        storage_retry.observe(outcome);
+                    }
                     match result {
-                        Ok(CaptureOutcome::Retried) => {
-                            warn!("capture pending during shutdown is still transiently unavailable");
-                        }
                         Ok(
-                            CaptureOutcome::NoCapture
+                            CaptureOutcome::Retried
+                            | CaptureOutcome::NoCapture
                             | CaptureOutcome::Stored
                             | CaptureOutcome::PolicyCancelled
                             | CaptureOutcome::InputRejected,
@@ -211,7 +213,11 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                 // for the IPC server — and reaching it costs six thread wakeups,
                 // which is why an idle clipboard stops short of here.
                 let worker_pending = Arc::clone(&pending);
-                match tokio::task::spawn_blocking(move || tick_slot(&worker_state, &worker_pending)).await {
+                let outcome = tokio::task::spawn_blocking(move || tick_slot(&worker_state, &worker_pending)).await;
+                if let Ok(outcome) = &outcome {
+                    storage_retry.observe(outcome);
+                }
+                match outcome {
                     Ok(
                         CaptureOutcome::NoCapture
                         | CaptureOutcome::Stored
@@ -219,7 +225,6 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                         | CaptureOutcome::InputRejected,
                     ) => {}
                     Ok(CaptureOutcome::Retried) => {
-                        warn!("capture tick will retry transient storage failure");
                         #[cfg(test)]
                         test_busy_completed();
                     }
@@ -254,6 +259,27 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
     state.set_capture_running(false);
     info!("clipboard capture stopped");
     result
+}
+
+/// One warning per transient-storage episode, including shutdown draining.
+#[derive(Default)]
+struct StorageRetryLog {
+    active: bool,
+}
+impl StorageRetryLog {
+    fn observe(&mut self, outcome: &CaptureOutcome) {
+        if matches!(outcome, CaptureOutcome::Retried) {
+            if !self.active {
+                warn!("capture will retry transient storage failure");
+                self.active = true;
+            }
+        } else if self.active {
+            self.active = false;
+            if matches!(outcome, CaptureOutcome::Stored) {
+                info!("clipboard capture storage recovered");
+            }
+        }
+    }
 }
 
 /// One poll. Returns `Ok(())` when there was nothing to capture.
@@ -315,7 +341,7 @@ fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
                         None,
                     ) {
                         Ok(reference) => {
-                            info!("file capture reference accepted");
+                            debug!("file capture reference accepted");
                             Some(reference)
                         }
                         Err(error) => {
@@ -402,7 +428,7 @@ fn persist_pending(
     match ingested {
         Ok(Ingested::Stored(item)) => {
             if pending.capture.content_type == copypaste_ipc::content_type::FILE {
-                info!("file capture stored");
+                debug!("file capture stored");
             } else {
                 debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             }
@@ -418,7 +444,7 @@ fn persist_pending(
         }
         Ok(Ingested::Duplicate(item)) => {
             if pending.capture.content_type == copypaste_ipc::content_type::FILE {
-                info!("file capture deduplicated");
+                debug!("file capture deduplicated");
             } else {
                 debug!(id = %item.id, "capture deduplicated against a recent item");
             }
@@ -763,6 +789,28 @@ mod tests {
             phases.drain = None;
             phases.persist = None;
         }
+    }
+
+    #[test]
+    fn storage_retry_logs_one_warning_per_episode_and_only_real_recovery() {
+        let (_, log) = copypaste_runtime_log::test_support::capture(|| {
+            let mut episode = StorageRetryLog::default();
+            episode.observe(&CaptureOutcome::Retried);
+            episode.observe(&CaptureOutcome::Retried);
+            episode.observe(&CaptureOutcome::Stored);
+            episode.observe(&CaptureOutcome::Stored);
+            episode.observe(&CaptureOutcome::Retried);
+            episode.observe(&CaptureOutcome::PolicyCancelled);
+        });
+        assert_eq!(
+            log.matches("capture will retry transient storage failure")
+                .count(),
+            2
+        );
+        assert_eq!(
+            log.matches("clipboard capture storage recovered").count(),
+            1
+        );
     }
 
     #[test]
@@ -1655,7 +1703,7 @@ mod tests {
         drop(guard);
     }
     #[test]
-    fn file_capture_logs_fixed_outcomes_without_locator_payload_or_identity() {
+    fn file_capture_keeps_normal_outcomes_out_of_default_logs() {
         let _serial = TEST_PERSIST_SERIAL
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1681,9 +1729,9 @@ mod tests {
         assert!(!captured.contains("secret-debug-token"));
         assert_eq!(
             captured.matches("file capture reference accepted").count(),
-            1
+            0
         );
-        assert_eq!(captured.matches("file capture stored").count(), 1);
+        assert_eq!(captured.matches("file capture stored").count(), 0);
         for token in [
             "secret-locator-token",
             "secret-payload-token",
@@ -1763,7 +1811,7 @@ mod tests {
         assert!(log.contains("formatter boundary control"));
     }
     #[test]
-    fn default_runtime_log_accepts_reference_once_across_busy_and_distinguishes_duplicate_commit() {
+    fn default_runtime_log_is_quiet_for_file_retries_and_duplicate_commits() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secret-retry-file");
         std::fs::write(&path, b"secret-retry-bytes").unwrap();
@@ -1782,17 +1830,17 @@ mod tests {
             *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
             assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Stored));
         });
-        assert_eq!(log.matches("file capture reference accepted").count(), 1);
-        assert_eq!(log.matches("file capture stored").count(), 1);
+        assert_eq!(log.matches("file capture reference accepted").count(), 0);
+        assert_eq!(log.matches("file capture stored").count(), 0);
         assert!(!log.contains("file capture deduplicated"));
         let (_, duplicate) = copypaste_runtime_log::test_support::capture(|| {
             assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Stored));
         });
         assert_eq!(
             duplicate.matches("file capture reference accepted").count(),
-            1
+            0
         );
-        assert_eq!(duplicate.matches("file capture deduplicated").count(), 1);
+        assert_eq!(duplicate.matches("file capture deduplicated").count(), 0);
         assert!(!duplicate.contains("file capture stored"));
         for output in [&log, &duplicate] {
             assert!(!output.contains("secret-retry-file"));

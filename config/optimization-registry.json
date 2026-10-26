@@ -3328,7 +3328,7 @@
         "crates/copypaste-core/src/sync/diagnostics.rs",
         "docs/engineering/synchronization-status-contract.json"
       ],
-      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions and empty successful polls do not write the journal. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
+      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
       "allocation_lifetime": "One bounded journal per node; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
       "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
       "native_resource_qualification": {
@@ -3338,7 +3338,68 @@
       },
       "measured_saving": null,
       "evidence_refs": [],
-      "functional_validation": "342 P2P tests, 43 core sync tests, four protected-workspace tests, five IPC transport contract tests, 50 settings/UI tests plus the fixture renderer, and 13 final drawer/layout checks passed. Dart analysis clean. New-build native and resource qualification is not established."
+      "functional_validation": "2026-10-26 activity noise fix: all 343 P2P library tests passed, including historical noise pruning, routine-event write suppression, problem retention/recovery and live presence notifications. Native UI/resource evidence for this change is not established. Prior validation: 342 P2P tests, 43 core sync tests, four protected-workspace tests, five IPC transport contract tests, 50 settings/UI tests plus the fixture renderer, and 13 final drawer/layout checks passed. Dart analysis clean. New-build native and resource qualification is not established."
+    },
+    {
+      "id": "RUN-071",
+      "title": "Quiet runtime diagnostics and bounded log storage",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Runtime logging, clipboard capture and peer cursors",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime-log/src/lib.rs",
+        "crates/copypaste-runtime-log/src/writer.rs",
+        "crates/copypaste-runtime-log/src/reader.rs",
+        "crates/copypaste-daemon/src/capture.rs",
+        "crates/copypaste-p2p/src/peers/cursor.rs",
+        "config/runtime-resource-budgets.json"
+      ],
+      "invariant": "Default INFO logs exclude routine file capture and deduplication. A transient capture-storage retry episode logs one warning and one recovery only after a successful store. Identical peer cursors with no relay floor do not rewrite the cursor file. Runtime log files rotate by size and day without renaming existing segments or invalidating byte-offset cursors; legacy daily filenames remain readable. Per-process file and export limits come from runtime-resource-budgets.json. Oversized legacy logs are retired at logger initialization. Export input reads and output bytes are bounded independently.",
+      "allocation_lifetime": "One existing logging worker and bounded channel per process. No additional timers or workers. Files close on rotation; log exports read only their configured byte allowance.",
+      "next_step": "Measure app, daemon and workers separately and together on macOS, Android and Windows during idle, repeated capture, log rotation and recovery. CPU, wakeup, disk-I/O and sustained-growth budgets remain unresolved; source allocation controls do not qualify native resources.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "rust-tests.log",
+          "sha256": "913dab1143fd28a0608118e6d774a0b416917b2baa1510e5578aa5546aaae75a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "capture-tests.log",
+          "sha256": "ae9a318209718f91537b320f1b72090d8058ebf19a590a092ab0664b65a9a974",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "log-tests.log",
+          "sha256": "755bbc7081b2d06b239485a04983832a205c8ba88e32fb491ea8d94d0cc1b652",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "log-clippy.log",
+          "sha256": "7958608958fa4d3b15ab9a3849c523837d72231e61f23b74d856e49657e833ae",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "344 P2P library tests, 37 capture tests and 21 runtime-log tests passed. Runtime-log Clippy with warnings denied, cargo fmt and git diff --check passed. Combined Clippy is blocked by three pre-existing unnecessary_lazy_evaluations findings in node/mod.rs at lines 361, 373 and 380. Native platform UI and resource measurements are not established."
     }
   ]
 }

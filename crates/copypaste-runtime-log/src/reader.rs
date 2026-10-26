@@ -45,9 +45,18 @@ impl Position {
     }
 }
 
-/// `YYYY-MM-DD`, checked by shape so a cursor cannot smuggle a path fragment
-/// into the filename comparison below.
+/// `YYYY-MM-DD` with an optional six-digit segment, checked by shape so a
+/// cursor cannot smuggle a path fragment into the filename comparison below.
 fn is_day(value: &str) -> bool {
+    let (day, segment) = value
+        .split_once('.')
+        .map_or((value, None), |(day, part)| (day, Some(part)));
+    if segment
+        .is_some_and(|part| part.len() != 6 || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    let value = day;
     value.len() == 10
         && value.bytes().enumerate().all(|(index, byte)| match index {
             4 | 7 => byte == b'-',
@@ -55,12 +64,12 @@ fn is_day(value: &str) -> bool {
         })
 }
 
-struct LogFile {
-    day: String,
-    path: PathBuf,
+pub(crate) struct LogFile {
+    pub(crate) day: String,
+    pub(crate) path: PathBuf,
 }
 
-fn log_files(log_dir: &Path, process: Process) -> io::Result<Vec<LogFile>> {
+pub(crate) fn log_files(log_dir: &Path, process: Process) -> io::Result<Vec<LogFile>> {
     let prefix = format!("{}.", process.prefix());
     let entries = match fs::read_dir(log_dir) {
         Ok(entries) => entries,

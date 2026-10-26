@@ -8,7 +8,7 @@ use crate::sync::SyncCursor;
 
 pub const DEFAULT_CURSOR_FILE_NAME: &str = "sync-cursors.json";
 
-#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct Record {
     #[serde(default)]
     since_ms: i64,
@@ -85,13 +85,14 @@ impl CursorStore {
 
     pub fn record_session(&self, pairing_id: &str, since_ms: i64) {
         self.mutate(|state| {
-            state.insert(
-                pairing_id.to_string(),
-                Record {
-                    since_ms: since_ms.max(0),
-                    relay_floor_ms: None,
-                },
-            );
+            let record = Record {
+                since_ms: since_ms.max(0),
+                relay_floor_ms: None,
+            };
+            if state.get(pairing_id) == Some(&record) {
+                return false;
+            }
+            state.insert(pairing_id.to_string(), record);
             true
         });
     }
@@ -188,6 +189,24 @@ mod tests {
 
     fn store(dir: &tempfile::TempDir) -> CursorStore {
         CursorStore::open(&dir.path().join(DEFAULT_CURSOR_FILE_NAME))
+    }
+
+    #[test]
+    fn unchanged_session_does_not_replace_cursor_file_but_relay_floor_is_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let cursors = store(&dir);
+        cursors.record_session("phone", 5_000);
+        // Replacing the path with a sentinel proves no file write was attempted.
+        std::fs::write(&cursors.path, b"unchanged sentinel").unwrap();
+        cursors.record_session("phone", 5_000);
+        assert_eq!(std::fs::read(&cursors.path).unwrap(), b"unchanged sentinel");
+        cursors.note_local(4_000);
+        assert_eq!(cursors.get("phone").relay_floor_ms, Some(4_000));
+        cursors.record_session("phone", 5_000);
+        assert_eq!(
+            CursorStore::open(&cursors.path).get("phone").relay_floor_ms,
+            None
+        );
     }
 
     #[test]

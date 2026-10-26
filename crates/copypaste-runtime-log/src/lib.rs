@@ -2,17 +2,15 @@
 
 use std::{
     fmt::{self},
-    fs, io,
+    fs,
+    io::{self, Read as _},
     path::{Path, PathBuf},
 };
 
 use copypaste_ipc::redact::scrub_paths;
 use serde::{Deserialize, Serialize};
 use tracing::{field::Visit, Event, Subscriber};
-use tracing_appender::{
-    non_blocking::{NonBlockingBuilder, WorkerGuard},
-    rolling::{RollingFileAppender, Rotation},
-};
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::{
     fmt::{self as tracing_fmt, format::FormatEvent, format::Writer, FmtContext},
     layer::SubscriberExt as _,
@@ -20,13 +18,29 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-const MAX_LOG_FILES: usize = 7;
+const RESOURCE_BUDGETS: &str = include_str!("../../../config/runtime-resource-budgets.json");
+
+#[derive(Clone, Copy, Deserialize)]
+struct LogLimits {
+    max_files_per_process: usize,
+    max_file_bytes: u64,
+    export_bytes_per_process: usize,
+}
+fn log_limits() -> LogLimits {
+    #[derive(Deserialize)]
+    struct Budgets {
+        runtime_logs: LogLimits,
+    }
+    serde_json::from_str::<Budgets>(RESOURCE_BUDGETS)
+        .expect("runtime log limits must be valid")
+        .runtime_logs
+}
 const BUFFERED_LINES: usize = 1_024;
-const EXPORT_BYTES: usize = 1_000_000;
 pub const MAX_PAGE_SIZE: usize = 100;
 
 mod query;
 mod reader;
+mod writer;
 
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -128,12 +142,7 @@ pub struct RuntimeLogGuard {
 /// they never reach the disk sink in the first place.
 pub fn init(log_dir: &Path, process: Process) -> anyhow::Result<RuntimeLogGuard> {
     fs::create_dir_all(log_dir)?;
-    let appender = RollingFileAppender::builder()
-        .rotation(Rotation::DAILY)
-        .filename_prefix(process.prefix())
-        .filename_suffix("log")
-        .max_log_files(MAX_LOG_FILES)
-        .build(log_dir)?;
+    let appender = writer::BoundedLog::open(log_dir, process, log_limits())?;
     let (writer, worker) = NonBlockingBuilder::default()
         .buffered_lines_limit(BUFFERED_LINES)
         .lossy(false)
@@ -170,16 +179,25 @@ pub fn export(log_dir: &Path, process: Process) -> io::Result<String> {
     files.sort();
 
     let mut out = String::new();
-    let mut remaining = EXPORT_BYTES;
+    let budget = log_limits().export_bytes_per_process;
+    let mut remaining = budget;
     for file in files.into_iter().rev() {
         if remaining == 0 {
             break;
         }
-        let bytes = fs::read(&file)?;
-        let take = bytes.len().min(remaining);
-        let text = String::from_utf8_lossy(&bytes[..take]);
-        out.push_str(&scrub_paths(&text));
-        if !out.ends_with('\n') {
+        let mut bytes = Vec::new();
+        fs::File::open(&file)?
+            .take(remaining as u64)
+            .read_to_end(&mut bytes)?;
+        let take = bytes.len();
+        let text = String::from_utf8_lossy(&bytes);
+        let safe = scrub_paths(&text);
+        let mut end = safe.len().min(budget - out.len());
+        while !safe.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.push_str(&safe[..end]);
+        if !out.ends_with('\n') && out.len() < budget {
             out.push('\n');
         }
         remaining -= take;
@@ -305,6 +323,20 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         fs::write(directory.path().join("daemon.2026-08-01.log"), surface).unwrap();
         export(directory.path(), Process::Daemon).unwrap()
+    }
+
+    #[test]
+    fn export_reads_only_the_configured_budget_from_large_legacy_files() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = fs::File::create(dir.path().join("app.2026-01-01.log")).unwrap();
+        file.write_all(b"bounded export\n").unwrap();
+        file.seek(SeekFrom::Start(512 * 1024 * 1024)).unwrap();
+        file.write_all(b"must not read this tail\n").unwrap();
+        let out = export(dir.path(), Process::App).unwrap();
+        assert!(out.starts_with("bounded export\n"));
+        assert!(!out.contains("must not read this tail"));
+        assert!(out.len() <= log_limits().export_bytes_per_process);
     }
 
     #[test]
