@@ -65,9 +65,19 @@ class PublicationPreparationTest(unittest.TestCase):
                     prepare.main()
             self.assertFalse(Path("dist/create-marketplace-release").exists())
 
-    def test_missing_signature_blocks_catalog_update(self):
+    def test_missing_legacy_signature_blocks_catalog_update(self):
         with patch.object(prepare.subprocess, "run", side_effect=[self.release(), subprocess.CompletedProcess([], 0)]), \
                 patch.object(prepare, "download_optional", side_effect=[b'{"schema_version":1,"modules":[]}', None]), \
+                patch.object(prepare, "build_catalog") as build:
+            with self.assertRaisesRegex(ValueError, "missing its signature"):
+                prepare.main()
+        build.assert_not_called()
+        self.assertFalse(Path("dist/create-marketplace-release").exists())
+
+    def test_missing_v2_signature_blocks_catalog_update(self):
+        with patch.object(prepare.subprocess, "run", side_effect=[self.release(), subprocess.CompletedProcess([], 0)]), \
+                patch.object(prepare, "download_optional", side_effect=[
+                    None, b'{"schema_version":1,"modules":[]}', None]), \
                 patch.object(prepare, "build_catalog") as build:
             with self.assertRaisesRegex(ValueError, "missing its signature"):
                 prepare.main()
@@ -90,6 +100,23 @@ class PublicationPreparationTest(unittest.TestCase):
         self.assertEqual(
             json.loads(Path("dist/modules-v2.json").read_text()), prepared)
         self.assertFalse(Path("dist/modules.json").exists())
+
+    def test_v2_only_catalog_continues_without_creating_a_release(self):
+        linux = b'{"schema_version":1,"modules":[]}'
+        signature = b"c2lnbmF0dXJl"
+        prepared = {"schema_version": 1, "modules": [{"id": "copypaste.semantic-search"}]}
+        with patch.object(prepare.subprocess, "run", side_effect=[
+                self.release(), subprocess.CompletedProcess([], 0)]) as run, \
+                patch.object(prepare, "download_optional", side_effect=[
+                    None, linux, signature]), \
+                patch.object(prepare, "verify_signature") as verify, \
+                patch.object(prepare, "build_catalog", return_value=prepared) as build:
+            prepare.main()
+        verify.assert_called_once_with(
+            linux, b"signature", catalog.LINUX_CATALOG_NAME)
+        self.assertEqual(build.call_args.args[2], json.loads(linux))
+        self.assertEqual(run.call_count, 2)
+        self.assertFalse(Path("dist/create-marketplace-release").exists())
 
     def test_draft_and_prerelease_packages_cannot_become_public_catalog_entries(self):
         for draft, prerelease in [(True, False), (False, True)]:

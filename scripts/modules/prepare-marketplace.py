@@ -39,8 +39,6 @@ def load_published_catalog(name):
 
 def previous_linux_catalog():
     legacy = load_published_catalog(LEGACY_CATALOG_NAME)
-    if legacy is None:
-        return None
     linux = load_published_catalog(LINUX_CATALOG_NAME)
     return legacy if linux is None else linux
 
