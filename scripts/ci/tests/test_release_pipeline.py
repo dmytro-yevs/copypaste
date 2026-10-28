@@ -163,6 +163,11 @@ class ReleasePipelineTest(unittest.TestCase):
                 self.assertIs(producer["with"]["linux_only"], False)
                 self.assertIs(producer["with"]["publish"], False)
                 self.assertIn("qualification-" + module, workflow["jobs"]["linux-native-current"]["needs"])
+        sms = workflow["jobs"]["qualification-sms-codes"]
+        self.assertEqual(sms["uses"], "./.github/workflows/sms-codes-module.yml")
+        self.assertIs(sms["with"]["publish"], False)
+        self.assertIn("qualification-sms-codes", workflow["jobs"]["qualify"]["needs"])
+        self.assertIn("needs.qualification-sms-codes.result == 'success'", workflow["jobs"]["qualify"]["if"])
 
     def test_publication_stays_draft_until_every_asset_matches(self):
         publish = load("publish-release.py")["publish"]
@@ -248,10 +253,17 @@ class ReleasePipelineTest(unittest.TestCase):
         eligible = load("qualified_source.py")["eligible"]
         run = {**self.run, "status": "completed", "conclusion": "success"}
         jobs = self.jobs(["preflight", "macos", "android", "windows", "qualify",
-                          "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions"])
+                          "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions",
+                          "Build SMS Codes module / android-native"])
         artifacts = self.artifact("production-qualified")
+        artifacts["artifacts"].extend({
+            "name": f"sms-codes-android-{target}", "expired": False,
+            "workflow_run": {"id": 123, "head_sha": "a" * 40},
+        } for target in ("arm", "aarch64", "x86_64", "native"))
+        artifacts["total_count"] = len(artifacts["artifacts"])
         eligible(run, jobs, artifacts, "owner/repo", "a" * 40, linux=True, compositor=True)
-        for name in ("qualify", "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions"):
+        for name in ("qualify", "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions",
+                     "Build SMS Codes module / android-native"):
             bad = deepcopy(jobs)
             next(job for job in bad["jobs"] if job["name"] == name)["conclusion"] = "skipped"
             with self.assertRaises(ValueError):

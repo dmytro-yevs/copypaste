@@ -156,7 +156,7 @@ jobs:
             python3 scripts/release/github_inventory.py --run-id "$QUALIFIED_RUN_ID" --kind artifacts > "$RUNNER_TEMP/source-artifacts.json"
             # Authenticate the source envelope before extracting any archive.
             # Linux origin bytes are checked after reading its bound receipt.
-            python3 scripts/release/verify-qualified-run.py --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
+            python3 scripts/release/verify-qualified-run.py --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit" --require-sms
             linux_required=false
             if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
               linux_required=true
@@ -170,7 +170,7 @@ jobs:
               python3 scripts/release/github_inventory.py --run-id "$linux_artifact_run_id" --kind jobs > "$RUNNER_TEMP/linux-origin-jobs.json"
               python3 scripts/release/github_inventory.py --run-id "$linux_artifact_run_id" --kind artifacts > "$RUNNER_TEMP/linux-origin-artifacts.json"
             fi
-            qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit")
+            qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit" --require-sms)
             if [[ "$linux_required" == true ]]; then qualified_args+=(--require-linux); fi
             if [[ "$compositor_runtime_required" == true ]]; then qualified_args+=(--require-compositor-runtime); fi
             if [[ "$linux_required" == true ]]; then qualified_args+=(--linux-origin-run "$RUNNER_TEMP/linux-origin-run.json" --linux-origin-jobs "$RUNNER_TEMP/linux-origin-jobs.json" --linux-origin-artifacts "$RUNNER_TEMP/linux-origin-artifacts.json" --linux-receipt "$RUNNER_TEMP/linux-origin-receipt.json"); fi
@@ -343,6 +343,20 @@ jobs:
       linux_only: false
       publish: false
       publish_marketplace: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  qualification-sms-codes:
+    name: Build SMS Codes module
+    needs: [preflight, policy]
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
+    uses: ./.github/workflows/sms-codes-module.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      publish: false
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -902,8 +916,8 @@ jobs:
           python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
 
   qualify:
-    needs: [preflight, policy, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
+    needs: [preflight, policy, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence, qualification-sms-codes]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && needs.qualification-sms-codes.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

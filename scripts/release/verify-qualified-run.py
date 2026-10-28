@@ -20,6 +20,7 @@ def verify(
     *,
     require_linux: bool = False,
     require_compositor_runtime: bool = False,
+    require_sms: bool = False,
     linux_origin: Optional[Tuple[dict, dict, dict, dict]] = None,
 ) -> None:
     if type(run.get("id")) is not int or run["id"] <= 0:
@@ -61,6 +62,18 @@ def verify(
             or matching[0].get("conclusion") != "success"
         ):
             raise ValueError(f"required qualification job did not pass: {name}")
+    if require_sms:
+        native = [job for job in entries if job.get("name") == "Build SMS Codes module / android-native"]
+        if (len(native) != 1 or native[0].get("status") != "completed"
+                or native[0].get("conclusion") != "success"):
+            raise ValueError("required SMS native qualification did not pass")
+        for target in ("arm", "aarch64", "x86_64", "native"):
+            name = f"sms-codes-android-{target}"
+            matching_sms = [item for item in artifacts.get("artifacts", []) if item.get("name") == name]
+            if (len(matching_sms) != 1 or matching_sms[0].get("expired") is not False
+                    or matching_sms[0].get("workflow_run", {}).get("id") != run["id"]
+                    or matching_sms[0].get("workflow_run", {}).get("head_sha") != commit):
+                raise ValueError(f"exact-source SMS qualification artifact is missing or invalid: {name}")
     if require_linux:
         required_linux_jobs = {"Linux full parity evidence gate"}
         passed_linux_jobs = {
@@ -121,6 +134,7 @@ def main() -> None:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--require-linux", action="store_true")
     parser.add_argument("--require-compositor-runtime", action="store_true")
+    parser.add_argument("--require-sms", action="store_true")
     parser.add_argument("--linux-origin-run", type=Path)
     parser.add_argument("--linux-origin-jobs", type=Path)
     parser.add_argument("--linux-origin-artifacts", type=Path)
@@ -135,6 +149,7 @@ def main() -> None:
         args.commit,
         require_linux=args.require_linux,
         require_compositor_runtime=args.require_compositor_runtime,
+        require_sms=args.require_sms,
         linux_origin=tuple(json.loads(path.read_text()) for path in origin_paths) if all(origin_paths) else None,
     )
     print("verified successful native qualification at the immutable release tag")
