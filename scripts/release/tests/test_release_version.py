@@ -31,19 +31,26 @@ class ReleaseVersionTest(unittest.TestCase):
             "crates/sdk/src/lib.rs": "",
             "apps/copypaste_flutter/pubspec.yaml": 'name: app\nversion: 1.2.3+17\ndependencies:\n  library: 2.0.0\n',
             "modules/fixture/module.json": '{"version": "0.4.0", "app_versions": ">=1.2.3, <2.0.0"}\n',
+            "modules/fixture/Cargo.toml": '[package]\nname = "fixture"\nversion = "0.4.0"\nedition = "2021"\n'
+                                          '[workspace]\nmembers = []\n'
+                                          '[dependencies]\napp = { path = "../../crates/app" }\n',
+            "modules/fixture/src/lib.rs": "",
         }
         for name, content in files.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
         subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["cargo", "generate-lockfile", "--manifest-path", "modules/fixture/Cargo.toml", "--offline"],
+                       cwd=self.root, check=True, capture_output=True)
 
     def command(self, *args):
         return subprocess.run([sys.executable, str(SCRIPT), "--root", str(self.root), *args],
                               capture_output=True, text=True)
 
     def snapshot(self):
-        names = ("config/release.json", "Cargo.toml", "Cargo.lock", VERSION["PUBSPEC"], "modules/fixture/module.json")
+        names = ("config/release.json", "Cargo.toml", "Cargo.lock", VERSION["PUBSPEC"],
+                 "modules/fixture/module.json", "modules/fixture/Cargo.lock")
         return {name: (self.root / name).read_bytes() for name in names}
 
     def test_one_bump_updates_build_inputs_and_creates_only_the_exact_committed_tag(self):
@@ -55,6 +62,7 @@ class ReleaseVersionTest(unittest.TestCase):
         self.assertIn("version: 1.2.4+18", pubspec)
         self.assertIn("  library: 2.0.0", pubspec)
         self.assertIn('name = "sdk"\nversion = "1.0.0"', (self.root / "Cargo.lock").read_text())
+        self.assertIn('name = "app"\nversion = "1.2.4"', (self.root / "modules/fixture/Cargo.lock").read_text())
         self.assertEqual(json.loads((self.root / "modules/fixture/module.json").read_text()),
                          {"version": "0.4.0", "app_versions": ">=1.2.4, <2.0.0"})
         values = self.command("values")
@@ -82,14 +90,21 @@ class ReleaseVersionTest(unittest.TestCase):
         result = self.command("check", "--tag", "v9.9.9")
         self.assertEqual(result.returncode, 1)
         self.assertIn("canonical release identity", result.stderr)
-        lock = self.root / "Cargo.lock"
+        lock = self.root / "modules/fixture/Cargo.lock"
         lock.write_text(lock.read_text().replace('version = "1.2.3"', 'version = "1.2.2"'))
-        with self.assertRaisesRegex(ValueError, "stale workspace version for app"):
+        with self.assertRaisesRegex(ValueError, "modules/fixture/Cargo.lock has stale workspace version for app"):
             VERSION["check"](self.root, self.release)
 
     def test_failed_lock_resolution_restores_all_release_files(self):
         before = self.snapshot()
-        with patch.object(VERSION["subprocess"], "run", side_effect=subprocess.CalledProcessError(1, "cargo")):
+        execute = subprocess.run
+
+        def fail_independent_workspace(command, **kwargs):
+            if Path(command[3]).parent == self.root / "modules/fixture":
+                raise subprocess.CalledProcessError(1, "cargo")
+            return execute(command, **kwargs)
+
+        with patch.object(VERSION["subprocess"], "run", side_effect=fail_independent_workspace):
             with self.assertRaises(subprocess.CalledProcessError):
                 VERSION["bump"](self.root, "1.2.4")
         self.assertEqual(self.snapshot(), before)

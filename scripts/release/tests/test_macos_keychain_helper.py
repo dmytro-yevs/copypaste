@@ -120,11 +120,12 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 # signing identity. Keep both the identity and helper intact.
                 signing_keychain = next((support / "signing").glob("*.keychain*"))
                 password_file = support / "signing/keychain-password"
-                password = password_file.read_bytes()
                 self.run_command("security", "lock-keychain", str(signing_keychain))
-                password_file.write_text("incorrect fixture password")
-                self.environment["COPYPASTE_SIGN_MODE"] = "auto"
+                original_file = password_file.with_name("original-fixture-credential")
+                password_file.rename(original_file)
                 try:
+                    password_file.write_text("incorrect fixture password")
+                    self.environment["COPYPASTE_SIGN_MODE"] = "auto"
                     refused = subprocess.run(install_command, env=self.environment, cwd=root,
                                              capture_output=True, timeout=30)
                     self.assertEqual(refused.returncode, 1, (refused.stdout, refused.stderr))
@@ -132,10 +133,8 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                     self.assertEqual(digest, hashlib.sha256(helper.read_bytes()).hexdigest())
                     assert_preferences_unchanged()
                 finally:
-                    password_file.write_bytes(password)
+                    original_file.replace(password_file)
                     self.environment.pop("COPYPASTE_SIGN_MODE", None)
-                    self.run_command("security", "unlock-keychain", "-p", password.decode(),
-                                     str(signing_keychain))
                 # A failed codesign must leave the user's search list untouched.
                 daemon_binary = binaries / "copypaste-daemon"
                 daemon_binary.chmod(0o000)

@@ -75,23 +75,32 @@ def projections(root, release):
     return expected
 
 
+def lockfiles(root):
+    return [root / "Cargo.lock", *sorted((root / "modules").glob("*/Cargo.lock"))]
+
+
 def check_lock(root, release):
     cargo = (root / "Cargo.toml").read_text(encoding="utf-8")
     members = re.search(r"(?m)^members[ \t]*=[ \t]*\[(.*?)\]", table(cargo, "workspace")["body"], re.DOTALL)
     if not members:
         raise ValueError("workspace members are missing")
-    lock = (root / "Cargo.lock").read_text(encoding="utf-8")
-    blocks = re.split(r"(?m)^\[\[package\]\][ \t]*\n", lock)[1:]
+    inherited = []
     for member in re.findall(r'"([^"\n]+)"', members[1]):
         manifest = (root / member / "Cargo.toml").read_text(encoding="utf-8")
         package = table(manifest, "package")["body"]
         if not re.search(r"(?m)^version\.workspace[ \t]*=[ \t]*true[ \t]*(?:#.*)?$", package):
             continue
         name = re.search(r'(?m)^name[ \t]*=[ \t]*"([^"\n]+)"', package)[1]
-        records = [block for block in blocks if re.search(r'(?m)^name = "' + re.escape(name) + r'"$', block)
-                   and not re.search(r"(?m)^source[ \t]*=", block)]
-        if len(records) != 1 or not re.search(r'(?m)^version = "' + re.escape(release["version"]) + r'"$', records[0]):
-            raise ValueError(f"Cargo.lock has stale workspace version for {name}; run version.py sync")
+        inherited.append(name)
+    for path in lockfiles(root):
+        blocks = re.split(r"(?m)^\[\[package\]\][ \t]*\n", path.read_text(encoding="utf-8"))[1:]
+        for name in inherited:
+            records = [block for block in blocks if re.search(r'(?m)^name = "' + re.escape(name) + r'"$', block)
+                       and not re.search(r"(?m)^source[ \t]*=", block)]
+            if not records and path != root / "Cargo.lock":
+                continue
+            if len(records) != 1 or not re.search(r'(?m)^version = "' + re.escape(release["version"]) + r'"$', records[0]):
+                raise ValueError(f"{path.relative_to(root)} has stale workspace version for {name}; run version.py sync")
 
 
 def check(root, release):
@@ -104,17 +113,21 @@ def check(root, release):
 def sync(root, release):
     validate(release)
     expected = projections(root, release)
-    snapshots = {name: (root / name).read_bytes() for name in (SOURCE, "Cargo.lock", *expected)}
+    locks = lockfiles(root)
+    snapshots = {root / name: (root / name).read_bytes() for name in (SOURCE, *expected)}
+    snapshots.update({path: path.read_bytes() for path in locks})
     try:
         for name, text in expected.items():
             (root / name).write_text(text, encoding="utf-8")
         # Cargo owns lockfile resolution; retain locked external dependencies.
-        subprocess.run(["cargo", "update", "--workspace", "--offline"], cwd=root, check=True)
+        for path in locks:
+            subprocess.run(["cargo", "update", "--manifest-path", str(path.parent / "Cargo.toml"),
+                            "--workspace", "--offline"], cwd=root, check=True)
         check(root, release)
         (root / SOURCE).write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
     except (OSError, ValueError, subprocess.CalledProcessError):
-        for name, content in snapshots.items():
-            (root / name).write_bytes(content)
+        for path, content in snapshots.items():
+            path.write_bytes(content)
         raise
 
 
