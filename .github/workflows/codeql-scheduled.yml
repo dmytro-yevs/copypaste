@@ -155,7 +155,9 @@ jobs:
         working-directory: apps/copypaste_flutter
         run: |
           flutter pub get --enforce-lockfile
-          flutter build apk --debug --no-pub
+          flutter build apk --debug --config-only --no-pub
+          cd android
+          ./gradlew --no-daemon --no-configuration-cache --no-build-cache --rerun-tasks :app:assembleDebug
         env:
           CARGO_BUILD_JOBS: "2"
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
