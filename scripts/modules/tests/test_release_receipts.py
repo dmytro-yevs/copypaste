@@ -17,6 +17,8 @@ class ReleaseReceiptsTest(unittest.TestCase):
         module = {"id": module_id, "version": "0.1.0"}
         if supported_platforms is not None:
             module["supported_platforms"] = supported_platforms
+        if module_id == "copypaste.sms-codes":
+            module["app_versions"] = ">=1.1.0, <2.0.0"
         paths = []
         for platform, architecture in receipts.receipt_targets(module):
             package = root / f"CopyPasteModule-{module_id}-v0.1.0-{platform}-{architecture}.cpmodule"
@@ -28,6 +30,12 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 "package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(), "package_size_bytes": package.stat().st_size,
                 "cases_passed": 3, "signature_verified": True, "removal_completed_after_restart": True,
                 "restart_required": False,
+                **({
+                    "app_version": "1.1.0",
+                    "environment": "android-emulator",
+                    "api": "36",
+                    "internet_permission": False,
+                } if module_id == "copypaste.sms-codes" else {}),
                 **({
                     "glibc_floor": "2.39.0",
                     "effective_uid": 1001,
@@ -42,6 +50,19 @@ class ReleaseReceiptsTest(unittest.TestCase):
             with self.subTest(module=module_id), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 module, _ = self.fixtures(root, module_id)
+                receipts.verify_receipts(root, module, "a" * 40, "123")
+
+    def test_android_only_sms_receipt_requires_the_qualified_emulator_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module, paths = self.fixtures(root, "copypaste.sms-codes", ["android"])
+            self.assertEqual(len(paths), 1)
+            self.assertIn("android-x86_64", paths[0].name)
+            receipts.verify_receipts(root, module, "a" * 40, "123")
+            receipt = json.loads(paths[0].read_text())
+            receipt["internet_permission"] = True
+            paths[0].write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "isolated API 36"):
                 receipts.verify_receipts(root, module, "a" * 40, "123")
 
     def test_linux_receipts_require_every_released_native_architecture(self):

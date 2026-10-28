@@ -25,13 +25,26 @@ class QualifiedModulePublisherTest(unittest.TestCase):
     def test_accepts_only_first_party_versioned_module_tag(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "module.json"
-            manifest.write_text(json.dumps({"id": "copypaste.supabase", "version": "0.1.21"}))
-            self.assertEqual(publisher.module_tag(manifest), "module-copypaste.supabase-v0.1.21")
+            manifest.write_text(json.dumps({"id": "copypaste.sms-codes", "version": "0.1.21"}))
+            self.assertEqual(publisher.module_tag(manifest), "module-copypaste.sms-codes-v0.1.21")
             for module_id, version in (("copypaste.foreign", "0.1.21"),
                                        ("copypaste.supabase", "0.1.21-evil")):
                 manifest.write_text(json.dumps({"id": module_id, "version": version}))
                 with self.assertRaises(ValueError):
                     publisher.module_tag(manifest)
+
+    def test_rejects_any_qualification_artifact_that_is_not_a_package_or_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = json.loads((publisher.ROOT / "modules/sms-codes/module.json").read_text())
+            for architecture in ("arm", "aarch64", "x86_64"):
+                package = root / f"CopyPasteModule-{module['id']}-v{module['version']}-android-{architecture}.cpmodule"
+                package.write_bytes(b"package")
+            package.with_name(package.name + ".receipt.json").write_text("{}")
+            self.assertEqual(publisher.qualified_paths(root, module), sorted(root.iterdir()))
+            (root / "qualification.apk").write_bytes(b"test-only")
+            with self.assertRaisesRegex(ValueError, "unexpected artifact"):
+                publisher.qualified_paths(root, module)
 
     def test_draft_recovery_rejects_a_different_tag_or_commit(self):
         tag = "module-copypaste.supabase-v0.1.21"
