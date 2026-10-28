@@ -53,7 +53,7 @@ jobs:
           python3 scripts/release/verify-qualified-run.py \
             --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" \
             --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" \
-            --commit "$commit" --require-linux --require-compositor-runtime
+            --commit "$commit" --require-linux --require-compositor-runtime --require-sms
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
   publish:
@@ -65,6 +65,7 @@ jobs:
           - {module: supabase, artifact_pattern: 'provider-supabase-*'}
           - {module: semantic-search, artifact_pattern: 'provider-semantic-search-*'}
           - {module: ocr, artifact_pattern: 'ocr-*'}
+          - {module: sms-codes, artifact_pattern: 'sms-codes-*'}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -78,10 +79,14 @@ jobs:
         with:
           pattern: ${{ matrix.artifact_pattern }}
           merge-multiple: true
-          path: dist
+          path: qualified-modules
           run-id: ${{ inputs.qualified_run_id }}
           expected-commit: ${{ needs.preflight.outputs.commit }}
           github-token: ${{ github.token }}
+      - name: Stage module packages and native receipts
+        run: |
+          mkdir dist
+          cp qualified-modules/*.cpmodule qualified-modules/*.cpmodule.receipt.json dist/
       - name: Test module publication safety
         run: python3 -m unittest scripts/modules/tests/test_publish_qualified_release.py
       - name: Publish exact signed and native-qualified packages

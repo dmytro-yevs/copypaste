@@ -15,7 +15,7 @@ def eligible(run, jobs, artifacts, repository, commit, *, linux, compositor):
     # The full Linux origin/byte checks still run in the existing preflight
     # recovery path, after this authenticated source envelope is selected.
     verifier = runpy.run_path(str(Path(__file__).with_name("verify-qualified-run.py")))["verify"]
-    verifier(run, jobs, artifacts, repository, commit)
+    verifier(run, jobs, artifacts, repository, commit, require_sms=True)
     passed = {job["name"] for job in jobs["jobs"] if job.get("status") == "completed" and job.get("conclusion") == "success"}
     if linux and "Linux full parity evidence gate" not in passed:
         raise ValueError("candidate lacks native Linux qualification")

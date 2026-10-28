@@ -205,6 +205,34 @@ class ReleaseSafetyTest(unittest.TestCase):
                 with self.subTest(index=index, conclusion=conclusion), self.assertRaises(ValueError):
                     verify(*evidence, "owner/repo", "commit")
 
+    def test_sms_recovery_requires_native_execution_and_all_exact_source_packages(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        evidence = self.qualification()
+        with self.assertRaisesRegex(ValueError, "SMS native qualification"):
+            verify(*evidence, "owner/repo", "commit", require_sms=True)
+        evidence[1]["jobs"].append({
+            "name": "Build SMS Codes module / android-native",
+            "status": "completed", "conclusion": "success",
+        })
+        evidence[1]["total_count"] += 1
+        evidence[2]["artifacts"].extend({
+            "name": f"sms-codes-android-{target}", "expired": False,
+            "workflow_run": {"id": 123, "head_sha": "commit"},
+        } for target in ("arm", "aarch64", "x86_64", "native"))
+        verify(*evidence, "owner/repo", "commit", require_sms=True)
+        broken = deepcopy(evidence)
+        broken[1]["jobs"][-1]["conclusion"] = "skipped"
+        with self.assertRaisesRegex(ValueError, "SMS native qualification"):
+            verify(*broken, "owner/repo", "commit", require_sms=True)
+        for index in range(1, 5):
+            broken = deepcopy(evidence)
+            broken[2]["artifacts"][index]["workflow_run"]["head_sha"] = "stale"
+            with self.assertRaisesRegex(ValueError, "SMS qualification artifact"):
+                verify(*broken, "owner/repo", "commit", require_sms=True)
+        evidence[2]["artifacts"].pop()
+        with self.assertRaisesRegex(ValueError, "SMS qualification artifact"):
+            verify(*evidence, "owner/repo", "commit", require_sms=True)
+
     def test_linux_recovery_binds_skipped_builds_to_the_exact_origin(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
         evidence = self.qualification()
