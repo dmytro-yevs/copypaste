@@ -71,10 +71,18 @@ pub(crate) fn qualify_with_inference(
     let installed = manager
         .install(package)
         .map_err(|error| error.to_string())?;
+    if installed.id == "copypaste.sms-codes"
+        && manager
+            .has_sms_handler()
+            .map_err(|error| error.to_string())?
+    {
+        return Err("An SMS event module must be disabled after installation.".into());
+    }
     let cases_passed = match installed.id.as_str() {
         "copypaste.ocr" => qualify_ocr(&manager, fixtures, &installed.id)?,
         "copypaste.semantic-search" => semantic::qualify(&manager, fixtures, data, &installed.id)?,
         "copypaste.supabase" => supabase::qualify(&manager, &installed.id)?,
+        "copypaste.sms-codes" => qualify_sms(&manager, &installed.id)?,
         _ => return Err("No native qualification scenario exists for this module.".into()),
     };
     manager
@@ -161,6 +169,84 @@ fn qualify_ocr(manager: &ModuleManager, fixtures: &Path, id: &str) -> Result<usi
         }
     }
     Ok(cases.len())
+}
+
+fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
+    // Event modules are installed disabled. Exercise the signed package through
+    // the event dispatcher rather than calling its detector directly.
+    let mut published = Vec::new();
+    if manager
+        .dispatch_sms("Your verification code is 007123.", |code| {
+            published.push(code.to_owned());
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?
+        || !published.is_empty()
+    {
+        return Err("A newly installed SMS module accepted an incoming message.".into());
+    }
+    manager
+        .set_enabled(id, true)
+        .map_err(|error| error.to_string())?;
+    if !manager
+        .has_sms_handler()
+        .map_err(|error| error.to_string())?
+    {
+        return Err("The SMS module did not register an enabled event handler.".into());
+    }
+
+    if !manager
+        .dispatch_sms("Your verification code is 007123.", |code| {
+            published.push(code.to_owned());
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?
+        || published != ["007123"]
+    {
+        return Err("The SMS module did not publish the recognized code exactly once.".into());
+    }
+
+    if manager
+        .dispatch_sms("Your promo code is SAVE2026.", |code| {
+            published.push(code.to_owned());
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?
+        || published != ["007123"]
+    {
+        return Err("The SMS module published a non-authentication code.".into());
+    }
+
+    manager
+        .set_enabled(id, false)
+        .map_err(|error| error.to_string())?;
+    if manager
+        .has_sms_handler()
+        .map_err(|error| error.to_string())?
+        || manager
+            .dispatch_sms("Your verification code is 765432.", |code| {
+                published.push(code.to_owned());
+                Ok(())
+            })
+            .map_err(|error| error.to_string())?
+        || published != ["007123"]
+    {
+        return Err("A disabled SMS module accepted an incoming message.".into());
+    }
+    manager
+        .set_enabled(id, true)
+        .map_err(|error| error.to_string())?;
+    if !manager
+        .dispatch_sms("Your verification code is 765432.", |code| {
+            published.push(code.to_owned());
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?
+        || published != ["007123", "765432"]
+    {
+        return Err("The SMS module did not resume after being enabled again.".into());
+    }
+    Ok(3)
 }
 
 pub fn finish_after_restart(data: &Path, app_version: &str) -> Result<(), String> {
