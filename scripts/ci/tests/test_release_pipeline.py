@@ -314,6 +314,8 @@ class ReleasePipelineTest(unittest.TestCase):
         flutter = {"frameworkVersion": (ROOT / ".flutter-version").read_text().strip(),
                    "frameworkRevision": "a" * 40, "dartSdkVersion": "pinned"}
         original = metadata(ROOT, environment, "rustc 1.96.0", flutter)
+        self.assertEqual(original["inputs"]["config/release.json"],
+                         hashlib.sha256((ROOT / "config/release.json").read_bytes()).hexdigest())
         self.assertEqual(original["target_architectures"], ["armv7", "arm64", "x86_64"])
         self.assertNotIn("must-not-appear", json.dumps(original))
         for change in ({"BUILD_PROFILE": "debug"}, {"RUSTFLAGS": "-C opt-level=1"}):

@@ -114,17 +114,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          version="${pubspec_version%%+*}"
-          build_number="${pubspec_version#*+}"
-          android_version_code="$(awk -F'= *' '/android-release-version-code/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Cargo.toml)"
-          [[ "$version" == "$cargo_version" ]]
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$build_number" =~ ^[1-9][0-9]*$ ]]
-          [[ "$android_version_code" =~ ^[1-9][0-9]*$ ]]
-          (( android_version_code > 200000038 && android_version_code <= 2100000000 ))
-          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then [[ "$GITHUB_REF_NAME" == "v$version" ]]; fi
+          read -r version build_number android_version_code release_tag < <(python3 scripts/release/version.py values)
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then [[ "$GITHUB_REF_NAME" == "$release_tag" ]]; fi
           publish=false
           release_commit="$GITHUB_SHA"
           artifact_run_id="$GITHUB_RUN_ID"
@@ -141,7 +132,7 @@ jobs:
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true || "${GITHUB_REF_TYPE:-}" == tag ]]
-            git fetch --no-tags origin "refs/tags/v$version"
+            git fetch --no-tags origin "refs/tags/$release_tag"
             release_commit="$(git rev-list -n 1 FETCH_HEAD)"
             linux_required=false
             compositor_runtime_required=false
@@ -179,10 +170,10 @@ jobs:
             reuse_qualified=true
             publish=true
           elif [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
-            [[ "$GITHUB_REF_NAME" == "v$version" ]]
+            [[ "$GITHUB_REF_NAME" == "$release_tag" ]]
             publish=true
           elif [[ "${REQUESTED_PUBLISH:-false}" == true ]]; then
-            git fetch --no-tags origin "refs/tags/v$version"
+            git fetch --no-tags origin "refs/tags/$release_tag"
             [[ "$(git rev-list -n 1 FETCH_HEAD)" == "$GITHUB_SHA" ]]
             publish=true
           fi

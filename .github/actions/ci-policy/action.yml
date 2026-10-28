@@ -15,6 +15,9 @@ runs:
       python3 -m pip install -r scripts/ci/requirements.txt
       bash scripts/ci/install-actionlint.sh "$RUNNER_TEMP/ci-tools"
     shell: bash
+  - name: Verify canonical release identity
+    run: python3 scripts/release/version.py check
+    shell: bash
   - name: Validate workflow syntax, embedded shell and CI policy
     run: python3 scripts/ci/lint-workflows.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
     shell: bash

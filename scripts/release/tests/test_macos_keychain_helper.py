@@ -3,6 +3,7 @@ import hashlib
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,9 +23,12 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                       f"{error.stdout}\n{error.stderr}")
 
     def test_updated_daemon_reuses_one_key_and_one_helper_grant(self):
+        import pwd
+
         with tempfile.TemporaryDirectory(prefix="keychain-update-") as directory:
             root = Path(directory)
             self.environment = dict(os.environ, TMPDIR=str(root))
+            self.environment.pop("COPYPASTE_SIGN_MODE", None)
             search_before = self.run_command("security", "list-keychains", "-d", "user").stdout
             default_before = self.run_command("security", "default-keychain", "-d", "user").stdout
             def assert_preferences_unchanged():
@@ -40,6 +44,15 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
             }))
             support = root / "persistent support"
+            signing_script = root / "selfsign.sh"
+            shutil.copyfile(ROOT / "packaging/macos/selfsign.sh", signing_script)
+            install_command = [
+                "/usr/bin/sandbox-exec", "-D", f"TEST_ROOT={root}",
+                "-D", f"ACCOUNT_HOME={pwd.getpwuid(os.getuid()).pw_dir}",
+                "-f", str(ROOT / "packaging/macos/tests/install-sandbox.sb"),
+                "/usr/bin/env", f"TMPDIR={root}",
+                "/bin/bash", str(signing_script), str(app),
+            ]
             keychain = root / "device-secret.keychain-db"
             self.environment["COPYPASTE_KEYCHAIN_TEST_PATH"] = str(keychain)
             self.run_command("security", "create-keychain", "-p", "disposable-fixture", str(keychain))
@@ -62,16 +75,16 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                     temporary_home = root / f"temporary-home-{version}"
                     temporary_home.mkdir()
                     self.environment["HOME"] = str(temporary_home)
-                    self.environment["COPYPASTE_SIGN_MODE"] = "selfsigned"
-                    self.run_command("/bin/bash", str(ROOT / "packaging/macos/selfsign.sh"), str(app))
+                    self.run_command(*install_command, cwd=root)
                     self.assertFalse((temporary_home / "Library").exists())
+                    self.assertEqual(list((support / "signing").glob(".signing-home.*")), [])
+                    self.assertEqual(list((support / "signing").glob(".certificate.*")), [])
                     assert_preferences_unchanged()
 
                 compile_parent(1)
                 compile_helper("-Os")
                 # The production path resolver must ignore Homebrew's fake HOME.
                 resolved = self.run_command(str(binaries / "copypaste-keychain"), "support-directory").stdout.strip()
-                import pwd
                 self.assertEqual(resolved, str(Path(pwd.getpwuid(os.getuid()).pw_dir) /
                                                "Library/Application Support/com.copypaste.CopyPaste"))
                 self.assertEqual(self.run_command(str(binaries / "copypaste-keychain"),
@@ -85,6 +98,7 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 digest = hashlib.sha256(helper.read_bytes()).hexdigest()
                 first_identity = (support / "signing/certificate-sha1").read_text()
                 first_daemon = self.run_command("codesign", "-dvvv", str(binaries / "copypaste-daemon")).stderr
+                self.assertNotIn("Signature=adhoc", first_daemon)
                 self.run_command(str(binaries / "copypaste-daemon"), str(helper), "create")
                 self.run_command(str(binaries / "copypaste-daemon"), str(helper), "load")
                 # A genuinely different helper build must NOT replace the granted one.
@@ -102,15 +116,35 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                                            env=self.environment, capture_output=True, timeout=10)
                 self.assertEqual(duplicate.returncode, 2)
                 self.run_command(str(binaries / "copypaste-daemon"), str(helper), "load")
-                # A failed codesign must also restore the user's search list.
+                # The former auto mode must not report success after losing the
+                # signing identity. Keep both the identity and helper intact.
+                signing_keychain = next((support / "signing").glob("*.keychain*"))
+                password_file = support / "signing/keychain-password"
+                password = password_file.read_bytes()
+                self.run_command("security", "lock-keychain", str(signing_keychain))
+                password_file.write_text("incorrect fixture password")
+                self.environment["COPYPASTE_SIGN_MODE"] = "auto"
+                try:
+                    refused = subprocess.run(install_command, env=self.environment, cwd=root,
+                                             capture_output=True, timeout=30)
+                    self.assertEqual(refused.returncode, 1, (refused.stdout, refused.stderr))
+                    self.assertIn(b"could not preserve its local signing identity", refused.stderr)
+                    self.assertEqual(digest, hashlib.sha256(helper.read_bytes()).hexdigest())
+                    assert_preferences_unchanged()
+                finally:
+                    password_file.write_bytes(password)
+                    self.environment.pop("COPYPASTE_SIGN_MODE", None)
+                    self.run_command("security", "unlock-keychain", "-p", password.decode(),
+                                     str(signing_keychain))
+                # A failed codesign must leave the user's search list untouched.
                 daemon_binary = binaries / "copypaste-daemon"
                 daemon_binary.chmod(0o000)
-                failed_signing = subprocess.run(["/bin/bash", str(ROOT / "packaging/macos/selfsign.sh"),
-                                                str(app)], env=self.environment,
+                failed_signing = subprocess.run(install_command, env=self.environment, cwd=root,
                                                capture_output=True, timeout=30)
                 self.assertEqual(failed_signing.returncode, 1,
                                  (failed_signing.stdout, failed_signing.stderr))
                 self.assertIn(b"codesign rejected the certificate", failed_signing.stderr)
+                self.assertEqual(list((support / "signing").glob(".signing-home.*")), [])
                 assert_preferences_unchanged()
                 daemon_binary.chmod(0o755)
                 # Same executable/id, wrong signer: reject before Keychain access.
@@ -122,8 +156,7 @@ class MacosKeychainUpdateTest(unittest.TestCase):
                 self.assertEqual(rejected.stdout, b"")
                 # An invalid retained helper must stop installation, not rotate it.
                 helper.write_bytes(b"invalid retained helper")
-                stopped = subprocess.run(["/bin/bash", str(ROOT / "packaging/macos/selfsign.sh"),
-                                          str(app)], env=self.environment,
+                stopped = subprocess.run(install_command, env=self.environment, cwd=root,
                                          capture_output=True, timeout=30)
                 self.assertEqual(stopped.returncode, 1)
                 self.assertEqual(helper.read_bytes(), b"invalid retained helper")

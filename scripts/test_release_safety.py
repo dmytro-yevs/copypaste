@@ -700,16 +700,22 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn('[[ "$FLUTTER_VERSION" == 3.47.6 ]]', action)
 
     def test_stable_version_and_no_cloud_release_configuration(self):
+        identity = runpy.run_path(str(ROOT / "scripts/release/version.py"))
+        canonical = identity["load"](ROOT)
+        identity["check"](ROOT, canonical)
         cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
         pubspec = (ROOT / "apps/copypaste_flutter/pubspec.yaml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         workspace = re.search(r"\[workspace\.package\]\n([^\[]+)", cargo).group(1)
         version = re.search(r'^version = "([^"]+)"$', workspace, re.MULTILINE).group(1)
+        self.assertEqual(version, canonical["version"])
         self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
         match = re.search(r"^version: ([0-9.]+)\+([1-9][0-9]*)$", pubspec, re.MULTILINE)
         self.assertIsNotNone(match)
         self.assertEqual(version, match.group(1))
+        self.assertEqual(int(match.group(2)), canonical["build_number"])
         code = int(re.search(r"^android-release-version-code = ([0-9]+)$", cargo, re.MULTILINE).group(1))
+        self.assertEqual(code, canonical["android_version_code"])
         self.assertGreater(code, 200000038)
         self.assertLessEqual(code, 2100000000)
         self.assertNotIn("COPYPASTE_CLOUD_URL", release)
@@ -737,14 +743,11 @@ class ReleaseSafetyTest(unittest.TestCase):
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
-                self.assertEqual(len(rows), 6)
-                self.assertEqual(rows[0], "| Platform | Download |")
+                self.assertEqual(len(rows), 3)
+                self.assertEqual(rows[0], "| macOS | Windows | Linux | Android |")
                 self.assertEqual(
-                    [row.split("|")[1].strip() for row in rows[2:]],
-                    ["macOS", "Android", "Windows", "Linux"],
-                )
-                self.assertEqual(
-                    [row.count("](") for row in rows[2:]], [1, 3, 1, 3]
+                    [column.count("](") for column in rows[2].split("|")[1:-1]],
+                    [1, 1, 3, 3],
                 )
                 self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe", ".AppImage", ".deb", ".rpm")) for link in links))
                 for suffix in ("", "-arm64", "-armv7"):

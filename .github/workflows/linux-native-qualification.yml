@@ -104,11 +104,7 @@ jobs:
             previous_version="${previous_version%%+*}"
             upgrade_mode=prior_release
           fi
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          version="${version%%+*}"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          [[ "$version" == "$cargo_version" ]] || { echo "ERROR: Flutter and module-host app versions differ" >&2; exit 1; }
+          read -r version _ _ _ < <(python3 scripts/release/version.py values)
           for module_source in "$SUPABASE_MODULE_RUN_ID:.github/workflows/provider-module.yml:supabase" "$SEMANTIC_SEARCH_MODULE_RUN_ID:.github/workflows/provider-module.yml:semantic-search" "$OCR_MODULE_RUN_ID:.github/workflows/ocr-module.yml:ocr"; do
             IFS=: read -r module_run_id module_workflow module_name <<< "$module_source"
             [[ "$module_run_id" =~ ^[1-9][0-9]*$ ]]

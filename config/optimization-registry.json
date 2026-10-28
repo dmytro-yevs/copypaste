@@ -2732,17 +2732,27 @@
       "source_references": [
         "packaging/macos/keychain-access.c",
         "crates/copypaste-core/src/crypto/keystore/macos_helper.rs",
-        "packaging/macos/selfsign.sh"
+        "packaging/macos/selfsign.sh",
+        "packaging/macos/tests/install-sandbox.sb",
+        "scripts/release/tests/test_macos_keychain_helper.py"
       ],
-      "invariant": "Preserve one Keychain item and one accessor identity across app upgrades; authenticate both caller and accessor; reap the one-request process within the existing startup deadline. No resident helper or periodic work.",
+      "invariant": "Preserve one Keychain item and one accessor identity across app upgrades; authenticate both caller and accessor; reap the one-request process within the existing startup deadline. Sign with disposable search-list preferences inside the install sandbox, remove temporary signing files, and fail installation instead of automatically falling back to ad-hoc. Never read the login Keychain or modify the user's search list during signing. No resident helper or periodic work.",
       "next_step": "Collect same-artifact app, daemon and accessor physical footprint, CPU, startup peaks and repeated-start growth. Isolated functional fixtures do not qualify resource behavior; CPU, wakeup and recovery budgets remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_report",
+          "name": "macos-keychain-update-validation.json",
+          "sha256": "91d0c4e336d09cf1494badc49bc845e009ee8e5c536452d558b27bf234005384",
+          "source_state": "uncommitted_worktree_and_installed_1_1_0_build_40_repair",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "native_update_fixture_passed_installed_adoption_and_resource_evidence_pending"
+      "functional_validation": "native_sandbox_update_fixture_passed_installed_1_1_0_repaired_and_ready_with_existing_identity_and_keychain_metadata_preserved_resource_qualification_not_established"
     },
     {
       "id": "RUN-058",

@@ -1,0 +1,9 @@
+; Reproduce Homebrew's hidden login Keychain and restricted install writes.
+; Compilation and Keychain access by the caller fixture happen outside this
+; sandbox. Only the installer runs here, with disposable task-local artifacts.
+(version 1)
+(allow default)
+(deny file-read* (subpath (string-append (param "ACCOUNT_HOME") "/Library/Keychains")))
+(deny file-write*)
+(allow file-write* (subpath (param "TEST_ROOT"))
+    (literal "/dev/null") (literal "/dev/dtracehelper"))
