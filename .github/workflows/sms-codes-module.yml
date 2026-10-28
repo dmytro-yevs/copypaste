@@ -1,13 +1,72 @@
 name: Build SMS Codes module
 
 on:
+  workflow_call:
+    inputs:
+      publish: {required: false, type: boolean, default: false}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: {required: true}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: {required: true}
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the qualified Android packages
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: sms-codes-module-${{ inputs.publish && format('publish-{0}', github.ref) || github.run_id }}
+  cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      app_version: ${{ steps.metadata.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import tomllib
+          from pathlib import Path
+
+          module = json.loads(Path("modules/sms-codes/module.json").read_text())
+          application = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          if module["id"] != "copypaste.sms-codes" or module["supported_platforms"] != ["android"]:
+              raise ValueError("SMS Codes must remain an Android-only first-party module")
+          if module["app_versions"] != f">={application}, <2.0.0":
+              raise ValueError("SMS Codes must bind the current application release")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={module['version']}\napp_version={application}\n")
+          PY
+      - name: Verify the compatible application release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLICATION_VERSION: ${{ steps.metadata.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$APPLICATION_VERSION" > release.json
+          jq -e '.draft == false and .prerelease == false' release.json
+
   android:
+    needs: preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -25,13 +84,20 @@ jobs:
         with:
           toolchain: "1.96"
           targets: ${{ matrix.target }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: modules/sms-codes
-      - name: Check recognition and build Android package
+      - name: Test and prepare Android toolchain
         run: |
           cargo +1.96 test --manifest-path modules/sms-codes/Cargo.toml --locked
           python3 - <<'PY'
@@ -39,18 +105,86 @@ jobs:
           subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"],
                          input="y\n" * 100, text=True, check=True)
           PY
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066"
-          python3 scripts/modules/build-android-module.py --module-dir modules/sms-codes --library-name libcopypaste_module_sms_codes.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
-      - name: Sign separately installed module
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
+      - name: Build and verify target ABI
+        run: python3 scripts/modules/build-android-module.py --module-dir modules/sms-codes --library-name libcopypaste_module_sms_codes.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Sign exact production package
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          version="$(python3 -c 'import json; print(json.load(open("modules/sms-codes/module.json"))["version"])')"
-          python3 scripts/modules/package.py --module-dir modules/sms-codes --library modules/sms-codes/target/${{ matrix.target }}/release/libcopypaste_module_sms_codes.so --platform android --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.sms-codes-v${version}-android-${{ matrix.architecture }}.cpmodule"
+          mkdir -p dist
+          python3 scripts/modules/package.py --module-dir modules/sms-codes --library modules/sms-codes/target/${{ matrix.target }}/release/libcopypaste_module_sms_codes.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.sms-codes-v${{ needs.preflight.outputs.version }}-android-${{ matrix.architecture }}.cpmodule
+      - name: Build app-private Android qualification host
+        if: matrix.architecture == 'x86_64'
+        run: python3 scripts/modules/build-android-qualification.py --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.sms-codes-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/sms-codes-qualification.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          retention-days: 3
+          retention-days: 7
           name: sms-codes-android-${{ matrix.architecture }}
           if-no-files-found: error
-          path: dist/*.cpmodule
+          path: |
+            dist/*.cpmodule
+            dist/sms-codes-qualification.apk
+
+  android-native:
+    needs: [preflight, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: sms-codes-android-x86_64
+          path: dist
+      - name: Enable emulator acceleration
+        run: sudo chmod 666 /dev/kvm
+      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: python3 scripts/modules/qualify-android.py --apk dist/sms-codes-qualification.apk --app-version "${{ needs.preflight.outputs.app_version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.sms-codes-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          retention-days: 90
+          name: sms-codes-android-native
+          if-no-files-found: error
+          path: dist/*.receipt.json
+
+  publish:
+    needs: [preflight, android, android-native]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          pattern: sms-codes-*
+          merge-multiple: true
+          path: raw
+      - name: Stage only signed packages and native receipts
+        run: |
+          set -euo pipefail
+          mkdir dist
+          find raw -maxdepth 1 -type f \( -name '*.cpmodule' -o -name '*.cpmodule.receipt.json' \) -exec cp {} dist/ \;
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+      - name: Test module publication safety
+        run: python3 -m unittest scripts/modules/tests/test_publish_qualified_release.py scripts/modules/tests/test_release_receipts.py
+      - name: Publish exact signed and Android-qualified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/modules/publish-qualified-release.py --repository "$GITHUB_REPOSITORY" --directory dist --manifest modules/sms-codes/module.json --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"

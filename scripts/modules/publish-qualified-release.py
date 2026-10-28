@@ -11,6 +11,9 @@ import sys
 import time
 import tomllib
 
+sys.path.insert(0, str(Path(__file__).parent))
+from catalog import REQUIRED_TARGETS
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -18,13 +21,18 @@ SPEC = importlib.util.spec_from_file_location(
 )
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
+RECEIPT_SPEC = importlib.util.spec_from_file_location(
+    "verify_release_packages", ROOT / "scripts/modules/verify-release-packages.py"
+)
+receipt_verifier = importlib.util.module_from_spec(RECEIPT_SPEC)
+RECEIPT_SPEC.loader.exec_module(receipt_verifier)
 
 
 def module_tag(manifest_path: Path) -> str:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     module_id = manifest.get("id")
     version = manifest.get("version")
-    if module_id not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"}:
+    if module_id not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
         raise ValueError("unrecognized first-party module")
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
         raise ValueError("invalid module release version")
@@ -36,6 +44,23 @@ def validate_release(release: dict, tag: str, commit: str) -> None:
             or release.get("prerelease") is not False or release.get("draft") not in (True, False)
             or type(release.get("id")) is not int or release["id"] <= 0):
         raise ValueError("module release tag or source commit differs from qualification")
+
+
+def qualified_paths(directory: Path, module: dict) -> list[Path]:
+    paths = sorted(directory.iterdir())
+    if not paths or any(not path.is_file() or path.is_symlink() for path in paths):
+        raise ValueError("qualified module files are missing or invalid")
+    package_names = {
+        f"CopyPasteModule-{module['id']}-v{module['version']}-{platform}-{architecture}.cpmodule"
+        for platform, architecture in REQUIRED_TARGETS if platform in module["supported_platforms"]
+    }
+    receipt_names = {
+        f"CopyPasteModule-{module['id']}-v{module['version']}-{platform}-{architecture}.cpmodule.receipt.json"
+        for platform, architecture in receipt_verifier.receipt_targets(module)
+    }
+    if {path.name for path in paths} != package_names | receipt_names:
+        raise ValueError("qualified module release contains an unexpected artifact")
+    return paths
 
 
 def release_by_id(repository: str, release_id: int) -> dict:
@@ -60,10 +85,12 @@ def publish(repository: str, directory: Path, manifest: Path, commit: str, run_i
         raise ValueError("invalid qualified repository or commit")
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
         raise ValueError("invalid qualification run")
+    module = json.loads(manifest.read_text())
     tag = module_tag(manifest)
     application_version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-    if json.loads(manifest.read_text())["app_versions"] != f">={application_version}, <2.0.0":
+    if module["app_versions"] != f">={application_version}, <2.0.0":
         raise ValueError("module source does not bind the current application release")
+    qualified_paths(directory, module)
     subprocess.run([
         sys.executable, str(ROOT / "scripts/modules/verify-release-packages.py"),
         "--directory", str(directory), "--commit", commit, "--run-id", run_id,
@@ -71,12 +98,11 @@ def publish(repository: str, directory: Path, manifest: Path, commit: str, run_i
     ], check=True)
     release = publisher.find_release(repository, tag)
     if release is None:
+        notes = f"{module['title']} module for CopyPaste {application_version}."
         subprocess.run([
             "gh", "release", "create", tag, "--repo", repository, "--target", commit,
-            "--latest=false", "--draft", "--title", f"CopyPaste {tag}",
-            "--notes", (f"Optional first-party module for CopyPaste {application_version}. "
-                        f"Exact production-signed packages from qualified run {run_id}, "
-                        "with native receipts for macOS, Windows, Linux x86_64, and Android."),
+            "--latest=false", "--draft", "--title", f"{module['title']} {module['version']}",
+            "--notes", notes,
         ], check=True)
         release = wait_for_created_release(repository, tag)
     if release is None:

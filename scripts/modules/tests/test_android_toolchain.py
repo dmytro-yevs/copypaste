@@ -12,6 +12,21 @@ SPEC.loader.exec_module(builder)
 
 
 class AndroidToolchainTest(unittest.TestCase):
+    def test_sms_x86_64_builds_the_native_qualification_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ndk = root / "ndk"
+            module = root / "sms-codes"
+            ndk.mkdir()
+            module.mkdir()
+            (ndk / "source.properties").write_text("Pkg.Revision = 29.0.13846066")
+            argv = ["build", "--architecture", "x86_64", "--ndk", str(ndk), "--module-dir", str(module)]
+            result = subprocess.CompletedProcess([], 0, " LOAD 0 0 0 0 0 0 0x4000\n")
+            with patch.object(sys, "argv", argv), patch.object(builder.platform, "system", return_value="Linux"), patch.object(builder.subprocess, "run", return_value=result) as run:
+                builder.main()
+            qualification = [call.args[0] for call in run.call_args_list if "copypaste-module-qualification" in call.args[0]]
+            self.assertEqual(len(qualification), 1)
+
     def test_ndk_archiver_and_indexer_are_bound_for_each_android_abi(self):
         for architecture, (target, _) in builder.TARGETS.items():
             with self.subTest(architecture=architecture), tempfile.TemporaryDirectory() as directory:

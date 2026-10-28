@@ -29,7 +29,7 @@ def main():
     packages = list(args.directory.glob("*.cpmodule"))
     # Package authentication also checks all file hashes and platform parity.
     module = build_catalog(packages, args.release_tag)["modules"][0]
-    if module["id"] not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"}:
+    if module["id"] not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
         raise ValueError("No native qualification contract exists for this module")
     verify_receipts(args.directory, module, args.commit, args.run_id)
     print(f"Verified exact signed {module['id']} package receipts for every shipped native platform")
@@ -43,6 +43,12 @@ def receipt_targets(module):
 
 
 def verify_receipts(directory, module, commit, run_id):
+    expected_app_version = None
+    if module["id"] == "copypaste.sms-codes":
+        matched = re.fullmatch(r">=([0-9]+\.[0-9]+\.[0-9]+), <2\.0\.0", module.get("app_versions", ""))
+        if matched is None:
+            raise ValueError("SMS Codes must bind one stable application version")
+        expected_app_version = matched.group(1)
     for platform, architecture in receipt_targets(module):
         name = f"CopyPasteModule-{module['id']}-v{module['version']}-{platform}-{architecture}.cpmodule"
         package = directory / name
@@ -56,6 +62,12 @@ def verify_receipts(directory, module, commit, run_id):
                 or receipt["restart_required"] is not False
                 or not receipt["removal_completed_after_restart"]):
             raise ValueError(f"Native evidence does not qualify the exact {platform}/{architecture} package")
+        if expected_app_version is not None and (
+                receipt.get("app_version") != expected_app_version
+                or receipt.get("environment") != "android-emulator"
+                or receipt.get("api") != "36"
+                or receipt.get("internet_permission") is not False):
+            raise ValueError("SMS Codes requires an isolated API 36 Android emulator receipt")
         if platform == "linux" and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", receipt.get("glibc_floor", "")):
             raise ValueError(f"Linux native evidence is missing the package glibc ABI floor for {architecture}")
         uid = receipt.get("effective_uid")
