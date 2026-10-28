@@ -26,7 +26,8 @@ class MacosKeychainUpdateTest(unittest.TestCase):
         import pwd
 
         with tempfile.TemporaryDirectory(prefix="keychain-update-") as directory:
-            root = Path(directory)
+            # Seatbelt matches real paths; macOS runners use /var -> /private/var.
+            root = Path(directory).resolve()
             self.environment = dict(os.environ, TMPDIR=str(root))
             self.environment.pop("COPYPASTE_SIGN_MODE", None)
             search_before = self.run_command("security", "list-keychains", "-d", "user").stdout
