@@ -10,7 +10,7 @@ import subprocess
 
 
 def metadata(root, environment, rustc, flutter):
-    files = ["Cargo.toml", "Cargo.lock", ".flutter-version", "apps/copypaste_flutter/pubspec.lock",
+    files = ["config/release.json", "Cargo.toml", "Cargo.lock", ".flutter-version", "apps/copypaste_flutter/pubspec.lock",
              "apps/copypaste_flutter/android/app/build.gradle.kts", "apps/copypaste_flutter/android/gradle.properties"]
     hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files}
     flags = {name: environment.get(name, "") for name in

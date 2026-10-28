@@ -242,9 +242,7 @@ jobs:
       - name: Build the unsigned native Flutter bundle and declared package formats
         run: |
           set -euo pipefail
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          build_number="${version#*+}"
-          version="${version%%+*}"
+          read -r version build_number _ _ < <(python3 scripts/release/version.py values)
           chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
           scripts/release/build-linux-flutter.sh "$version" "$build_number" "${{ matrix.architecture }}"
           python3 scripts/release/verify-linux-runtime-baseline.py \

@@ -37,12 +37,7 @@ esac
 }
 [[ -f "$CONTRACT" ]] || { echo "ERROR: missing Linux release contract" >&2; exit 1; }
 
-workspace_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/[\"[:space:]]/, "", $3); print $3; exit}' "$ROOT/Cargo.toml")"
-pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$APP_ROOT/pubspec.yaml")"
-[[ "$workspace_version" == "$VERSION" && "${pubspec_version%%+*}" == "$VERSION" ]] || {
-  echo "ERROR: Cargo.toml and pubspec.yaml must both identify version $VERSION" >&2
-  exit 1
-}
+python3 "$ROOT/scripts/release/version.py" check --version "$VERSION" --build-number "$BUILD_NUMBER"
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 export CARGO_BUILD_JOBS=2

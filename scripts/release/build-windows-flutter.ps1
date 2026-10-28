@@ -13,19 +13,8 @@ Set-StrictMode -Version Latest
 if ($env:OS -ne "Windows_NT") { throw "Windows release packaging requires Windows" }
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $appRoot = Join-Path $root "apps\copypaste_flutter"
-$cargoToml = Get-Content -LiteralPath (Join-Path $root "Cargo.toml") -Raw
-$pubspec = Get-Content -LiteralPath (Join-Path $appRoot "pubspec.yaml") -Raw
-$cargoMatch = [regex]::Match(
-    $cargoToml,
-    '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^\"]+)"'
-)
-$pubspecMatch = [regex]::Match($pubspec, '(?m)^version:\s*([^\s]+)\s*$')
-if (-not $cargoMatch.Success -or $cargoMatch.Groups[1].Value -cne $Version) {
-    throw "Cargo.toml does not identify version $Version"
-}
-if (-not $pubspecMatch.Success -or $pubspecMatch.Groups[1].Value -cne "$Version+$BuildNumber") {
-    throw "pubspec.yaml does not identify version $Version+$BuildNumber"
-}
+& python (Join-Path $root "scripts/release/version.py") check --version $Version --build-number $BuildNumber
+if ($LASTEXITCODE -ne 0) { throw "Release identity does not match the requested Windows build" }
 
 Push-Location $root
 try {

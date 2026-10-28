@@ -1,7 +1,8 @@
 name: copypaste_flutter
 description: "CopyPaste Flutter application."
 publish_to: 'none'
-version: 1.1.0+40
+# Generated from config/release.json by scripts/release/version.py.
+version: 1.1.1+41
 
 environment:
   sdk: ">=3.11.0 <4.0.0"

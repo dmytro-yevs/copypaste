@@ -65,8 +65,8 @@ cask "copypaste" do
   #    that is genuinely dangerous applied anywhere else.
   #
   # 2. It re-signs the bundle with a self-signed certificate generated once on
-  #    this machine. That makes a TCC grant survive an update; the script falls
-  #    back to `--sign -` if the certificate path fails.
+  #    this machine. That makes a TCC grant survive an update. A signing failure
+  #    aborts installation instead of losing grants through an ad-hoc fallback.
   #
   # Why a script in the bundle rather than commands here. The logic has real
   # failure handling in it — roughly two hundred lines — and inlining that into
@@ -78,22 +78,13 @@ cask "copypaste" do
   # still quarantined at this point, and invoking the interpreter explicitly
   # takes Gatekeeper out of the question entirely.
   #
-  # Homebrew 7 uses declarative steps. The signing helper also needs access
-  # to the app's own support directory for its persistent local keychain.
-  # A failing run aborts installation, preserving the previous contract.
+  # Homebrew 7 uses declarative steps. Only the app's own support directory is
+  # needed: signing uses disposable preferences, never the login Keychain or
+  # the user's search list. A failed run aborts installation.
   postflight_steps do
-    if_path_exists "CopyPaste.app/Contents/Resources/selfsign.sh", base: :appdir do
-      run "/bin/bash",
-          args: ["{{appdir}}/CopyPaste.app/Contents/Resources/selfsign.sh", "{{appdir}}/CopyPaste.app"],
-          writable_paths: ["~/Library/Application Support/com.copypaste.CopyPaste"]
-    end
-    unless_path_exists "CopyPaste.app/Contents/Resources/selfsign.sh", base: :appdir do
-      run "/bin/bash",
-          args: ["-c",
-                 "/usr/bin/xattr -dr com.apple.quarantine \"$1\" 2>/dev/null || true; " \
-                 "exec /usr/bin/codesign --force --sign - --timestamp=none \"$1\"",
-                 "--", "{{appdir}}/CopyPaste.app"]
-    end
+    run "/bin/bash",
+        args: ["{{appdir}}/CopyPaste.app/Contents/Resources/selfsign.sh", "{{appdir}}/CopyPaste.app"],
+        writable_paths: ["~/Library/Application Support/com.copypaste.CopyPaste"]
   end
 
   # On `brew upgrade`/`reinstall`, Homebrew uninstalls the old version by

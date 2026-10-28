@@ -68,8 +68,8 @@ pub(super) fn path() -> Result<Option<PathBuf>, CryptoError> {
     }
     let own = designated_requirement(&executable)?;
     if own.starts_with("cdhash ") {
-        // Preserve the documented ad-hoc installation fallback. The installer
-        // warns that this fallback cannot retain grants across updates.
+        // Explicit developer ad-hoc installs cannot retain grants across
+        // updates. Ordinary installations require the stable local identity.
         return Ok(None);
     }
     let identifier = "identifier \"com.copypaste.copypaste-daemon\"";

@@ -53,10 +53,7 @@ jobs:
           set -euo pipefail
           commit="$(git rev-parse HEAD)"
           [[ "$commit" == "${{ github.event.pull_request.head.sha }}" && "$commit" =~ ^[0-9a-f]{40}$ ]]
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          version="${version%%+*}"
-          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$version" == "$cargo_version" ]]
+          read -r version _ _ _ < <(python3 scripts/release/version.py values)
           {
             echo "version=$version"
             echo "commit=$commit"
@@ -460,9 +457,7 @@ jobs:
       - name: Build the unsigned native Flutter bundle and every package format
         run: |
           set -euo pipefail
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          build_number="${version#*+}"
-          version="${version%%+*}"
+          read -r version build_number _ _ < <(python3 scripts/release/version.py values)
           chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
           scripts/release/build-linux-flutter.sh "$version" "$build_number" "${{ matrix.architecture }}"
           python3 scripts/release/verify-linux-runtime-baseline.py \
@@ -477,8 +472,7 @@ jobs:
       - name: Install and verify the exact RPM preview on Fedora
         run: |
           set -euo pipefail
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          version="${version%%+*}"
+          read -r version _ _ _ < <(python3 scripts/release/version.py values)
           scripts/release/test-linux-rpm.sh "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.rpm" "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

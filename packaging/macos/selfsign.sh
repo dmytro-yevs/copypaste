@@ -42,16 +42,11 @@
 # `system_command` in a cask is `SystemCommand.run!`, which is must-succeed: a
 # non-zero exit raises and Homebrew rolls the install back. So:
 #
-#   exit 0  — the bundle carries a valid signature. Either ours, or (if anything
-#             about the certificate path failed) a plain ad-hoc one, which needs
-#             no key and always works. The app launches either way.
-#   exit 1  — the bundle does NOT carry a valid signature. This is the one case
-#             where aborting the install beats completing it, because the
-#             alternative is an app that cannot be opened.
+#   exit 0  — the bundle and persistent Keychain helper share the local signing
+#             identity. Explicit developer-only ad-hoc installs are the exception.
+#   exit 1  — stable signing failed. Homebrew must roll back instead of accepting
+#             an update that loses the user's Keychain and Accessibility grants.
 #   exit 2  — called wrongly, or on the wrong platform.
-#
-# "A failed re-sign must not leave an unlaunchable app" is enforced by always
-# having the ad-hoc fallback available, not by copying the bundle aside.
 set -uo pipefail
 
 CERT_CN="CopyPaste Local Signing"
@@ -102,8 +97,9 @@ done
 # Escape hatch for the test procedure in ADR-0001, which installs the same build
 # both ways and compares whether the Accessibility grant survived.
 #   COPYPASTE_SIGN_MODE=adhoc       — skip the certificate entirely
-#   COPYPASTE_SIGN_MODE=selfsigned  — fail loudly instead of falling back
-SIGN_MODE="${COPYPASTE_SIGN_MODE:-auto}"
+#   COPYPASTE_SIGN_MODE=selfsigned  — require the stable local identity (default)
+# The former `auto` value also requires stable signing; it cannot lose grants.
+SIGN_MODE="${COPYPASTE_SIGN_MODE:-selfsigned}"
 case "$SIGN_MODE" in
     auto|adhoc|selfsigned) ;;
     *) say "ERROR: COPYPASTE_SIGN_MODE must be auto, adhoc or selfsigned (got: ${SIGN_MODE})"; exit 2 ;;
@@ -124,8 +120,8 @@ esac
 
 # Resolve the real account home only after the downloaded helper can execute.
 if [ -x "$SOURCE_KEYCHAIN_HELPER" ]; then
-    # Security tools also use HOME for their search-list preferences. Merely
-    # moving the signing material leaves codesign in Homebrew's empty domain.
+    # Keep account paths stable under Homebrew's temporary HOME. Bundle signing
+    # uses its own disposable search-list preferences below.
     ACCOUNT_HOME="$("$SOURCE_KEYCHAIN_HELPER" home-directory)" || exit 1
     case "$ACCOUNT_HOME" in
         /*) export HOME="$ACCOUNT_HOME" ;;
@@ -167,30 +163,16 @@ sign_bundle() (
     keychain_args=()
     if [ -n "$keychain" ]; then
         keychain_args=(--keychain "$keychain")
-        # --keychain limits identity lookup; codesign still requires the
-        # identity's certificate chain on the user's search list on macOS 14.
-        # Scope the addition to this signing call and restore it on every exit.
-        local listing entry present
-        local -a original_search
-        original_search=()
-        present=false
-        listing="$(/usr/bin/security list-keychains -d user)" || return 1
-        while IFS= read -r entry; do
-            entry="${entry#"${entry%%[![:space:]]*}"}"
-            entry="${entry%"${entry##*[![:space:]]}"}"
-            [ -n "$entry" ] || continue
-            case "$entry" in
-                \"*\") entry="${entry#\"}"; entry="${entry%\"}" ;;
-                *) echo "ERROR: cannot parse the Keychain search list."; return 1 ;;
-            esac
-            original_search+=("$entry")
-            if [ "$entry" = "$keychain" ]; then present=true; fi
-        done <<< "$listing"
-        [ "${#original_search[@]}" -gt 0 ] || return 1
-        if [ "$present" = false ]; then
-            trap '/usr/bin/security list-keychains -d user -s "${original_search[@]}" || exit 1' EXIT
-            /usr/bin/security list-keychains -d user -s "${original_search[@]}" "$keychain" || return 1
-        fi
+        # codesign needs the certificate chain on its search list, even with
+        # --keychain. Homebrew denies access to the user's login Keychain, so
+        # its visible search list can be empty. Use disposable preferences for
+        # this subshell instead of reading or changing the user's search list.
+        local signing_home
+        signing_home="$(mktemp -d "${SUPPORT}/.signing-home.XXXXXX")" || return 1
+        trap 'rm -rf "$signing_home"' EXIT
+        mkdir -p "$signing_home/Library/Preferences" || return 1
+        export HOME="$signing_home"
+        /usr/bin/security list-keychains -d user -s "$keychain" || return 1
     fi
 
     for bin in $INNER_BINARIES; do
@@ -300,7 +282,7 @@ generate_certificate() {
     local kc="$1"
     local password="$2"
     local tmp status
-    tmp="$(mktemp -d)" || return 1
+    tmp="$(mktemp -d "${SUPPORT}/.certificate.XXXXXX")" || return 1
     chmod 700 "$tmp"
     generate_certificate_inner "$kc" "$password" "$tmp"
     status=$?
@@ -415,26 +397,10 @@ ensure_identity() {
 # ---------------------------------------------------------------------------
 # 4. Run
 # ---------------------------------------------------------------------------
-fall_back_to_adhoc() {
+signing_failed() {
     local reason="$1"
-
-    if [ "$SIGN_MODE" = "selfsigned" ]; then
-        say "ERROR: COPYPASTE_SIGN_MODE=selfsigned, and the certificate path failed:"
-        say "       ${reason}"
-        exit 1
-    fi
-
-    say "CopyPaste: could not sign with a local certificate — ${reason}."
-    say "           Falling back to an ad-hoc signature. The app works either way, but"
-    say "           any permission granted to it will have to be granted again after"
-    say "           every update. 'brew reinstall --cask copypaste' retries this."
-
-    if sign_adhoc; then
-        exit 0
-    fi
-
-    say "ERROR: CopyPaste.app could not be signed at all and would not open."
-    say "       The install was stopped rather than completed."
+    say "ERROR: CopyPaste could not preserve its local signing identity — ${reason}."
+    say "       Installation stopped to preserve Keychain and Accessibility grants."
     exit 1
 }
 
@@ -447,11 +413,11 @@ if [ "$SIGN_MODE" = "adhoc" ]; then
 fi
 
 IDENTITY_INFO="$(ensure_identity)" \
-    || fall_back_to_adhoc "the signing certificate could not be created"
+    || signing_failed "the signing certificate could not be created or unlocked"
 IDENTITY_SHA1="$(printf '%s\n' "$IDENTITY_INFO" | sed -n 1p)"
 KEYCHAIN="$(printf '%s\n' "$IDENTITY_INFO" | sed -n 2p)"
 if [ -z "$IDENTITY_SHA1" ] || [ -z "$KEYCHAIN" ]; then
-    fall_back_to_adhoc "the signing certificate was not found after being created"
+    signing_failed "the signing certificate was not found after being created"
 fi
 
 # Sign by SHA-1 rather than by name: unambiguous if the user ever holds another
@@ -469,7 +435,7 @@ SIGN_OUTPUT="$(sign_bundle "$IDENTITY_SHA1" "$KEYCHAIN")" || {
         say "           to settle. To trust it for code signing (your own password, not"
         say "           an administrator's), see the ADR's test procedure."
     fi
-    fall_back_to_adhoc "codesign rejected the certificate"
+    signing_failed "codesign rejected the certificate"
 }
 
 # Report a changed certificate. The only ways this happens are expiry and a
