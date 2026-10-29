@@ -1,0 +1,44 @@
+name: Ubuntu ARM64
+
+on:
+  push:
+    branches: [main, codex/ubuntu-arm64-runner]
+  workflow_dispatch:
+
+concurrency:
+  group: ubuntu-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  portable-rust:
+    name: Portable Rust (Ubuntu ARM64)
+    if: github.repository == 'dmytro-yevs/copypaste' && github.actor == 'dmytro-yevs' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, Linux, ARM64, ubuntu-server, copypaste]
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify native unprivileged ARM64 execution
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(id -u)" -ne 0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: '1.96'
+          components: clippy
+      - name: Test portable Rust contracts on ARM64
+        run: |
+          python3 scripts/ci/timed.py testing -- cargo +1.96 test --locked \
+            -p copypaste-clock -p copypaste-feedback -p copypaste-retry \
+            -p copypaste-fs -p copypaste-ipc -p copypaste-module-sdk
+      - name: Lint portable Rust targets on ARM64
+        run: |
+          cargo +1.96 clippy --locked --all-targets \
+            -p copypaste-clock -p copypaste-feedback -p copypaste-retry \
+            -p copypaste-fs -p copypaste-ipc -p copypaste-module-sdk -- -D warnings
