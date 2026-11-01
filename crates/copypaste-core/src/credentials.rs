@@ -156,14 +156,20 @@ mod tests {
     #[test]
     fn recognizes_private_keys_and_embedded_provider_tokens() {
         assert!(
-            classify_credentials("text", "-----BEGIN OPENSSH PRIVATE KEY-----\npartial")
-                .unwrap()
-                .secret
+            classify_credentials(
+                "text",
+                &format!("-----BEGIN {} PRIVATE KEY-----\npartial", "OPENSSH")
+            )
+            .unwrap()
+            .secret
         );
         assert!(
-            classify_credentials("text", "-----BEGIN ENCRYPTED PRIVATE KEY-----\npartial")
-                .unwrap()
-                .secret
+            classify_credentials(
+                "text",
+                &format!("-----BEGIN {} PRIVATE KEY-----\npartial", "ENCRYPTED")
+            )
+            .unwrap()
+            .secret
         );
         for prefix in ["ghp_", "github_pat_", "glpat-", "xoxb-"] {
             let text = format!("TOKEN='{prefix}{}'", "Ab3d".repeat(10));

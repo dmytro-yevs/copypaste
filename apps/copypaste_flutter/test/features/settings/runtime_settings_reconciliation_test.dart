@@ -64,33 +64,36 @@ void main() {
     },
   );
 
-  test('configuration events reconcile notification decisions before the next capture', () async {
-    await repository.updateSettings(
-      const RuntimeSettingsChange(notifyOnCopy: true),
-    );
-    repository.emit(1);
-    repository.captures.add('clip');
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.settings!.notifyOnCopy, isTrue);
-    expect(notifications.notifications, 1);
-    final reads = repository.reads;
-    repository.captures.add('next-clip');
-    await Future<void>.delayed(Duration.zero);
-    expect(notifications.notifications, 2);
-    expect(
-      repository.reads,
-      reads,
-      reason: 'Captures must not poll configuration',
-    );
-    await repository.updateSettings(
-      const RuntimeSettingsChange(notifyOnCopy: false),
-    );
-    repository.emit(2);
-    repository.captures.add('silent-clip');
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.settings!.notifyOnCopy, isFalse);
-    expect(notifications.notifications, 2);
-  });
+  test(
+    'configuration events reconcile notification decisions before the next capture',
+    () async {
+      await repository.updateSettings(
+        const RuntimeSettingsChange(notifyOnCopy: true),
+      );
+      repository.emit(1);
+      repository.captures.add('clip');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.settings!.notifyOnCopy, isTrue);
+      expect(notifications.notifications, 1);
+      final reads = repository.reads;
+      repository.captures.add('next-clip');
+      await Future<void>.delayed(Duration.zero);
+      expect(notifications.notifications, 2);
+      expect(
+        repository.reads,
+        reads,
+        reason: 'Captures must not poll configuration',
+      );
+      await repository.updateSettings(
+        const RuntimeSettingsChange(notifyOnCopy: false),
+      );
+      repository.emit(2);
+      repository.captures.add('silent-clip');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.settings!.notifyOnCopy, isFalse);
+      expect(notifications.notifications, 2);
+    },
+  );
 
   test(
     'reconnect reads configuration even when the runtime revision restarts',
@@ -104,25 +107,30 @@ void main() {
     },
   );
 
-  test('a failed configuration refresh cannot reuse an obsolete notification policy', () async {
-    await controller.setNotifyOnCopy(true);
-    await repository.updateSettings(
-      const RuntimeSettingsChange(notifyOnCopy: false),
-    );
-    final delayed = Completer<RuntimeSettings>();
-    repository.nextRead = delayed;
-    repository.emit(1);
-    await Future<void>.delayed(Duration.zero);
-    repository.captures.add('old-policy');
-    delayed.completeError(StateError('configuration temporarily unavailable'));
-    await Future<void>.delayed(Duration.zero);
-    expect(notifications.notifications, 0);
-    expect(controller.errorMessage, contains('could not be refreshed'));
-    repository.emit(2);
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.settings!.notifyOnCopy, isFalse);
-    expect(controller.errorMessage, isNull);
-  });
+  test(
+    'a failed configuration refresh cannot reuse an obsolete notification policy',
+    () async {
+      await controller.setNotifyOnCopy(true);
+      await repository.updateSettings(
+        const RuntimeSettingsChange(notifyOnCopy: false),
+      );
+      final delayed = Completer<RuntimeSettings>();
+      repository.nextRead = delayed;
+      repository.emit(1);
+      await Future<void>.delayed(Duration.zero);
+      repository.captures.add('old-policy');
+      delayed.completeError(
+        StateError('configuration temporarily unavailable'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(notifications.notifications, 0);
+      expect(controller.errorMessage, contains('could not be refreshed'));
+      repository.emit(2);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.settings!.notifyOnCopy, isFalse);
+      expect(controller.errorMessage, isNull);
+    },
+  );
 
   test(
     'a pre-mutation configuration read cannot undo a newer local change',
