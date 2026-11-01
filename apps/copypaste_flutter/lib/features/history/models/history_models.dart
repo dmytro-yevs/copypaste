@@ -12,6 +12,7 @@ enum HistoryClipKind {
   code,
   json,
   path,
+  credentials,
   image,
   file,
   other,
@@ -27,6 +28,7 @@ extension HistoryClipKindX on HistoryClipKind {
     HistoryClipKind.code => 'Code',
     HistoryClipKind.json => 'JSON',
     HistoryClipKind.path => 'Path',
+    HistoryClipKind.credentials => 'Credentials',
     HistoryClipKind.image => 'Image',
     HistoryClipKind.file => 'File',
     HistoryClipKind.other => 'Other',
@@ -40,7 +42,8 @@ extension HistoryClipKindX on HistoryClipKind {
     HistoryClipKind.phone ||
     HistoryClipKind.code ||
     HistoryClipKind.json ||
-    HistoryClipKind.path => true,
+    HistoryClipKind.path ||
+    HistoryClipKind.credentials => true,
     HistoryClipKind.image ||
     HistoryClipKind.file ||
     HistoryClipKind.other => false,
@@ -74,6 +77,10 @@ class HistoryQuery {
     this.origin,
     this.sourceApp,
     this.sort = HistorySort.newest,
+    this.capturedFrom,
+    this.capturedBefore,
+    this.tagIds = const [],
+    this.untaggedOnly = false,
   });
 
   final String search;
@@ -82,6 +89,12 @@ class HistoryQuery {
   final String? origin;
   final String? sourceApp;
   final HistorySort sort;
+  final DateTime? capturedFrom;
+  final DateTime? capturedBefore;
+  final List<String> tagIds;
+  final bool untaggedOnly;
+  bool get hasDateFilter => capturedFrom != null || capturedBefore != null;
+  bool get hasTagFilter => tagIds.isNotEmpty || untaggedOnly;
 
   bool get hasSearch => search.trim().isNotEmpty;
 
@@ -95,6 +108,11 @@ class HistoryQuery {
     String? sourceApp,
     bool clearSourceApp = false,
     HistorySort? sort,
+    DateTime? capturedFrom,
+    DateTime? capturedBefore,
+    bool clearDates = false,
+    List<String>? tagIds,
+    bool? untaggedOnly,
   }) {
     return HistoryQuery(
       search: search ?? this.search,
@@ -103,6 +121,10 @@ class HistoryQuery {
       origin: clearOrigin ? null : origin ?? this.origin,
       sourceApp: clearSourceApp ? null : sourceApp ?? this.sourceApp,
       sort: sort ?? this.sort,
+      capturedFrom: clearDates ? null : capturedFrom ?? this.capturedFrom,
+      capturedBefore: clearDates ? null : capturedBefore ?? this.capturedBefore,
+      tagIds: tagIds ?? this.tagIds,
+      untaggedOnly: untaggedOnly ?? this.untaggedOnly,
     );
   }
 }
@@ -169,10 +191,12 @@ class HistoryFacets {
   const HistoryFacets({
     this.originDevices = const [],
     this.sourceApps = const [],
+    this.tags = const [],
   });
 
   final List<HistoryDeviceFacet> originDevices;
   final List<HistorySourceAppFacet> sourceApps;
+  final List<HistoryTag> tags;
 }
 
 /// Compact item data returned by a page query.
@@ -291,3 +315,15 @@ class HistorySourceAppIcon {
 }
 
 enum HistoryRuntimeEvent { itemsChanged, unavailable }
+
+class HistoryTag {
+  const HistoryTag({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
+class HistoryTags {
+  const HistoryTags({this.tags = const [], this.assignments = const {}});
+  final List<HistoryTag> tags;
+  final Map<String, List<String>> assignments;
+}

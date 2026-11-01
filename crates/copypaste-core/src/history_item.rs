@@ -109,7 +109,11 @@ pub(crate) fn from_payload(
         content_type: row.content_type.clone(),
         content_class,
         semantic_kind: semantic
-            .filter(|_| !privacy.secret || !preview)
+            .filter(|value| {
+                !privacy.secret
+                    || !preview
+                    || value.kind == copypaste_ipc::SemanticKind::Credentials
+            })
             .map(|classification| classification.kind),
         color_rgba: semantic
             .filter(|_| !privacy.secret || !preview)

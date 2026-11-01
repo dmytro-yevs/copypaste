@@ -1095,7 +1095,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const ButtonStyle.destructive(),
                 ),
                 onPressed: widget.controller.busy ? null : _confirmRestore,
-                leading: const AppIconFrame(child: Icon(LucideIcons.history)),
+                leading: const AppIconFrame(
+                  child: Icon(LucideIcons.clipboardList),
+                ),
                 child: const Text('Restore'),
               ),
             ),
@@ -1597,7 +1599,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _confirmRestore() async {
     await AppOverlays.showActionDialog(
       context,
-      icon: LucideIcons.history,
+      icon: LucideIcons.clipboardList,
       title: const Text('Replace local history?'),
       content: const Text(
         'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.',

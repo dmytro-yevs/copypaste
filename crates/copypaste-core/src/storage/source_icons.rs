@@ -35,6 +35,7 @@ pub(super) fn normalise(
         params![id, icon.png_base64, icon.width, icon.height, captured_at],
     )?;
     let remaining = if parsed.file.is_some()
+        || parsed.credentials
         || !parsed.privacy.is_empty()
         || parsed.secret_override.is_some()
     {
@@ -145,6 +146,7 @@ pub(super) mod tests {
         let mut row = item(text, timestamp);
         row.app_bundle_id = app.map(str::to_owned);
         row.payload_metadata = PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,
@@ -234,6 +236,7 @@ pub(super) mod tests {
     fn synced_clips_normalise_assets_without_losing_wire_metadata() {
         let store = store();
         let metadata = PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,

@@ -27,7 +27,7 @@ const List<AppNavigationDestination> appNavigationDestinations =
       AppNavigationDestination(
         destination: AppDestination.history,
         label: 'History',
-        icon: LucideIcons.history,
+        icon: LucideIcons.clipboardList,
       ),
       AppNavigationDestination(
         destination: AppDestination.devices,

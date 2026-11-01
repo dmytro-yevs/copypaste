@@ -124,13 +124,20 @@ impl<'a> CapturePolicy<'a> {
             _ => return false,
         };
 
-        capture.privacy.allows(self.settings)
-            && !self.settings.private_mode
-            && capture.source_policy.allows(
+        if !within_limit
+            || !capture.privacy.allows(self.settings)
+            || self.settings.private_mode
+            || !capture.source_policy.allows(
                 &self.settings.excluded_app_bundle_ids,
                 capture.app_bundle_id.as_deref(),
             )
-            && within_limit
+        {
+            return false;
+        }
+        let detected =
+            copypaste_core::classify_credentials(&capture.content_type, &capture.content)
+                .unwrap_or_default();
+        capture.privacy.union(detected).allows(self.settings)
     }
 }
 
@@ -469,6 +476,15 @@ mod tests {
         ] {
             assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
         }
+    }
+
+    #[test]
+    fn detected_credentials_obey_the_secret_capture_setting() {
+        let capture = super::Capture::text("-----BEGIN OPENSSH PRIVATE KEY-----\npartial".into());
+        let mut settings = ConfigData::default();
+        assert!(!CapturePolicy::new(&settings).allows_materialized(&capture));
+        settings.skip_secret = false;
+        assert!(CapturePolicy::new(&settings).allows_materialized(&capture));
     }
 
     #[cfg(feature = "dev-fake-clipboard")]

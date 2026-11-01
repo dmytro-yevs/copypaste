@@ -17,11 +17,14 @@ abstract final class AppOverlays {
   static const drawerBodyAnchor = Symbol('app-drawer-body');
   static const Color scrimColor = Color(0x99000000);
 
+  static ValueListenable<bool> drawerVisibilityOf(BuildContext context) =>
+      _AppDrawerConfiguration.sessionFor(context);
+
   static DrawerConfiguration drawerConfiguration(BuildContext context) {
     final registry = OverlayAnchorRegistry.of(context);
     final side =
         MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector;
-    return DrawerConfiguration(
+    return _AppDrawerConfiguration(
       // Header actions target the body overlay through the library registry.
       anchor: registry.find(drawerBodyAnchor) == null
           ? null
@@ -61,8 +64,18 @@ abstract final class AppOverlays {
   static PopoverConfiguration selectPopoverConfiguration(
     BuildContext context, {
     PopoverConstraint widthConstraint = PopoverConstraint.anchorFixedSize,
+    Anchor? anchor,
+    bool modal = true,
+    bool follow = true,
   }) {
-    return PopoverConfiguration(
+    final parent = OverlayConfiguration.maybeOf(context);
+    return _AppPopoverConfiguration(
+      regionGroupId: parent is PopoverConfiguration
+          ? parent.regionGroupId
+          : Object(),
+      modal: modal,
+      follow: follow,
+      anchor: anchor,
       alignment: Alignment.topLeft,
       anchorAlignment: Alignment.bottomLeft,
       offset: const Offset(0, AppSpacing.xs),
@@ -100,6 +113,66 @@ abstract final class AppOverlays {
           width: AppOverlaySize.dialogMaxWidth,
           child: builder(dialogContext),
         ),
+      ),
+    ).future;
+  }
+
+  /// Compact editors anchor to their control and use the shared drawer on
+  /// narrow screens. The editor owns its scrollable body and fixed actions.
+  static Future<T?> showCompactEditor<T>(
+    BuildContext context, {
+    Object? anchor,
+    double? maxWidth,
+    required WidgetBuilder builder,
+  }) {
+    final compact =
+        MediaQuery.sizeOf(context).width < AdaptiveBreakpoints.inspector;
+    Widget content(BuildContext context) => ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth:
+            (maxWidth ?? AppOverlaySize.dialogMaxWidth) - AppSpacing.md * 2,
+        maxHeight:
+            MediaQuery.sizeOf(context).height *
+            AppOverlaySize.drawerHeightFactor,
+      ),
+      child: builder(context),
+    );
+    if (compact) {
+      return showOverlay<T>(
+        context,
+        drawerConfiguration(context),
+        builder: (context) => AppMotion.keyboardInsets(
+          context,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight:
+                  MediaQuery.sizeOf(context).height *
+                  AppOverlaySize.drawerHeightFactor,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: SizedBox(width: double.infinity, child: builder(context)),
+            ),
+          ),
+        ),
+      ).future;
+    }
+    return showOverlay<T>(
+      context,
+      selectPopoverConfiguration(
+        context,
+        widthConstraint: PopoverConstraint.flexible,
+        anchor: anchor == null
+            ? ContextAnchor(context)
+            : LinkedAnchor(anchor, registry: OverlayAnchorRegistry.of(context)),
+        follow: anchor != null,
+        modal: false,
+      ),
+      builder: (context) => SurfaceCard(
+        theme: const CardTheme(padding: EdgeInsets.all(AppSpacing.md)),
+        surfaceOpacity: 1,
+        surfaceBlur: 0,
+        child: content(context),
       ),
     ).future;
   }
@@ -317,4 +390,84 @@ abstract final class AppOverlays {
       borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
     );
   }
+}
+
+/// Applies the shared popup surface to stock shadcn select and menu content.
+class _AppPopoverConfiguration extends PopoverConfiguration {
+  const _AppPopoverConfiguration({
+    super.anchor,
+    required super.alignment,
+    super.anchorAlignment,
+    super.offset,
+    super.widthConstraint,
+    super.showDuration,
+    super.dismissDuration,
+    super.overlayBarrier,
+    super.modal,
+    super.follow,
+    super.regionGroupId,
+  });
+
+  @override
+  OverlayConfiguration get nonAdaptive => this;
+
+  @override
+  OverlayConfiguration adaptiveConversion(BuildContext context) => this;
+
+  @override
+  OverlayCompleter<T?> show<T>(BuildContext context, WidgetBuilder builder) =>
+      super.show<T>(
+        context,
+        (popupContext) => AppTheme.popupSurface(
+          popupContext,
+          child: Builder(builder: builder),
+        ),
+      );
+}
+
+/// Each application window has one drawer session, shared by all entry points.
+class _AppDrawerConfiguration extends DrawerConfiguration {
+  const _AppDrawerConfiguration({
+    super.anchor,
+    super.position,
+    super.expands,
+    super.draggable,
+    super.barrierDismissible,
+    super.transformBackdrop,
+    super.showDragHandle,
+    super.dragHandleSize,
+    super.surfaceOpacity,
+    super.surfaceBlur,
+    super.barrierColor,
+    super.borderRadius,
+  });
+
+  static final _sessions = Expando<_DrawerSession>();
+
+  static _DrawerSession sessionFor(BuildContext context) {
+    final window = Overlay.of(context, rootOverlay: true);
+    return _sessions[window] ??= _DrawerSession();
+  }
+
+  @override
+  OverlayCompleter<T?> show<T>(BuildContext context, WidgetBuilder builder) {
+    final session = sessionFor(context);
+    final previous = session.active;
+    if (previous != null && !previous.isCompleted) previous.remove();
+    final drawer = super.show<T>(context, builder);
+    session.active = drawer;
+    session.value = true;
+    drawer.future.whenComplete(() {
+      if (identical(session.active, drawer)) {
+        session.active = null;
+        session.value = false;
+      }
+    });
+    return drawer;
+  }
+}
+
+class _DrawerSession extends ValueNotifier<bool> {
+  _DrawerSession() : super(false);
+  OverlayCompleter? active;
 }

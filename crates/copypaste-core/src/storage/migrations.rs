@@ -54,6 +54,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/008_file_operations.sql"),
         transform: |_| Ok(()),
     },
+    Migration {
+        version: 9,
+        sql: include_str!("migrations/009_history_organization.sql"),
+        transform: |_| Ok(()),
+    },
 ];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
@@ -210,6 +215,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,
@@ -249,6 +255,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,
@@ -287,7 +294,7 @@ mod tests {
     #[test]
     fn version_one_history_survives_upgrade_to_the_current_version() {
         use super::super::{connection::apply_key, Store};
-        assert_eq!(LATEST_VERSION, 8);
+        assert_eq!(LATEST_VERSION, 9);
         let keyring = crate::Keyring::from_secret(&[37; 32]);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
@@ -428,6 +435,7 @@ mod tests {
         apply_key(&conn, &KEY).unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,

@@ -1,3 +1,4 @@
+import 'history_tags_dialog.dart';
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import '../../transfers/file_operations_view.dart';
@@ -306,6 +307,39 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                           ),
                       ],
                     ),
+                    if (clip.pinned && controller.tags.available)
+                      Tooltip(
+                        tooltip: (_) => const TooltipContainer(
+                          child: Text('Manage clip tags'),
+                        ),
+                        child: Button.outline(
+                          key: const ValueKey('history-inspector-tags'),
+                          style: AppTheme.actionButtonStyle(
+                            ButtonStyle.outline(
+                              density: iconOnly
+                                  ? ButtonDensity.icon
+                                  : ButtonDensity.normal,
+                            ),
+                          ),
+                          onPressed: () => showHistoryTagsDialog(
+                            context,
+                            controller: controller,
+                            clipIds: [clip.id],
+                          ),
+                          leading: iconOnly
+                              ? null
+                              : const Icon(
+                                  LucideIcons.tags,
+                                  size: AppIconSize.sm,
+                                ),
+                          child: iconOnly
+                              ? const Icon(
+                                  LucideIcons.tags,
+                                  size: AppIconSize.sm,
+                                )
+                              : const Text('Tags'),
+                        ),
+                      ),
                     if (controller.canDownloadSelected)
                       _DownloadButton(
                         controller: controller,

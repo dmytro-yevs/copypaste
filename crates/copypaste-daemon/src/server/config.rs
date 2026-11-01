@@ -34,7 +34,11 @@ where
 {
     let before = {
         let settings = state.settings.get();
-        (settings.private_mode_epoch(), settings.health().cloned())
+        (
+            settings.clone(),
+            settings.private_mode_epoch(),
+            settings.health().cloned(),
+        )
     };
     match state
         .settings
@@ -43,7 +47,11 @@ where
         Ok(config) => {
             let changed = {
                 let settings = state.settings.get();
-                (settings.private_mode_epoch(), settings.health().cloned()) != before
+                (
+                    settings.clone(),
+                    settings.private_mode_epoch(),
+                    settings.health().cloned(),
+                ) != before
             };
             if changed {
                 state.note_capture_state_changed();
@@ -169,6 +177,27 @@ mod tests {
     use super::*;
     use crate::testutil::test_state;
     use copypaste_ipc::Method;
+
+    #[test]
+    fn ordinary_configuration_changes_publish_one_authoritative_watch_revision() {
+        let (state, _dir) = test_state("config-watch");
+        let mut events = state.subscribe_runtime();
+        let patch = ConfigPatch {
+            notify_on_copy: Some(true),
+            ..Default::default()
+        };
+        assert!(set(&state, 1, &patch).ok);
+        let event = events
+            .try_recv()
+            .expect("configuration changes wake subscribers");
+        assert!(event.capture.is_some());
+        assert!(events.try_recv().is_err());
+        assert!(set(&state, 2, &patch).ok);
+        assert!(
+            events.try_recv().is_err(),
+            "unchanged configuration stays quiet"
+        );
+    }
 
     fn call(state: &AppState, method: Method) -> Response {
         crate::server::dispatch::dispatch_store(state, 1, method)

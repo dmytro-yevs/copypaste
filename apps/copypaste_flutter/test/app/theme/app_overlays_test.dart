@@ -81,6 +81,50 @@ void main() {
     }),
   );
 
+  testWidgets('opening another drawer replaces the previous drawer', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: Builder(
+            builder: (context) => Button.primary(
+              child: const Text('First drawer'),
+              onPressed: () => showOverlay<void>(
+                context,
+                AppOverlays.drawerConfiguration(context),
+                builder: (context) => Button.primary(
+                  child: const Text('Second drawer'),
+                  onPressed: () => showOverlay<void>(
+                    context,
+                    AppOverlays.drawerConfiguration(context),
+                    builder: (context) => Button.primary(
+                      onPressed: () => closeDrawer(context),
+                      child: const Text('Close second'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('First drawer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Second drawer'));
+    await tester.pumpAndSettle();
+    expect(find.text('Second drawer'), findsNothing);
+    expect(find.text('Close second'), findsOneWidget);
+    await tester.tap(find.text('Close second'));
+    await tester.pumpAndSettle();
+    expect(find.text('Second drawer'), findsNothing);
+    expect(find.text('Close second'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'drawers use the right edge from 800 pixels and bottom edge below it',
     (tester) async {

@@ -196,7 +196,7 @@ fn secret_dedup_upgrades_remove_indexes_and_never_declassify() {
 }
 
 #[test]
-fn privacy_survives_sync_and_blocks_automatic_clipboard_writes() {
+fn privacy_survives_sync_and_allows_automatic_clipboard_writes() {
     let keys = Keyring::from_secret(&[92; 32]);
     let sender = Store::open_in_memory(&keys.db_key()).unwrap();
     let receiver_keys = Keyring::from_secret(&[93; 32]);
@@ -222,13 +222,30 @@ fn privacy_survives_sync_and_blocks_automatic_clipboard_writes() {
     assert!(received.clipboard_privacy().secret);
     assert!(receiver.search("remote", 10).unwrap().is_empty());
     assert!(receiver.semantic_work("model:test").unwrap().is_none());
-    InstantClipboard::default().apply(
+    let gate = InstantClipboard::default();
+    let mut copied = false;
+    assert!(gate.apply(
         &receiver,
         &receiver_keys,
         &received,
         ConfigData::default,
-        |_| panic!("a secret must never be automatically copied"),
-    );
+        |payload| {
+            let copypaste_core::ClipboardPayload::Text(text) = payload else {
+                panic!("expected the original secret text");
+            };
+            assert_eq!(text.as_str(), "synthetic remote secret");
+            copied = true;
+            Ok(())
+        },
+    ));
+    assert!(copied);
+    assert!(!gate.apply(
+        &receiver,
+        &receiver_keys,
+        &received,
+        ConfigData::default,
+        |_| panic!("a replay must not rewrite the clipboard"),
+    ));
     // A newer ordinary version of the same content cannot downgrade classification.
     incoming.created_at += 100;
     incoming.payload_metadata = None;
@@ -261,6 +278,7 @@ fn icon_normalization_and_sync_hydration_preserve_classification() {
         .write_to(&mut image, image::ImageFormat::Png)
         .unwrap();
     let metadata = PayloadMetadata {
+        credentials: false,
         secret_override: None,
         privacy: ClipboardPrivacy {
             secret: true,

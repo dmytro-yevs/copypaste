@@ -7,6 +7,7 @@ use std::ops::ControlFlow;
 use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
+use super::content_bytes::content_bytes_sql;
 use super::model::{
     is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
     StoredItem,
@@ -19,6 +20,7 @@ fn refresh_privacy(
     conn: &rusqlite::Connection,
     item: &mut StoredItem,
     privacy: copypaste_ipc::ClipboardPrivacy,
+    credentials: bool,
     search_text: Option<&str>,
 ) -> rusqlite::Result<()> {
     let previous = item.clipboard_privacy();
@@ -36,17 +38,26 @@ fn refresh_privacy(
         .as_deref()
         .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type));
     let repair_text = item.payload_metadata.is_some() && parsed.is_none() && search_text.is_some();
-    if combined.is_empty() && !repair_text {
+    if combined.is_empty() && !repair_text && !credentials {
         return Ok(());
     }
     let mut metadata = parsed.unwrap_or_default();
+    let previous_credentials = metadata.credentials;
+    metadata.credentials |= credentials;
     metadata.privacy = combined;
     item.payload_metadata = metadata.to_json(&item.content_type);
     // Classification is versioned too: even a same-tick recopy must reach peers.
-    if combined != previous || repair_text {
+    if combined != previous || repair_text || metadata.credentials != previous_credentials {
         item.created_at = item.created_at.saturating_add(1);
     }
-    conn.execute("UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, content_bytes = LENGTH(content_ciphertext) + LENGTH(COALESCE(?2, '')) WHERE id = ?1", rusqlite::params![item.id, item.payload_metadata, item.created_at])?;
+    conn.execute(
+        concat!(
+            "UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, content_bytes = ",
+            content_bytes_sql!("?2"),
+            " WHERE id = ?1"
+        ),
+        rusqlite::params![item.id, item.payload_metadata, item.created_at],
+    )?;
     if combined.secret {
         delete_fts_row_in_tx(conn, &item.id)?;
         conn.execute(
@@ -154,14 +165,16 @@ impl Store {
         );
         let search_text = item.search_text.take();
         self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed))
+            .map(|(ingested, _)| ingested)
     }
 
+    /// Returns the row and whether its durable version changed, in one transaction.
     pub(crate) fn insert_or_bump_late_sealed<E, F>(
         &self,
         mut item: NewItem,
         search_text: Option<&str>,
         seal: F,
-    ) -> Result<Ingest, E>
+    ) -> Result<(Ingest, bool), E>
     where
         E: From<StoreError>,
         F: FnOnce() -> Result<(Vec<u8>, Vec<u8>), E>,
@@ -171,6 +184,11 @@ impl Store {
             .as_deref()
             .map(crate::PayloadMetadata::privacy_from_json)
             .unwrap_or_default();
+        let credentials = item
+            .payload_metadata
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+            .is_some_and(|metadata| metadata.credentials);
         let indexable = copypaste_ipc::content_type::is_text(&item.content_type) && !privacy.secret;
         let search_text = search_text.filter(|text| indexable && !text.trim().is_empty());
 
@@ -204,11 +222,14 @@ impl Store {
                 &source_icon_id,
             )
             .map_err(StoreError::from)?;
-            refresh_privacy(&tx, &mut bumped, privacy, search_text).map_err(StoreError::from)?;
+            refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
+                .map_err(StoreError::from)?;
             super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                 .map_err(StoreError::from)?;
             tx.commit().map_err(StoreError::from)?;
-            return Ok(Ingest::Bumped(bumped));
+            let changed = bumped.created_at != existing.created_at
+                || bumped.payload_metadata != existing.payload_metadata;
+            return Ok((Ingest::Bumped(bumped), changed));
         }
 
         let (nonce, content_ciphertext) = seal()?;
@@ -271,10 +292,12 @@ impl Store {
                         .map_err(StoreError::from)?;
                         super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                             .map_err(StoreError::from)?;
-                        refresh_privacy(&tx, &mut bumped, privacy, search_text)
+                        refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
                             .map_err(StoreError::from)?;
                         tx.commit().map_err(StoreError::from)?;
-                        Ok(Ingest::Bumped(bumped))
+                        let changed = bumped.created_at != existing.created_at
+                            || bumped.payload_metadata != existing.payload_metadata;
+                        Ok((Ingest::Bumped(bumped), changed))
                     }
                     None => Err(StoreError::from(e).into()),
                 };
@@ -284,25 +307,28 @@ impl Store {
 
         tx.commit().map_err(StoreError::from)?;
 
-        Ok(Ingest::Inserted(StoredItem {
-            source_icon_id,
-            id,
-            content_ciphertext,
-            nonce,
-            content_type: item.content_type,
-            content_hash: item.content_hash,
-            created_at: item.created_at,
-            pinned: false,
-            pin_order: None,
-            pin_updated_at: 0,
-            deleted: false,
-            // A capture on this device. The empty sentinel rather than a device
-            // id the store has no business knowing — see `versions::origin_or`.
-            origin_device_id: String::new(),
-            app_bundle_id: item.app_bundle_id,
-            app_name: item.app_name,
-            payload_metadata: item.payload_metadata,
-        }))
+        Ok((
+            Ingest::Inserted(StoredItem {
+                source_icon_id,
+                id,
+                content_ciphertext,
+                nonce,
+                content_type: item.content_type,
+                content_hash: item.content_hash,
+                created_at: item.created_at,
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+                deleted: false,
+                // A capture on this device. The empty sentinel rather than a device
+                // id the store has no business knowing — see `versions::origin_or`.
+                origin_device_id: String::new(),
+                app_bundle_id: item.app_bundle_id,
+                app_name: item.app_name,
+                payload_metadata: item.payload_metadata,
+            }),
+            true,
+        ))
     }
 
     /// [`Store::insert_or_bump`] for callers that do not need to know which of
@@ -563,6 +589,7 @@ mod tests {
         let mut candidate = item("not read", T0);
         let icon = source_icon();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,

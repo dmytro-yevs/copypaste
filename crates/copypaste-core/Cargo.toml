@@ -46,6 +46,8 @@ image = { workspace = true, features = ["jpeg", "gif", "webp", "bmp"] }
 png.workspace = true
 url.workspace = true
 csscolorparser.workspace = true
+html2text.workspace = true
+rclip-rtf.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.
 tempfile.workspace = true

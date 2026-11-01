@@ -13,6 +13,7 @@ abstract final class HistoryClipPresentation {
     HistoryClipKind.code => LucideIcons.code,
     HistoryClipKind.json => LucideIcons.braces,
     HistoryClipKind.path => LucideIcons.route,
+    HistoryClipKind.credentials => LucideIcons.keyRound,
     HistoryClipKind.image => LucideIcons.image,
     HistoryClipKind.file => LucideIcons.file,
     HistoryClipKind.other => LucideIcons.box,

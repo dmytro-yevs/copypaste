@@ -28,24 +28,18 @@ pub(super) fn export(state: &AppState, id: u64, limit: u32) -> Response {
 
 pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Response {
     let settings = state.settings.get().clone();
-    // An import keeps each item's original `created_at` so a restored history
-    // keeps its order — which puts every one of them *below* the cloud upload
-    // floor on a device that has already synced. Taken before the items move.
-    let oldest = items.iter().map(|item| item.created_at).min();
-    match copypaste_core::transfer::import_with_current_retention(
+    match copypaste_core::transfer::import_with_current_retention_outcome(
         &state.store,
         &state.keyring,
         &settings,
         || state.settings.get().clone(),
         items,
     ) {
-        Ok(result) => {
-            if result.inserted > 0 {
-                if let Some(oldest) = oldest {
-                    announce_import(state, oldest);
-                }
+        Ok(outcome) => {
+            if let Some(oldest) = outcome.oldest_changed_at {
+                announce_import(state, oldest);
             }
-            Response::ok(id, ResponseData::Import(result))
+            Response::ok(id, ResponseData::Import(outcome.data))
         }
         Err(copypaste_core::ImportError::Empty) => {
             Response::err(id, ErrorCode::InvalidRequest, MSG_IMPORT_EMPTY)
@@ -84,9 +78,9 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
 /// Imported capture stamps usually predate an existing upload floor. Reset it
 /// to the oldest committed row before waking either transport, or those rows
 /// remain stored locally but are never offered to sync.
-fn announce_import(state: &AppState, oldest_inserted_at: i64) {
-    state.modules.note_version(oldest_inserted_at);
-    state.p2p.node().note_local_version(oldest_inserted_at);
+fn announce_import(state: &AppState, oldest_changed_at: i64) {
+    state.modules.note_version(oldest_changed_at);
+    state.p2p.node().note_local_version(oldest_changed_at);
     state.note_local_change();
 }
 
@@ -172,12 +166,14 @@ mod tests {
             &state,
             vec![
                 ExportItem {
+                    privacy: Default::default(),
                     content: "older".into(),
                     content_type: "text".into(),
                     created_at: old,
                     pinned: false,
                 },
                 ExportItem {
+                    privacy: Default::default(),
                     content: "newer".into(),
                     content_type: "text".into(),
                     created_at: old + 60_000,
@@ -219,12 +215,14 @@ mod tests {
             &state,
             vec![
                 ExportItem {
+                    privacy: Default::default(),
                     content: "committed before failure".into(),
                     content_type: "text".into(),
                     created_at: oldest,
                     pinned: false,
                 },
                 ExportItem {
+                    privacy: Default::default(),
                     content: "rejected second item".into(),
                     content_type: "text".into(),
                     created_at: oldest + 60_000,
@@ -274,6 +272,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn duplicate_privacy_and_pin_changes_publish_while_replays_stay_quiet() {
+        let (state, _dir) = test_state("duplicate-import");
+        let row = copypaste_core::ingest_into(
+            &state.store,
+            &state.keyring,
+            "synthetic secret",
+            "text",
+            1000,
+            &Default::default(),
+        )
+        .unwrap()
+        .into_item();
+        let mut item = export_of(&state).items.remove(0);
+        item.privacy.secret = true;
+        let floor = copypaste_core::now_ms();
+        let key = "module:copypaste.supabase:cloud_upload_floor_ms";
+        state.meta.set_state_ms(key, floor).unwrap();
+        let mut events = state.subscribe();
+        let response = import_of(&state, vec![item.clone()]);
+        let Some(ResponseData::Import(result)) = response.data else {
+            panic!("import response expected")
+        };
+        assert_eq!((result.inserted, result.skipped_duplicate), (0, 1));
+        let secret = state.store.get(&row.id).unwrap().unwrap();
+        assert!(secret.clipboard_privacy().secret);
+        assert_eq!(state.meta.state_ms(key).unwrap(), secret.created_at);
+        assert_eq!(
+            events.try_recv().unwrap().event,
+            copypaste_ipc::EventKind::Items
+        );
+
+        state.meta.set_state_ms(key, floor).unwrap();
+        assert!(import_of(&state, vec![item.clone()]).ok);
+        assert!(events.try_recv().is_err());
+        assert_eq!(state.meta.state_ms(key).unwrap(), floor);
+
+        item.pinned = true;
+        assert!(import_of(&state, vec![item]).ok);
+        assert!(state.store.get(&row.id).unwrap().unwrap().pinned);
+        assert_eq!(
+            events.try_recv().unwrap().event,
+            copypaste_ipc::EventKind::Items
+        );
+        assert_eq!(state.meta.state_ms(key).unwrap(), secret.created_at);
+    }
+
+    #[test]
+    fn duplicate_privacy_change_is_announced_before_a_later_import_failure() {
+        let (state, _dir) = test_state("partial-duplicate-import");
+        let row = copypaste_core::ingest_into(
+            &state.store,
+            &state.keyring,
+            "synthetic secret",
+            "text",
+            1000,
+            &Default::default(),
+        )
+        .unwrap()
+        .into_item();
+        let mut duplicate = export_of(&state).items.remove(0);
+        duplicate.privacy.secret = true;
+        let mut later = duplicate.clone();
+        later.content = "rejected later item".into();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_later_import BEFORE INSERT ON clipboard_items BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+        let key = "module:copypaste.supabase:cloud_upload_floor_ms";
+        state
+            .meta
+            .set_state_ms(key, copypaste_core::now_ms())
+            .unwrap();
+        let mut events = state.subscribe();
+        assert!(!import_of(&state, vec![duplicate, later]).ok);
+        let changed = state.store.get(&row.id).unwrap().unwrap();
+        assert!(changed.clipboard_privacy().secret);
+        assert_eq!(state.meta.state_ms(key).unwrap(), changed.created_at);
+        assert_eq!(
+            events.try_recv().unwrap().event,
+            copypaste_ipc::EventKind::Items
+        );
+    }
+
     /// Both bounds are refusals a client has to be able to tell from a fault.
     #[test]
     fn an_empty_or_oversized_batch_is_an_invalid_request_and_writes_nothing() {
@@ -284,6 +364,7 @@ mod tests {
         );
 
         let item = ExportItem {
+            privacy: Default::default(),
             content: "x".into(),
             content_type: "text".into(),
             created_at: 1,
@@ -300,6 +381,7 @@ mod tests {
         let response = import_of(
             &state,
             vec![ExportItem {
+                privacy: Default::default(),
                 content: "plain content".into(),
                 content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),
                 created_at: 1,

@@ -148,7 +148,7 @@ class DevicesController extends ChangeNotifier {
   String? get verificationCode => _verificationCode;
   bool get canConfirmPairing => _verificationCode != null && !_locallyConfirmed;
 
-  /// Display-safe peer connection state. Expired observations fail closed.
+  /// Keep confirmed Offline during renewal; positive presence must be current.
   DeviceConnectionState peerConnectionState(DevicePeer peer) =>
       _connectionState(peer.details?.presence, fallbackOnline: peer.online);
 
@@ -226,6 +226,7 @@ class DevicesController extends ChangeNotifier {
           ? DeviceConnectionState.visible
           : DeviceConnectionState.notSeen;
     }
+    if (_isConfirmedOffline(presence)) return DeviceConnectionState.offline;
     if (!_isFresh(presence.freshUntil)) return DeviceConnectionState.unknown;
     return switch (presence.state) {
       DevicePresence.online
@@ -233,13 +234,14 @@ class DevicesController extends ChangeNotifier {
               presence.trust == DeviceObservationTrust.authenticated =>
         DeviceConnectionState.online,
       DevicePresence.online => DeviceConnectionState.visible,
-      DevicePresence.offline
-          when presence.provenance == DeviceObservationProvenance.measured &&
-              presence.trust == DeviceObservationTrust.authenticated =>
-        DeviceConnectionState.offline,
       _ => DeviceConnectionState.unknown,
     };
   }
+
+  bool _isConfirmedOffline(DevicePresenceObservation presence) =>
+      presence.state == DevicePresence.offline &&
+      presence.provenance == DeviceObservationProvenance.measured &&
+      presence.trust == DeviceObservationTrust.authenticated;
 
   String _latencyLabel(DeviceDetails? details) {
     final latency = details?.latency;
@@ -279,8 +281,13 @@ class DevicesController extends ChangeNotifier {
   }
 
   Iterable<DateTime> _freshnessDeadlines(DeviceDetails? details) sync* {
-    final presenceDeadline = details?.presence?.freshUntil;
-    if (presenceDeadline != null) yield presenceDeadline;
+    final presence = details?.presence;
+    final presenceDeadline = presence?.freshUntil;
+    if (presence != null &&
+        presenceDeadline != null &&
+        !_isConfirmedOffline(presence)) {
+      yield presenceDeadline;
+    }
     final latencyDeadline = details?.latency?.freshUntil;
     if (latencyDeadline != null) yield latencyDeadline;
   }

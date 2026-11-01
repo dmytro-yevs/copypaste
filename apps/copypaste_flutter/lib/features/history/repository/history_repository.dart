@@ -52,3 +52,15 @@ abstract interface class HistoryFileProgressRepository {
 abstract interface class HistoryDownloadedFileRepository {
   Future<String?> downloadedFile(String id);
 }
+
+/// Tag management is separate from paged payload access.
+abstract interface class HistoryTagsRepository {
+  Future<HistoryTags> tags(List<String> clipIds);
+  Future<void> saveTag({String? id, required String name});
+  Future<void> deleteTag(String id);
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  });
+}

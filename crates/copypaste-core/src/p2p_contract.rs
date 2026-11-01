@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_probe_is_offline_but_expired_probe_falls_back_to_current_discovery() {
+    fn offline_survives_renewal_while_expired_online_falls_back_to_discovery() {
         let now = crate::now_ms();
         let offline = AuthenticatedReachability::offline(now);
         let offline_info = peer_info(&peer(), None, None, Some(&offline));
@@ -528,6 +528,16 @@ mod tests {
             offline_info.details.unwrap().presence.unwrap().state,
             DevicePresence::Offline
         );
+
+        let expired_offline = AuthenticatedReachability::offline(0);
+        let found = discovered(now);
+        let info = peer_info(&peer(), Some(&found), None, Some(&expired_offline));
+        assert!(!info.online);
+        let details = info.details.unwrap();
+        let presence = details.presence.unwrap();
+        assert_eq!(presence.state, DevicePresence::Offline);
+        assert_eq!(presence.trust, DeviceObservationTrust::Authenticated);
+        assert!(details.latency.is_none());
 
         let expired = AuthenticatedReachability::online(Some(24), 0);
         let found = discovered(now);

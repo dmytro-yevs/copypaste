@@ -90,6 +90,24 @@ macro_rules! version_columns {
     };
 }
 
+const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, 0 AS deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
+
+fn summary_query(predicate: &str) -> String {
+    format!("SELECT {} FROM clipboard_items WHERE {predicate} UNION ALL SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records WHERE {predicate}", version_columns!())
+}
+
+/// Bound each indexed stream before merging metadata. Range reads over the
+/// payload-bearing UNION view otherwise materialize and sort ciphertext.
+fn version_ctes(changes: bool, newest: bool) -> String {
+    let local_stamp = if changes {
+        "MAX(created_at, pin_updated_at)"
+    } else {
+        "created_at"
+    };
+    let direction = if newest { "DESC" } else { "ASC" };
+    format!("WITH local_versions AS MATERIALIZED (        SELECT {} FROM clipboard_items         WHERE {local_stamp} > ?1 OR ({local_stamp} = ?1 AND (?2 IS NULL OR id > ?2))         ORDER BY {local_stamp} {direction}, id {direction} LIMIT ?3),         organization_versions AS MATERIALIZED (        SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records         WHERE created_at > ?1 OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))         ORDER BY created_at {direction}, id {direction} LIMIT ?3),         version_candidates AS (SELECT *, {local_stamp} AS change_stamp FROM local_versions         UNION ALL SELECT *, created_at AS change_stamp FROM organization_versions),         bounded_versions AS MATERIALIZED (SELECT * FROM version_candidates         ORDER BY change_stamp {direction}, id {direction} LIMIT ?3) ", version_columns!())
+}
+
 fn row_to_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
     Ok(Version {
         created_at: row.get(0)?,
@@ -113,13 +131,11 @@ pub(super) fn version_summaries_on(
     };
     let mut found = HashMap::with_capacity(unique.len());
     for chunk in unique.chunks(SUMMARY_CHUNK) {
-        let placeholders = std::iter::repeat_n("?", chunk.len())
+        let placeholders = (1..=chunk.len())
+            .map(|index| format!("?{index}"))
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!(
-            "SELECT {} FROM clipboard_items WHERE id IN ({placeholders})",
-            version_columns!()
-        );
+        let sql = summary_query(&format!("id IN ({placeholders})"));
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(chunk), row_to_version)?;
         for row in rows {
@@ -144,6 +160,16 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        let organization_stamp: Option<i64> = tx
+            .query_row(
+                "SELECT updated_at FROM history_pin_state WHERE clip_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if organization_stamp.is_some_and(|stamp| stamp >= pin_updated_at) {
+            return Ok(false);
+        }
         let written = tx.execute(
             "UPDATE clipboard_items \
                 SET pinned = ?2, pin_order = ?3, pin_updated_at = ?4 \
@@ -158,12 +184,16 @@ impl Store {
     ///
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            version_columns!(),
-            " FROM clipboard_items ORDER BY created_at DESC, id DESC LIMIT ?1"
-        ))?;
-        let rows = stmt.query_map([limit], row_to_version)?;
+        let sql = format!(
+            "{} SELECT {} FROM bounded_versions ORDER BY change_stamp DESC, id DESC",
+            version_ctes(false, true),
+            version_columns!()
+        );
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(
+            params![i64::MIN, Option::<&str>::None, limit],
+            row_to_version,
+        )?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -184,15 +214,12 @@ impl Store {
         limit: i64,
     ) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            version_columns!(),
-            " FROM clipboard_items \
-               WHERE MAX(created_at, pin_updated_at) > ?1 \
-                      OR (MAX(created_at, pin_updated_at) = ?1 \
-                          AND (?2 IS NULL OR id > ?2)) \
-               ORDER BY MAX(created_at, pin_updated_at) ASC, id ASC LIMIT ?3"
-        ))?;
+        let sql = format!(
+            "{} SELECT {} FROM bounded_versions ORDER BY change_stamp ASC, id ASC",
+            version_ctes(true, false),
+            version_columns!()
+        );
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_version)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -204,11 +231,7 @@ impl Store {
     /// ciphertext BLOB to do it.
     pub fn version_summary(&self, id: &str) -> Result<Option<Version>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            version_columns!(),
-            " FROM clipboard_items WHERE id = ?1"
-        ))?;
+        let mut stmt = conn.prepare_cached(&summary_query("id = ?1"))?;
         Ok(stmt.query_row([id], row_to_version).optional()?)
     }
 
@@ -232,7 +255,7 @@ impl Store {
         let mut stmt = conn.prepare_cached(concat!(
             "SELECT ",
             item_columns!(),
-            " FROM clipboard_items WHERE id = ?1"
+            " FROM sync_records AS clipboard_items WHERE id = ?1"
         ))?;
         let columns = ItemColumns::resolve(&stmt)?;
         Ok(stmt
@@ -257,7 +280,7 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items WHERE id IN ({placeholders})",
+            "SELECT {} FROM sync_records AS clipboard_items WHERE id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -294,19 +317,15 @@ impl Store {
         limit: i64,
     ) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            item_columns!(),
-            " FROM clipboard_items \
-               WHERE created_at > ?1 \
-                     OR (created_at = ?1 AND (?2 IS NULL OR id > ?2)) \
-               ORDER BY created_at ASC, id ASC LIMIT ?3"
-        ))?;
+        let sql = format!("{} SELECT {} FROM sync_records AS clipboard_items WHERE id IN (SELECT id FROM bounded_versions)", version_ctes(false, false), item_columns!());
+        let mut stmt = conn.prepare_cached(&sql)?;
         let columns = ItemColumns::resolve(&stmt)?;
         let rows = stmt.query_map(params![since_ms, after_id, limit], |row| {
             row_to_item(row, &columns)
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+        Ok(rows)
     }
 
     /// The stamp of the oldest version this device would ever offer, if any.
@@ -316,10 +335,11 @@ impl Store {
     /// on how far back that goes.
     pub fn oldest_version_ms(&self) -> Result<Option<i64>, StoreError> {
         let conn = self.conn()?;
-        let oldest: Option<i64> =
-            conn.query_row("SELECT MIN(created_at) FROM clipboard_items", [], |row| {
-                row.get(0)
-            })?;
+        let oldest: Option<i64> = conn.query_row(
+            "SELECT MIN(stamp) FROM (SELECT MIN(created_at) AS stamp FROM clipboard_items UNION ALL SELECT MIN(created_at) FROM organization_records)",
+            [],
+            |row| row.get(0),
+        )?;
         Ok(oldest)
     }
 
@@ -396,6 +416,12 @@ pub(super) fn upsert_in_tx(
     tx: &rusqlite::Connection,
     incoming: &IncomingItem<'_>,
 ) -> Result<bool, StoreError> {
+    if incoming.content_type == super::organization::CONTENT_TYPE {
+        return super::organization::upsert_in_tx(tx, incoming);
+    }
+    if super::organization::is_record_id(incoming.id) {
+        return Ok(false);
+    }
     // Before the write below clears `fts_rowid`, and rolled back with it if
     // the dedup index refuses the version.
     delete_fts_row_in_tx(tx, incoming.id)?;
@@ -521,6 +547,7 @@ pub(super) fn upsert_in_tx(
 
     match written {
         Ok(_) => {
+            super::organization::apply_pin_projection(tx, incoming.id)?;
             if let Some(bytes) = incoming.content_ciphertext {
                 super::file_payloads::link(tx, incoming.id, incoming.content_hash, bytes)?;
             }

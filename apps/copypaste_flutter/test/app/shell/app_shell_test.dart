@@ -298,7 +298,7 @@ void main() {
           )
           .map((item) => item.icon),
       [
-        LucideIcons.history,
+        LucideIcons.clipboardList,
         DevicePresentation.collectionIcon,
         LucideIcons.settings,
       ],
@@ -443,6 +443,47 @@ void main() {
       find.byKey(const ValueKey<String>('bottom-navigation')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('compact editors hide navigation until their drawer closes', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(400, 700);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = AppNavigationController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      _shell(
+        controller: controller,
+        destinations: {
+          AppDestination.history: Builder(
+            builder: (context) => Button.primary(
+              child: const Text('Open editor'),
+              onPressed: () => AppOverlays.showCompactEditor<void>(
+                context,
+                builder: (context) => Button.outline(
+                  onPressed: () => closeOverlay(context),
+                  child: const Text('Close editor'),
+                ),
+              ),
+            ),
+          ),
+          AppDestination.devices: const Text('Devices body'),
+          AppDestination.settings: const Text('Settings body'),
+        },
+      ),
+    );
+    final navigation = find.byKey(const ValueKey<String>('bottom-navigation'));
+    expect(navigation, findsOneWidget);
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    expect(navigation, findsNothing);
+    await tester.tap(find.text('Close editor'));
+    await tester.pumpAndSettle();
+    expect(navigation, findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {
@@ -633,7 +674,7 @@ void main() {
     }
     final railCenter = tester.getCenter(find.byType(NavigationRail)).dx;
     for (final icon in [
-      LucideIcons.history,
+      LucideIcons.clipboardList,
       DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {
@@ -756,7 +797,7 @@ void main() {
       }
     }
     for (final icon in [
-      LucideIcons.history,
+      LucideIcons.clipboardList,
       DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {

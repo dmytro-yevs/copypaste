@@ -241,6 +241,7 @@ pub enum ClipSemanticKind {
     Code,
     Json,
     Path,
+    Credentials,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +284,75 @@ pub struct HistorySourceAppFacet {
 pub struct HistoryFacets {
     pub origin_devices: Vec<HistoryDeviceFacet>,
     pub source_apps: Vec<HistorySourceAppFacet>,
+    pub tags: Vec<HistoryTag>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryTag {
+    pub id: String,
+    pub name: String,
+}
+#[derive(Debug, Clone)]
+pub struct ClipTags {
+    pub clip_id: String,
+    pub tag_ids: Vec<String>,
+}
+#[derive(Debug, Clone)]
+pub struct HistoryTags {
+    pub tags: Vec<HistoryTag>,
+    pub assignments: Vec<ClipTags>,
+}
+
+pub async fn history_tags(clip_ids: Vec<String>) -> Result<HistoryTags, RuntimeError> {
+    let response = client::request(Method::HistoryTags { clip_ids }).await?;
+    let Some(ResponseData::HistoryTags(data)) = response.data else {
+        return Err(RuntimeError::internal());
+    };
+    Ok(HistoryTags {
+        tags: data
+            .tags
+            .into_iter()
+            .map(|tag| HistoryTag {
+                id: tag.id,
+                name: tag.name,
+            })
+            .collect(),
+        assignments: data
+            .assignments
+            .into_iter()
+            .map(|(clip_id, tag_ids)| ClipTags { clip_id, tag_ids })
+            .collect(),
+    })
+}
+
+pub async fn save_history_tag(id: Option<String>, name: String) -> Result<(), RuntimeError> {
+    client::request(Method::MutateHistoryTags {
+        mutation: copypaste_ipc::HistoryTagMutation::Save { id, name },
+    })
+    .await?;
+    Ok(())
+}
+pub async fn delete_history_tag(id: String) -> Result<(), RuntimeError> {
+    client::request(Method::MutateHistoryTags {
+        mutation: copypaste_ipc::HistoryTagMutation::Delete { id },
+    })
+    .await?;
+    Ok(())
+}
+pub async fn change_clip_tags(
+    clip_ids: Vec<String>,
+    tag_ids: Vec<String>,
+    assigned: bool,
+) -> Result<(), RuntimeError> {
+    client::request(Method::MutateHistoryTags {
+        mutation: copypaste_ipc::HistoryTagMutation::Assign {
+            clip_ids,
+            tag_ids,
+            assigned,
+        },
+    })
+    .await?;
+    Ok(())
 }
 
 /// Rust-owned query DTO for the generated Flutter API.
@@ -298,6 +368,10 @@ pub struct ClipQuery {
     pub origin_device_id: Option<String>,
     pub source_app_bundle_id: Option<String>,
     pub sort: ClipSort,
+    pub captured_from_ms: Option<i64>,
+    pub captured_before_ms: Option<i64>,
+    pub tag_ids: Vec<String>,
+    pub untagged_only: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1018,6 +1092,14 @@ pub async fn history_facets() -> Result<HistoryFacets, RuntimeError> {
     Ok(HistoryFacets {
         origin_devices,
         source_apps,
+        tags: facets
+            .tags
+            .into_iter()
+            .map(|tag| HistoryTag {
+                id: tag.id,
+                name: tag.name,
+            })
+            .collect(),
     })
 }
 
@@ -1602,6 +1684,10 @@ fn history_query(query: ClipQuery) -> copypaste_ipc::HistoryQuery {
         pinned_only: query.pinned_only,
         origin_device_id: query.origin_device_id,
         source_app_bundle_id: query.source_app_bundle_id,
+        captured_from_ms: query.captured_from_ms,
+        captured_before_ms: query.captured_before_ms,
+        tag_ids: query.tag_ids,
+        untagged_only: query.untagged_only,
         sort: match query.sort {
             ClipSort::Newest => copypaste_ipc::HistorySort::Newest,
             ClipSort::Oldest => copypaste_ipc::HistorySort::Oldest,
@@ -1620,6 +1706,7 @@ fn semantic_kind(value: copypaste_ipc::SemanticKind) -> ClipSemanticKind {
         copypaste_ipc::SemanticKind::Code => ClipSemanticKind::Code,
         copypaste_ipc::SemanticKind::Json => ClipSemanticKind::Json,
         copypaste_ipc::SemanticKind::Path => ClipSemanticKind::Path,
+        copypaste_ipc::SemanticKind::Credentials => ClipSemanticKind::Credentials,
     }
 }
 
@@ -1633,6 +1720,7 @@ fn semantic_kind_to_ipc(value: ClipSemanticKind) -> copypaste_ipc::SemanticKind 
         ClipSemanticKind::Code => copypaste_ipc::SemanticKind::Code,
         ClipSemanticKind::Json => copypaste_ipc::SemanticKind::Json,
         ClipSemanticKind::Path => copypaste_ipc::SemanticKind::Path,
+        ClipSemanticKind::Credentials => copypaste_ipc::SemanticKind::Credentials,
     }
 }
 
@@ -1822,6 +1910,10 @@ mod tests {
             origin_device_id: None,
             source_app_bundle_id: None,
             sort: ClipSort::Newest,
+            captured_from_ms: Some(100),
+            captured_before_ms: Some(200),
+            tag_ids: vec!["work".into()],
+            untagged_only: false,
         });
 
         assert_eq!(

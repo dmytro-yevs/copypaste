@@ -8,6 +8,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../controller/history_controller.dart';
 import 'history_delete_dialog.dart';
+import 'history_tags_dialog.dart';
 
 /// Actions over the explicit History selection, including pinned clips.
 class HistoryBulkToolbar extends StatelessWidget {
@@ -26,6 +27,25 @@ class HistoryBulkToolbar extends StatelessWidget {
       runSpacing: AppSpacing.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        Tooltip(
+          tooltip: (_) =>
+              const TooltipContainer(child: Text('Tag selected pinned clips')),
+          child: Button.secondary(
+            key: const ValueKey('history-bulk-tags'),
+            style: AppTheme.historyToolbarIconStyle,
+            onPressed: canApply && controller.canTagBulkSelection
+                ? () => showHistoryTagsDialog(
+                    context,
+                    controller: controller,
+                    clipIds: controller.bulkSelectedIds.toList(),
+                  )
+                : null,
+            child: const AppIconFrame(
+              size: AppIconSize.md,
+              child: Icon(LucideIcons.tags, size: AppIconSize.md),
+            ),
+          ),
+        ),
         Tooltip(
           tooltip: (_) => const TooltipContainer(child: Text('Exit selection')),
           child: Semantics(
@@ -123,7 +143,7 @@ class HistoryBulkToolbar extends StatelessWidget {
           context,
           minimum: AppControlSize.large,
         );
-        final minimumWidth = text.width + extent * 4 + AppSpacing.sm * 4;
+        final minimumWidth = text.width + extent * 5 + AppSpacing.sm * 5;
         text.dispose();
         if (constraints.maxWidth >= minimumWidth) {
           return Row(

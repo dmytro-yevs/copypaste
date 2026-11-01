@@ -34,6 +34,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool _accessibilityGranted = false;
   bool _observingLifecycle = false;
   bool _recordingShortcut = false;
+  DesktopShortcut? _registeredShortcut;
   bool _disposed = false;
   Future<void> _registrationOperation = Future<void>.value();
   String? _errorMessage;
@@ -88,18 +89,19 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<bool> setAutoPaste(bool value) async {
-    if (_busy || value == _preferences.autoPaste) return false;
+    if (_disposed || _busy || value == _preferences.autoPaste) return false;
     _busy = true;
     _errorMessage = null;
     notifyListeners();
     final before = _preferences;
     final next = before.copyWith(autoPaste: value);
     try {
-      await _store.write(next);
-      _preferences = next;
       if (value && _supported) {
         _accessibilityGranted = await _windowHost.requestAccessibility();
       }
+      if (_disposed) return false;
+      await _store.write(next);
+      _preferences = next;
       return true;
     } catch (_) {
       _preferences = before;
@@ -107,7 +109,7 @@ class QuickPasteSettingsController extends ChangeNotifier
       return false;
     } finally {
       _busy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -170,12 +172,17 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<void> cancelShortcutRecording() async {
-    if (_disposed || !_supported || _busy || !_recordingShortcut) return;
-    _recordingShortcut = false;
+    if (_disposed ||
+        !_supported ||
+        _busy ||
+        (!_recordingShortcut && _registeredShortcut == _preferences.shortcut)) {
+      return;
+    }
     _busy = true;
     notifyListeners();
     try {
       if (!await _changeRegistration(_preferences.shortcut)) return;
+      _recordingShortcut = false;
       _errorMessage = null;
     } catch (_) {
       if (!_disposed) _errorMessage = 'The shortcut could not be restored.';
@@ -188,10 +195,12 @@ class QuickPasteSettingsController extends ChangeNotifier
   Future<bool> _changeRegistration(DesktopShortcut? shortcut) {
     final operation = _registrationOperation.then((_) async {
       if (_disposed) return false;
+      _registeredShortcut = null;
       if (shortcut == null) {
         await _registrar.unregister();
       } else {
         await _registrar.register(shortcut, _openWindow);
+        _registeredShortcut = shortcut;
       }
       return !_disposed;
     });

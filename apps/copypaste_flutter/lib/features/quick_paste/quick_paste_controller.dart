@@ -241,6 +241,8 @@ class QuickPasteController extends ChangeNotifier {
         !query.pinnedOnly &&
         query.origin == null &&
         query.sourceApp == null &&
+        !query.hasDateFilter &&
+        !query.hasTagFilter &&
         query.sort == HistorySort.newest;
     _cancelInspectorHover();
     _autoOpenSuppressed = false;

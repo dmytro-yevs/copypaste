@@ -12,6 +12,49 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'settings_test_support.dart';
 
 void main() {
+  test(
+    'a permission error cannot persist an auto-paste value hidden by rollback',
+    () async {
+      final store = MemoryQuickPastePreferencesStore(
+        QuickPastePreferences.defaults().copyWith(autoPaste: false),
+      );
+      final controller = QuickPasteSettingsController(
+        store: store,
+        registrar: _Registrar(),
+        windowHost: _WindowHost()..failPermission = true,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      expect(await controller.setAutoPaste(true), isFalse);
+      expect(controller.autoPaste, isFalse);
+      expect((await store.read()).autoPaste, isFalse);
+    },
+  );
+
+  test(
+    'the saved shortcut can be retried after cancellation restoration fails',
+    () async {
+      final store = MemoryQuickPastePreferencesStore();
+      final registrar = _Registrar();
+      final controller = QuickPasteSettingsController(
+        store: store,
+        registrar: registrar,
+        windowHost: _WindowHost(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.beginShortcutRecording();
+      registrar.failRegister = true;
+      await controller.cancelShortcutRecording();
+      expect(registrar.registered, isNull);
+      expect(controller.errorMessage, isNotNull);
+      registrar.failRegister = false;
+      expect(await controller.setShortcut(store.value.shortcut), isFalse);
+      expect(registrar.registered, store.value.shortcut);
+      expect(controller.errorMessage, isNull);
+    },
+  );
+
   test('persists auto-paste and replaces the registered shortcut', () async {
     final store = MemoryQuickPastePreferencesStore();
     final registrar = _Registrar();
@@ -288,6 +331,7 @@ void main() {
 }
 
 class _Registrar implements DesktopShortcutRegistrar {
+  bool failRegister = false;
   DesktopShortcut? registered;
   int registerCalls = 0;
   int unregisterCalls = 0;
@@ -297,6 +341,7 @@ class _Registrar implements DesktopShortcutRegistrar {
     DesktopShortcut shortcut,
     Future<void> Function() callback,
   ) async {
+    if (failRegister) throw PlatformException(code: 'registration_failed');
     registerCalls += 1;
     registered = shortcut;
   }
@@ -309,6 +354,7 @@ class _Registrar implements DesktopShortcutRegistrar {
 }
 
 class _WindowHost implements QuickPasteWindowHost {
+  bool failPermission = false;
   int prepareCalls = 0;
   int permissionRequests = 0;
   bool permissionGranted = false;
@@ -332,6 +378,7 @@ class _WindowHost implements QuickPasteWindowHost {
 
   @override
   Future<bool> requestAccessibility() async {
+    if (failPermission) throw PlatformException(code: 'permission_failed');
     permissionRequests += 1;
     permissionGranted = true;
     return true;

@@ -191,6 +191,8 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Search { .. }
         | Method::HistoryQuery { .. }
         | Method::HistoryFacets
+        | Method::HistoryTags { .. }
+        | Method::MutateHistoryTags { .. }
         | Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::CopyText { .. }
@@ -568,6 +570,14 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             cursor,
         } => items::history_query(state, id, &query, limit, cursor.as_deref()),
         Method::HistoryFacets => items::history_facets(state, id),
+        Method::HistoryTags { clip_ids } => match state.store.history_tags(&clip_ids) {
+            Ok(tags) => Response::ok(id, copypaste_ipc::ResponseData::HistoryTags(tags)),
+            Err(_) => Response::err(id, copypaste_ipc::ErrorCode::InvalidRequest, "Tags could not be loaded."),
+        },
+        Method::MutateHistoryTags { mutation } => match state.store.mutate_history_tags(&state.keyring.item_key(), &mutation) {
+            Ok(()) => { state.note_local_change(); Response::ok(id, copypaste_ipc::ResponseData::Empty {}) },
+            Err(_) => Response::err(id, copypaste_ipc::ErrorCode::InvalidRequest, "The tag change is invalid. Use a unique name of up to 64 characters and select pinned clips."),
+        },
         Method::GetSpoilerState => {
             let (revision, revealed_ids) = state.spoilers.snapshot();
             Response::ok(

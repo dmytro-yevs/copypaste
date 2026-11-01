@@ -539,7 +539,10 @@ pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Res
         Ok(Some(_)) => {}
     }
 
-    if let Err(e) = state.store.set_pinned(item_id, pinned) {
+    if let Err(e) = state
+        .store
+        .set_pinned_synced(item_id, pinned, &state.keyring.item_key())
+    {
         return storage_error(id, "set_pinned", &e);
     }
     state.note_local_change();
@@ -576,7 +579,10 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
     if ids.len() > MAX_REORDER_IDS {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_REORDER_TOO_MANY);
     }
-    match state.store.reorder_pinned(ids) {
+    match state
+        .store
+        .reorder_pinned_synced(ids, &state.keyring.item_key())
+    {
         Ok(0) => Response::ok(id, ResponseData::Count(0)),
         Ok(renumbered) => {
             // A pin is local and never travels (`Store::upsert` preserves both
@@ -1297,10 +1303,20 @@ mod tests {
 
         // ...and `copy` is the one that does write, so the assertion above is
         // not passing for want of a working clipboard.
-        assert!(copy(&state, 3, &added.id).ok);
+        assert_eq!(
+            crate::notify::count_requests(|| {
+                assert!(copy(&state, 3, &added.id).ok);
+            }),
+            1
+        );
         assert_eq!(writes.count(), 1);
 
-        assert!(copy_plain_text(&state, 4, &added.id).ok);
+        assert_eq!(
+            crate::notify::count_requests(|| {
+                assert!(copy_plain_text(&state, 4, &added.id).ok);
+            }),
+            1
+        );
         assert_eq!(
             writes.count(),
             2,
@@ -1310,6 +1326,12 @@ mod tests {
         // An unknown id is not_found, not an empty success.
         let missing = get(&state, 5, "00000000-0000-0000-0000-000000000000");
         assert_eq!(missing.error_code, Some(ErrorCode::NotFound));
+        assert_eq!(
+            crate::notify::count_requests(|| {
+                assert!(!copy(&state, 6, "missing").ok);
+            }),
+            0
+        );
     }
 
     /// B-1 / `CopyPaste-8ebg.57`, at the wire: a capture landing above the
@@ -1591,7 +1613,12 @@ mod tests {
         );
         let original = state.store.get(&image.id).unwrap().unwrap();
         assert!(add(&state, 1, "newer text").ok);
-        assert!(copy_text(&state, 2, &image.id, "recognized text").ok);
+        assert_eq!(
+            crate::notify::count_requests(|| {
+                assert!(copy_text(&state, 2, &image.id, "recognized text").ok);
+            }),
+            1
+        );
         assert_eq!(state.store.list(10, 0).unwrap()[0].id, image.id);
         assert_eq!(
             state

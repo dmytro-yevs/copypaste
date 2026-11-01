@@ -21,7 +21,10 @@ mod export;
 mod import;
 
 pub use export::{export, ExportError};
-pub use import::{import, import_with_current_retention, ImportError, MAX_IMPORT_ITEMS};
+pub use import::{
+    import, import_with_current_retention, import_with_current_retention_outcome, ImportError,
+    ImportOutcome, MAX_IMPORT_ITEMS,
+};
 
 #[cfg(test)]
 mod testkit;

@@ -23,6 +23,83 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets('icon filter actions show their tooltips on hover', (
+    tester,
+  ) async {
+    final controller = HistoryController(_TagScreenRepository());
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(600, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.byIcon(LucideIcons.monitorSmartphone)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('All devices'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) => widget is SelectPopup),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('retry reissues a request without changing selected filters', (
+    tester,
+  ) async {
+    final repository = _RecoveryScreenRepository();
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(600, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.state, HistoryLoadState.error);
+    expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
+    final requests = repository.queries.length;
+    repository.failAll = false;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(repository.queries.length, greaterThan(requests));
+    expect(controller.state, HistoryLoadState.empty);
+    repository.rejectFiltered = true;
+    await controller.updateQuery(
+      const HistoryQuery(kind: HistoryClipKind.image),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.state, HistoryLoadState.error);
+    expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
+    repository.rejectFiltered = false;
+    final filteredRequests = repository.queries.length;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(repository.queries.length, greaterThan(filteredRequests));
+    expect(controller.query.kind, HistoryClipKind.image);
+    expect(controller.state, HistoryLoadState.empty);
+    expect(find.byKey(const ValueKey('history-reset-filters')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('history-reset-filters')));
+    await tester.pumpAndSettle();
+    expect(controller.query.kind, isNull);
+    expect(controller.hasActiveFilters, isFalse);
+    expect(find.byKey(const ValueKey('history-reset-filters')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('reuses code spans when the row and inspector rebuild', (
     tester,
   ) async {
@@ -365,6 +442,7 @@ void main() {
             HistoryClip(
               id: 'secret-fixture',
               contentType: 'text',
+              kind: HistoryClipKind.credentials,
               preview: 'SYNTHETIC HISTORY SECRET',
               body: 'SYNTHETIC HISTORY SECRET',
               secret: true,
@@ -387,6 +465,7 @@ void main() {
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       await controller.select('secret-fixture');
       await tester.pump();
+      expect(find.text('Credentials'), findsWidgets);
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       final inspectorSpoiler = find.byKey(
         const ValueKey('inspector-spoiler-secret-fixture-0'),
@@ -1830,7 +1909,7 @@ void main() {
     expect(searchButton, findsOneWidget);
     expect(
       find.byWidgetPredicate((widget) => widget is Select),
-      findsNWidgets(4),
+      findsNWidgets(5),
     );
     expect(find.bySemanticsLabel('All pins'), findsNothing);
     expect(find.bySemanticsLabel('Pinned only'), findsNothing);
@@ -1864,9 +1943,11 @@ void main() {
   testWidgets(
     'compact search replaces all actions and keeps their height',
     (tester) async {
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       for (final width in [320.0, 390.0]) {
-        await tester.binding.setSurfaceSize(Size(width, 800));
+        tester.view.physicalSize = Size(width, 800);
         for (final scale in [1.0, 1.5, 2.0]) {
           final controller = HistoryController(_ScreenRepository());
           addTearDown(controller.dispose);
@@ -1889,7 +1970,7 @@ void main() {
           final searchToggle = find.byKey(
             const ValueKey<String>('history-search-toggle'),
           );
-          final actionHeight = tester.getSize(searchToggle).height;
+          final actionHeight = tester.getRect(searchToggle).height;
           final selection = find.byKey(const ValueKey('history-select-clips'));
           expect(
             tester.getRect(selection).right,
@@ -1901,11 +1982,14 @@ void main() {
 
           final searchField = find.byType(TextField);
           expect(
-            tester.getSize(searchField).height,
+            tester.getRect(searchField).height,
             closeTo(actionHeight, 0.01),
             reason: 'Width $width, text scale $scale',
           );
-          expect(tester.getSize(searchField).width, toolbarWidth);
+          expect(
+            tester.getRect(searchField).width,
+            closeTo(toolbarWidth, 0.01),
+          );
           expect(selection, findsNothing);
           expect(
             find.byKey(const ValueKey<String>('history-import-files')),
@@ -1927,7 +2011,7 @@ void main() {
           expect(selection, findsOneWidget);
           expect(
             find.byWidgetPredicate((widget) => widget is Select),
-            findsNWidgets(4),
+            findsNWidgets(5),
           );
           expect(tester.takeException(), isNull);
         }
@@ -1941,7 +2025,7 @@ void main() {
   );
 
   testWidgets(
-    'keeps the expanded search field at least 160 pixels wide beside all toolbar actions',
+    'collapses search before toolbar controls wrap onto a second row',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(480, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1958,15 +2042,25 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final searchField = find.byType(TextField);
-      expect(searchField, findsOneWidget);
-      expect(tester.getSize(searchField).width, 160);
-      expect(
-        tester
-            .getRect(find.byKey(const ValueKey('history-select-clips')))
-            .right,
-        lessThan(tester.getRect(searchField).left),
-      );
+      expect(find.byType(TextField), findsNothing);
+      final search = find.byKey(const ValueKey('history-search-toggle'));
+      expect(search, findsOneWidget);
+      final baseline = tester.getRect(search);
+      final controls = [
+        find.byKey(const ValueKey('history-select-clips')),
+        find.byKey(const ValueKey('history-date-filter')),
+        find.byKey(const ValueKey('history-import-files')),
+        ...find
+            .byWidgetPredicate((widget) => widget is Select)
+            .evaluate()
+            .map((element) => find.byWidget(element.widget)),
+      ];
+      for (final control in controls) {
+        final rect = tester.getRect(control);
+        expect(rect.top, closeTo(baseline.top, 0.01));
+        expect(rect.right, lessThanOrEqualTo(480 - AppSpacing.lg));
+      }
+      expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
       TargetPlatform.macOS,
@@ -2203,9 +2297,19 @@ void main() {
       expect(find.text(label), findsOneWidget, reason: label);
     }
 
-    await tester.tap(find.text('Link'));
+    await tester.scrollUntilVisible(
+      find.text('Credentials'),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byWidgetPredicate((widget) => widget is SelectPopup),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.text('Credentials'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(repository.queries.last.kind, HistoryClipKind.link);
+    expect(repository.queries.last.kind, HistoryClipKind.credentials);
   });
 
   testWidgets('facet dropdowns use no Radix overflow icons', (tester) async {
@@ -2261,7 +2365,7 @@ void main() {
       const surfaceSize = Size(1200, 800);
       await tester.binding.setSurfaceSize(surfaceSize);
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final controller = HistoryController(_ScreenRepository());
+      final controller = HistoryController(_TagScreenRepository());
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         ShadcnApp(
@@ -2275,7 +2379,7 @@ void main() {
       final selectFinder = find.byWidgetPredicate(
         (widget) => widget is Select<dynamic>,
       );
-      expect(selectFinder, findsNWidgets(4));
+      expect(selectFinder, findsNWidgets(5));
       expect(find.bySemanticsLabel('All pins'), findsNothing);
       expect(find.bySemanticsLabel('Pinned only'), findsNothing);
       for (final select in tester.widgetList<Select<dynamic>>(selectFinder)) {
@@ -2664,5 +2768,40 @@ class _ScreenFileDownloader implements HistoryFileDownloader {
   Future<void> presentSavedFile(String path, HistoryFileDetails file) async {
     presented.add(path);
     await presentPending;
+  }
+}
+
+class _TagScreenRepository extends _ScreenRepository
+    implements HistoryTagsRepository {
+  @override
+  Future<HistoryTags> tags(List<String> clipIds) async =>
+      HistoryTags(tags: availableFacets.tags);
+  @override
+  Future<void> saveTag({String? id, required String name}) =>
+      throw UnimplementedError();
+  @override
+  Future<void> deleteTag(String id) => throw UnimplementedError();
+  @override
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  }) => throw UnimplementedError();
+}
+
+class _RecoveryScreenRepository extends _ScreenRepository {
+  bool failAll = true;
+  bool rejectFiltered = false;
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async {
+    final page = await super.query(query: query, limit: limit, cursor: cursor);
+    if (failAll || (rejectFiltered && query.kind != null)) {
+      throw StateError('query refused');
+    }
+    return page;
   }
 }
