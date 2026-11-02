@@ -7,12 +7,9 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api.dart';
-
 import 'dart:async';
 import 'dart:convert';
-
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -146,6 +143,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipSort dco_decode_clip_sort(dynamic raw);
 
   @protected
+  ClipTags dco_decode_clip_tags(dynamic raw);
+
+  @protected
   CloudAccountStatus dco_decode_cloud_account_status(dynamic raw);
 
   @protected
@@ -202,6 +202,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   HistorySourceAppFacet dco_decode_history_source_app_facet(dynamic raw);
 
   @protected
+  HistoryTag dco_decode_history_tag(dynamic raw);
+
+  @protected
+  HistoryTags dco_decode_history_tags(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
@@ -220,6 +226,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ClipSemanticKind> dco_decode_list_clip_semantic_kind(dynamic raw);
 
   @protected
+  List<ClipTags> dco_decode_list_clip_tags(dynamic raw);
+
+  @protected
   List<DiscoveredDevice> dco_decode_list_discovered_device(dynamic raw);
 
   @protected
@@ -229,6 +238,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HistorySourceAppFacet> dco_decode_list_history_source_app_facet(
     dynamic raw,
   );
+
+  @protected
+  List<HistoryTag> dco_decode_list_history_tag(dynamic raw);
 
   @protected
   List<Peer> dco_decode_list_peer(dynamic raw);
@@ -540,6 +552,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipSort sse_decode_clip_sort(SseDeserializer deserializer);
 
   @protected
+  ClipTags sse_decode_clip_tags(SseDeserializer deserializer);
+
+  @protected
   CloudAccountStatus sse_decode_cloud_account_status(
     SseDeserializer deserializer,
   );
@@ -608,6 +623,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  HistoryTag sse_decode_history_tag(SseDeserializer deserializer);
+
+  @protected
+  HistoryTags sse_decode_history_tags(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -630,6 +651,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ClipTags> sse_decode_list_clip_tags(SseDeserializer deserializer);
+
+  @protected
   List<DiscoveredDevice> sse_decode_list_discovered_device(
     SseDeserializer deserializer,
   );
@@ -643,6 +667,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HistorySourceAppFacet> sse_decode_list_history_source_app_facet(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<HistoryTag> sse_decode_list_history_tag(SseDeserializer deserializer);
 
   @protected
   List<Peer> sse_decode_list_peer(SseDeserializer deserializer);
@@ -1039,6 +1066,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_clip_sort(ClipSort self, SseSerializer serializer);
 
   @protected
+  void sse_encode_clip_tags(ClipTags self, SseSerializer serializer);
+
+  @protected
   void sse_encode_cloud_account_status(
     CloudAccountStatus self,
     SseSerializer serializer,
@@ -1129,6 +1159,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_history_tag(HistoryTag self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_history_tags(HistoryTags self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
@@ -1153,6 +1189,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_clip_tags(List<ClipTags> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_discovered_device(
     List<DiscoveredDevice> self,
     SseSerializer serializer,
@@ -1167,6 +1206,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_history_source_app_facet(
     List<HistorySourceAppFacet> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_history_tag(
+    List<HistoryTag> self,
     SseSerializer serializer,
   );
 

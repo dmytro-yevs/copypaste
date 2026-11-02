@@ -193,6 +193,7 @@ mod tests {
             transient: true,
         };
         let metadata = PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy,
             file: None,

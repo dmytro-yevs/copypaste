@@ -215,7 +215,7 @@ impl AppState {
     /// treating the receive as local activity or waking outbound sync.
     pub fn note_received_copy(&self, item_id: &str) {
         self.publish(EventKind::Items, Some(item_id));
-        crate::notify::on_capture(self, true);
+        crate::notify::on_copy(self);
     }
 
     pub fn note_sync_status_changed(&self) {

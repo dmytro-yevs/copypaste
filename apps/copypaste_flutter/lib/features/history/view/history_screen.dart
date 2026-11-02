@@ -1,3 +1,4 @@
+import '../../../app/theme/app_filter_indicator.dart';
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
@@ -33,6 +34,8 @@ import 'history_inspector.dart';
 import 'history_window_scroll.dart';
 import 'history_delete_dialog.dart';
 import 'history_bulk_toolbar.dart';
+import 'history_date_filter.dart';
+import 'history_tags_filter.dart';
 import '../presentation/history_color_swatch.dart';
 
 /// The shell-owned History destination body. It intentionally does not add an
@@ -275,15 +278,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (state == HistoryLoadState.initial) {
       return const StateView.loading(message: 'Loading clipboard history.');
     }
-    if (state == HistoryLoadState.error) {
-      return StateView.error(
-        title: 'History is unavailable',
-        message: widget.controller.errorMessage,
-        actionLabel: 'Try again',
-        onAction: () => unawaited(widget.controller.reload()),
-      );
-    }
-
     final list = _HistoryList(
       key: _listKey,
       controller: widget.controller,
@@ -449,6 +443,27 @@ class _HistoryListState extends State<_HistoryList> {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.state == HistoryLoadState.error) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _HistoryToolbar(
+            controller: controller,
+            searchController: searchController,
+            findRequests: widget.findRequests,
+          ),
+          const Gap(AppSpacing.md),
+          Expanded(
+            child: StateView.error(
+              title: 'History is unavailable',
+              message: controller.errorMessage,
+              actionLabel: 'Try again',
+              onAction: () => unawaited(controller.retryHistory()),
+            ),
+          ),
+        ],
+      );
+    }
     if (controller.state == HistoryLoadState.empty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -938,7 +953,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   static const double _minimumExpandedSearchWidth =
       AppLayoutSize.historySearchMinWidth;
   static const double _toolbarGap = AppSpacing.sm;
-  static const int _filterCount = 4;
+  static const int _filterCount = 6;
   bool _searchExpanded = false;
 
   @override
@@ -948,43 +963,84 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        final hasReset = widget.controller.hasActiveFilters;
+        final actionCount = _filterCount + 2 + (hasReset ? 1 : 0);
         final compactFilters =
             constraints.maxWidth < _expandedToolbarMinimumWidth(context);
         final collapseSearch =
             constraints.maxWidth <
             _minimumExpandedSearchWidth +
-                (_controlExtent(context) * (_filterCount + 2)) +
-                (_toolbarGap * (_filterCount + 2));
-        if (collapseSearch && _searchExpanded) {
+                (_controlExtent(context) * actionCount) +
+                (_toolbarGap * actionCount);
+        final naturalWidth =
+            _controlExtent(context) * (actionCount + 1) +
+            _toolbarGap * actionCount;
+        final toolbarScale = math.min(
+          AppTheme.historyToolbarScale(context),
+          constraints.maxWidth / naturalWidth,
+        );
+        if (collapseSearch && (_searchExpanded || _searchFocus.hasFocus)) {
+          if (toolbarScale <= 0) return const SizedBox.shrink();
           return SizedBox(
             width: constraints.maxWidth,
-            child: _searchField(compact: true),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: constraints.maxWidth / toolbarScale,
+                child: _searchField(compact: true),
+              ),
+            ),
           );
         }
 
-        final filters = _filterSelects(context, compact: compactFilters);
+        final filters = _filterSelects(
+          context,
+          compact: compactFilters || collapseSearch,
+        );
         if (collapseSearch) {
-          return Wrap(
-            spacing: _toolbarGap,
-            runSpacing: _toolbarGap,
-            children: [
-              _selectionButton(),
-              Semantics(
-                label: 'Search history',
-                button: true,
-                child: Button.secondary(
-                  key: const ValueKey<String>('history-search-toggle'),
-                  style: AppTheme.historyToolbarIconStyle,
-                  onPressed: () => setState(() => _searchExpanded = true),
-                  child: const AppIconFrame(
-                    size: AppIconSize.md,
-                    child: Icon(LucideIcons.search, size: AppIconSize.md),
-                  ),
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: naturalWidth * toolbarScale,
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: _toolbarGap,
+                  children: [
+                    _selectionButton(),
+                    AppFilterIndicator(
+                      active: widget.controller.query.hasSearch,
+                      tooltip: 'Search history',
+                      child: Semantics(
+                        label: 'Search history',
+                        button: true,
+                        child: Button.secondary(
+                          key: const ValueKey<String>('history-search-toggle'),
+                          style: AppTheme.historyToolbarIconStyle,
+                          onPressed: () =>
+                              setState(() => _searchExpanded = true),
+                          child: const AppIconFrame(
+                            size: AppIconSize.md,
+                            child: Icon(
+                              LucideIcons.search,
+                              size: AppIconSize.md,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    ...filters,
+                    if (hasReset) _resetButton(),
+                    _importButton(),
+                  ],
                 ),
               ),
-              ...filters,
-              _importButton(),
-            ],
+            ),
           );
         }
 
@@ -1001,12 +1057,34 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
               ),
             ),
             ...filters,
+            if (hasReset) _resetButton(),
             _importButton(),
           ],
         );
       },
     );
   }
+
+  Widget _resetButton() => Tooltip(
+    tooltip: (_) => const TooltipContainer(child: Text('Reset filters')),
+    child: Semantics(
+      label: 'Reset filters',
+      button: true,
+      child: Button.secondary(
+        key: const ValueKey('history-reset-filters'),
+        style: AppTheme.historyToolbarIconStyle,
+        onPressed: () {
+          widget.searchController.clear();
+          setState(() => _searchExpanded = false);
+          unawaited(widget.controller.resetFilters());
+        },
+        child: const AppIconFrame(
+          size: AppIconSize.md,
+          child: Icon(LucideIcons.filterX, size: AppIconSize.md),
+        ),
+      ),
+    ),
+  );
 
   Widget _importButton() => Semantics(
     label: 'Import files',
@@ -1096,6 +1174,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   }
 
   void _closeCompactSearch() {
+    _searchFocus.unfocus();
     widget.searchController.clear();
     widget.controller.updateSearch('');
     setState(() => _searchExpanded = false);
@@ -1176,10 +1255,13 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     ];
 
     return [
+      HistoryDateFilter(controller: widget.controller),
+      HistoryTagsFilter(controller: widget.controller, compact: compact),
       _filterSelect(
         context,
         compact: compact,
         options: kindOptions,
+        active: query.kind != null,
         value: query.kind,
         onChanged: (option) {
           final current = widget.controller.query;
@@ -1196,6 +1278,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         context,
         compact: compact,
         options: originOptions,
+        active: query.origin != null,
         value: query.origin,
         onChanged: (option) {
           final current = widget.controller.query;
@@ -1212,6 +1295,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         context,
         compact: compact,
         options: sourceOptions,
+        active: query.sourceApp != null,
         value: query.sourceApp,
         onChanged: (option) {
           final current = widget.controller.query;
@@ -1228,6 +1312,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         context,
         compact: compact,
         options: sortOptions,
+        active: query.sort != HistorySort.newest,
         value: query.sort,
         onChanged: (option) {
           unawaited(
@@ -1243,27 +1328,32 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   Widget _filterSelect<T>(
     BuildContext context, {
     required bool compact,
+    bool active = false,
     required List<_HistoryFilterOption<T>> options,
     required T value,
     required ValueChanged<_HistoryFilterOption<T>> onChanged,
-  }) => ComponentTheme<SelectTheme>(
-    data: AppTheme.selectTheme(
-      context,
-      variant: compact
-          ? AppSelectVariant.compactToolbar
-          : AppSelectVariant.toolbar,
-      labels: options.map((option) => option.label),
-    ),
-    child: Select<_HistoryFilterOption<T>>(
-      filled: true,
-      constraints: _selectConstraints(context, compact),
-      value: _selectedOption(options, value),
-      onChanged: (option) {
-        if (option != null) onChanged(option);
-      },
-      expandIcon: compact ? null : const SelectExpandIcon(),
-      popup: _selectPopup(options).call,
-      itemBuilder: (context, option) => option.build(compact: compact),
+  }) => AppFilterIndicator(
+    active: active,
+    tooltip: _selectedOption(options, value).label,
+    child: ComponentTheme<SelectTheme>(
+      data: AppTheme.selectTheme(
+        context,
+        variant: compact
+            ? AppSelectVariant.compactToolbar
+            : AppSelectVariant.toolbar,
+        labels: options.map((option) => option.label),
+      ),
+      child: Select<_HistoryFilterOption<T>>(
+        filled: true,
+        constraints: _selectConstraints(context, compact),
+        value: _selectedOption(options, value),
+        onChanged: (option) {
+          if (option != null) onChanged(option);
+        },
+        expandIcon: compact ? null : const SelectExpandIcon(),
+        popup: _selectPopup(options).call,
+        itemBuilder: (context, option) => option.build(compact: compact),
+      ),
     ),
   );
 
@@ -1278,6 +1368,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   double _expandedToolbarMinimumWidth(BuildContext context) {
     final query = widget.controller.query;
     final labels = [
+      HistoryTagsFilter.selectionLabel(widget.controller),
       query.kind?.label ?? 'All clips',
       _facetLabel(
         widget.controller.facets.originDevices,
@@ -1303,8 +1394,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         theme.iconTheme.small.size!;
     var width =
         _minimumExpandedSearchWidth +
-        (_controlExtent(context) * 2) +
-        (_toolbarGap * (_filterCount + 2));
+        (_controlExtent(context) *
+            (widget.controller.hasActiveFilters ? 4 : 3)) +
+        (_toolbarGap *
+            (_filterCount + 2 + (widget.controller.hasActiveFilters ? 1 : 0)));
     for (final label in labels) {
       final painter = TextPainter(
         text: TextSpan(text: label, style: style),

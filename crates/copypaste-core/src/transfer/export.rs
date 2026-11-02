@@ -42,6 +42,7 @@ pub fn export(store: &Store, keyring: &Keyring, limit: u32) -> Result<ExportData
             return Err(ExportError::ContentTooLarge);
         }
         let item = ExportItem {
+            privacy: row.clipboard_privacy(),
             content: String::from_utf8_lossy(&plaintext).into_owned(),
             content_type: row.content_type,
             created_at: row.created_at,

@@ -161,6 +161,12 @@ void main() {
         final drawer = find.byKey(const ValueKey('sms-access-setup-drawer'));
         expect(drawer, findsOneWidget);
         expect(
+          find.byKey(
+            const ValueKey('module-settings-drawer-copypaste.sms-codes'),
+          ),
+          findsNothing,
+        );
+        expect(
           tester.getSize(drawer).width,
           closeTo(width >= 800 ? AppOverlaySize.drawerPanelWidth : width, 2),
         );
@@ -232,14 +238,8 @@ void main() {
           find.byKey(
             const ValueKey('module-settings-drawer-copypaste.sms-codes'),
           ),
-          findsOneWidget,
+          findsNothing,
         );
-        await tester.tap(
-          find.byKey(
-            const ValueKey('module-settings-done-copypaste.sms-codes'),
-          ),
-        );
-        await tester.pumpAndSettle();
         final enabled = find.byKey(
           const ValueKey('module-enabled-copypaste.sms-codes'),
         );

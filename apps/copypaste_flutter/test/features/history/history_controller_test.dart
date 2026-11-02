@@ -415,6 +415,7 @@ void main() {
         'Code',
         'JSON',
         'Path',
+        'Credentials',
         'Image',
         'File',
         'Other',
@@ -428,6 +429,7 @@ void main() {
         HistoryClipKind.code,
         HistoryClipKind.json,
         HistoryClipKind.path,
+        HistoryClipKind.credentials,
       ]);
     });
 

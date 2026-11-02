@@ -576,6 +576,65 @@ void main() {
     expect(gateway.loadCalls, 1);
   });
 
+  test(
+    'keeps confirmed offline through renewal until online evidence',
+    () async {
+      final clock = _TestClock(DateTime.utc(2026, 11, 1, 12));
+      final scheduler = _FreshnessTimerFactory();
+      final deadline = clock.now.add(const Duration(seconds: 10));
+      final peer = DevicePeer(
+        id: 'observed-peer',
+        name: 'Offline peer',
+        lastSeen: clock.now,
+        online: false,
+        details: DeviceDetails(
+          presence: DevicePresenceObservation(
+            state: DevicePresence.offline,
+            lastSeen: clock.now,
+            provenance: DeviceObservationProvenance.measured,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: clock.now,
+            freshUntil: deadline,
+          ),
+        ),
+      );
+      gateway.snapshot = _snapshot(peers: [peer]);
+      final statusController = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        now: () => clock.now,
+        freshnessTimerFactory: scheduler.schedule,
+      );
+      addTearDown(statusController.dispose);
+      await statusController.start();
+      expect(statusController.peerStateLabel(peer), 'Offline');
+
+      clock.now = deadline.add(const Duration(seconds: 5));
+      expect(statusController.peerStateLabel(peer), 'Offline');
+      expect(statusController.peerLatencyLabel(peer), '— ms');
+      expect(scheduler.timers, isEmpty);
+      await statusController.refresh();
+      expect(
+        statusController.peerStateLabel(
+          statusController.snapshot!.peers.single,
+        ),
+        'Offline',
+      );
+
+      gateway.snapshot = _snapshot(
+        peers: [_observedPeer(clock.now.add(const Duration(seconds: 30)))],
+      );
+      gateway.emitChange();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        statusController.peerStateLabel(
+          statusController.snapshot!.peers.single,
+        ),
+        'Available',
+      );
+    },
+  );
+
   test('runtime events renew latency without a UI renewal poll', () async {
     final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
     final scheduler = _FreshnessTimerFactory();

@@ -119,8 +119,9 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final drawerVisibility = AppOverlays.drawerVisibilityOf(context);
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge([widget.controller, drawerVisibility]),
       builder: (context, child) {
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -133,7 +134,8 @@ class _AppShellState extends State<AppShell> {
             final mobileNavigationVisible =
                 mode == _ShellNavigationMode.bottom &&
                 MediaQuery.viewInsetsOf(context).bottom == 0 &&
-                !widget.controller.bottomOverlayOpen;
+                !widget.controller.bottomOverlayOpen &&
+                !drawerVisibility.value;
             final systemBottomPadding = MediaQuery.paddingOf(context).bottom;
             final railExpanded = mode == _ShellNavigationMode.wide
                 ? (_desktopRailExpanded ?? true)

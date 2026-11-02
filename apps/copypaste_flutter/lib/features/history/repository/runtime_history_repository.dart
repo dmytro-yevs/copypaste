@@ -21,6 +21,7 @@ import 'history_file_importer.dart';
 class RuntimeHistoryRepository
     implements
         HistoryRepository,
+        HistoryTagsRepository,
         HistorySpoilerRepository,
         HistoryFileDownloadCancellation,
         HistoryFileProgressRepository,
@@ -64,6 +65,9 @@ class RuntimeHistoryRepository
   /// Maps only Rust-provided labels and opaque IDs for server-side filters.
   static HistoryFacets mapFacets(runtime.HistoryFacets facets) {
     return HistoryFacets(
+      tags: facets.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
       originDevices: facets.originDevices
           .map(
             (facet) => HistoryDeviceFacet(
@@ -101,6 +105,18 @@ class RuntimeHistoryRepository
         originDeviceId: query.origin,
         sourceAppBundleId: query.sourceApp,
         sort: _toRuntimeSort(query.sort),
+        capturedFromMs: query.capturedFrom == null
+            ? null
+            : PlatformInt64Util.from(
+                query.capturedFrom!.millisecondsSinceEpoch,
+              ),
+        capturedBeforeMs: query.capturedBefore == null
+            ? null
+            : PlatformInt64Util.from(
+                query.capturedBefore!.millisecondsSinceEpoch,
+              ),
+        tagIds: query.tagIds,
+        untaggedOnly: query.untaggedOnly,
       ),
       limit: limit,
       cursor: cursor,
@@ -111,6 +127,36 @@ class RuntimeHistoryRepository
       skippedUndecryptable: page.skippedUndecryptable,
     );
   }
+
+  @override
+  Future<HistoryTags> tags(List<String> clipIds) async {
+    _ensureActive();
+    final data = await runtime.historyTags(clipIds: clipIds);
+    return HistoryTags(
+      tags: data.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
+      assignments: {
+        for (final entry in data.assignments) entry.clipId: entry.tagIds,
+      },
+    );
+  }
+
+  @override
+  Future<void> saveTag({String? id, required String name}) =>
+      runtime.saveHistoryTag(id: id, name: name);
+  @override
+  Future<void> deleteTag(String id) => runtime.deleteHistoryTag(id: id);
+  @override
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  }) => runtime.changeClipTags(
+    clipIds: clipIds,
+    tagIds: tagIds,
+    assigned: assigned,
+  );
 
   @override
   Future<HistoryClip> get(String id) async {
@@ -535,6 +581,7 @@ HistoryClipKind _fromRuntimeKind(
     runtime.ClipSemanticKind.code => HistoryClipKind.code,
     runtime.ClipSemanticKind.json => HistoryClipKind.json,
     runtime.ClipSemanticKind.path => HistoryClipKind.path,
+    runtime.ClipSemanticKind.credentials => HistoryClipKind.credentials,
   };
 }
 
@@ -552,7 +599,8 @@ List<runtime.ClipContentClass> _toRuntimeContentClasses(
   HistoryClipKind.phone ||
   HistoryClipKind.code ||
   HistoryClipKind.json ||
-  HistoryClipKind.path => const [],
+  HistoryClipKind.path ||
+  HistoryClipKind.credentials => const [],
 };
 
 List<runtime.ClipSemanticKind> _toRuntimeSemanticKinds(HistoryClipKind? kind) =>
@@ -565,6 +613,9 @@ List<runtime.ClipSemanticKind> _toRuntimeSemanticKinds(HistoryClipKind? kind) =>
       HistoryClipKind.code => const [runtime.ClipSemanticKind.code],
       HistoryClipKind.json => const [runtime.ClipSemanticKind.json],
       HistoryClipKind.path => const [runtime.ClipSemanticKind.path],
+      HistoryClipKind.credentials => const [
+        runtime.ClipSemanticKind.credentials,
+      ],
       null ||
       HistoryClipKind.image ||
       HistoryClipKind.file ||

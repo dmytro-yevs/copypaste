@@ -358,9 +358,7 @@ struct ActiveSyncSource<'a, S> {
 
 impl<S: SyncSource> ActiveSyncSource<'_, S> {
     fn operation(&self) -> Result<ActiveSourceOperation, SyncError> {
-        self.state
-            .enter_operation()
-            .ok_or_else(|| SyncError::Cancelled)
+        self.state.enter_operation().ok_or(SyncError::Cancelled)
     }
 }
 
@@ -370,17 +368,11 @@ struct ActiveDeferredFileSource {
 }
 impl crate::sync::DeferredFileSource for ActiveDeferredFileSource {
     fn read_chunk(&mut self) -> Result<Vec<u8>, SyncError> {
-        let _operation = self
-            .state
-            .enter_operation()
-            .ok_or_else(|| SyncError::Cancelled)?;
+        let _operation = self.state.enter_operation().ok_or(SyncError::Cancelled)?;
         self.source.read_chunk()
     }
     fn verify(&mut self) -> Result<(), SyncError> {
-        let _operation = self
-            .state
-            .enter_operation()
-            .ok_or_else(|| SyncError::Cancelled)?;
+        let _operation = self.state.enter_operation().ok_or(SyncError::Cancelled)?;
         self.source.verify()
     }
 }
@@ -1012,8 +1004,8 @@ impl Node {
 
     /// The most recent authenticated probe observation for a pairing.
     ///
-    /// Expired observations remain available for diagnostics; callers must use
-    /// [`AuthenticatedReachability::state_at`] to fail closed to `Unknown`.
+    /// Callers use [`AuthenticatedReachability::state_at`] to retain Offline
+    /// during renewal while expired Online observations fail closed to Unknown.
     #[must_use]
     pub fn authenticated_reachability(
         &self,

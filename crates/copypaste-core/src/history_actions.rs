@@ -75,6 +75,11 @@ pub fn prepare_copy(
         options.local_device_id,
         false,
     );
+    if options.plain_text {
+        if let ClipboardPayload::Text(text) = &mut payload {
+            *text = crate::rich_text::plain_text(&row.content_type, text)?.into();
+        }
+    }
     let local_reference = crate::file_transfer::offer(&payload).is_some()
         && store
             .file_reference(&row.id)
@@ -149,15 +154,27 @@ pub fn copy_text(
     text: &str,
     write: impl FnOnce(&ClipboardPayload) -> Result<(), crate::ClipboardWriteError>,
 ) -> Result<i64, HistoryError> {
-    store
-        .version_summary(id)
+    copy_text_classified(store, id, text, |payload, _| write(payload))
+}
+
+/// Derived copies carry their source classification to native clipboard hosts.
+pub fn copy_text_classified(
+    store: &Store,
+    id: &str,
+    text: &str,
+    write: impl FnOnce(&ClipboardPayload, bool) -> Result<(), crate::ClipboardWriteError>,
+) -> Result<i64, HistoryError> {
+    let privacy = store
+        .live_clipboard_privacy(id)
         .map_err(HistoryError::Store)?
-        .filter(|version| !version.deleted)
         .ok_or(HistoryError::NotFound)?;
     if text.len() > copypaste_ipc::MAX_CONTENT_BYTES {
         return Err(HistoryError::ContentTooLarge);
     }
-    write(&ClipboardPayload::Text(text.to_owned().into()))?;
+    write(
+        &ClipboardPayload::Text(text.to_owned().into()),
+        privacy.secret,
+    )?;
     note_copy(store, id)
 }
 

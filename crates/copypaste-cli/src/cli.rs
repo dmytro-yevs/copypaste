@@ -97,7 +97,7 @@ pub(crate) enum Command {
     /// no longer exist, are ignored; pinned items not named keep their order
     /// and move behind the ones that are.
     ///
-    /// The order is local to this device — a pin never travels to a peer.
+    /// Pin state and ordering synchronize with paired devices and cloud.
     Reorder {
         /// The pinned item ids, in the order wanted.
         #[arg(required = true, num_args = 1..)]

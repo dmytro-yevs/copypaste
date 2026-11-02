@@ -52,8 +52,8 @@ class FileOperation {
     phase: phase,
     sourceDevice: sourceDevice,
     destinationDevice: destinationDevice,
-    written: bytes,
-    total: size,
+    written: bytes < written ? written : bytes,
+    total: size < total ? total : size,
     startedAt: startedAt,
     finishedAt: finishedAt,
     error: error,
@@ -204,6 +204,7 @@ class FileOperationsController extends ChangeNotifier {
       (change) {
         final index = _items.indexWhere((item) => item.id == change.id);
         if (!change.finished && index >= 0) {
+          if (!_items[index].active) return;
           _recordSpeed(change);
           _items = List.unmodifiable([
             for (var i = 0; i < _items.length; i++)
@@ -263,13 +264,19 @@ class FileOperationsController extends ChangeNotifier {
         for (final previous in absentActive) {
           final result = await _repository.load(id: previous.id);
           if (_disposed) return;
+          if (generation != _generation) break;
           _remember(result);
         }
-        _remember(records);
-        _retainActiveSpeedSamples(records);
+        if (generation != _generation) {
+          _refreshAgain = true;
+          continue;
+        }
+        final current = records.map(_keepNewerState).toList(growable: false);
+        _remember(current);
+        _retainActiveSpeedSamples(current);
         _items = List.unmodifiable([
-          ...records.where((item) => item.active),
-          ...records.where((item) => !item.active),
+          ...current.where((item) => item.active),
+          ...current.where((item) => !item.active),
         ]);
         error = null;
         notifyListeners();
@@ -282,6 +289,20 @@ class FileOperationsController extends ChangeNotifier {
     } finally {
       _refresh = null;
     }
+  }
+
+  /// An operation ID owns one lifetime: terminal results never become active
+  /// again, and delayed snapshots cannot undo byte progress already observed.
+  FileOperation _keepNewerState(FileOperation incoming) {
+    final cached = _clipStates[incoming.itemId];
+    final previous =
+        _items.where((item) => item.id == incoming.id).firstOrNull ??
+        (cached?.id == incoming.id ? cached : null);
+    if (previous == null) return incoming;
+    if (!previous.active) return incoming.active ? previous : incoming;
+    return incoming.active
+        ? incoming.withProgress(previous.written, previous.total)
+        : incoming;
   }
 
   Future<void> _loadChanged(String id, {required bool terminal}) async {
@@ -298,8 +319,9 @@ class FileOperationsController extends ChangeNotifier {
     try {
       do {
         _reloadIds.remove(id);
-        final records = await _repository.load(id: id);
+        final loaded = await _repository.load(id: id);
         if (_disposed || generation != _generation) return;
+        final records = loaded.map(_keepNewerState).toList(growable: false);
         _remember(records);
         final next = {for (final item in _items) item.id: item};
         for (final item in records) {

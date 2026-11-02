@@ -58,34 +58,54 @@ class MainActivity : FlutterActivity() {
 
         @Keep
         @JvmStatic
-        fun writeClipboardText(text: String, contentType: String, received: Boolean): Boolean {
+        fun writeClipboardText(
+            text: String,
+            contentType: String,
+            received: Boolean,
+            secret: Boolean,
+        ): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeText(context, text, contentType).also { written ->
-                if (written && received) runCatching {
-                    AndroidCaptureFeedback.onCaptured(
-                        context, CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(text)),
-                    )
+            return AndroidClipboardWriter.writeText(context, text, contentType, secret = secret).also { written ->
+                if (written) runCatching {
+                    if (received) {
+                        AndroidCaptureFeedback.onCaptured(
+                            context,
+                            if (secret) null else CaptureFeedbackPreview(
+                                AndroidCaptureFeedback.textPreview(text),
+                            ),
+                        )
+                    } else AndroidCaptureFeedback.onCopied()
                 }
             }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardFile(path: String, filename: String, mimeType: String): Boolean {
-            val context=instance ?: return false
-            return AndroidClipboardWriter.writeFile(context,path,filename,mimeType)
+        fun writeClipboardFile(path: String, filename: String, mimeType: String, secret: Boolean): Boolean {
+            val context = instance ?: return false
+            return AndroidClipboardWriter.writeFile(context, path, filename, mimeType, secret).also { written ->
+                if (written) runCatching { AndroidCaptureFeedback.onCopied() }
+            }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String, received: Boolean): Boolean {
+        fun writeClipboardBinary(
+            bytes: ByteArray,
+            filename: String,
+            mimeType: String,
+            received: Boolean,
+            secret: Boolean,
+        ): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType).also { written ->
-                if (written && received) {
-                    val preview = runCatching {
-                        AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
-                    }.getOrNull()
-                    runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
+            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType, secret).also { written ->
+                if (written) {
+                    if (received) {
+                        val preview = if (secret) null else runCatching {
+                            AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
+                        }.getOrNull()
+                        runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
+                    } else runCatching { AndroidCaptureFeedback.onCopied() }
                 }
             }
         }

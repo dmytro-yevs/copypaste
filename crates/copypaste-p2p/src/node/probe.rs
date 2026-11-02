@@ -75,21 +75,24 @@ impl AuthenticatedReachability {
         }
     }
 
-    /// Returns `Unknown` rather than an expired positive or negative value.
+    /// Retain a failed observation while it is renewed. Only a current positive
+    /// observation may claim Online; a missing observation remains Unknown.
     #[must_use]
     pub fn state_at(&self, now_ms: i64) -> ProbeState {
-        if self.observed_at_ms > now_ms
-            || !matches!(self.fresh_until_ms, Some(fresh_until_ms) if now_ms <= fresh_until_ms)
-        {
+        if self.observed_at_ms > now_ms {
             ProbeState::Unknown
-        } else {
+        } else if self.state == ProbeState::Offline || self.is_current_at(now_ms) {
             self.state
+        } else {
+            ProbeState::Unknown
         }
     }
 
     #[must_use]
     pub fn is_current_at(&self, now_ms: i64) -> bool {
-        self.state_at(now_ms) != ProbeState::Unknown
+        self.state != ProbeState::Unknown
+            && self.observed_at_ms <= now_ms
+            && matches!(self.fresh_until_ms, Some(fresh_until_ms) if now_ms <= fresh_until_ms)
     }
 
     fn should_refresh_at(&self, now_ms: i64) -> bool {
@@ -527,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn observations_fail_closed_after_their_freshness_window() {
+    fn offline_survives_expiry_while_refresh_and_online_freshness_are_preserved() {
         let online = AuthenticatedReachability::online(Some(12), 100);
         assert_eq!(online.state_at(100), ProbeState::Online);
         assert!(!online.should_refresh_at(100));
@@ -541,10 +544,13 @@ mod tests {
         assert_eq!(offline.state_at(100), ProbeState::Offline);
         assert!(!offline.should_refresh_at(100));
         assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS));
+        assert!(!offline.is_current_at(100 + PROBE_FAILURE_FRESH_MS + 1));
+        assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS + 1));
         assert_eq!(
             offline.state_at(100 + PROBE_FAILURE_FRESH_MS + 1),
-            ProbeState::Unknown
+            ProbeState::Offline
         );
+        assert_eq!(offline.state_at(99), ProbeState::Unknown);
     }
 
     #[test]
@@ -883,6 +889,19 @@ mod tests {
             shutdown_rx,
         ));
         let client = node(&client_dir);
+        client.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::offline(
+                crate::now_ms().saturating_sub(PROBE_FAILURE_FRESH_MS + 1),
+            ),
+        );
+        assert_eq!(
+            client
+                .authenticated_reachability(&trusted.pairing_id)
+                .unwrap()
+                .state_at(crate::now_ms()),
+            ProbeState::Offline
+        );
         let (complete_tx, complete_rx) = oneshot::channel();
         assert!(
             client.refresh_reachability([trusted.clone()], move |state_changed| {

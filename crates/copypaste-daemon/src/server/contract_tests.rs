@@ -45,6 +45,12 @@ fn expected(method: &Method) -> Expected {
         Method::List { .. } | Method::Search { .. } | Method::HistoryQuery { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Page(_)))
         }
+        Method::HistoryTags { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::HistoryTags(_)))
+        }
+        Method::MutateHistoryTags { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
+        }
         Method::HistoryFacets => {
             Expected::Data(|data| matches!(data, ResponseData::HistoryFacets(_)))
         }
@@ -131,6 +137,15 @@ fn cases(root: &Path) -> Vec<Method> {
             cursor: None,
         },
         Method::HistoryFacets,
+        Method::HistoryTags {
+            clip_ids: Vec::new(),
+        },
+        Method::MutateHistoryTags {
+            mutation: copypaste_ipc::HistoryTagMutation::Save {
+                id: None,
+                name: "Contract tag".into(),
+            },
+        },
         Method::GetSpoilerState,
         Method::SetSpoilerRevealed {
             id: None,
@@ -316,7 +331,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        53,
+        55,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

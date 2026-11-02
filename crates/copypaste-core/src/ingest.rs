@@ -144,7 +144,12 @@ pub(crate) fn ingest_into_batched(
     content: &str,
     content_type: &str,
     created_at: i64,
-) -> Result<Ingested, IngestError> {
+    privacy: copypaste_ipc::ClipboardPrivacy,
+) -> Result<(Ingested, bool), IngestError> {
+    let metadata = (!privacy.is_empty()).then_some(crate::PayloadMetadata {
+        privacy,
+        ..Default::default()
+    });
     ingest_text(
         batch.store(),
         keyring,
@@ -153,7 +158,7 @@ pub(crate) fn ingest_into_batched(
         created_at,
         None,
         None,
-        None,
+        metadata.as_ref(),
         batch.settings(),
         Sweep::Deferred,
     )
@@ -266,6 +271,7 @@ pub fn ingest_into_with_capture_source_metadata_with_current_retention(
         settings,
         Sweep::Now(&current_settings),
     )
+    .map(|(ingested, _)| ingested)
 }
 
 /// [`ingest_into_with_capture_source`] with a live policy read for its
@@ -314,7 +320,7 @@ fn ingest_text(
     payload_metadata: Option<&crate::PayloadMetadata>,
     settings: &copypaste_ipc::ConfigData,
     sweep: Sweep<'_>,
-) -> Result<Ingested, IngestError> {
+) -> Result<(Ingested, bool), IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
     }
@@ -324,7 +330,10 @@ fn ingest_text(
         return Err(IngestError::TooLarge);
     }
 
-    let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
+    let classified = crate::classify_credentials(content_type, content)
+        .map(|privacy| crate::credentials::metadata(privacy, payload_metadata));
+    let payload_metadata =
+        encode_payload_metadata(classified.as_ref().or(payload_metadata), content_type)?;
     let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
@@ -337,7 +346,7 @@ fn ingest_text(
     let seal_id = item_id.clone();
     let indexable = copypaste_ipc::content_type::is_text(content_type);
 
-    let ingested = store.insert_or_bump_late_sealed(
+    let (ingested, changed) = store.insert_or_bump_late_sealed(
         NewItem {
             id: item_id,
             content_ciphertext: Vec::new(),
@@ -362,7 +371,7 @@ fn ingest_text(
         crate::retention::enforce_retention_with(store, current_settings);
     }
 
-    Ok(ingested.into())
+    Ok((ingested.into(), changed))
 }
 
 /// Store a raw image or file payload.  Binary values have no string
@@ -406,6 +415,7 @@ pub fn ingest_binary_into_with_capture_source(
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     let payload_metadata = payload_metadata.map(|file| crate::PayloadMetadata {
+        credentials: false,
         secret_override: None,
         privacy: Default::default(),
         file: Some(file.clone()),
@@ -601,6 +611,7 @@ mod tests {
             let ingress = ingress.clone();
             std::thread::spawn(move || {
                 let metadata = crate::PayloadMetadata {
+                    credentials: false,
                     secret_override: None,
                     privacy: Default::default(),
                     file: None,
@@ -826,6 +837,7 @@ mod tests {
     fn capture_source_metadata_is_stored_atomically_with_a_binary_item() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: Some(crate::FileMetadata::new("report.pdf", "application/pdf").unwrap()),
@@ -858,6 +870,7 @@ mod tests {
     fn text_capture_preserves_source_icon_metadata() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,

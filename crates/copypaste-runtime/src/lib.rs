@@ -113,14 +113,27 @@ pub trait ClipboardWriter: Send + Sync {
         content_type: &str,
     ) -> Result<(), ClipboardWriteError>;
 
+    /// Preserve classification on hosts that support native sensitive previews.
+    fn write_classified(
+        &self,
+        payload: &ClipboardPayload,
+        content_type: &str,
+        secret: bool,
+    ) -> Result<(), ClipboardWriteError> {
+        let _ = secret;
+        self.write(payload, content_type)
+    }
+
     /// Write received content and acknowledge success through the native host,
-    /// including when no Flutter notification subscriber is running.
+    /// including when no Flutter notification subscriber is running. Secret
+    /// content must stay concealed in native notification previews.
     fn write_received(
         &self,
         payload: &ClipboardPayload,
         content_type: &str,
+        secret: bool,
     ) -> Result<(), ClipboardWriteError> {
-        self.write(payload, content_type)
+        self.write_classified(payload, content_type, secret)
     }
 }
 
@@ -223,7 +236,13 @@ impl Runtime {
                         &clipboard_keyring,
                         row,
                         || settings,
-                        |payload| clipboard_writer.write_received(payload, &row.content_type),
+                        |payload| {
+                            clipboard_writer.write_received(
+                                payload,
+                                &row.content_type,
+                                row.clipboard_privacy().secret,
+                            )
+                        },
                     );
                 });
             }),
@@ -383,6 +402,7 @@ impl Runtime {
                 | Method::Pin { .. }
                 | Method::SetSecret { .. }
                 | Method::ReorderPinned { .. }
+                | Method::MutateHistoryTags { .. }
                 | Method::ImportFile { .. }
                 | Method::ImportFileReference { .. }
         );
@@ -405,6 +425,14 @@ impl Runtime {
             Method::Status => Response::ok(id, ResponseData::Status(self.status_data())),
             Method::List { limit, cursor } => self.list(id, limit, cursor),
             Method::Search { query, limit } => self.search(id, &query, limit),
+            Method::HistoryTags { clip_ids } => match self.store.history_tags(&clip_ids) {
+                Ok(tags) => Response::ok(id, ResponseData::HistoryTags(tags)),
+                Err(_) => Response::err(id, ErrorCode::InvalidRequest, "Tags could not be loaded."),
+            },
+            Method::MutateHistoryTags { mutation } => match self.store.mutate_history_tags(&self.keyring.item_key(), &mutation) {
+                Ok(()) => Response::ok(id, ResponseData::Empty {}),
+                Err(_) => Response::err(id, ErrorCode::InvalidRequest, "The tag change is invalid. Use a unique name of up to 64 characters and select pinned clips."),
+            },
             Method::HistoryFacets => match self.store.history_facets(
                 &self.device_id,
                 &self.device_name,
@@ -663,7 +691,7 @@ impl Runtime {
             Method::Pin {
                 id: item_id,
                 pinned,
-            } => match self.store.set_pinned(&item_id, pinned) {
+            } => match self.store.set_pinned_synced(&item_id, pinned, &self.keyring.item_key()) {
                 Ok(true) => self.item(id, &item_id),
                 Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
                 Err(_) => {
@@ -739,7 +767,7 @@ impl Runtime {
             .unwrap_or_else(|_| {
                 Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
             }),
-            Method::ReorderPinned { ids } => match self.store.reorder_pinned(&ids) {
+            Method::ReorderPinned { ids } => match self.store.reorder_pinned_synced(&ids, &self.keyring.item_key()) {
                 Ok(count) => Response::ok(id, ResponseData::Count(count)),
                 Err(_) => Response::err(
                     id,
@@ -851,13 +879,16 @@ impl Runtime {
             Method::Copy { id: item_id } => self.copy(id, &item_id, false),
             Method::CopyPlainText { id: item_id } => self.copy(id, &item_id, true),
             Method::CopyText { id: item_id, text } => {
-                match copypaste_core::history_actions::copy_text(
+                match copypaste_core::history_actions::copy_text_classified(
                     &self.store,
                     &item_id,
                     &text,
-                    |payload| {
-                        self.clipboard
-                            .write(payload, copypaste_ipc::content_type::TEXT)
+                    |payload, secret| {
+                        self.clipboard.write_classified(
+                            payload,
+                            copypaste_ipc::content_type::TEXT,
+                            secret,
+                        )
                     },
                 ) {
                     Ok(stamp) => {
@@ -1079,6 +1110,13 @@ impl Runtime {
     }
 
     pub fn capture_text_operation(&self, token: u64, content: &str) -> Result<(), RuntimeError> {
+        if let Some(privacy) =
+            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
+        {
+            if !self.capture_admission().classify(token, privacy) {
+                return Err(RuntimeError::CaptureRefused);
+            }
+        }
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
@@ -1149,14 +1187,15 @@ impl Runtime {
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
         self.capture_text_operation(token, code)?;
-        let _completion = self
+        let completion = self
             .capture_admission()
             .acquire(token, CaptureScope::Completion)
             .ok_or(RuntimeError::CaptureRefused)?;
         self.clipboard
-            .write(
+            .write_classified(
                 &ClipboardPayload::Text(code.to_owned().into()),
                 copypaste_ipc::content_type::TEXT,
+                completion.privacy.secret,
             )
             .map_err(|_| RuntimeError::Capture)
     }
@@ -1244,6 +1283,7 @@ impl Runtime {
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
         let metadata = copypaste_core::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: permit.privacy,
             file: None,
@@ -1439,7 +1479,8 @@ impl Runtime {
                 modules.sync_enabled_changed(applied.config.sync_enabled);
             }
             let after = settings.snapshot();
-            if before.private_mode_epoch != after.private_mode_epoch
+            if before.config != after.config
+                || before.private_mode_epoch != after.private_mode_epoch
                 || before.health != after.health
             {
                 capture_revision.fetch_add(1, Ordering::AcqRel);
@@ -1838,7 +1879,11 @@ impl Runtime {
                 },
             )?;
             self.clipboard
-                .write(prepared.payload(), &prepared.content_type)
+                .write_classified(
+                    prepared.payload(),
+                    &prepared.content_type,
+                    prepared.item.privacy.secret,
+                )
                 .map_err(copypaste_core::history_error::HistoryError::from)?;
             let item = history_actions::finish_copy(&self.store, prepared)?;
             self.instant_clipboard
@@ -2103,13 +2148,23 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingClipboard(Mutex<Vec<String>>);
+    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<bool>>);
     impl ClipboardWriter for RecordingClipboard {
         fn write(
             &self,
             payload: &ClipboardPayload,
-            _content_type: &str,
+            content_type: &str,
         ) -> Result<(), ClipboardWriteError> {
+            self.write_classified(payload, content_type, false)
+        }
+
+        fn write_classified(
+            &self,
+            payload: &ClipboardPayload,
+            _content_type: &str,
+            secret: bool,
+        ) -> Result<(), ClipboardWriteError> {
+            self.1.lock().unwrap().push(secret);
             self.0.lock().unwrap().push(match payload {
                 ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
                 ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
@@ -2128,10 +2183,42 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn manual_and_derived_copies_preserve_native_sensitivity() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        seed_text(&runtime, "secret-source", "synthetic secret");
+        runtime
+            .store
+            .set_secret(&runtime.keyring, "secret-source", true)
+            .unwrap();
+        assert!(runtime.copy(1, "secret-source", false).ok);
+        assert!(runtime.copy(2, "secret-source", true).ok);
+        assert!(
+            runtime
+                .request(
+                    3,
+                    Method::CopyText {
+                        id: "secret-source".into(),
+                        text: "derived secret".into(),
+                    }
+                )
+                .await
+                .ok
+        );
+        runtime
+            .store
+            .set_secret(&runtime.keyring, "secret-source", false)
+            .unwrap();
+        assert!(runtime.copy(4, "secret-source", false).ok);
+        assert_eq!(*clipboard.1.lock().unwrap(), [true, true, true, false]);
+    }
+
     #[derive(Default)]
     struct ReceivingClipboard {
         writes: RecordingClipboard,
         acknowledgements: Mutex<usize>,
+        concealed: Mutex<Vec<bool>>,
     }
 
     impl ClipboardWriter for ReceivingClipboard {
@@ -2139,13 +2226,24 @@ mod tests {
             self.writes.write(payload, kind)
         }
 
+        fn write_classified(
+            &self,
+            payload: &ClipboardPayload,
+            kind: &str,
+            secret: bool,
+        ) -> Result<(), ClipboardWriteError> {
+            self.writes.write_classified(payload, kind, secret)
+        }
+
         fn write_received(
             &self,
             payload: &ClipboardPayload,
             kind: &str,
+            secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.write(payload, kind)?;
+            self.write_classified(payload, kind, secret)?;
             *self.acknowledgements.lock().unwrap() += 1;
+            self.concealed.lock().unwrap().push(secret);
             Ok(())
         }
     }
@@ -2350,6 +2448,33 @@ mod tests {
                 .await
                 .error_code,
             Some(ErrorCode::NotFound)
+        );
+    }
+
+    #[test]
+    fn detected_credentials_share_the_android_capture_gate_and_hidden_preview() {
+        let (runtime, _dir) = fixture();
+        let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic";
+        assert!(matches!(
+            runtime.capture_text(content),
+            Err(RuntimeError::CaptureRefused)
+        ));
+        assert_eq!(runtime.store.count().unwrap(), 0);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                skip_secret: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        runtime.capture_text(content).unwrap();
+        let row = runtime.store.list(10, 0).unwrap().pop().unwrap();
+        let preview = runtime.item_value(row, true).unwrap();
+        assert!(preview.privacy.secret);
+        assert!(preview.content.is_empty());
+        assert_eq!(
+            preview.semantic_kind,
+            Some(copypaste_ipc::SemanticKind::Credentials)
         );
     }
 
@@ -2647,6 +2772,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ordinary_configuration_changes_publish_one_watch_revision() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_runtime_events();
+        let patch = copypaste_ipc::ConfigPatch {
+            notify_on_copy: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            runtime
+                .request(
+                    1,
+                    Method::SetConfig {
+                        patch: patch.clone()
+                    }
+                )
+                .await
+                .ok
+        );
+        assert!(events.try_recv().unwrap().capture.is_some());
+        assert!(events.try_recv().is_err());
+        assert!(runtime.request(2, Method::SetConfig { patch }).await.ok);
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn export_backup_and_confirmed_restore_use_the_shared_store() {
         let (runtime, dir) = fixture();
         seed_text(&runtime, "first", "first text");
@@ -2919,6 +3069,7 @@ mod tests {
             ["text:from another device"]
         );
         assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert_eq!(*clipboard.concealed.lock().unwrap(), [false]);
         assert!(!runtime.source.apply_version(&incoming).unwrap());
         assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
         runtime
@@ -2944,6 +3095,43 @@ mod tests {
         assert!(runtime.copy(1, "incoming", false).ok);
         assert_eq!(clipboard.writes.0.lock().unwrap().len(), 2);
         assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn received_secrets_reach_the_clipboard_with_concealed_native_feedback() {
+        let dir = tempfile::tempdir().unwrap();
+        let clipboard = Arc::new(ReceivingClipboard::default());
+        let runtime = Runtime::open_with_keyring(
+            dir.path(),
+            "receiver",
+            0,
+            clipboard.clone(),
+            Arc::new(Keyring::from_secret(&[7; 32])),
+        )
+        .unwrap();
+        let incoming = copypaste_core::RemoteVersion {
+            item_id: "secret-incoming",
+            content: "synthetic confidential text",
+            binary_content: None,
+            payload_metadata: Some(r#"{"privacy":{"secret":true}}"#),
+            content_type: "text",
+            created_at: 100,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "sender",
+            app_bundle_id: None,
+            app_name: None,
+        };
+        assert!(runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(
+            *clipboard.writes.0.lock().unwrap(),
+            ["text:synthetic confidential text"]
+        );
+        assert_eq!(*clipboard.concealed.lock().unwrap(), [true]);
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert!(!runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert!(runtime.store.search("confidential", 10).unwrap().is_empty());
     }
 
     #[test]

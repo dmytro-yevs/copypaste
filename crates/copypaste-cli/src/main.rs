@@ -411,6 +411,7 @@ mod tests {
     fn one_item_export() -> ExportData {
         ExportData {
             items: vec![ExportItem {
+                privacy: Default::default(),
                 content: "hello".to_string(),
                 content_type: "text/plain".to_string(),
                 created_at: 1,

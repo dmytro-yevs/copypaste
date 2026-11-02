@@ -83,6 +83,23 @@ pub(super) fn prepare_remote_version(
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
     local: Option<&Version>,
 ) -> Result<Option<Prepared>, MergeError> {
+    let organization_text = if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
+        incoming
+            .binary_content
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+    } else {
+        Some(incoming.content)
+    };
+    if !organization_text.is_some_and(|text| {
+        crate::storage::organization::valid_wire(
+            incoming.item_id,
+            incoming.content_type,
+            text,
+            incoming.deleted,
+        )
+    }) {
+        return Ok(None);
+    }
     let content = incoming
         .binary_content
         .unwrap_or(incoming.content.as_bytes());
@@ -181,6 +198,26 @@ pub(super) fn prepare_remote_version(
         }
     };
 
+    let payload_metadata = if incoming.deleted {
+        None
+    } else if let Some(privacy) =
+        crate::classify_credentials(incoming.content_type, incoming.content)
+    {
+        let supplied = incoming
+            .payload_metadata
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .unwrap_or_else(|| crate::PayloadMetadata {
+                privacy: incoming
+                    .payload_metadata
+                    .map(crate::PayloadMetadata::privacy_from_json)
+                    .unwrap_or_default(),
+                ..Default::default()
+            });
+        crate::credentials::metadata(privacy, Some(&supplied)).to_json(incoming.content_type)
+    } else {
+        incoming.payload_metadata.map(str::to_string)
+    };
+
     Ok(Some(Prepared {
         id: incoming.item_id.to_string(),
         content_ciphertext: ciphertext,
@@ -195,18 +232,15 @@ pub(super) fn prepare_remote_version(
         pinned,
         pin_order,
         pin_updated_at,
-        search_text: if incoming.deleted
-            || copypaste_ipc::content_type::is_binary(incoming.content_type)
+        search_text: if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
+            organization_text.map(str::to_owned)
+        } else if incoming.deleted || copypaste_ipc::content_type::is_binary(incoming.content_type)
         {
             None
         } else {
             Some(incoming.content.to_string())
         },
-        payload_metadata: if incoming.deleted {
-            None
-        } else {
-            incoming.payload_metadata.map(str::to_string)
-        },
+        payload_metadata,
     }))
 }
 

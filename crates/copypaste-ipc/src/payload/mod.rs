@@ -62,6 +62,16 @@ pub struct HistoryQuery {
     /// Exact stable bundle/package id of the application that captured a clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_app_bundle_id: Option<String>,
+    /// Inclusive lower bound and exclusive upper bound, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_from_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_before_ms: Option<i64>,
+    /// Selected tag ids match with OR. Tag filtering only returns pinned clips.
+    #[serde(default)]
+    pub tag_ids: Vec<String>,
+    #[serde(default)]
+    pub untagged_only: bool,
     #[serde(default = "default_history_sort")]
     pub sort: HistorySort,
 }
@@ -79,6 +89,10 @@ impl Default for HistoryQuery {
             pinned_only: false,
             origin_device_id: None,
             source_app_bundle_id: None,
+            captured_from_ms: None,
+            captured_before_ms: None,
+            tag_ids: Vec::new(),
+            untagged_only: false,
             sort: HistorySort::Newest,
         }
     }
@@ -108,6 +122,8 @@ pub struct HistorySourceAppFacet {
 pub struct HistoryFacets {
     pub origin_devices: Vec<HistoryDeviceFacet>,
     pub source_apps: Vec<HistorySourceAppFacet>,
+    #[serde(default)]
+    pub tags: Vec<crate::HistoryTag>,
 }
 
 /// One page of history, and how much of it could not be shown.
@@ -189,6 +205,9 @@ pub struct ImagePreviewBounds {
 /// id. Carrying the old one would invite a client to expect it back.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportItem {
+    /// Older exports omit privacy; new exports preserve explicit classification.
+    #[serde(default, skip_serializing_if = "crate::ClipboardPrivacy::is_empty")]
+    pub privacy: crate::ClipboardPrivacy,
     pub content: String,
     pub content_type: String,
     /// Milliseconds since the Unix epoch. Preserved across an import, so a

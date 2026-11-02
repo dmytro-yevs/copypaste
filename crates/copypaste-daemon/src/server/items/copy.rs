@@ -14,6 +14,7 @@ pub(crate) fn copy_text(state: &AppState, id: u64, item_id: &str, text: &str) ->
         state
             .clipboard()
             .write_payload(item_id, payload, copypaste_ipc::content_type::TEXT)
+            .inspect(|()| crate::notify::on_copy(state))
     }) {
         Ok(stamp) => {
             state.instant_clipboard.note_local(&state.store, stamp);
@@ -49,6 +50,7 @@ fn copy_with(state: &AppState, id: u64, item_id: &str, plain_text: bool) -> Resp
                 &prepared.content_type,
             )
             .map_err(copypaste_core::history_error::HistoryError::from)?;
+        crate::notify::on_copy(state);
         let item = history_actions::finish_copy(&state.store, prepared)?;
         state
             .instant_clipboard

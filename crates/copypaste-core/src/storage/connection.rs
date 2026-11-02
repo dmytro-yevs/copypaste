@@ -111,7 +111,10 @@ fn register_semantic_functions(conn: &Connection) -> rusqlite::Result<()> {
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |context| {
             let content_type = context.get::<String>(0)?;
-            let content = context.get::<String>(1)?;
+            let Some(content) = context.get::<Option<String>>(1)? else {
+                // Binary and unindexed rows have no joined FTS content.
+                return Ok(None);
+            };
             Ok(crate::classify_semantic(&content_type, &content)
                 .map(|classification| classification.kind.as_str()))
         },

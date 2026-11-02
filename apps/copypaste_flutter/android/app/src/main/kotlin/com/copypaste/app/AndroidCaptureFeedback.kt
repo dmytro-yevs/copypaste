@@ -64,12 +64,16 @@ internal object AndroidCaptureFeedback {
     }
 
     fun onCaptured(context: Context, preview: CaptureFeedbackPreview? = null) {
+        onCopied()
         if (NativeRuntimeCapture.notifyOnCopyEnabled() &&
             AndroidCaptureState.notificationGranted(context)
         ) {
             notify(context, if (NativeRuntimeCapture.notificationPreviewEnabled()) preview else null)
         }
-        if (NativeRuntimeCapture.soundOnCopyEnabled()) playSound()
+    }
+
+    fun onCopied() {
+        if (NativeRuntimeCapture.soundOnCopyEnabled()) runCatching { playSound() }
     }
 
     private fun notify(context: Context, preview: CaptureFeedbackPreview?) {

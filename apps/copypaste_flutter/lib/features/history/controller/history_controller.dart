@@ -12,6 +12,7 @@ import 'history_ocr_controller.dart';
 import '../../transfers/file_operations_controller.dart';
 import 'history_resource_limits.dart';
 import 'history_summary.dart';
+import 'history_tags_controller.dart';
 import 'history_window_index.dart';
 import 'history_spoiler_controller.dart';
 
@@ -53,10 +54,25 @@ class HistoryController extends ChangeNotifier {
        _filePicker = filePicker,
        _fileDownloader = fileDownloader,
        _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250) {
+    tags.addListener(notifyListeners);
     spoilers.addListener(notifyListeners);
     ocr?.addListener(notifyListeners);
     fileOperations?.addListener(_fileOperationsChanged);
   }
+
+  late final tags = HistoryTagsController(
+    _repository is HistoryTagsRepository
+        ? _repository as HistoryTagsRepository
+        : null,
+  );
+
+  final _organizationChanges = ValueNotifier<int>(0);
+  HistoryTagsController createTagsController() => HistoryTagsController(
+    _repository is HistoryTagsRepository
+        ? _repository as HistoryTagsRepository
+        : null,
+    changes: _organizationChanges,
+  );
 
   final HistoryOcrController? ocr;
   late final spoilers = HistorySpoilerController(
@@ -327,6 +343,7 @@ class HistoryController extends ChangeNotifier {
     _replaceItems([]);
     _window.clear();
     _facets = const HistoryFacets();
+    tags.clear();
     _selectedClip = null;
     _selectedDetailEpoch++;
     _selectedDetailLoad = null;
@@ -455,12 +472,24 @@ class HistoryController extends ChangeNotifier {
       _pinMutations.isEmpty &&
       _deleteMutations.isEmpty;
   String? get draggedPinnedId => _draggedPinnedId;
+  bool get canTagBulkSelection {
+    if (!tags.available ||
+        _bulkSelectedIds.isEmpty ||
+        _bulkSelectedIds.length > 500) {
+      return false;
+    }
+    final pinned = _window.pinnedIds.toSet();
+    return _bulkSelectedIds.every(pinned.contains);
+  }
+
   bool get hasUnfilteredQuery =>
       !_query.hasSearch &&
       _query.kind == null &&
       !_query.pinnedOnly &&
       _query.origin == null &&
-      _query.sourceApp == null;
+      _query.sourceApp == null &&
+      !_query.hasDateFilter &&
+      !_query.hasTagFilter;
   bool get canReorderPinned =>
       !_disposed &&
       !_isBulkSelecting &&
@@ -774,6 +803,7 @@ class HistoryController extends ChangeNotifier {
       _watchErrored(_watchGeneration);
       return;
     }
+    _organizationChanges.value++;
     unawaited(spoilers.refresh());
     _watchReconnectAttempts = 0;
     if (_isBulkMutating) {
@@ -1212,12 +1242,38 @@ class HistoryController extends ChangeNotifier {
       final facets = await _repository.facets();
       if (!_disposed && !_suspended && epoch == _mediaEpoch) {
         _facets = facets;
+        tags.updateCatalogue(facets.tags);
         _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
         notifyListeners();
       }
     } catch (_) {
       // History remains usable when optional filter choices are unavailable.
     }
+  }
+
+  Future<void> setDateRange(DateTime? start, DateTime? end) {
+    if (start == null || end == null) {
+      return updateQuery(_query.copyWith(clearDates: true));
+    }
+    final a = start.toLocal();
+    final b = end.toLocal();
+    final from = DateTime(a.year, a.month, a.day);
+    final through = DateTime(b.year, b.month, b.day);
+    return updateQuery(
+      _query.copyWith(
+        capturedFrom: from.isBefore(through) ? from : through,
+        capturedBefore: from.isAfter(through)
+            ? DateTime(from.year, from.month, from.day + 1)
+            : DateTime(through.year, through.month, through.day + 1),
+      ),
+    );
+  }
+
+  Future<void> setDatePreset(int? days, {bool yesterday = false}) {
+    if (days == null) return setDateRange(null, null);
+    final now = DateTime.now();
+    final end = DateTime(now.year, now.month, now.day - (yesterday ? 1 : 0));
+    return setDateRange(DateTime(end.year, end.month, end.day - days + 1), end);
   }
 
   void updateSearch(String value) {
@@ -1241,6 +1297,16 @@ class HistoryController extends ChangeNotifier {
       query = query.copyWith(sort: HistorySort.newest);
     }
     _query = query;
+    await reload();
+  }
+
+  bool get hasActiveFilters =>
+      !hasUnfilteredQuery || _query.sort != HistorySort.newest;
+
+  Future<void> resetFilters() => updateQuery(const HistoryQuery());
+
+  Future<void> retryHistory() async {
+    cancelPinnedDrag();
     await reload();
   }
 
@@ -2158,6 +2224,9 @@ class HistoryController extends ChangeNotifier {
     fileOperations?.dispose();
     _spoilerContent.clear();
     spoilers.removeListener(notifyListeners);
+    tags.removeListener(notifyListeners);
+    tags.dispose();
+    _organizationChanges.dispose();
     spoilers.dispose();
     ocr?.removeListener(notifyListeners);
     ocr?.dispose();

@@ -14,6 +14,13 @@ pub const MAX_IMPORT_ITEMS: usize = 10_000;
 /// permanently local-only.
 const MAX_IMPORT_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Wire counts stay independent of durable duplicate and pin mutations.
+#[derive(Debug)]
+pub struct ImportOutcome {
+    pub data: ImportData,
+    pub oldest_changed_at: Option<i64>,
+}
+
 /// Import failures.
 ///
 /// The `Display` text carries no detail for the same reason
@@ -32,13 +39,14 @@ pub enum ImportError {
     Crypto(#[from] CryptoError),
     #[error("the items could not be stored")]
     Storage(#[from] StoreError),
-    /// Some earlier rows were committed before a later fatal failure.
+    /// Some accepted rows changed before a later fatal failure.
     ///
     /// Callers must still report the failure, but they also need this progress
     /// to announce the durable rows to sync rather than leaving them local-only.
     #[error("some items were imported before a later failure")]
     Partial {
         result: ImportData,
+        /// Oldest changed version, including duplicates; retains the legacy field name.
         oldest_inserted_at: i64,
         #[source]
         source: Box<ImportError>,
@@ -75,6 +83,18 @@ pub fn import_with_current_retention(
     current_settings: impl Fn() -> ConfigData,
     items: Vec<ExportItem>,
 ) -> Result<ImportData, ImportError> {
+    import_with_current_retention_outcome(store, keyring, settings, current_settings, items)
+        .map(|outcome| outcome.data)
+}
+
+/// Import and report durable mutations separately from the compatible wire counts.
+pub fn import_with_current_retention_outcome(
+    store: &Store,
+    keyring: &Keyring,
+    settings: &ConfigData,
+    current_settings: impl Fn() -> ConfigData,
+    items: Vec<ExportItem>,
+) -> Result<ImportOutcome, ImportError> {
     if items.is_empty() {
         return Err(ImportError::Empty);
     }
@@ -96,10 +116,10 @@ pub fn import_with_current_retention(
         skipped_too_large: 0,
         pins_failed: 0,
     };
-    let mut pin: Vec<String> = Vec::new();
+    let mut pin: Vec<(String, i64)> = Vec::new();
     let batch = retention::batch_with_current_policy(store, settings.clone(), &current_settings);
     let mut fatal: Option<ImportError> = None;
-    let mut oldest_inserted_at: Option<i64> = None;
+    let mut oldest_changed_at: Option<i64> = None;
 
     for item in items {
         let created_at = item
@@ -111,22 +131,29 @@ pub fn import_with_current_retention(
             &item.content,
             &item.content_type,
             created_at,
+            item.privacy,
         ) {
-            Ok(Ingested::Stored(stored)) => {
+            Ok((Ingested::Stored(stored), _)) => {
                 result.inserted += 1;
-                oldest_inserted_at = Some(
-                    oldest_inserted_at
+                oldest_changed_at = Some(
+                    oldest_changed_at
                         .map_or(stored.created_at, |oldest| oldest.min(stored.created_at)),
                 );
-                if item.pinned {
-                    pin.push(stored.id);
+                if item.pinned && !stored.pinned {
+                    pin.push((stored.id, stored.created_at));
                 }
             }
-            Ok(Ingested::Duplicate(existing)) => {
+            Ok((Ingested::Duplicate(existing), changed)) => {
                 result.skipped += 1;
                 result.skipped_duplicate += 1;
-                if item.pinned {
-                    pin.push(existing.id);
+                if changed {
+                    oldest_changed_at =
+                        Some(oldest_changed_at.map_or(existing.created_at, |oldest| {
+                            oldest.min(existing.created_at)
+                        }));
+                }
+                if item.pinned && !existing.pinned {
+                    pin.push((existing.id, existing.created_at));
                 }
             }
             Err(IngestError::Empty) => {
@@ -155,9 +182,15 @@ pub fn import_with_current_retention(
     // writes no new row and still owes the pin the file named, so this loop
     // runs before every exit — including the fatal one, whose rows are already
     // committed.
-    for item_id in &pin {
-        match batch.store().set_pinned(item_id, true) {
-            Ok(true) => {}
+    for (item_id, created_at) in &pin {
+        match batch
+            .store()
+            .set_pinned_synced(item_id, true, &keyring.item_key())
+        {
+            Ok(true) => {
+                oldest_changed_at =
+                    Some(oldest_changed_at.map_or(*created_at, |oldest| oldest.min(*created_at)));
+            }
             Ok(false) => {
                 warn!("an imported pin names an item that is no longer live");
                 result.pins_failed += 1;
@@ -169,11 +202,10 @@ pub fn import_with_current_retention(
         }
     }
 
-    // DMY-156: only rows this batch *added* can put the history over a bound —
-    // a duplicate bump and a pin change move no row count and no byte total. An
-    // import that added nothing therefore owes no sweep, and running one applies
-    // a lowered cap to history the user never asked to trim. A failed pin blocks
-    // it too: the row it names is still unpinned, so I9 would not protect it.
+    // DMY-156: only an import that added rows owes a destructive sweep. Applying
+    // a lowered cap to a duplicate or pin-only import would trim existing history.
+    // A failed pin blocks the sweep too: that row is still unpinned, so I9 would
+    // not protect it.
     if result.inserted > 0 && result.pins_failed == 0 {
         retention::finish(batch);
     } else {
@@ -190,16 +222,19 @@ pub fn import_with_current_retention(
         "imported history"
     );
     if let Some(source) = fatal {
-        if let Some(oldest_inserted_at) = oldest_inserted_at {
+        if let Some(oldest_changed_at) = oldest_changed_at {
             return Err(ImportError::Partial {
                 result,
-                oldest_inserted_at,
+                oldest_inserted_at: oldest_changed_at,
                 source: Box::new(source),
             });
         }
         return Err(source);
     }
-    Ok(result)
+    Ok(ImportOutcome {
+        data: result,
+        oldest_changed_at,
+    })
 }
 
 #[cfg(test)]
@@ -212,6 +247,7 @@ mod tests {
 
     fn item(content: &str) -> ExportItem {
         ExportItem {
+            privacy: Default::default(),
             content: content.to_string(),
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             created_at: 1_700_000_000_000,
@@ -221,6 +257,19 @@ mod tests {
 
     fn import_into(f: &Fixture, items: Vec<ExportItem>) -> Result<ImportData, ImportError> {
         import(&f.store, &f.keyring, &f.settings, items)
+    }
+
+    #[test]
+    fn live_retention_import_preserves_its_public_result_type() {
+        let f = fixture();
+        let result: Result<ImportData, ImportError> = import_with_current_retention(
+            &f.store,
+            &f.keyring,
+            &f.settings,
+            || f.settings.clone(),
+            vec![item("compatible import")],
+        );
+        assert_eq!(result.unwrap().inserted, 1);
     }
 
     #[test]
@@ -363,6 +412,7 @@ mod tests {
                 &f,
                 vec![
                     ExportItem {
+                        privacy: Default::default(),
                         pinned: true,
                         ..item("keep first")
                     },
@@ -538,6 +588,7 @@ mod tests {
         let items: Vec<ExportItem> = entries
             .iter()
             .map(|(content, created_at)| ExportItem {
+                privacy: Default::default(),
                 created_at: *created_at,
                 ..item(content)
             })
@@ -661,6 +712,7 @@ mod tests {
             &f,
             vec![
                 ExportItem {
+                    privacy: Default::default(),
                     pinned: true,
                     ..item("alpha")
                 },
@@ -692,6 +744,7 @@ mod tests {
             &f,
             vec![
                 ExportItem {
+                    privacy: Default::default(),
                     pinned: true,
                     ..item("alpha")
                 },
@@ -700,7 +753,20 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, ImportError::Storage(_)), "{error:?}");
+        let ImportError::Partial {
+            result,
+            oldest_inserted_at,
+            source,
+        } = error
+        else {
+            panic!("the committed pin must be reported as partial progress");
+        };
+        assert!(matches!(*source, ImportError::Storage(_)));
+        assert_eq!((result.inserted, result.skipped_duplicate), (0, 1));
+        assert_eq!(
+            oldest_inserted_at,
+            f.store.get(&alpha).unwrap().unwrap().created_at
+        );
         assert!(
             f.store.get(&alpha).unwrap().unwrap().pinned,
             "a fatal item must not take a prior item's pin with it"
@@ -723,6 +789,7 @@ mod tests {
         let result = import_into(
             &f,
             vec![ExportItem {
+                privacy: Default::default(),
                 pinned: true,
                 ..item("imported")
             }],
@@ -793,11 +860,13 @@ mod tests {
             &f,
             vec![
                 ExportItem {
+                    privacy: Default::default(),
                     pinned: true,
                     created_at: 1_700_000_000_000,
                     ..item("pin me")
                 },
                 ExportItem {
+                    privacy: Default::default(),
                     created_at: 1_700_000_600_000,
                     ..item("never lands")
                 },

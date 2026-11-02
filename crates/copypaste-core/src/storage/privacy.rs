@@ -3,12 +3,33 @@
 use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
+use super::content_bytes::content_bytes_sql;
 use super::model::{item_columns, row_to_item, ItemColumns};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::{Store, StoreError};
 use crate::{Keyring, PayloadMetadata};
 
 impl Store {
+    /// Classification for derived copies without loading the source payload.
+    pub(crate) fn live_clipboard_privacy(
+        &self,
+        id: &str,
+    ) -> Result<Option<copypaste_ipc::ClipboardPrivacy>, StoreError> {
+        let metadata: Option<Option<String>> = self
+            .conn()?
+            .query_row(
+                "SELECT payload_metadata FROM clipboard_items WHERE id = ?1 AND deleted = 0",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(metadata.map(|json| {
+            json.as_deref()
+                .map(PayloadMetadata::privacy_from_json)
+                .unwrap_or_default()
+        }))
+    }
+
     /// Changes confidentiality without replacing content, identity, or pin state.
     pub fn set_secret(&self, keys: &Keyring, id: &str, secret: bool) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
@@ -65,8 +86,11 @@ impl Store {
             None => None,
         };
         tx.execute(
-            "UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, fts_rowid = ?4, \
-             content_bytes = LENGTH(content_ciphertext) + LENGTH(?2) WHERE id = ?1",
+            concat!(
+                "UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, fts_rowid = ?4, content_bytes = ",
+                content_bytes_sql!("?2"),
+                " WHERE id = ?1"
+            ),
             params![id, json, stamp, fts_rowid],
         )?;
         let file_operations = tx.execute(

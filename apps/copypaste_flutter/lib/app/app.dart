@@ -118,13 +118,13 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -133,7 +133,7 @@ class CopyPasteApp extends StatelessWidget {
                       controller: settingsController!,
                       devices: devicesController,
                       onDrawerVisibilityChanged:
-                          navigation.setBottomOverlayOpen,
+                          navigation.handleDrawerVisibilityChanged,
                     ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
@@ -143,13 +143,13 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -161,7 +161,7 @@ class CopyPasteApp extends StatelessWidget {
                         controller: settingsController!,
                         devices: devicesController,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                     if (settingsController != null)
                       CaptureHeaderAction(controller: settingsController!),
@@ -172,13 +172,13 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                     if (historyController?.fileOperations case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -187,7 +187,7 @@ class CopyPasteApp extends StatelessWidget {
                       controller: settingsController!,
                       devices: devicesController,
                       onDrawerVisibilityChanged:
-                          navigation.setBottomOverlayOpen,
+                          navigation.handleDrawerVisibilityChanged,
                     ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
@@ -206,7 +206,7 @@ class CopyPasteApp extends StatelessWidget {
                         controller: historyController!,
                         findRequests: navigation.historyFindRequests,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                 AppDestination.devices: devicesController == null
                     ? StateView.error(
@@ -220,7 +220,7 @@ class CopyPasteApp extends StatelessWidget {
                     : DevicesScreen(
                         controller: devicesController!,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         isActive: () =>
                             navigation.selectedDestination ==
                             AppDestination.devices,

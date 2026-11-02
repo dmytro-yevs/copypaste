@@ -1,2 +1,11 @@
-- Fix repeated macOS Keychain password prompts after Homebrew updates.
-- Preserve the local signing identity and stop installation if stable signing fails.
+- Filter the complete clipboard history by a calendar date or date range, combine filters, and reset them from the toolbar.
+- Organize pinned clips with multiple tags. Sync tags, assignments, pin state, and pinned order between devices.
+- Keep history controls on one row at narrow widths and scale expanded search to match. Mark active filters and add tooltips and clearer popup boundaries.
+- Open compact editors in bottom drawers on narrow screens, fit the calendar to the available space, and keep action buttons visible. Opening a drawer closes the previous drawer.
+- Fix Text filtering when history contains images or other clips without a text index, and keep filters available when retrying a failed history request.
+- Recognize credential clips, conceal sensitive previews, and preserve clipboard sensitivity during capture, sync, manual copy, and derived copy actions.
+- Copy rich-text clips as readable plain text and preserve their privacy settings.
+- Keep file references deferred until their content is needed, with consistent storage and transfer handling.
+- Apply runtime settings updates consistently across History, Quick Paste, devices, and file operations.
+- Preserve Android clipboard sensitivity and copy feedback, and avoid interrupting the active keyboard session during clipboard capture.
+- Keep offline peer presence stable across address renewal and play copy feedback only after successful clipboard activity.

@@ -35,6 +35,7 @@
 //! must match it exactly before connection pragmas or application queries run.
 
 mod connection;
+mod content_bytes;
 mod creation;
 mod dbfile;
 mod file_operations;
@@ -48,6 +49,7 @@ mod items;
 mod merge_page;
 mod migrations;
 mod model;
+pub(crate) mod organization;
 mod page;
 mod pinning;
 mod privacy;

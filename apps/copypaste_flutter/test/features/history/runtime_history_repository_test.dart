@@ -100,6 +100,7 @@ void main() {
       runtime.ClipSemanticKind.code: HistoryClipKind.code,
       runtime.ClipSemanticKind.json: HistoryClipKind.json,
       runtime.ClipSemanticKind.path: HistoryClipKind.path,
+      runtime.ClipSemanticKind.credentials: HistoryClipKind.credentials,
     };
 
     for (final entry in expected.entries) {
@@ -147,6 +148,7 @@ void main() {
   test('maps opaque filter IDs separately from display labels', () {
     final facets = RuntimeHistoryRepository.mapFacets(
       const runtime.HistoryFacets(
+        tags: [],
         originDevices: [
           runtime.HistoryDeviceFacet(
             id: 'device-1',

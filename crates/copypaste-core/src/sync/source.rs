@@ -86,6 +86,9 @@ impl StoreSource {
         device_name: String,
         settings: impl Fn() -> copypaste_ipc::ConfigData + Send + Sync + 'static,
     ) -> Self {
+        if let Err(error) = store.seed_pin_organization(&keyring.item_key()) {
+            tracing::warn!(error = ?error, "could not initialize synchronized pin records");
+        }
         Self {
             store,
             keyring,
@@ -139,7 +142,10 @@ impl StoreSource {
         };
         let Some(newest) = versions
             .filter(|item| {
-                !item.deleted && item.origin_device_id != self.device_id && item.created_at > floor
+                item.content_type != crate::storage::organization::CONTENT_TYPE
+                    && !item.deleted
+                    && item.origin_device_id != self.device_id
+                    && item.created_at > floor
             })
             .max_by_key(|item| (item.created_at, item.item_id))
         else {

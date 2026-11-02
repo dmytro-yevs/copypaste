@@ -17,6 +17,7 @@ pub enum SemanticKind {
     Code,
     Json,
     Path,
+    Credentials,
 }
 
 impl SemanticKind {
@@ -31,6 +32,7 @@ impl SemanticKind {
             Self::Code => "code",
             Self::Json => "json",
             Self::Path => "path",
+            Self::Credentials => "credentials",
         }
     }
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-24",
+  "date": "2026-11-01",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -3336,13 +3336,16 @@
         "crates/copypaste-p2p/src/node/activity.rs",
         "crates/copypaste-p2p/src/node/listen.rs",
         "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-core/src/p2p_contract.rs",
+        "apps/copypaste_flutter/lib/features/devices/devices_controller.dart",
+        "apps/copypaste_flutter/test/features/devices/devices_controller_test.dart",
         "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/settings/view/sync_header_action.dart",
         "crates/copypaste-ipc/src/sync_issue.rs",
         "crates/copypaste-core/src/sync/diagnostics.rs",
         "docs/engineering/synchronization-status-contract.json"
       ],
-      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
+      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. A measured Offline observation remains Offline during renewal without extending its probe freshness or retry cadence. Positive presence and RTT still expire. Flutter schedules no freshness-only timer for confirmed Offline presence. No extra timers or services are introduced.",
       "allocation_lifetime": "One bounded journal per node and one atomic last-published sync revision per daemon; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
       "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
       "native_resource_qualification": {
@@ -3352,7 +3355,7 @@
       },
       "measured_saving": null,
       "evidence_refs": [],
-      "functional_validation": "2026-10-26 activity noise fix: 344 P2P library tests and 58 runtime tests passed, including historical noise pruning, routine-event write suppression, problem retention/recovery, live presence notifications, and post-persistence inbound probe events. Native UI/resource evidence for this change is not established."
+      "functional_validation": "2026-10-26 activity noise fix: 344 P2P library tests and 58 runtime tests passed. 2026-11-01 Offline renewal fix: 344 P2P tests, 7 shared device-contract tests, 59 runtime tests and 179 Flutter device/sync tests passed. Rust and Flutter regressions fail before the fix and pass afterward; expired Offline can still refresh and recover through an authenticated probe. Dart analysis passed. Native UI/resource evidence remains unestablished on macOS, Android and Windows; unresolved resource budgets are unchanged."
     },
     {
       "id": "RUN-071",
@@ -3414,6 +3417,316 @@
         }
       ],
       "functional_validation": "344 P2P library tests, 37 capture tests and 21 runtime-log tests passed. Runtime-log Clippy with warnings denied, cargo fmt and git diff --check passed. Combined Clippy is blocked by three pre-existing unnecessary_lazy_evaluations findings in node/mod.rs at lines 361, 373 and 380. Native platform UI and resource measurements are not established."
+    },
+    {
+      "id": "RUN-072",
+      "title": "Copy feedback follows successful clipboard activity",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Clipboard feedback and instant clipboard",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/sync/instant_clipboard.rs",
+        "crates/copypaste-daemon/src/notify.rs",
+        "crates/copypaste-daemon/src/capture.rs",
+        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt"
+      ],
+      "invariant": "Successful duplicate captures and explicit History copies request one acknowledgement when sound is enabled. Self-write suppression prevents a second acknowledgement. Received secret clips use the same instant clipboard path and recency gates as ordinary clips while native notification previews remain concealed. Replays, metadata-only changes and failed native writes do not request copy feedback.",
+      "allocation_lifetime": "Reuse existing feedback adapters without additional retained services, caches or polling. Each newly acknowledged copy incurs the existing platform audio cost: a reaped afplay process on macOS, asynchronous embedded audio on Windows, and a released short-lived Android tone.",
+      "next_step": "Measure application, daemon and workers separately and together during repeated local and received copies on all three platforms. Native audio/UI evidence is missing; CPU, wakeup, I/O and sustained-growth budgets remain unresolved. No resource saving or resource qualification is claimed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "123 Rust tests passed: 12 clipboard privacy/secret-toggle tests, 4 instant clipboard tests, 59 runtime tests, 42 daemon History tests, 1 duplicate capture regression, 4 daemon sound gate tests and 1 cloud privacy/relay test. Three host-side Robolectric tests of the production Android feedback owner passed with fake runtime settings. Android aarch64 Rust bridge cross-check, Rust formatting and git diff --check passed. Native audio/UI and resource qualification remain unestablished on all supported platforms."
+    },
+    {
+      "id": "RUN-073",
+      "title": "Deferred file references and consistent bounded presentation state",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Clipboard actions, settings and file-operation presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardWriter.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart",
+        "apps/copypaste_flutter/lib/features/settings/controller/quick_paste_settings_controller.dart",
+        "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
+        "crates/copypaste-daemon/src/server/config.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-core/src/rich_text.rs",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/transfer/export.rs",
+        "crates/copypaste-core/src/transfer/import.rs",
+        "crates/copypaste-core/src/storage/content_bytes.rs",
+        "crates/copypaste-core/src/storage/privacy.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/storage/dbfile.rs",
+        "crates/copypaste-daemon/src/server/transfer.rs"
+      ],
+      "invariant": "Capture and synchronization retain file references and metadata; bodies transfer only on explicit request. Android file copy publishes the original content URI or existing download FileProvider URI without opening or copying the body. Terminal transfer state and observed byte progress survive older responses using the existing bounded presentation collections. Auto-paste persistence and shortcut-registration state agree with acknowledged operations. Actual runtime configuration changes publish one existing watch revision; unchanged writes stay quiet. Settings reads coalesce on revisions/reconnect/resume, cannot overwrite newer local mutations, and do not poll on captures. Unconfirmed notification policy never displays content. Rich-text parsing runs only for explicit plain-text copy; input/output use the existing clipboard cap, the RTF parser bounds nesting, and no parser service or result cache is retained. Text export/import preserves privacy classification, including duplicate imports, and older exports remain compatible. Restore retains deferred file references. Metadata-only secrecy changes account for every retained encrypted chunk and shared payload. Imports publish actual duplicate and pin mutations, including progress before a later failure, while unchanged imports stay quiet. Fallback polling reconciles configuration on accepted revision changes. Android native clipboard sensitivity follows received, manual and derived copies without losing ownership receipts.",
+      "allocation_lifetime": "No new workers, recurring timers or unbounded collections. Configuration reconciliation retains one in-flight read and one dirty bit. Rich-text DOM/run iteration and converted payloads belong to one copy action and are released afterward. Existing file-transfer, staging and retention owners remain authoritative. Import mutation tracking reuses rows already read inside the existing transaction and retains one aggregate timestamp. Derived copies read classification without loading the source body. Byte accounting uses SQLite BLOB lengths without decrypting or materializing file bodies. Polling reconciliation reuses the existing coalesced read and adds no timer.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/core-contract-tests.log",
+          "sha256": "03173e289e03d6ce7783878ad907ae37dcd29eaa587c9e9a074898533b04cfa3",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/flutter-verified-tests.log",
+          "sha256": "7b6d98ca87cf6111eeee7768ab7f11f584ef8a9ddafd620d221e18f6ee09c35c",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/android-writer-tests.log",
+          "sha256": "3945c5448ede7d3431bf705237e18c1d9b1e1a950abbdadc0452823d56a50a4b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/android-rust-final-check.log",
+          "sha256": "8d71708140b64269e99138813d76c84e81f7f96f9adebcf1e451ba3141d28c86",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-core-final.log",
+          "sha256": "5ec8f52186f126836510fa6329c64be96b92713398c0f1b19d8f5edb45bed29f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-runtime-final.log",
+          "sha256": "d1e58de3787c84f1ea4c7cc34c185d5ee96931b2640014905d0eb84083898339",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-daemon-import.log",
+          "sha256": "0d3feef5cc73829dc8b942200df9b1d3181df64b2eca7c3ae33888cea8016eb4",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-storage-final.log",
+          "sha256": "8b595f56d481f86616fc7c0ab331d222295d701b56418f7b132e332ca48c783f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-flutter-settings.log",
+          "sha256": "b0ab1dd98e1f1d0a49b8d1a5b05461386b0ba5e1a1098fbd404c9bd194d5974d",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-android-writer-tests.log",
+          "sha256": "20ff75b3f127b7c439e6592a137a469a1a9e4fe3832c46ec8af0ea63a06d949a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-android-rust-check.log",
+          "sha256": "28212a8442513eccff38d25d7007405c393fc48b1a49b29bf267c0947c2f4450",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-clippy-scoped.log",
+          "sha256": "5c8991c56f1cc3f161952f78ba960090ae4291539afe6d85083e030716a1bdda",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-flutter-analyze.log",
+          "sha256": "bf28ae976546fd1f49f38a6bd7b5e2f8ecb9b7352e44a937eb1da682ad4bf88c",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "279 Rust tests, 327 Flutter tests and 6 Android Robolectric writer tests passed. Android aarch64 bridge cross-check, Dart analysis, Rust formatting, version identity and whitespace checks passed. Clippy for the changed crates with --no-deps and warnings denied passed; the dependency-inclusive check remains blocked by three pre-existing unnecessary_lazy_evaluations in copypaste-p2p/src/node/mod.rs. Native installed-app and resource evidence remains unestablished on macOS, Android and Windows. Adversarial review fixes: 488 core unit tests and the core integration suites, 61 runtime tests, 10 daemon transfer tests, 43 Flutter settings tests and 7 production Android clipboard-writer Robolectric tests passed. The Android aarch64 bridge cross-check passed. Native UI and process resource qualification remain unestablished; unresolved budgets are unchanged. Public import and clipboard-writer APIs retain their original signatures. Scoped Clippy for the changed Rust packages and Flutter analysis passed; the full dependency Clippy gate remains blocked by three pre-existing P2P unnecessary_lazy_evaluations findings.",
+      "next_step": "Collect same-build app, daemon and worker peaks, steady state and growth on all three platforms during file-reference copy, requested transfer, rich-text conversion and runtime configuration changes. CPU, wakeup, I/O, network and growth budgets remain unresolved where null in runtime-resource-budgets.json. No native resource qualification or measured saving is claimed."
+    },
+    {
+      "id": "RUN-074",
+      "title": "Bounded local credential recognition and confidential type filtering",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Shared credential classification and History",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/credentials.rs",
+        "crates/copypaste-core/src/ingest.rs",
+        "crates/copypaste-core/src/semantic.rs",
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/history_item.rs",
+        "crates/copypaste-core/src/storage/history_preview.rs",
+        "crates/copypaste-core/src/sync/prepare.rs",
+        "crates/copypaste-payload/src/lib.rs",
+        "crates/copypaste-daemon/src/clipboard/mod.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/lib/features/history/models/history_models.dart"
+      ],
+      "invariant": "Recognized SSH/PEM private keys and JWT/GitHub/GitLab/Slack tokens are Credentials and secret by default. Public SSH keys are Credentials without adding secrecy. Capture respects skip_secret; explicit stored secret choices retain priority. Confidential type filtering uses a boolean metadata marker instead of indexing or decrypting secret bodies for filtering.",
+      "allocation_lifetime": "Recognition runs synchronously on admitted text with no model, worker, network, polling or retained detector cache. Token candidates are limited to 64 KiB, JWT headers to 4 KiB, and public SSH key bodies to 16 KiB before decoding. Decoded JWT claims are temporary and zeroized. Existing preview-cache entry/count bounds remain unchanged; the fingerprint version invalidates previews from the previous classifier.",
+      "next_step": "Measure application, daemon and workers separately and together on macOS, Android and Windows during ordinary capture, credential capture, repeated copies and filtered History reads. Native UI/resource evidence is not established. CPU, wakeup, I/O and sustained-growth budgets remain unresolved. No acceleration or resource qualification is claimed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/rust-tests.log",
+          "sha256": "e9e8e077918227a3b1cbc6bb6723097e279734417c3022ba7791fd275e69a909",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/core-integration-tests.log",
+          "sha256": "9ef7c5883ca627ba6c3ed342df7dea53aa4bd8bdaf178a5f1404c11a3780f2cc",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/flutter-tests.log",
+          "sha256": "7defb89571cc4ad82df626b287c01fcf809571043418e094dcea65ba2e1f1789",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/flutter-analyze.log",
+          "sha256": "1c9b9e39f88939e280b434f84c9860ee2dd7bd37a8d31bb7269243b0b7e3909b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/bridge-check.log",
+          "sha256": "16960202839073574712a0a88cd5dc03d2f5523273c6aff67a21df17c5a1071e",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/bridge-check-current.log",
+          "sha256": "e45e95f0d2d3536612b39ae95f6256914c7e69b6d60c3688b89a550d83969f6d",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "959 Rust library/binary tests passed (15 existing ignored daemon tests); 16 targeted core integration tests passed. 107 Flutter controller/repository/widget tests and flutter analyze passed in an isolated source copy. Rust-Flutter bindings regenerated with pinned 2.13.0-beta.5; the final workspace bridge cargo check passed after concurrent History organization edits completed. Earlier bridge checks in the evidence observed that work in progress. Task-owned Rust formatting checks and git diff --check passed. Native platform UI and resource evidence remain unestablished; no same-commit release or resource qualification is claimed."
+    },
+    {
+      "id": "RUN-075",
+      "title": "Bounded history date and tag queries with incremental organization sync",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History storage, sync and Flutter controllers",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/organization.rs",
+        "crates/copypaste-core/src/storage/migrations/009_history_organization.sql",
+        "apps/copypaste_flutter/lib/features/history/controller/history_tags_controller.dart",
+        "crates/copypaste-core/src/storage/versions.rs",
+        "apps/copypaste_flutter/lib/app/theme/app_overlays.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_tags_filter.dart"
+      ],
+      "invariant": "Apply date and tag predicates before keyset pagination. Merge bounded indexed version prefixes before reading ciphertext. Cache tag catalogues with existing facets and load memberships for explicit bounded selections. Replicate independently versioned encrypted organization records without recapturing content. Anchored editors use compositor links instead of per-frame anchor polling.",
+      "next_step": "Measure native application, daemon and worker peak, steady-state and repeated-use growth on supported platforms. CPU, wakeup, I/O, network and sustained-growth budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-ui-validation.log",
+          "sha256": "0ac9ce020b7cb2c909adc3fc19f02a23a25fdf0bc2e87da51818e70bea740d64",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-core-sync-validation.log",
+          "sha256": "9b1db887096b08e3886717fffb203ce0fd46cde95175e9f304211851adc9bfe6",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "dart-analysis.log",
+          "sha256": "8e6d5435ebe34621b567c370751f251c6437b1d104e25039b37ff323ab92b84f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-host-ipc-validation.log",
+          "sha256": "f077f5276f7e4ef0e37402d52e072e4253469d66471038f466e2d29a8a53d743",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
     }
   ]
 }

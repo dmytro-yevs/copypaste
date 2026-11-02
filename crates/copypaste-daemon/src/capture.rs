@@ -438,7 +438,7 @@ fn persist_pending(
             // `note_local_change` because this is the one caller that knows the
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
-            announce_capture(state, item.created_at, &item.id, true);
+            announce_capture(state, item.created_at, &item.id);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -448,7 +448,7 @@ fn persist_pending(
             } else {
                 debug!(id = %item.id, "capture deduplicated against a recent item");
             }
-            announce_capture(state, item.created_at, &item.id, false);
+            announce_capture(state, item.created_at, &item.id);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -503,9 +503,9 @@ fn test_persist_outcome() -> Option<CaptureOutcome> {
     }
 }
 
-fn announce_capture(state: &AppState, created_at: i64, item_id: &str, saved: bool) {
+fn announce_capture(state: &AppState, created_at: i64, item_id: &str) {
     state.note_capture(created_at, item_id);
-    crate::notify::on_capture(state, saved);
+    crate::notify::on_copy(state);
 }
 
 /// `settings` is the caller's snapshot, not a second read.
@@ -635,6 +635,7 @@ fn capture_metadata_with(
             copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
         });
     let metadata = copypaste_core::PayloadMetadata {
+        credentials: false,
         secret_override: None,
         privacy: capture.privacy,
         file: capture.file_metadata.clone(),
@@ -1559,7 +1560,12 @@ mod tests {
 
         let mut events = state.subscribe();
         let mut pending = None;
-        assert!(matches!(tick(&state, &mut pending), CaptureOutcome::Stored));
+        assert_eq!(
+            crate::notify::count_requests(|| {
+                assert!(matches!(tick(&state, &mut pending), CaptureOutcome::Stored));
+            }),
+            1
+        );
 
         let after = state.store.get(&first.id).unwrap().unwrap();
         assert!(

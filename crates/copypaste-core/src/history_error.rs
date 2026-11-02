@@ -13,6 +13,8 @@ pub enum HistoryError {
     ContentTooLarge,
     #[error("this item has no supported representation for that clipboard action")]
     Unsupported,
+    #[error("This rich-text clip could not be converted to plain text.")]
+    InvalidRichText,
     #[error("the system clipboard could not be written")]
     Clipboard,
     #[error("a destination is required")]
@@ -45,6 +47,7 @@ impl HistoryError {
             Self::ContentTooLarge => ErrorCode::ContentTooLarge,
             Self::Unsupported => ErrorCode::UnsupportedContent,
             Self::BackupMissingDirectory
+            | Self::InvalidRichText
             | Self::BadPath
             | Self::Exists
             | Self::NeedsConfirmation
