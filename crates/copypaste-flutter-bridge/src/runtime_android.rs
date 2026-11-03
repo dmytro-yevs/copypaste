@@ -387,28 +387,32 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
     _class: JClass,
     token: jlong,
     text: JObject,
-) -> jboolean {
+) -> jint {
+    // Mirrors NativeRuntimeCapture.INGEST_* in Kotlin.
+    const REFUSED: jint = 0;
+    const SAVED: jint = 1;
+    const SAVED_SECRET: jint = 2;
     if token <= 0 {
-        return JNI_FALSE;
+        return REFUSED;
     }
     let Some(runtime) = RUNTIME.get() else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let Some(read) = runtime.capture_admission().acquire(
         token as u64,
         copypaste_runtime::capture_admission::CaptureScope::Read,
     ) else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let Ok(text) = env.get_string((&text).into()) else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let text = text.to_string_lossy().into_owned();
     drop(read);
-    if runtime.capture_text_operation(token as u64, &text).is_ok() {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
+    match runtime.capture_text_operation(token as u64, &text) {
+        Ok(privacy) if privacy.secret => SAVED_SECRET,
+        Ok(_) => SAVED,
+        Err(_) => REFUSED,
     }
 }
 

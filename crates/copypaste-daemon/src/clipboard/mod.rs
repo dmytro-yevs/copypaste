@@ -288,8 +288,9 @@ pub trait ClipboardSource: Send {
     }
 
     /// Write text to the clipboard. Must suppress the resulting self-write so
-    /// the next poll does not re-capture our own content.
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;
+    /// the next poll does not re-capture our own content. `concealed` adds the
+    /// platform's secret marker, the one capture reads as `privacy.secret`.
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()>;
 
     /// Write one authenticated history payload without consulting its display
     /// label. The payload enum is shared with Android's embedded backend, so
@@ -299,6 +300,7 @@ pub trait ClipboardSource: Send {
         item_id: &str,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 
@@ -309,20 +311,21 @@ pub trait ClipboardSource: Send {
                     copypaste_ipc::content_type::HTML | copypaste_ipc::content_type::RICH_TEXT
                 ) =>
             {
-                self.set_binary_contents(item_id, content_type, text.as_bytes(), None)
+                self.set_binary_contents(item_id, content_type, text.as_bytes(), None, concealed)
             }
             ClipboardPayload::Text(text) => self
-                .set_contents(text)
+                .set_contents(text, concealed)
                 .map_err(|_| ClipboardWriteError::Failed),
             ClipboardPayload::Image {
                 content_type,
                 bytes,
-            } => self.set_binary_contents(item_id, content_type, bytes, None),
+            } => self.set_binary_contents(item_id, content_type, bytes, None, concealed),
             ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
                 item_id,
                 copypaste_ipc::content_type::FILE,
                 bytes,
                 metadata.as_ref(),
+                concealed,
             ),
             ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
         }
@@ -337,6 +340,7 @@ pub trait ClipboardSource: Send {
         _content_type: &str,
         _bytes: &[u8],
         _metadata: Option<&copypaste_core::FileMetadata>,
+        _concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
     }
@@ -579,6 +583,7 @@ mod tests {
         struct Writes {
             text: Option<String>,
             binary: Option<Vec<u8>>,
+            concealed: Option<bool>,
         }
         impl super::ClipboardSource for Writes {
             fn poll(&mut self) -> Option<super::Capture> {
@@ -587,8 +592,9 @@ mod tests {
             fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<super::Capture> {
                 None
             }
-            fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+            fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
                 self.text = Some(text.into());
+                self.concealed = Some(concealed);
                 Ok(())
             }
             fn set_binary_contents(
@@ -597,6 +603,7 @@ mod tests {
                 _: &str,
                 bytes: &[u8],
                 _: Option<&copypaste_core::FileMetadata>,
+                _: bool,
             ) -> Result<(), copypaste_core::ClipboardWriteError> {
                 self.binary = Some(bytes.to_vec());
                 Ok(())
@@ -619,6 +626,7 @@ mod tests {
                     ),
                 },
                 copypaste_ipc::content_type::FILE,
+                false,
             )
             .unwrap();
         assert!(writes.text.is_none());
@@ -631,8 +639,22 @@ mod tests {
                     metadata: copypaste_core::FileMetadata::new("file", "application/octet-stream"),
                 },
                 copypaste_ipc::content_type::FILE,
+                false,
             )
             .unwrap();
         assert_eq!(writes.binary, Some(vec![8]));
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::Text("secret".to_owned().into()),
+                copypaste_ipc::content_type::TEXT,
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            writes.concealed,
+            Some(true),
+            "a secret copy keeps its marker"
+        );
     }
 }

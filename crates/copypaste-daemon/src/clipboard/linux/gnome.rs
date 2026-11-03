@@ -318,11 +318,11 @@ impl ClipboardSource for GnomeClipboard {
             .map(|state| state.active && state.watching)
             .unwrap_or(false)
     }
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
-        self.write(HashMap::from([(
-            "text/plain;charset=utf-8".into(),
-            text.as_bytes().to_vec(),
-        )]))
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+        self.write(concealed_values(
+            HashMap::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]),
+            concealed,
+        ))
     }
     fn set_binary_contents(
         &mut self,
@@ -330,6 +330,7 @@ impl ClipboardSource for GnomeClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (mime, _) = super::formats::write_format(content_type)
@@ -346,8 +347,11 @@ impl ClipboardSource for GnomeClipboard {
         } else {
             bytes.to_vec()
         };
-        self.write(HashMap::from([(mime.into(), bytes)]))
-            .map_err(|_| ClipboardWriteError::Failed)
+        self.write(concealed_values(
+            HashMap::from([(mime.into(), bytes)]),
+            concealed,
+        ))
+        .map_err(|_| ClipboardWriteError::Failed)
     }
     fn backend_name(&self) -> &'static str {
         self.bridge.backend_name
@@ -779,6 +783,17 @@ fn attach_source(capture: &mut Capture, source: Option<SourceIdentity>) {
         .and_then(|source| source_label(&source.app_id));
     capture.app_bundle_id = source.map(|source| source.app_id);
 }
+/// The KDE password-manager hint is what capture reads as a secret.
+fn concealed_values(
+    mut values: HashMap<String, Vec<u8>>,
+    concealed: bool,
+) -> HashMap<String, Vec<u8>> {
+    if concealed {
+        values.insert(KDE_PASSWORD_MANAGER_HINT.into(), b"secret".to_vec());
+    }
+    values
+}
+
 fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
     !values.is_empty()
         && values.len() <= MAX_MIMES
@@ -1226,7 +1241,7 @@ mod tests {
         );
 
         clipboard
-            .set_contents("written bridge text")
+            .set_contents("written bridge text", false)
             .expect("bridge write");
         let state = fixture.state.lock().expect("fixture bridge state");
         assert_eq!(state.writes.len(), 1);

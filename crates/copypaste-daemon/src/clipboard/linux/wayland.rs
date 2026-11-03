@@ -287,11 +287,11 @@ impl ClipboardSource for WaylandClipboard {
         self.active()
     }
 
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
-        self.write(HashMap::from([(
-            "text/plain;charset=utf-8".into(),
-            text.as_bytes().to_vec(),
-        )]))
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+        self.write(concealed_values(
+            HashMap::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]),
+            concealed,
+        ))
     }
 
     fn set_binary_contents(
@@ -300,6 +300,7 @@ impl ClipboardSource for WaylandClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (mime, _) = super::formats::write_format(content_type)
@@ -316,8 +317,11 @@ impl ClipboardSource for WaylandClipboard {
         } else {
             bytes.to_vec()
         };
-        self.write(HashMap::from([(mime.into(), bytes)]))
-            .map_err(|_| ClipboardWriteError::Failed)
+        self.write(concealed_values(
+            HashMap::from([(mime.into(), bytes)]),
+            concealed,
+        ))
+        .map_err(|_| ClipboardWriteError::Failed)
     }
 
     fn backend_name(&self) -> &'static str {
@@ -792,6 +796,17 @@ fn receive(
     (bytes.len() <= limit).then_some(bytes)
 }
 
+/// The KDE password-manager hint is what capture reads as a secret.
+fn concealed_values(
+    mut values: HashMap<String, Vec<u8>>,
+    concealed: bool,
+) -> HashMap<String, Vec<u8>> {
+    if concealed {
+        values.insert(SECRET_HINT.into(), b"secret".to_vec());
+    }
+    values
+}
+
 fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
     !values.is_empty()
         && values.len() <= MAX_MIMES
@@ -1230,7 +1245,9 @@ mod tests {
             }
         }
 
-        clipboard.set_contents("owned text").expect("text write");
+        clipboard
+            .set_contents("owned text", false)
+            .expect("text write");
         assert_eq!(wl_paste("text/plain;charset=utf-8"), b"owned text");
         assert!(!clipboard.changed(), "our marker suppresses the self-write");
 
@@ -1240,6 +1257,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"outbound tiff",
                 None,
+                false,
             )
             .expect("TIFF write");
         assert_eq!(wl_paste("image/tiff"), b"outbound tiff");

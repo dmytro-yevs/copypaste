@@ -1101,7 +1101,7 @@ impl Runtime {
             .begin(host, Arc::new(|| {}))
             .ok_or(RuntimeError::CaptureRefused)
             .and_then(|token| {
-                let result = self.capture_text_operation(token, content);
+                let result = self.capture_text_operation(token, content).map(|_| ());
                 self.capture_admission().abandon(token);
                 result
             });
@@ -1109,7 +1109,13 @@ impl Runtime {
         result
     }
 
-    pub fn capture_text_operation(&self, token: u64, content: &str) -> Result<(), RuntimeError> {
+    /// Returns the privacy the capture was committed with, so a native host
+    /// can hide its own preview of a secret exactly as the app does.
+    pub fn capture_text_operation(
+        &self,
+        token: u64,
+        content: &str,
+    ) -> Result<copypaste_ipc::ClipboardPrivacy, RuntimeError> {
         if let Some(privacy) =
             copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
         {
@@ -1142,9 +1148,10 @@ impl Runtime {
                 || self.settings.config(),
             )
             .map_err(|_| RuntimeError::Capture)?;
+        let privacy = permit.privacy;
         self.emit_capture(ingested.into_item());
         permit.committed();
-        Ok(())
+        Ok(privacy)
     }
 
     pub fn has_sms_module(&self) -> Result<bool, copypaste_modules::ModuleError> {
@@ -2476,6 +2483,20 @@ mod tests {
             preview.semantic_kind,
             Some(copypaste_ipc::SemanticKind::Credentials)
         );
+
+        // A native host learns the detected secret so its own preview hides it.
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::Implicit)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        let privacy = runtime
+            .capture_text_operation(token, "-----BEGIN RSA PRIVATE KEY-----\nother")
+            .unwrap();
+        assert!(privacy.secret);
     }
 
     fn seed_text(runtime: &Runtime, id: &str, value: &str) {
@@ -3525,7 +3546,9 @@ mod tests {
                                 None,
                             )
                         } else {
-                            runtime.capture_text_operation(token, "barrier text")
+                            runtime
+                                .capture_text_operation(token, "barrier text")
+                                .map(|_| ())
                         }
                     };
                     let host = runtime.capture_admission().open_host(kind).unwrap();
@@ -3569,7 +3592,9 @@ mod tests {
                                 None,
                             )
                         } else {
-                            worker_runtime.capture_text_operation(token, "barrier text")
+                            worker_runtime
+                                .capture_text_operation(token, "barrier text")
+                                .map(|_| ())
                         }
                     });
                     entered.wait();
