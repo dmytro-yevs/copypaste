@@ -1,14 +1,17 @@
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
-import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/view/windows_onboarding_screen.dart';
+import 'package:copypaste_flutter/features/onboarding/view/onboarding_screen.dart';
 import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import 'onboarding_test_support.dart';
+
 void main() {
   test('failed Windows persistence does not complete onboarding', () async {
-    final controller = WindowsOnboardingController(
+    final controller = windowsOnboarding(
       store: _FailingStore(),
       startup: _Startup(),
     );
@@ -24,11 +27,11 @@ void main() {
   test('Windows completion persists and cannot finish from Welcome', () async {
     final store = MemoryOnboardingStore();
     final startup = _Startup();
-    final first = WindowsOnboardingController(store: store, startup: startup);
+    final first = windowsOnboarding(store: store, startup: startup);
     addTearDown(first.dispose);
     await first.initialize();
     expect(await first.finish(), isFalse);
-    expect(first.launchAtLogin, isTrue);
+    expect(first.windows.launchAtLogin, isTrue);
     expect(startup.writes, isEmpty);
     first.showSetup();
     expect(await first.finish(), isFalse);
@@ -36,10 +39,7 @@ void main() {
     expect(startup.writes, [true]);
     expect(await first.finish(), isTrue);
     final untouched = _Startup()..status = LaunchAtLoginStatus.disabled;
-    final restarted = WindowsOnboardingController(
-      store: store,
-      startup: untouched,
-    );
+    final restarted = windowsOnboarding(store: store, startup: untouched);
     addTearDown(restarted.dispose);
     await restarted.initialize();
     expect(restarted.complete, isTrue);
@@ -51,22 +51,22 @@ void main() {
     'fresh startup opt-out survives Back and does not enable startup',
     () async {
       final startup = _Startup();
-      final controller = WindowsOnboardingController(
+      final controller = windowsOnboarding(
         store: MemoryOnboardingStore(),
         startup: startup,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
       controller.showSetup();
-      await controller.setLaunchAtLogin(false);
+      await controller.windows.setLaunchAtLogin(false);
       controller.showPreviousStep();
-      expect(controller.step, WindowsOnboardingStep.welcome);
+      expect(controller.step, OnboardingStep.welcome);
       controller.showSetup();
-      expect(controller.launchAtLogin, isFalse);
+      expect(controller.windows.launchAtLogin, isFalse);
       await controller.continueFromSetup();
       controller.showPreviousStep();
-      expect(controller.step, WindowsOnboardingStep.setup);
-      expect(controller.launchAtLogin, isFalse);
+      expect(controller.step, OnboardingStep.setup);
+      expect(controller.windows.launchAtLogin, isFalse);
       expect(startup.writes, isEmpty);
     },
   );
@@ -75,7 +75,7 @@ void main() {
     'already enabled startup is preserved without a redundant write',
     () async {
       final startup = _Startup()..status = LaunchAtLoginStatus.enabled;
-      final controller = WindowsOnboardingController(
+      final controller = windowsOnboarding(
         store: MemoryOnboardingStore(),
         startup: startup,
       );
@@ -83,23 +83,23 @@ void main() {
       await controller.initialize();
       controller.showSetup();
       await controller.continueFromSetup();
-      expect(controller.launchAtLogin, isTrue);
+      expect(controller.windows.launchAtLogin, isTrue);
       expect(startup.writes, isEmpty);
     },
   );
 
   test('opting out disables an existing startup registration', () async {
     final startup = _Startup()..status = LaunchAtLoginStatus.enabled;
-    final controller = WindowsOnboardingController(
+    final controller = windowsOnboarding(
       store: MemoryOnboardingStore(),
       startup: startup,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
     controller.showSetup();
-    await controller.setLaunchAtLogin(false);
+    await controller.windows.setLaunchAtLogin(false);
     await controller.continueFromSetup();
-    expect(controller.launchAtLogin, isFalse);
+    expect(controller.windows.launchAtLogin, isFalse);
     expect(startup.writes, [false]);
   });
 
@@ -108,15 +108,12 @@ void main() {
     () async {
       final startup = _Startup()..failWrite = true;
       final store = MemoryOnboardingStore();
-      final controller = WindowsOnboardingController(
-        store: store,
-        startup: startup,
-      );
+      final controller = windowsOnboarding(store: store, startup: startup);
       addTearDown(controller.dispose);
       await controller.initialize();
       controller.showSetup();
       expect(await controller.continueFromSetup(), isTrue);
-      expect(controller.launchAtLogin, isFalse);
+      expect(controller.windows.launchAtLogin, isFalse);
       expect(controller.noticeMessage, contains('continue without it'));
       expect(await controller.finish(), isTrue);
       expect(await store.isComplete(), isTrue);
@@ -130,14 +127,14 @@ void main() {
         final startup = _Startup()
           ..status = LaunchAtLoginStatus.unavailable
           ..failRead = failedRead;
-        final controller = WindowsOnboardingController(
+        final controller = windowsOnboarding(
           store: MemoryOnboardingStore(),
           startup: startup,
         );
         addTearDown(controller.dispose);
         await controller.initialize();
-        expect(controller.launchAtLoginAvailable, isFalse);
-        expect(controller.launchAtLogin, isFalse);
+        expect(controller.windows.launchAtLoginAvailable, isFalse);
+        expect(controller.windows.launchAtLogin, isFalse);
         controller.showSetup();
         expect(await controller.continueFromSetup(), isTrue);
         expect(await controller.finish(), isTrue);
@@ -146,13 +143,46 @@ void main() {
     );
   }
 
+  testWidgets(
+    'Task Manager disabled startup is shown and refreshed on resume',
+    (tester) async {
+      final startup = _Startup()..status = LaunchAtLoginStatus.requiresApproval;
+      final controller = windowsOnboarding(
+        store: MemoryOnboardingStore(),
+        startup: startup,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.showSetup();
+      await tester.pumpWidget(
+        ShadcnApp(
+          home: OnboardingScreen(
+            controller: controller,
+            onFinished: () async {},
+          ),
+        ),
+      );
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      expect(find.text('Disabled in Task Manager'), findsOneWidget);
+      await tester.tap(find.widgetWithText(Button, 'Open Settings'));
+      expect(startup.settingsOpened, 1);
+
+      startup.status = LaunchAtLoginStatus.enabled;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Disabled in Task Manager'), findsNothing);
+      expect(startup.writes, isEmpty);
+    },
+  );
+
   testWidgets('unavailable startup is disabled and leaves Continue usable', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final startup = _Startup()..status = LaunchAtLoginStatus.unavailable;
-    final controller = WindowsOnboardingController(
+    final controller = windowsOnboarding(
       store: MemoryOnboardingStore(),
       startup: startup,
     );
@@ -163,10 +193,7 @@ void main() {
       ShadcnApp(
         theme: AppTheme.dark,
         builder: AppTheme.builder,
-        home: WindowsOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
     expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
@@ -188,7 +215,7 @@ void main() {
         (tester) async {
           await tester.binding.setSurfaceSize(Size(width, 640));
           addTearDown(() => tester.binding.setSurfaceSize(null));
-          final controller = WindowsOnboardingController(
+          final controller = windowsOnboarding(
             store: MemoryOnboardingStore(),
             startup: _Startup(),
           );
@@ -199,7 +226,7 @@ void main() {
             ShadcnApp(
               theme: dark ? AppTheme.dark : AppTheme.light,
               builder: AppTheme.builder,
-              home: WindowsOnboardingScreen(
+              home: OnboardingScreen(
                 controller: controller,
                 onFinished: () async {
                   finished = controller.complete;
@@ -244,6 +271,7 @@ class _Startup implements LaunchAtLoginGateway {
   LaunchAtLoginStatus status = LaunchAtLoginStatus.disabled;
   final writes = <bool>[];
   int reads = 0;
+  int settingsOpened = 0;
   bool failRead = false;
   bool failWrite = false;
   @override
@@ -263,7 +291,7 @@ class _Startup implements LaunchAtLoginGateway {
   }
 
   @override
-  Future<void> openSystemSettings() async {}
+  Future<void> openSystemSettings() async => settingsOpened++;
 }
 
 class _FailingStore implements OnboardingStore {
@@ -272,4 +300,8 @@ class _FailingStore implements OnboardingStore {
 
   @override
   Future<void> markComplete() async => throw StateError('Storage unavailable');
+}
+
+extension on OnboardingController {
+  WindowsOnboardingSetup get windows => setup as WindowsOnboardingSetup;
 }

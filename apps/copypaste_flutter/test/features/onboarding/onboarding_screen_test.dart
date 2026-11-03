@@ -1,10 +1,13 @@
-import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_setup.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/view/macos_onboarding_screen.dart';
+import 'package:copypaste_flutter/features/onboarding/view/onboarding_screen.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import 'onboarding_test_support.dart';
 
 void main() {
   testWidgets('missing Login Item record can be enabled from the switch', (
@@ -12,19 +15,20 @@ void main() {
   ) async {
     final setup = _ScreenMacosSetupGateway()
       ..status = MacosLoginItemStatus.notFound;
-    final controller = MacosOnboardingController(
-      store: MemoryOnboardingStore(complete: true),
+    final controller = macosOnboarding(
+      store: MemoryOnboardingStore(),
       setup: setup,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showSetup();
+    await controller.showSetup();
+    final macos = controller.setup as MacosOnboardingSetup;
+    await macos.setLaunchAtLogin(false);
+    setup.status = MacosLoginItemStatus.notFound;
+    await macos.refresh();
     await tester.pumpWidget(
       ShadcnApp(
-        home: MacosOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
 
@@ -37,14 +41,14 @@ void main() {
 
     expect(setup.status, MacosLoginItemStatus.enabled);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-    expect(controller.step, MacosOnboardingStep.setup);
+    expect(controller.step, OnboardingStep.setup);
   });
 
   testWidgets('runs Welcome, combined Setup, and Sync in order', (
     tester,
   ) async {
     final setup = _ScreenMacosSetupGateway();
-    final controller = MacosOnboardingController(
+    final controller = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: setup,
     );
@@ -54,7 +58,7 @@ void main() {
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: MacosOnboardingScreen(
+        home: OnboardingScreen(
           controller: controller,
           onFinished: () async {
             finishCalls += 1;
@@ -97,7 +101,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(360, 480));
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     final setup = _ScreenMacosSetupGateway(accessibility: true);
-    final controller = MacosOnboardingController(
+    final controller = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: setup,
     );
@@ -106,10 +110,7 @@ void main() {
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: MacosOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
     expect(tester.takeException(), isNull);
@@ -130,7 +131,7 @@ void main() {
       accessibility: true,
       statusAfterUpdate: MacosLoginItemStatus.requiresApproval,
     );
-    final controller = MacosOnboardingController(
+    final controller = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: setup,
     );
@@ -140,10 +141,7 @@ void main() {
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: MacosOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
     await tester.tap(find.widgetWithText(Button, 'Continue'));
@@ -158,7 +156,7 @@ void main() {
   testWidgets('uses the unified header when macOS owns the title bar', (
     tester,
   ) async {
-    final controller = MacosOnboardingController(
+    final controller = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: _ScreenMacosSetupGateway(),
     );
@@ -167,7 +165,7 @@ void main() {
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: MacosOnboardingScreen(
+        home: OnboardingScreen(
           controller: controller,
           onFinished: () async {},
           unifiedTitleBar: true,

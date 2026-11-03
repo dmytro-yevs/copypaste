@@ -1,12 +1,10 @@
-import 'onboarding_controller.dart';
-
 import '../../../platform/macos/macos_setup_gateway.dart';
 import '../repository/onboarding_store.dart';
+import 'onboarding_setup.dart';
 
-enum MacosOnboardingStep { welcome, setup, sync }
-
-class MacosOnboardingController extends OnboardingController {
-  MacosOnboardingController({
+/// Accessibility and Login Item setup for macOS.
+class MacosOnboardingSetup extends OnboardingSetup {
+  MacosOnboardingSetup({
     required OnboardingStore store,
     required MacosSetupGateway setup,
   }) : _store = store,
@@ -15,17 +13,15 @@ class MacosOnboardingController extends OnboardingController {
   final OnboardingStore _store;
   final MacosSetupGateway _setup;
 
-  MacosOnboardingStep _step = MacosOnboardingStep.welcome;
   MacosLoginItemStatus _loginItemStatus = MacosLoginItemStatus.notRegistered;
-  bool _initialized = false;
   bool _accessibilityGranted = false;
   bool _launchAtLogin = true;
   bool _loginDefaultPending = false;
   String? _noticeMessage;
 
-  MacosOnboardingStep get step => _step;
+  @override
+  String get platformLabel => 'macOS';
   MacosLoginItemStatus get loginItemStatus => _loginItemStatus;
-  bool get initialized => _initialized;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get launchAtLogin => _launchAtLogin;
   bool get launchAtLoginAvailable =>
@@ -35,43 +31,28 @@ class MacosOnboardingController extends OnboardingController {
       _launchAtLogin &&
       launchAtLoginAvailable &&
       _loginItemStatus != MacosLoginItemStatus.enabled;
+  @override
   String? get noticeMessage => _noticeMessage;
+  @override
+  bool get noticeOpensSystemSettings => loginItemNeedsAttention;
 
-  bool get canContinueSetup => !busy;
-
-  Future<void> initialize() async {
-    if (_initialized) return;
+  @override
+  Future<OnboardingResume> restore() async {
     busy = true;
     notifyIfActive();
     try {
       final wasComplete = await _store.isComplete();
       _loginDefaultPending = !wasComplete;
       await _refreshSystemState();
-      complete = wasComplete;
       errorMessage = null;
+      return wasComplete ? OnboardingResume.complete : OnboardingResume.welcome;
     } catch (_) {
       errorMessage = 'CopyPaste could not read the macOS setup state.';
+      return OnboardingResume.welcome;
     } finally {
-      _initialized = true;
       busy = false;
       notifyIfActive();
     }
-  }
-
-  void showSetup() {
-    if (busy || _step != MacosOnboardingStep.welcome) return;
-    _step = MacosOnboardingStep.setup;
-    notifyIfActive();
-  }
-
-  void showPreviousStep() {
-    if (busy) return;
-    _step = switch (_step) {
-      MacosOnboardingStep.welcome => MacosOnboardingStep.welcome,
-      MacosOnboardingStep.setup => MacosOnboardingStep.welcome,
-      MacosOnboardingStep.sync => MacosOnboardingStep.setup,
-    };
-    notifyIfActive();
   }
 
   Future<void> setLaunchAtLogin(bool enabled) async {
@@ -103,7 +84,8 @@ class MacosOnboardingController extends OnboardingController {
     }
   }
 
-  Future<void> refreshSystemState() async {
+  @override
+  Future<void> refresh() async {
     if (busy) return;
     busy = true;
     notifyIfActive();
@@ -118,7 +100,8 @@ class MacosOnboardingController extends OnboardingController {
     }
   }
 
-  Future<bool> continueFromSetup() async {
+  @override
+  Future<bool> apply() async {
     if (busy) return false;
     busy = true;
     errorMessage = null;
@@ -130,13 +113,13 @@ class MacosOnboardingController extends OnboardingController {
       _addNotice('Accessibility status could not be refreshed.');
     }
     await _updateLaunchAtLogin(_launchAtLogin);
-    _step = MacosOnboardingStep.sync;
     busy = false;
     notifyIfActive();
     return true;
   }
 
-  Future<void> openLoginItemsSettings() async {
+  @override
+  Future<void> openSystemSettings() async {
     try {
       await _setup.openLoginItemsSettings();
     } catch (_) {
@@ -145,10 +128,8 @@ class MacosOnboardingController extends OnboardingController {
     }
   }
 
-  Future<bool> finish() => finishOnboarding(
-    canFinish: _step == MacosOnboardingStep.sync,
-    persist: _store.markComplete,
-  );
+  @override
+  Future<void> persistCompletion() => _store.markComplete();
 
   bool get _loginItemRegistered =>
       _loginItemStatus == MacosLoginItemStatus.enabled ||

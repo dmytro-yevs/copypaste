@@ -1,23 +1,26 @@
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
 import 'dart:async';
 
-import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'onboarding_test_support.dart';
 
 void main() {
   test('unfinished capture setup resumes after a process restart', () async {
     final store = MemoryAndroidOnboardingStore();
     final first = _controller(store: store);
     await first.initialize();
-    first.showCapture();
+    first.showSetup();
     await Future<void>.delayed(Duration.zero);
     first.dispose();
 
     final resumed = _controller(store: store);
     addTearDown(resumed.dispose);
     await resumed.initialize();
-    expect(resumed.step, AndroidOnboardingStep.capture);
+    expect(resumed.step, OnboardingStep.setup);
     expect(resumed.complete, isFalse);
   });
 
@@ -37,8 +40,8 @@ void main() {
       );
       final first = _controller(store: store, setup: setup);
       await first.initialize();
-      first.showCapture();
-      await first.beginVerification();
+      first.showSetup();
+      await first.android.beginVerification();
       first.dispose();
 
       setup.current = _state(
@@ -52,12 +55,12 @@ void main() {
       );
       final resumed = _controller(store: store, setup: setup);
       await resumed.initialize();
-      expect(resumed.step, AndroidOnboardingStep.capture);
-      expect(resumed.verified, isTrue);
-      expect(resumed.canContinueCapture, isTrue);
+      expect(resumed.step, OnboardingStep.setup);
+      expect(resumed.android.verified, isTrue);
+      expect(resumed.android.canContinue, isTrue);
       expect(setup.applyCalls, 0);
 
-      await resumed.continueFromCapture();
+      await resumed.continueFromSetup();
       resumed.dispose();
       final completed = _controller(store: store, setup: setup);
       addTearDown(completed.dispose);
@@ -88,9 +91,9 @@ void main() {
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      expect(controller.verifying, isTrue);
-      expect(controller.verified, isFalse);
-      expect(controller.canContinueCapture, isFalse);
+      expect(controller.android.verifying, isTrue);
+      expect(controller.android.verified, isFalse);
+      expect(controller.android.canContinue, isFalse);
     },
   );
 
@@ -124,8 +127,8 @@ void main() {
       final controller = _controller(setup: setup);
       addTearDown(controller.dispose);
       await controller.initialize();
-      controller.showCapture();
-      await controller.beginVerification();
+      controller.showSetup();
+      await controller.android.beginVerification();
       setup.current = _state(
         privilegedGrants: true,
         notificationGranted: true,
@@ -133,8 +136,8 @@ void main() {
         serviceRunning: true,
         lastCaptureAtMs: 15,
       );
-      await controller.refresh();
-      expect(controller.verified, isFalse);
+      await controller.android.refresh();
+      expect(controller.android.verified, isFalse);
       setup.current = _state(
         privilegedGrants: true,
         notificationGranted: true,
@@ -142,8 +145,8 @@ void main() {
         serviceRunning: true,
         lastCaptureAtMs: 21,
       );
-      await controller.refresh();
-      expect(controller.verified, isTrue);
+      await controller.android.refresh();
+      expect(controller.android.verified, isTrue);
     },
   );
   test('observes external permission grants and applies setup once', () async {
@@ -152,15 +155,15 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(setup.events.close);
     await controller.initialize();
-    controller.showCapture();
-    controller.setMonitoring(true);
+    controller.showSetup();
+    controller.android.setMonitoring(true);
     await Future<void>.delayed(Duration.zero);
 
     setup.current = _state(shizukuPermission: true);
     setup.events.add(setup.current);
     await Future<void>.delayed(Duration.zero);
     expect(setup.applyCalls, 1);
-    expect(controller.setupState!.shizuku.permission, isTrue);
+    expect(controller.android.setupState!.shizuku.permission, isTrue);
     expect(
       controller.errorMessage,
       contains('capture grants could not be applied'),
@@ -169,7 +172,7 @@ void main() {
     setup.events.add(setup.current);
     await Future<void>.delayed(Duration.zero);
     expect(setup.applyCalls, 1);
-    controller.setMonitoring(false);
+    controller.android.setMonitoring(false);
     expect(setup.events.hasListener, isFalse);
   });
 
@@ -187,10 +190,10 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(setup.events.close);
       await controller.initialize();
-      controller.showCapture();
-      controller.setMonitoring(true);
+      controller.showSetup();
+      controller.android.setMonitoring(true);
       await Future<void>.delayed(Duration.zero);
-      await controller.beginVerification();
+      await controller.android.beginVerification();
 
       setup.events.add(
         _state(
@@ -202,13 +205,13 @@ void main() {
         ),
       );
       await Future<void>.delayed(Duration.zero);
-      expect(controller.verified, isTrue);
-      expect(controller.canContinueCapture, isTrue);
+      expect(controller.android.verified, isTrue);
+      expect(controller.android.canContinue, isTrue);
 
       setup.events.add(_state(lastCaptureAtMs: 11));
       await Future<void>.delayed(Duration.zero);
-      expect(controller.verified, isFalse);
-      expect(controller.canContinueCapture, isFalse);
+      expect(controller.android.verified, isFalse);
+      expect(controller.android.canContinue, isFalse);
     },
   );
   test(
@@ -219,11 +222,11 @@ void main() {
 
       await controller.initialize();
 
-      expect(controller.step, AndroidOnboardingStep.welcome);
-      expect(controller.selectedMode, AndroidCaptureMode.full);
-      expect(controller.mode, AndroidCaptureMode.limited);
-      expect(controller.method, AndroidCaptureSetupMethod.shizuku);
-      expect(controller.canContinueCapture, isFalse);
+      expect(controller.step, OnboardingStep.welcome);
+      expect(controller.android.selectedMode, AndroidCaptureMode.full);
+      expect(controller.android.mode, AndroidCaptureMode.limited);
+      expect(controller.android.method, AndroidCaptureSetupMethod.shizuku);
+      expect(controller.android.canContinue, isFalse);
     },
   );
 
@@ -232,12 +235,12 @@ void main() {
     final controller = _controller(store: store);
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
-    await controller.selectMode(AndroidCaptureMode.limited);
-    await controller.continueFromCapture();
+    await controller.android.selectMode(AndroidCaptureMode.limited);
+    await controller.continueFromSetup();
 
-    expect(controller.step, AndroidOnboardingStep.sync);
+    expect(controller.step, OnboardingStep.ready);
     expect(await controller.finish(), isTrue);
     expect(store.complete, isTrue);
     expect(store.mode, AndroidCaptureMode.limited);
@@ -254,12 +257,12 @@ void main() {
     final controller = _controller(setup: setup);
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
-    await controller.beginVerification();
-    expect(controller.verifying, isTrue);
-    expect(controller.verified, isFalse);
-    expect(controller.canContinueCapture, isFalse);
+    await controller.android.beginVerification();
+    expect(controller.android.verifying, isTrue);
+    expect(controller.android.verified, isFalse);
+    expect(controller.android.canContinue, isFalse);
 
     setup.current = _state(
       privilegedGrants: true,
@@ -268,10 +271,10 @@ void main() {
       serviceRunning: true,
       lastCaptureAtMs: 11,
     );
-    await controller.refresh();
+    await controller.android.refresh();
 
-    expect(controller.verified, isTrue);
-    expect(controller.canContinueCapture, isTrue);
+    expect(controller.android.verified, isTrue);
+    expect(controller.android.canContinue, isTrue);
   });
 
   test('Full mode remains blocked when only an older capture exists', () async {
@@ -285,9 +288,9 @@ void main() {
     final controller = _controller(setup: setup);
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
-    await controller.beginVerification();
+    await controller.android.beginVerification();
     setup.current = _state(
       privilegedGrants: true,
       notificationGranted: true,
@@ -295,10 +298,10 @@ void main() {
       serviceRunning: true,
       lastCaptureAtMs: 10,
     );
-    await controller.refresh();
+    await controller.android.refresh();
 
-    expect(controller.verified, isFalse);
-    expect(controller.canContinueCapture, isFalse);
+    expect(controller.android.verified, isFalse);
+    expect(controller.android.canContinue, isFalse);
   });
 
   test('completed Limited setup can reopen Full capture setup', () async {
@@ -310,10 +313,10 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
 
-    expect(await controller.reopenCaptureSetup(), isTrue);
+    expect(await controller.reopenSetup(), isTrue);
 
     expect(controller.complete, isFalse);
-    expect(controller.step, AndroidOnboardingStep.capture);
+    expect(controller.step, OnboardingStep.setup);
     expect(store.complete, isTrue);
   });
 
@@ -337,16 +340,16 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
 
-    expect(controller.mode, AndroidCaptureMode.full);
-    expect(controller.selectedMode, AndroidCaptureMode.full);
-    expect(controller.verified, isTrue);
+    expect(controller.android.mode, AndroidCaptureMode.full);
+    expect(controller.android.selectedMode, AndroidCaptureMode.full);
+    expect(controller.android.verified, isTrue);
 
     setup.current = _state(lastCaptureAtMs: 21);
-    await controller.refresh();
+    await controller.android.refresh();
 
-    expect(controller.mode, AndroidCaptureMode.limited);
-    expect(controller.verified, isFalse);
-    expect(controller.canContinueCapture, isFalse);
+    expect(controller.android.mode, AndroidCaptureMode.limited);
+    expect(controller.android.verified, isFalse);
+    expect(controller.android.canContinue, isFalse);
   });
 
   test('a saved Full choice cannot claim a stopped service is Full', () async {
@@ -367,9 +370,9 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
 
-    expect(controller.mode, AndroidCaptureMode.limited);
-    expect(controller.selectedMode, AndroidCaptureMode.limited);
-    expect(controller.verified, isFalse);
+    expect(controller.android.mode, AndroidCaptureMode.limited);
+    expect(controller.android.selectedMode, AndroidCaptureMode.limited);
+    expect(controller.android.verified, isFalse);
   });
 
   test('reopening working Full setup preserves completion and proof', () async {
@@ -391,12 +394,12 @@ void main() {
     await controller.initialize();
 
     for (var opening = 0; opening < 2; opening++) {
-      expect(await controller.reopenCaptureSetup(), isTrue);
-      expect(controller.step, AndroidOnboardingStep.capture);
-      expect(controller.mode, AndroidCaptureMode.full);
-      expect(controller.verified, isTrue);
-      expect(controller.verifying, isFalse);
-      expect(controller.canContinueCapture, isTrue);
+      expect(await controller.reopenSetup(), isTrue);
+      expect(controller.step, OnboardingStep.setup);
+      expect(controller.android.mode, AndroidCaptureMode.full);
+      expect(controller.android.verified, isTrue);
+      expect(controller.android.verifying, isFalse);
+      expect(controller.android.canContinue, isTrue);
       expect(store.complete, isTrue);
       expect(store.verificationBaseline, 20);
     }
@@ -416,11 +419,11 @@ void main() {
     final controller = _controller(store: store, setup: setup);
     addTearDown(controller.dispose);
     await controller.initialize();
-    expect(await controller.reopenCaptureSetup(), isTrue);
+    expect(await controller.reopenSetup(), isTrue);
 
-    expect(controller.verified, isFalse);
-    expect(controller.verifying, isTrue);
-    expect(controller.canContinueCapture, isFalse);
+    expect(controller.android.verified, isFalse);
+    expect(controller.android.verifying, isTrue);
+    expect(controller.android.canContinue, isFalse);
     expect(store.verificationBaseline, 20);
 
     setup.current = _state(
@@ -430,16 +433,16 @@ void main() {
       serviceRunning: true,
       lastCaptureAtMs: 21,
     );
-    await controller.refresh();
-    expect(controller.verified, isTrue);
-    expect(controller.canContinueCapture, isTrue);
+    await controller.android.refresh();
+    expect(controller.android.verified, isTrue);
+    expect(controller.android.canContinue, isTrue);
   });
 }
 
-AndroidOnboardingController _controller({
+OnboardingController _controller({
   AndroidOnboardingStore? store,
   _FakeAndroidCaptureSetupGateway? setup,
-}) => AndroidOnboardingController(
+}) => androidOnboarding(
   store: store ?? MemoryAndroidOnboardingStore(),
   setup: setup ?? _FakeAndroidCaptureSetupGateway(),
 );
@@ -532,4 +535,8 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
 
   @override
   Future<AndroidCaptureSetupState> stopCapture() async => current;
+}
+
+extension on OnboardingController {
+  AndroidOnboardingSetup get android => setup as AndroidOnboardingSetup;
 }

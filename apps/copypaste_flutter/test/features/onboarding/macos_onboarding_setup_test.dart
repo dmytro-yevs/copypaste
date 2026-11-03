@@ -1,9 +1,12 @@
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
 import 'dart:async';
 
-import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'onboarding_test_support.dart';
 
 void main() {
   test(
@@ -16,14 +19,15 @@ void main() {
       addTearDown(controller.dispose);
       await controller.initialize();
 
-      expect(controller.launchAtLoginAvailable, isTrue);
-      expect(controller.launchAtLogin, isTrue);
-      await controller.refreshSystemState();
-      expect(controller.launchAtLogin, isTrue);
+      expect(controller.macos.launchAtLoginAvailable, isTrue);
+      expect(controller.macos.launchAtLogin, isTrue);
+      await controller.macos.refresh();
+      expect(controller.macos.launchAtLogin, isTrue);
+      await controller.showSetup();
       await controller.continueFromSetup();
 
       expect(setup.launchAtLoginValues, [true]);
-      expect(controller.loginItemStatus, MacosLoginItemStatus.enabled);
+      expect(controller.macos.loginItemStatus, MacosLoginItemStatus.enabled);
       expect(controller.noticeMessage, isNull);
     },
   );
@@ -35,16 +39,16 @@ void main() {
     await controller.initialize();
     controller.showSetup();
 
-    await controller.setLaunchAtLogin(false);
+    await controller.macos.setLaunchAtLogin(false);
     expect(setup.launchAtLoginValues, [false]);
-    expect(controller.launchAtLogin, isFalse);
-    await controller.refreshSystemState();
-    expect(controller.launchAtLogin, isFalse);
+    expect(controller.macos.launchAtLogin, isFalse);
+    await controller.macos.refresh();
+    expect(controller.macos.launchAtLogin, isFalse);
 
-    await controller.setLaunchAtLogin(true);
+    await controller.macos.setLaunchAtLogin(true);
     expect(setup.launchAtLoginValues, [false, true]);
-    expect(controller.launchAtLogin, isTrue);
-    expect(controller.step, MacosOnboardingStep.setup);
+    expect(controller.macos.launchAtLogin, isTrue);
+    expect(controller.step, OnboardingStep.setup);
   });
 
   test('completed onboarding reflects a missing Login Item record', () async {
@@ -55,10 +59,10 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
 
-    expect(controller.launchAtLogin, isFalse);
-    expect(controller.launchAtLoginAvailable, isTrue);
-    await controller.setLaunchAtLogin(true);
-    expect(controller.launchAtLogin, isTrue);
+    expect(controller.macos.launchAtLogin, isFalse);
+    expect(controller.macos.launchAtLoginAvailable, isTrue);
+    await controller.macos.setLaunchAtLogin(true);
+    expect(controller.macos.launchAtLogin, isTrue);
   });
 
   test('refresh reflects a Login Item disabled outside CopyPaste', () async {
@@ -68,9 +72,9 @@ void main() {
     await controller.initialize();
     setup.status = MacosLoginItemStatus.notRegistered;
 
-    await controller.refreshSystemState();
+    await controller.macos.refresh();
 
-    expect(controller.launchAtLogin, isFalse);
+    expect(controller.macos.launchAtLogin, isFalse);
   });
 
   test('failed switch update restores the confirmed system state', () async {
@@ -85,9 +89,9 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
 
-    await controller.setLaunchAtLogin(true);
+    await controller.macos.setLaunchAtLogin(true);
 
-    expect(controller.launchAtLogin, isFalse);
+    expect(controller.macos.launchAtLogin, isFalse);
     expect(controller.busy, isFalse);
     expect(controller.noticeMessage, contains('could not be updated'));
   });
@@ -105,17 +109,17 @@ void main() {
       final update = Completer<MacosLoginItemStatus>();
       setup.pendingUpdate = update.future;
 
-      final enabling = controller.setLaunchAtLogin(true);
+      final enabling = controller.macos.setLaunchAtLogin(true);
       expect(controller.busy, isTrue);
       expect(await controller.continueFromSetup(), isFalse);
-      await controller.setLaunchAtLogin(false);
+      await controller.macos.setLaunchAtLogin(false);
       expect(setup.launchAtLoginValues, [true]);
       update.complete(MacosLoginItemStatus.requiresApproval);
       await enabling;
 
       expect(controller.busy, isFalse);
-      expect(controller.launchAtLogin, isTrue);
-      expect(controller.loginItemNeedsAttention, isTrue);
+      expect(controller.macos.launchAtLogin, isTrue);
+      expect(controller.macos.loginItemNeedsAttention, isTrue);
       expect(controller.noticeMessage, contains('requires approval'));
     },
   );
@@ -130,8 +134,8 @@ void main() {
 
       expect(controller.initialized, isTrue);
       expect(controller.complete, isFalse);
-      expect(controller.step, MacosOnboardingStep.welcome);
-      expect(controller.launchAtLogin, isTrue);
+      expect(controller.step, OnboardingStep.welcome);
+      expect(controller.macos.launchAtLogin, isTrue);
     },
   );
 
@@ -143,9 +147,9 @@ void main() {
     controller.showSetup();
 
     setup.accessibility = true;
-    await controller.requestAccessibility();
+    await controller.macos.requestAccessibility();
 
-    expect(controller.accessibilityGranted, isTrue);
+    expect(controller.macos.accessibilityGranted, isTrue);
   });
 
   test('development builds do not block on Start at login', () async {
@@ -157,10 +161,10 @@ void main() {
     await controller.initialize();
     controller.showSetup();
 
-    expect(controller.launchAtLogin, isFalse);
-    expect(controller.launchAtLoginAvailable, isFalse);
+    expect(controller.macos.launchAtLogin, isFalse);
+    expect(controller.macos.launchAtLoginAvailable, isFalse);
     expect(await controller.continueFromSetup(), isTrue);
-    expect(controller.step, MacosOnboardingStep.sync);
+    expect(controller.step, OnboardingStep.ready);
   });
 
   test(
@@ -172,9 +176,9 @@ void main() {
       await controller.initialize();
       controller.showSetup();
 
-      expect(controller.canContinueSetup, isTrue);
+      expect(controller.canContinue, isTrue);
       expect(await controller.continueFromSetup(), isTrue);
-      expect(controller.step, MacosOnboardingStep.sync);
+      expect(controller.step, OnboardingStep.ready);
       expect(setup.launchAtLoginValues, [true]);
     },
   );
@@ -217,7 +221,7 @@ void main() {
     controller.showSetup();
 
     expect(await controller.continueFromSetup(), isTrue);
-    expect(controller.step, MacosOnboardingStep.sync);
+    expect(controller.step, OnboardingStep.ready);
     expect(controller.errorMessage, isNull);
     expect(controller.noticeMessage, contains('requires approval'));
   });
@@ -233,17 +237,17 @@ void main() {
     controller.showSetup();
 
     expect(await controller.continueFromSetup(), isTrue);
-    expect(controller.step, MacosOnboardingStep.sync);
+    expect(controller.step, OnboardingStep.ready);
     expect(controller.errorMessage, isNull);
     expect(controller.noticeMessage, contains('continue without it'));
   });
 }
 
-MacosOnboardingController _controller({
+OnboardingController _controller({
   OnboardingStore? store,
   _FakeMacosSetupGateway? setup,
 }) {
-  return MacosOnboardingController(
+  return macosOnboarding(
     store: store ?? MemoryOnboardingStore(),
     setup: setup ?? _FakeMacosSetupGateway(),
   );
@@ -290,4 +294,8 @@ class _FakeMacosSetupGateway implements MacosSetupGateway {
     status = enabled ? statusAfterUpdate : MacosLoginItemStatus.notRegistered;
     return status;
   }
+}
+
+extension on OnboardingController {
+  MacosOnboardingSetup get macos => setup as MacosOnboardingSetup;
 }

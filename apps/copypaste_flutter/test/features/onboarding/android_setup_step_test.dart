@@ -1,10 +1,13 @@
-import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/view/android_onboarding_screen.dart';
+import 'package:copypaste_flutter/features/onboarding/view/onboarding_screen.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import 'onboarding_test_support.dart';
 
 void main() {
   testWidgets('offers Full and Limited capture modes with six ADB commands', (
@@ -13,7 +16,7 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
     await tester.pumpWidget(_app(controller));
 
@@ -24,7 +27,7 @@ void main() {
     expect(find.text('ADB'), findsOneWidget);
     expect(find.text('Check again'), findsNothing);
 
-    await controller.selectMethod(AndroidCaptureSetupMethod.adb);
+    await controller.android.selectMethod(AndroidCaptureSetupMethod.adb);
     await tester.pump();
     expect(find.text('Check access'), findsNothing);
     expect(find.text('Check capture'), findsNothing);
@@ -66,8 +69,8 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
-    await controller.selectMethod(AndroidCaptureSetupMethod.adb);
+    controller.showSetup();
+    await controller.android.selectMethod(AndroidCaptureSetupMethod.adb);
     await tester.pumpWidget(_app(controller));
 
     expect(find.byType(SelectableText), findsOneWidget);
@@ -88,13 +91,13 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
-    await controller.selectMode(AndroidCaptureMode.limited);
-    await controller.continueFromCapture();
+    controller.showSetup();
+    await controller.android.selectMode(AndroidCaptureMode.limited);
+    await controller.continueFromSetup();
     var finished = false;
     await tester.pumpWidget(
       ShadcnApp(
-        home: AndroidOnboardingScreen(
+        home: OnboardingScreen(
           controller: controller,
           onFinished: () async {
             finished = controller.complete;
@@ -116,8 +119,8 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
-    await controller.selectMode(AndroidCaptureMode.limited);
+    controller.showSetup();
+    await controller.android.selectMode(AndroidCaptureMode.limited);
 
     await tester.pumpWidget(_app(controller));
     await tester.tap(find.widgetWithText(Button, 'Continue'));
@@ -134,16 +137,16 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
     await tester.pumpWidget(_app(controller));
     expect(tester.takeException(), isNull);
 
-    await controller.selectMode(AndroidCaptureMode.limited);
+    await controller.android.selectMode(AndroidCaptureMode.limited);
     await tester.pump();
     expect(tester.takeException(), isNull);
 
-    await controller.continueFromCapture();
+    await controller.continueFromSetup();
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
@@ -152,7 +155,7 @@ void main() {
     final controller = _controller();
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showCapture();
+    controller.showSetup();
 
     await tester.pumpWidget(_app(controller));
 
@@ -179,7 +182,7 @@ void main() {
         ),
         adbCommands: _commands,
       );
-    final controller = AndroidOnboardingController(
+    final controller = androidOnboarding(
       store: MemoryAndroidOnboardingStore(
         complete: true,
         mode: AndroidCaptureMode.limited,
@@ -189,7 +192,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    await controller.reopenCaptureSetup();
+    await controller.reopenSetup();
 
     await tester.pumpWidget(_app(controller));
 
@@ -219,16 +222,13 @@ const _commands = [
   'adb shell am set-standby-bucket com.copypaste.app active',
 ];
 
-AndroidOnboardingController _controller() => AndroidOnboardingController(
+OnboardingController _controller() => androidOnboarding(
   store: MemoryAndroidOnboardingStore(),
   setup: _ScreenAndroidCaptureSetupGateway(),
 );
 
-Widget _app(AndroidOnboardingController controller) => ShadcnApp(
-  home: AndroidOnboardingScreen(
-    controller: controller,
-    onFinished: () async {},
-  ),
+Widget _app(OnboardingController controller) => ShadcnApp(
+  home: OnboardingScreen(controller: controller, onFinished: () async {}),
 );
 
 class _ScreenAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
@@ -275,4 +275,8 @@ class _ScreenAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
 
   @override
   Future<AndroidCaptureSetupState> stopCapture() async => current;
+}
+
+extension on OnboardingController {
+  AndroidOnboardingSetup get android => setup as AndroidOnboardingSetup;
 }

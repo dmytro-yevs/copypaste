@@ -30,13 +30,13 @@ void main() {
         return switch (call.method) {
           'loginItemStatus' => enabled ? 'enabled' : 'not_registered',
           'status' => {'startAtLogin': enabled},
-          'getEnabled' => enabled,
+          'getStatus' => enabled ? 'enabled' : 'disabled',
           _ => null,
         };
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final controller = LaunchAtLoginController(
-        MethodChannelLaunchAtLoginGateway(channel: channel, platform: platform),
+        platformLaunchAtLoginGateway(channel: channel, platform: platform),
       );
       addTearDown(controller.dispose);
       await controller.refresh();
@@ -48,6 +48,28 @@ void main() {
       expect(controller.error, isNull);
     });
   }
+
+  test('Windows reports a Task Manager disabled entry as approval', () async {
+    const channel = MethodChannel('test/startup/task-manager');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return call.method == 'getStatus' ? 'requires_approval' : null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final controller = LaunchAtLoginController(
+      platformLaunchAtLoginGateway(channel: channel, platform: 'windows'),
+    );
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    expect(controller.status, LaunchAtLoginStatus.requiresApproval);
+    expect(controller.enabled, isTrue);
+    await controller.openSystemSettings();
+    expect(calls, ['getStatus', 'openSettings']);
+    expect(controller.error, isNull);
+  });
 
   test(
     'approval, failed changes, and external settings retain actual state',
