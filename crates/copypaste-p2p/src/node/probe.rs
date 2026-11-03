@@ -36,6 +36,10 @@ const PROBE_TIMEOUT_SECS: u64 = 5;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
 // At most one discovery address and one persisted address are attempted.
 const PROBE_REFRESH_LEAD_MS: i64 = PROBE_TIMEOUT_SECS as i64 * 2 * 1_000;
+/// Renewal batches never start closer together than this.
+const PROBE_BATCH_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// Bounds how late a peer that gains its first dial candidate is noticed.
+const PROBE_IDLE_RECHECK: Duration = Duration::from_millis(PROBE_FRESH_MS as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeState {
@@ -108,11 +112,27 @@ impl AuthenticatedReachability {
                     if fresh_until_ms.saturating_sub(now_ms) <= refresh_lead_ms
             )
     }
+
+    /// The earliest time at which [`Self::should_refresh_at`] becomes true.
+    fn refresh_due_at(&self, now_ms: i64) -> i64 {
+        if self.should_refresh_at(now_ms) {
+            return now_ms;
+        }
+        let refresh_lead_ms = match self.state {
+            ProbeState::Online => PROBE_REFRESH_LEAD_MS,
+            ProbeState::Offline | ProbeState::Unknown => 0,
+        };
+        self.fresh_until_ms.map_or(now_ms, |fresh_until_ms| {
+            fresh_until_ms.saturating_sub(refresh_lead_ms)
+        })
+    }
 }
 
 impl Node {
     /// Maintains RTT independently of UI reads for the lifetime of the listener.
     /// Existing freshness and in-flight guards coalesce every renewal batch.
+    /// The monitor sleeps until the earliest renewal is due or a new
+    /// observation is recorded, instead of waking on a fixed tick.
     pub(super) async fn monitor_reachability<F>(
         self: Arc<Self>,
         on_complete: F,
@@ -120,26 +140,58 @@ impl Node {
     ) where
         F: Fn(bool) + Send + Sync + Clone + 'static,
     {
-        let mut tick = tokio::time::interval(Duration::from_secs(1));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut next_batch = tokio::time::Instant::now();
         loop {
-            if *shutdown.borrow() {
-                return;
-            }
             tokio::select! {
                 biased;
                 _ = shutdown.changed() => return,
-                _ = tick.tick() => {
-                    let notify = on_complete.clone();
-                    let completion_shutdown = shutdown.clone();
-                    self.refresh_reachability(self.peers().list(), move |state_changed| {
-                        if !*completion_shutdown.borrow() {
-                            notify(state_changed);
-                        }
-                    });
-                }
+                () = tokio::time::sleep_until(next_batch) => {}
             }
+            if *shutdown.borrow() {
+                return;
+            }
+            let started = tokio::time::Instant::now();
+            let notify = on_complete.clone();
+            let completion_shutdown = shutdown.clone();
+            self.refresh_reachability(self.peers().list(), move |state_changed| {
+                if !*completion_shutdown.borrow() {
+                    notify(state_changed);
+                }
+            });
+            let due = started + self.next_reachability_refresh_in(crate::now_ms());
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                () = tokio::time::sleep_until(due) => {}
+                () = self.reachability_recorded.notified() => {}
+            }
+            next_batch = started + PROBE_BATCH_MIN_INTERVAL;
         }
+    }
+
+    /// Time until a peer with a dial candidate next needs renewal. In-flight
+    /// probes record an observation on completion, which wakes the monitor.
+    fn next_reachability_refresh_in(&self, now_ms: i64) -> Duration {
+        let in_flight = self
+            .probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let due_ms = self
+            .peers()
+            .list()
+            .iter()
+            .filter(|peer| !in_flight.contains(&peer.pairing_id))
+            .filter(|peer| !self.dial_candidates(peer).is_empty())
+            .map(|peer| {
+                self.authenticated_reachability(&peer.pairing_id)
+                    .map_or(now_ms, |observation| observation.refresh_due_at(now_ms))
+            })
+            .min();
+        due_ms.map_or(PROBE_IDLE_RECHECK, |due_ms| {
+            Duration::from_millis(u64::try_from(due_ms.saturating_sub(now_ms)).unwrap_or(0))
+                .min(PROBE_IDLE_RECHECK)
+        })
     }
 
     /// Starts one probe per peer needing renewal and returns immediately.
@@ -387,6 +439,26 @@ mod tests {
             profile: None,
             profile_observed_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn the_monitor_sleeps_until_the_next_renewal_is_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let now = crate::now_ms();
+        assert_eq!(node.next_reachability_refresh_in(now), PROBE_IDLE_RECHECK);
+
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some("127.0.0.1:9".parse().unwrap()));
+        node.peers().upsert(trusted.clone()).unwrap();
+        assert_eq!(node.next_reachability_refresh_in(now), Duration::ZERO);
+
+        node.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::online(Some(5), now),
+        );
+        let due = Duration::from_millis((PROBE_FRESH_MS - PROBE_REFRESH_LEAD_MS) as u64);
+        assert_eq!(node.next_reachability_refresh_in(now), due);
     }
 
     #[test]

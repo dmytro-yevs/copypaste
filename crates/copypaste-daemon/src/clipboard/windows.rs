@@ -166,6 +166,26 @@ impl WindowsClipboard {
     }
 }
 
+/// Marks the contents just written as secret: monitors skip them, and Windows
+/// keeps them out of clipboard history and cloud clipboard. Capture reads the
+/// same formats as `privacy.secret`.
+fn conceal(concealed: bool) -> clipboard_win::SysResult<()> {
+    if !concealed {
+        return Ok(());
+    }
+    let off = 0u32.to_le_bytes();
+    for (name, value) in [
+        ("ExcludeClipboardContentFromMonitorProcessing", &off[..]),
+        ("CanIncludeInClipboardHistory", &off[..]),
+        ("CanUploadToCloudClipboard", &off[..]),
+    ] {
+        let format =
+            raw::register_format(name).ok_or_else(clipboard_win::ErrorCode::last_system)?;
+        raw::set_without_clear(format.get(), value)?;
+    }
+    Ok(())
+}
+
 impl ClipboardSource for WindowsClipboard {
     fn change_signal(&self) -> Option<std::sync::Arc<super::ChangeSignal>> {
         self.notifications
@@ -313,8 +333,11 @@ impl ClipboardSource for WindowsClipboard {
             .unwrap_or(true)
     }
 
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
-        self.write(|| raw::set_string(text))
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+        self.write(|| {
+            raw::set_string(text)?;
+            conceal(concealed)
+        })
     }
 
     fn set_binary_contents(
@@ -323,6 +346,7 @@ impl ClipboardSource for WindowsClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
@@ -347,10 +371,11 @@ impl ClipboardSource for WindowsClipboard {
                 .write(|| {
                     raw::empty()?;
                     if let Some(html) = html {
-                        raw::set_html(format, html)
+                        raw::set_html(format, html)?;
                     } else {
-                        raw::set_without_clear(format, bytes)
+                        raw::set_without_clear(format, bytes)?;
                     }
+                    conceal(concealed)
                 })
                 .map_err(|_| ClipboardWriteError::Failed);
         }
@@ -364,7 +389,8 @@ impl ClipboardSource for WindowsClipboard {
             return self
                 .write(move || {
                     raw::empty()?;
-                    raw::set_file_list(&[path])
+                    raw::set_file_list(&[path])?;
+                    conceal(concealed)
                 })
                 .map_err(|_| ClipboardWriteError::Failed);
         }
@@ -385,7 +411,8 @@ impl ClipboardSource for WindowsClipboard {
             // representations would survive beside ours.
             raw::empty()?;
             raw::set_bitmap(&image.bitmap)?;
-            raw::set_without_clear(format, &image.encoded)
+            raw::set_without_clear(format, &image.encoded)?;
+            conceal(concealed)
         })
         .map_err(|_| ClipboardWriteError::Failed)
     }
@@ -792,6 +819,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"synthetic bytes",
                 Some(&metadata),
+                false,
             )
             .expect("file paste-back must publish a file list");
         let mut paths = Vec::new();
@@ -828,6 +856,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"synthetic bytes",
                 Some(&metadata),
+                false,
             )
             .unwrap();
 
@@ -872,7 +901,7 @@ if ([IO.File]::ReadAllText($paths[0]) -cne 'synthetic bytes') {
 
         let before = sequence_number();
         clipboard
-            .set_contents("pasted by us")
+            .set_contents("pasted by us", false)
             .expect("the write failed");
         let after = sequence_number();
         assert!(
@@ -893,7 +922,7 @@ if ([IO.File]::ReadAllText($paths[0]) -cne 'synthetic bytes') {
         let _ = clipboard.poll();
 
         clipboard
-            .set_contents("pasted by us")
+            .set_contents("pasted by us", false)
             .expect("the write failed");
         if let Some(capture) = clipboard.poll() {
             panic!(

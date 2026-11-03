@@ -63,10 +63,19 @@ pub(super) fn prepare(conn: &Connection) -> rusqlite::Result<()> {
         conn.pragma_update(None, "auto_vacuum", 2)?;
         run_pragma(conn, "VACUUM")?;
     }
-    reclaim(conn)
+    reclaim(conn, WalTruncation::Always)
 }
 
-fn reclaim(conn: &Connection) -> rusqlite::Result<()> {
+/// Store open also retries a truncation an earlier busy reader deferred. A
+/// deletion that freed no whole page (most text rows) leaves the WAL to the
+/// ordinary autocheckpoint instead of forcing a checkpoint per capture.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WalTruncation {
+    Always,
+    AfterReclaim,
+}
+
+fn reclaim(conn: &Connection, truncation: WalTruncation) -> rusqlite::Result<()> {
     // Maintenance yields to captures, sync and readers. A later deletion or
     // store open retries deferred work; no timer or permanent worker exists.
     conn.busy_timeout(Duration::ZERO)?;
@@ -75,6 +84,7 @@ fn reclaim(conn: &Connection) -> rusqlite::Result<()> {
         if mode != 2 {
             return Ok(());
         }
+        let mut reclaimed = false;
         loop {
             let before: u64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
             if before == 0 {
@@ -88,7 +98,11 @@ fn reclaim(conn: &Connection) -> rusqlite::Result<()> {
             if after >= before {
                 break;
             }
+            reclaimed = true;
             std::thread::yield_now();
+        }
+        if !reclaimed && truncation == WalTruncation::AfterReclaim {
+            return Ok(());
         }
         // A busy reader leaves the WAL intact. Never wait for it or delete
         // journal files directly. SQLite reports that case in the result row.
@@ -116,9 +130,9 @@ impl Store {
             .name("history-space".into())
             .spawn(move || {
                 store.reclaim_requested.store(false, Ordering::Release);
-                let result = store
-                    .conn()
-                    .and_then(|conn| reclaim(&conn).map_err(Into::into));
+                let result = store.conn().and_then(|conn| {
+                    reclaim(&conn, WalTruncation::AfterReclaim).map_err(Into::into)
+                });
                 if let Err(error) = &result {
                     tracing::debug!(%error, "deferred history space maintenance");
                 }
@@ -174,7 +188,7 @@ mod tests {
         run_pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = bytes(&path);
         assert_eq!(store.delete_all_through(through).unwrap(), 1);
-        reclaim(&conn).unwrap();
+        reclaim(&conn, WalTruncation::AfterReclaim).unwrap();
         assert!(
             bytes(&path) + 8 * 1024 * 1024 < before,
             "before={before}, after={}, mode={}, free={}",
@@ -193,6 +207,26 @@ mod tests {
         let reopened = Store::open(&path, &KEY).unwrap();
         assert_eq!(reopened.count().unwrap(), 2);
         assert_eq!(reopened.search("retained", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_deletion_that_frees_no_page_does_not_force_a_wal_truncation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let store = Store::open(&path, &KEY).unwrap();
+        store.reclaiming.store(true, Ordering::Release);
+        let removed = store.insert(item("short clip", T0)).unwrap();
+        store.insert(item("neighbour clip", T0 + 1)).unwrap();
+        assert!(store.delete(&removed.id).unwrap());
+        let conn = store.conn().unwrap();
+        assert_eq!(store_free(&path), 0);
+        let wal = format!("{}-wal", path.display());
+        let before = std::fs::metadata(&wal).unwrap().len();
+        assert!(before > 0);
+
+        reclaim(&conn, WalTruncation::AfterReclaim).unwrap();
+
+        assert_eq!(std::fs::metadata(&wal).unwrap().len(), before);
     }
 
     #[test]

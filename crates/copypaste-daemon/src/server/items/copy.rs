@@ -10,10 +10,10 @@ pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Respo
     copy_with(state, id, item_id, true)
 }
 pub(crate) fn copy_text(state: &AppState, id: u64, item_id: &str, text: &str) -> Response {
-    match history_actions::copy_text(&state.store, item_id, text, |payload| {
+    match history_actions::copy_text_classified(&state.store, item_id, text, |payload, secret| {
         state
             .clipboard()
-            .write_payload(item_id, payload, copypaste_ipc::content_type::TEXT)
+            .write_payload(item_id, payload, copypaste_ipc::content_type::TEXT, secret)
             .inspect(|()| crate::notify::on_copy(state))
     }) {
         Ok(stamp) => {
@@ -48,6 +48,7 @@ fn copy_with(state: &AppState, id: u64, item_id: &str, plain_text: bool) -> Resp
                 &prepared.item.id,
                 prepared.payload(),
                 &prepared.content_type,
+                prepared.item.privacy.secret,
             )
             .map_err(copypaste_core::history_error::HistoryError::from)?;
         crate::notify::on_copy(state);

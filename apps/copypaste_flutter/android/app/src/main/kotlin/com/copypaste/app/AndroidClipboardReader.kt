@@ -373,9 +373,9 @@ internal object AndroidClipboardReader {
         // A binary payload never falls back to textual/base64 capture.
         return if (snapshot.uri != null) binary(context, pending, snapshot.uri, snapshot.type ?: return false)
         else snapshot.text?.takeIf(String::isNotBlank)?.let {
-            val saved = NativeRuntimeCapture.ingestText(pending.token, it)
-            if (saved && !snapshot.secret) pending.feedbackPreview(CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(it)))
-            saved
+            val result = NativeRuntimeCapture.ingestText(pending.token, it)
+            if (result == NativeRuntimeCapture.INGEST_SAVED) pending.feedbackPreview(CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(it)))
+            result != NativeRuntimeCapture.INGEST_REFUSED
         } == true
     }
 

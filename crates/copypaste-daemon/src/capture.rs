@@ -979,7 +979,7 @@ mod tests {
         ) -> Option<crate::clipboard::Capture> {
             self.poll()
         }
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             Ok(())
         }
         fn backend_name(&self) -> &'static str {
@@ -1289,7 +1289,7 @@ mod tests {
                     ) -> Option<crate::clipboard::Capture> {
                         self.poll()
                     }
-                    fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+                    fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
                         Ok(())
                     }
                     fn backend_name(&self) -> &'static str {
@@ -1522,7 +1522,7 @@ mod tests {
             self.poll()
         }
 
-        fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _text: &str, _: bool) -> anyhow::Result<()> {
             Ok(())
         }
 
@@ -1874,7 +1874,7 @@ mod tests {
             ) -> Option<crate::clipboard::Capture> {
                 self.poll()
             }
-            fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+            fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
                 Ok(())
             }
             fn backend_name(&self) -> &'static str {
@@ -2117,7 +2117,7 @@ mod tests {
         ) -> Option<crate::clipboard::Capture> {
             self.poll()
         }
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             Ok(())
         }
         fn backend_name(&self) -> &'static str {

@@ -625,7 +625,7 @@ mod tests {
             false
         }
 
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             Ok(())
         }
 
@@ -673,7 +673,7 @@ mod tests {
             self.0.load(Ordering::Acquire)
         }
 
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             Ok(())
         }
 

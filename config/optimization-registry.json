@@ -3727,6 +3727,85 @@
         }
       ],
       "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-076",
+      "title": "Persist unchanged authenticated peer profiles at most once per half TTL",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/mod.rs"
+      ],
+      "invariant": "Every session and probe records the authenticated profile in memory at its exact observation time. The encrypted peer file is rewritten only when the profile changes or its stored observation is older than half the authenticated-profile TTL, so the restart fallback stays within its freshness window without a full rewrite and directory fsync per session.",
+      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline and absent, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-077",
+      "title": "Schedule reachability renewal by deadline instead of a 1 Hz tick",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-p2p/src/node/mod.rs"
+      ],
+      "invariant": "The reachability monitor sleeps until the earliest renewal is due, a new observation is recorded, or a bounded recheck elapses for peers without dial candidates. Probe freshness, renewal lead and offline retry cadence are unchanged, and renewal batches never start closer than one second apart.",
+      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline and absent, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-078",
+      "title": "Truncate the WAL after deletions only when pages were reclaimed",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/space.rs"
+      ],
+      "invariant": "Committed deletions still reclaim free pages incrementally (DISK-001). A deletion that frees no whole page leaves the WAL to the configured autocheckpoint instead of forcing a TRUNCATE checkpoint per capture at the history cap. Store open still retries a truncation an earlier busy reader deferred.",
+      "next_step": "Measure native disk writes and fsyncs per capture at the history cap on macOS, physical Android and installed Windows. I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
     }
   ]
 }

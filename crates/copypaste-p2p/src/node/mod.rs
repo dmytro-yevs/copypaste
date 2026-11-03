@@ -215,6 +215,7 @@ pub(super) const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 
 const DISCOVERY_INTEREST_MS: i64 = 60_000;
 const AUTHENTICATED_PROFILE_TTL_MS: i64 = 5 * 60_000;
+const AUTHENTICATED_PROFILE_PERSIST_INTERVAL_MS: i64 = AUTHENTICATED_PROFILE_TTL_MS / 2;
 const DISCOVERY_CANDIDATE_COOLDOWN: Duration = Duration::from_secs(60);
 const MAX_DISCOVERY_ATTEMPTS_PER_PAIRING: usize = 1;
 const MAX_UNVERIFIED_DISCOVERY_ATTEMPTS: usize = 4;
@@ -504,6 +505,7 @@ pub struct Node {
     pairing: pairing::PairingManager,
     profiles: RwLock<HashMap<String, AuthenticatedDeviceProfile>>,
     reachability: RwLock<HashMap<String, AuthenticatedReachability>>,
+    reachability_recorded: tokio::sync::Notify,
     probe_flights: Mutex<HashSet<String>>,
     probes: Arc<Semaphore>,
     discovery_candidate_cooldowns: Mutex<DiscoveryCandidateCooldowns>,
@@ -560,6 +562,7 @@ impl Node {
             pairing: pairing::PairingManager::new(),
             profiles: RwLock::new(HashMap::new()),
             reachability: RwLock::new(HashMap::new()),
+            reachability_recorded: tokio::sync::Notify::new(),
             probe_flights: Mutex::new(HashSet::new()),
             probes: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
             discovery_candidate_cooldowns: Mutex::new(DiscoveryCandidateCooldowns::default()),
@@ -985,6 +988,15 @@ impl Node {
         let Some(peer) = self.peers.get(pairing_id) else {
             return;
         };
+        // Every session and probe re-observes the profile. The in-memory map
+        // above holds the exact time; disk only needs the restart fallback to
+        // stay within its freshness window, so skip the encrypted rewrite.
+        if peer.profile.as_ref() == Some(profile)
+            && observed_at_ms.saturating_sub(peer.profile_observed_at_ms)
+                < AUTHENTICATED_PROFILE_PERSIST_INTERVAL_MS
+        {
+            return;
+        }
         let updated = Peer {
             pairing_id: peer.pairing_id.clone(),
             device_id: peer.device_id.clone(),
@@ -1042,6 +1054,7 @@ impl Node {
             .is_none_or(|old| old.state != observation.state);
         reachability.insert(pairing_id.to_string(), observation);
         drop(reachability);
+        self.reachability_recorded.notify_one();
         if changed {
             self.sync_activity.connection_changed();
         }
@@ -1712,6 +1725,36 @@ mod tests {
         assert_eq!(stored.name, "renamed phone");
         assert_eq!(stored.profile.as_ref(), Some(&profile));
         assert!(stored.profile_observed_at_ms > 0);
+    }
+
+    #[test]
+    fn an_unchanged_fresh_profile_observation_does_not_rewrite_the_peer_file() {
+        let (node, dir) = node();
+        let path = dir.path().join("peers.json");
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let profile = DeviceProfile {
+            model: Some("Pixel 9".to_string()),
+            ..DeviceProfile::default()
+        };
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: Some(profile.clone()),
+                profile_observed_at_ms: crate::now_ms(),
+            })
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        node.record_authenticated_profile(&pairing_id, Some(&profile));
+
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(node.authenticated_profile(&pairing_id).is_some());
     }
 
     #[test]

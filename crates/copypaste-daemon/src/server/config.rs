@@ -277,7 +277,7 @@ mod tests {
             })
         }
 
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             panic!("private mode must preserve the native clipboard")
         }
 

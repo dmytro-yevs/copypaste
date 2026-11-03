@@ -79,7 +79,7 @@ impl ClipboardSource for FakeClipboard {
         inner.generation != inner.observed
     }
 
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, _: bool) -> anyhow::Result<()> {
         self.writes
             .0
             .lock()
@@ -93,6 +93,7 @@ impl ClipboardSource for FakeClipboard {
         _item_id: &str,
         payload: &copypaste_core::ClipboardPayload,
         _content_type: &str,
+        _concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 

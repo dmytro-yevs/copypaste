@@ -97,6 +97,7 @@ enum Command {
 struct OwnedSelection {
     target: Atom,
     bytes: Vec<u8>,
+    concealed: bool,
 }
 
 /// Ownership metadata is sufficient to keep a policy-dropped value private
@@ -522,10 +523,11 @@ impl ClipboardSource for X11Clipboard {
     fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
         self.write(OwnedSelection {
             target: 0,
             bytes: text.as_bytes().to_vec(),
+            concealed,
         })
     }
     fn set_binary_contents(
@@ -534,6 +536,7 @@ impl ClipboardSource for X11Clipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (_, target) =
@@ -550,8 +553,12 @@ impl ClipboardSource for X11Clipboard {
         } else {
             bytes.to_vec()
         };
-        self.write(OwnedSelection { target, bytes })
-            .map_err(|_| ClipboardWriteError::Failed)
+        self.write(OwnedSelection {
+            target,
+            bytes,
+            concealed,
+        })
+        .map_err(|_| ClipboardWriteError::Failed)
     }
     fn backend_name(&self) -> &'static str {
         "linux-x11-system-clipboard"
@@ -633,13 +640,13 @@ impl ClipboardSource for LinuxClipboard {
             Self::Adaptive(source) => source.active.is_available(),
         }
     }
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
         match self {
-            Self::X11(source) => source.set_contents(text),
-            Self::Gnome(source) => source.set_contents(text),
-            Self::Kwin(source) => source.set_contents(text),
-            Self::Wayland(source) => source.set_contents(text),
-            Self::Adaptive(source) => source.active.set_contents(text),
+            Self::X11(source) => source.set_contents(text, concealed),
+            Self::Gnome(source) => source.set_contents(text, concealed),
+            Self::Kwin(source) => source.set_contents(text, concealed),
+            Self::Wayland(source) => source.set_contents(text, concealed),
+            Self::Adaptive(source) => source.active.set_contents(text, concealed),
         }
     }
     fn set_binary_contents(
@@ -648,22 +655,25 @@ impl ClipboardSource for LinuxClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         match self {
-            Self::X11(source) => source.set_binary_contents(item_id, content_type, bytes, metadata),
+            Self::X11(source) => {
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+            }
             Self::Gnome(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Kwin(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Wayland(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Adaptive(source) => {
                 source
                     .active
-                    .set_binary_contents(item_id, content_type, bytes, metadata)
+                    .set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
         }
     }
@@ -1058,6 +1068,9 @@ fn serve(
         let mut targets = vec![a.targets, a.utf8, a.text, a.string, a.plain_utf8];
         if let Some(value) = owned {
             targets.push(value.target);
+            if value.concealed {
+                targets.push(a.kde_hint);
+            }
         }
         if c.change_property32(
             PropMode::REPLACE,
@@ -1065,6 +1078,18 @@ fn serve(
             property,
             AtomEnum::ATOM,
             &targets,
+        )
+        .is_ok()
+        {
+            delivered = property;
+        }
+    } else if request.target == a.kde_hint && owned.is_some_and(|value| value.concealed) {
+        if c.change_property8(
+            PropMode::REPLACE,
+            request.requestor,
+            property,
+            request.target,
+            b"secret",
         )
         .is_ok()
         {

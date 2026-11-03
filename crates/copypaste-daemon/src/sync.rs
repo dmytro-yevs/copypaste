@@ -44,7 +44,14 @@ pub fn store_source(state: &Arc<AppState>) -> StoreSource {
                 &clipboard.keyring,
                 row,
                 || settings,
-                |payload| native.write_payload(&row.id, payload, &row.content_type),
+                |payload| {
+                    native.write_payload(
+                        &row.id,
+                        payload,
+                        &row.content_type,
+                        row.clipboard_privacy().secret,
+                    )
+                },
             );
             drop(native);
             if applied {
