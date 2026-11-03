@@ -673,6 +673,7 @@ dependencies = [
  "clap",
  "comfy-table",
  "copypaste-clock",
+ "copypaste-fs",
  "copypaste-ipc",
  "futures-util",
  "serde",
@@ -784,6 +785,7 @@ dependencies = [
  "copypaste-clock",
  "copypaste-core",
  "copypaste-feedback",
+ "copypaste-fs",
  "copypaste-ipc",
  "copypaste-modules",
  "copypaste-p2p",
@@ -841,6 +843,7 @@ version = "1.1.2"
 dependencies = [
  "base64",
  "copypaste-core",
+ "copypaste-fs",
  "copypaste-ipc",
  "copypaste-modules",
  "copypaste-p2p",
@@ -865,8 +868,12 @@ dependencies = [
 name = "copypaste-fs"
 version = "1.1.2"
 dependencies = [
+ "interprocess",
  "rustix",
  "tempfile",
+ "widestring",
+ "win-security-identifier",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1031,6 +1038,7 @@ version = "1.1.2"
 dependencies = [
  "anyhow",
  "copypaste-clock",
+ "copypaste-fs",
  "copypaste-ipc",
  "serde",
  "serde_json",

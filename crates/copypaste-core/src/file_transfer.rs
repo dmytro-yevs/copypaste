@@ -450,14 +450,7 @@ pub struct Destination {
 }
 impl Destination {
     pub fn create(path: &Path) -> Result<Self, FileTransferError> {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options.open(path).map_err(destination_error)?;
+        let file = copypaste_fs::create_private(path).map_err(destination_error)?;
         Ok(Self {
             file: Some(file),
             path: path.to_owned(),

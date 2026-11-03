@@ -1,12 +1,14 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+#![cfg_attr(windows, deny(unsafe_code))]
 
-//! Durable file replacement.
+//! Durable file replacement and owner-only file creation.
 //!
 //! Four call sites carried a copy of this and they had drifted. The peer sync
 //! cursors were written with no `fsync` at all, so a power loss could publish a
 //! rename to contents that had never reached the disk, and two of the four
 //! wrote key material without narrowing the mode first.
 
+use std::fs::File;
 use std::io::{self, Write as _};
 use std::path::Path;
 use std::sync::Mutex;
@@ -14,25 +16,71 @@ use std::sync::Mutex;
 use tempfile::NamedTempFile;
 
 pub mod file_lock;
+#[cfg(windows)]
+mod owner_acl;
 
 static REPLACE: Mutex<()> = Mutex::new(());
 
-/// Mode [`Visibility::OwnerOnly`] applies on unix.
+/// Mode the owner-only helpers apply on unix.
 #[cfg(unix)]
 pub const OWNER_ONLY_MODE: u32 = 0o600;
 
 /// Who may read the file once it is in place.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Visibility {
-    /// [`OWNER_ONLY_MODE`], applied to the temporary file *before* any bytes go
-    /// into it, so key material never exists at a wider mode — not even for the
-    /// span of one write. It is applied on every write, so a file someone
-    /// widened by hand is narrowed again rather than left open.
+    /// The temporary file is created by [`create_private`], so key material
+    /// never exists with wider access — not even for the span of one write. A
+    /// fresh file replaces the target on every write, so a file someone widened
+    /// by hand is narrowed again rather than left open.
     OwnerOnly,
-    /// No mode is set. Not a wider file: `tempfile` creates at `0600` and the
-    /// rename carries that inode into place, so this differs from
-    /// [`Visibility::OwnerOnly`] only in promising nothing.
+    /// No access is set. On unix not a wider file: `tempfile` creates at
+    /// `0600` and the rename carries that inode into place. On Windows the
+    /// file inherits the directory's access list.
     Inherited,
+}
+
+/// Create a new file, failing if `path` exists, opened for writing and
+/// readable only by its owner from the moment it exists.
+///
+/// Unix: created at [`OWNER_ONLY_MODE`]. Windows: created with a protected
+/// access list that grants the current user full control and nobody else
+/// anything, inheritance from the directory included.
+///
+/// # Errors
+///
+/// Any I/O failure; an existing `path` reports [`io::ErrorKind::AlreadyExists`].
+pub fn create_private(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(OWNER_ONLY_MODE)
+            .open(path)
+    }
+    #[cfg(windows)]
+    {
+        owner_acl::create_new(path)
+    }
+}
+
+/// Narrow an existing file to its owner, with the same access
+/// [`create_private`] creates. Handles opened before the call keep theirs.
+///
+/// # Errors
+///
+/// Any failure to read the account or to apply the access.
+pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(OWNER_ONLY_MODE))
+    }
+    #[cfg(windows)]
+    {
+        owner_acl::restrict(path)
+    }
 }
 
 /// Replace `path` with `bytes` in one observable step, creating the parent
@@ -66,28 +114,15 @@ fn write_with(
     }
     let dir = parent.unwrap_or_else(|| Path::new("."));
 
-    let mut tmp = NamedTempFile::new_in(dir)?;
-    if visibility == Visibility::OwnerOnly {
-        restrict(tmp.as_file())?;
-    }
+    let mut tmp = match visibility {
+        Visibility::OwnerOnly => tempfile::Builder::new().make_in(dir, create_private)?,
+        Visibility::Inherited => NamedTempFile::new_in(dir)?,
+    };
     tmp.write_all(bytes)?;
     tmp.flush()?;
     tmp.as_file().sync_all()?;
     persist(tmp, path)?;
     sync_dir(dir);
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict(file: &std::fs::File) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    file.set_permissions(std::fs::Permissions::from_mode(OWNER_ONLY_MODE))
-}
-
-/// Scope is macOS and Android, both unix. This exists so the workspace still
-/// builds on a Windows CI runner, not as a supported configuration.
-#[cfg(not(unix))]
-fn restrict(_file: &std::fs::File) -> io::Result<()> {
     Ok(())
 }
 
@@ -179,6 +214,31 @@ mod tests {
         assert_eq!(error.to_string(), "publish refused");
         assert_eq!(std::fs::read(&path).expect("read"), b"before");
         assert_eq!(temp_entries(dir.path()), 1);
+    }
+
+    #[test]
+    fn a_private_file_is_owner_only_and_never_replaces_an_existing_one() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("export.json");
+        create_private(&path)
+            .expect("create")
+            .write_all(b"history")
+            .expect("write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, OWNER_ONLY_MODE);
+        }
+
+        let error = create_private(&path).expect_err("must not clobber");
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).expect("read"), b"history");
+        restrict_to_owner(&path).expect("restrict");
     }
 
     #[cfg(unix)]

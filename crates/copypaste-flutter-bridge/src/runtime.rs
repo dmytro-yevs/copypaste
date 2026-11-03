@@ -323,13 +323,9 @@ fn open_startup_log(data_dir: &Path) -> Result<std::fs::File, RuntimeError> {
         .create(true)
         .truncate(true)
         .write(true)
-        .open(path)
+        .open(&path)
         .map_err(|_| RuntimeError::daemon_start_failed())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
+    let _ = copypaste_fs::restrict_to_owner(&path);
     Ok(file)
 }
 

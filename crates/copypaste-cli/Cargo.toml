@@ -12,6 +12,7 @@ path = "src/main.rs"
 # No copypaste-core dependency: the CLI speaks IPC only.
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
+copypaste-fs = { path = "../copypaste-fs" }
 copypaste-ipc = { path = "../copypaste-ipc" }
 backon.workspace = true
 tokio.workspace = true
