@@ -754,6 +754,7 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   Future<void> shutdown() async {
+    // Let an in-flight Copy settle; the native 1 s failsafe still bounds it.
     final action = _activeAction;
     dispose();
     await action;
