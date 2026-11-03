@@ -19,7 +19,7 @@ use tracing::{debug, error};
 use super::listener::WireLease;
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
 use crate::AppState;
-use copypaste_runtime::Runtime;
+use copypaste_runtime::Route;
 
 /// A pre-handler rejection and whether the rejected request was a subscription.
 pub(super) struct GateRejection {
@@ -342,9 +342,9 @@ where
 
 /// Route one request to the shared runtime.
 ///
-/// Two kinds of work, and they belong on different threads. Peer, cloud and
-/// module operations await network I/O and run on the reactor. Everything
-/// else is blocking (SQLite, AEAD, the pasteboard) and takes one admitted
+/// The runtime's [`Route`] decides the thread. Reactor work (peer, cloud,
+/// module and file-offer operations) is awaited here. Everything else is
+/// blocking (SQLite, AEAD, the pasteboard) and takes one admitted
 /// `spawn_blocking` hop.
 pub(super) async fn dispatch_request(
     state: &Arc<AppState>,
@@ -353,38 +353,21 @@ pub(super) async fn dispatch_request(
 ) -> AdmittedResponse {
     let id = request.id;
     let method = request.method;
-    let offer =
-        matches!(&method, Method::SaveFile { id: item_id, .. } if state.is_file_offer(item_id));
-    if offer || Runtime::runs_on_reactor(&method) {
-        let response = match method {
-            Method::SaveFile {
-                id: item_id,
-                dest_path,
-                download_token,
-            } => {
-                state
-                    .save_offer(id, &item_id, &dest_path, download_token)
-                    .await
-            }
-            method => state.runtime.request(id, method).await,
-        };
-        return AdmittedResponse {
-            response,
-            _lease: None,
-            _wire_lease: wire_lease,
-        };
-    }
-    let permit = match &method {
-        Method::ImagePreview { .. } => {
-            Some(copypaste_core::image_preview::acquire_preview_source().await)
+    let admission = match state.runtime.route(&method).await {
+        Route::Reactor => {
+            return AdmittedResponse {
+                response: state.runtime.request(id, method).await,
+                _lease: None,
+                _wire_lease: wire_lease,
+            };
         }
-        _ => None,
+        Route::Blocking(admission) => admission,
     };
     let units = blocking_weight(&method);
     let pool = payload_pool(interactive(&method));
     let state = Arc::clone(state);
     match blocking_work(pool, units, wire_lease, move || {
-        let _permit = permit;
+        let _admission = admission;
         dispatch_store(&state, id, method)
     })
     .await

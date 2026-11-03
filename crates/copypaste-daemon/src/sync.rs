@@ -1,4 +1,5 @@
-//! The runtime's sync source writing received content to this daemon's clipboard.
+//! The runtime's peer and cloud sync sources writing received content to this
+//! daemon's clipboard.
 
 #[allow(unused_imports)]
 use crate::testutil::calls::*;
@@ -13,6 +14,9 @@ mod tests {
     fn receiving_sources_share_the_native_writer_and_live_device_switch() {
         let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("receiver");
         let mut events = state.subscribe_events();
+        // The peer source, and the hook-free view the cloud provider receives.
+        let peer = Arc::clone(&state.source);
+        let cloud = state.source.without_version_hook();
         let remote = |stamp| RemoteVersion {
             item_id: "remote-text",
             content: "received text",
@@ -26,7 +30,7 @@ mod tests {
             app_bundle_id: None,
             app_name: None,
         };
-        assert!(store_source(&state).apply_version(&remote(100)).unwrap());
+        assert!(peer.apply_version(&remote(100)).unwrap());
         let event = events.try_recv().unwrap();
         assert!(event.captured);
         assert_eq!(event.captured_item_id.as_deref(), Some("remote-text"));
@@ -36,7 +40,7 @@ mod tests {
                 "received text".into()
             )]
         );
-        assert!(!peer_source(&state).apply_version(&remote(100)).unwrap());
+        assert!(!cloud.apply_version(&remote(100)).unwrap());
         assert_eq!(writes.count(), 1);
         assert!(events.try_recv().is_err());
         state
@@ -46,7 +50,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert!(peer_source(&state).apply_version(&remote(200)).unwrap());
+        assert!(cloud.apply_version(&remote(200)).unwrap());
         assert_eq!(writes.count(), 1);
         assert!(events.try_recv().is_err());
         assert!(state.settings.get().sync_enabled);
@@ -57,7 +61,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert!(store_source(&state).apply_version(&remote(300)).unwrap());
+        assert!(peer.apply_version(&remote(300)).unwrap());
         assert_eq!(writes.count(), 2);
         assert!(events.try_recv().unwrap().captured);
         assert!(events.try_recv().is_err());

@@ -46,6 +46,8 @@ pub const MSG_BACKUP_EXISTS: &str =
 pub const MSG_BACKUP_NO_DIR: &str = "the folder to write the backup into does not exist";
 pub const MSG_BACKUP_FAILED: &str = "the backup could not be written";
 pub const MSG_SAVE_FILE_FAILED: &str = "the file could not be saved";
+pub const MSG_DOWNLOAD_METADATA: &str = "the download request contains invalid file metadata";
+pub const MSG_SYNC_OFF: &str = "sync is turned off";
 pub const MSG_NEEDS_CONFIRM: &str = "restoring replaces this device's history; confirm it";
 pub const MSG_RESTORE_NOT_FOUND: &str = "there is no backup file there";
 pub const MSG_RESTORE_NOT_A_BACKUP: &str =
@@ -154,6 +156,8 @@ mod tests {
         MSG_BACKUP_NO_DIR,
         MSG_BACKUP_FAILED,
         MSG_SAVE_FILE_FAILED,
+        MSG_DOWNLOAD_METADATA,
+        MSG_SYNC_OFF,
         MSG_NEEDS_CONFIRM,
         MSG_RESTORE_NOT_FOUND,
         MSG_RESTORE_NOT_A_BACKUP,

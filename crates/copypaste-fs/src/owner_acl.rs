@@ -1,5 +1,5 @@
 //! The Windows half of the owner-only helpers: one protected DACL entry that
-//! grants the current user everything, the daemon pipe's access list.
+//! grants the current user everything, also the daemon pipe's access list.
 #![allow(unsafe_code)]
 
 use std::fs::File;
@@ -22,10 +22,28 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE,
 };
 
-fn owner_only() -> io::Result<SecurityDescriptor> {
+/// What an owner-only access list covers.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OwnerScope {
+    /// The object itself: a file or a pipe.
+    Object,
+    /// A directory and everything later created inside it.
+    Tree,
+}
+
+/// A protected DACL with one entry granting the current user everything.
+///
+/// # Errors
+///
+/// Any failure to read the account or to build the descriptor.
+pub fn owner_only_descriptor(scope: OwnerScope) -> io::Result<SecurityDescriptor> {
     let sid = SecurityIdentifier::get_current_user_sid()
         .map_err(|_| io::Error::other("could not read this account's identifier"))?;
-    let text = U16CString::from_str(format!("D:P(A;;GA;;;{sid})"))
+    let inheritance = match scope {
+        OwnerScope::Object => "",
+        OwnerScope::Tree => "OICI",
+    };
+    let text = U16CString::from_str(format!("D:P(A;{inheritance};GA;;;{sid})"))
         .map_err(|_| io::Error::other("could not build the owner-only access list"))?;
     SecurityDescriptor::deserialize(&text)
 }
@@ -38,7 +56,7 @@ fn wide(path: &Path) -> io::Result<U16CString> {
 /// The same access and sharing `OpenOptions::new().write(true).create_new(true)`
 /// asks for, plus the descriptor, which `std` has no way to pass.
 pub(crate) fn create_new(path: &Path) -> io::Result<File> {
-    let security = owner_only()?;
+    let security = owner_only_descriptor(OwnerScope::Object)?;
     let path = wide(path)?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -65,8 +83,8 @@ pub(crate) fn create_new(path: &Path) -> io::Result<File> {
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
-pub(crate) fn restrict(path: &Path) -> io::Result<()> {
-    let security = owner_only()?;
+pub(crate) fn restrict(path: &Path, scope: OwnerScope) -> io::Result<()> {
+    let security = owner_only_descriptor(scope)?;
     let (dacl, _) = security
         .dacl()?
         .ok_or_else(|| io::Error::other("the owner-only access list has no DACL"))?;
@@ -88,4 +106,16 @@ pub(crate) fn restrict(path: &Path) -> io::Result<()> {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_account_has_an_identifier_the_parser_accepts() {
+        for scope in [OwnerScope::Object, OwnerScope::Tree] {
+            owner_only_descriptor(scope).expect("the descriptor must parse");
+        }
+    }
 }

@@ -62,22 +62,13 @@ pub trait RuntimeHost: Send + Sync {
 
 /// The writer-only host contract an in-process platform supplies.
 pub trait ClipboardWriter: Send + Sync {
+    /// Write `payload`; `secret` content keeps its native sensitive marking.
     fn write(
         &self,
         payload: &ClipboardPayload,
         content_type: &str,
-    ) -> Result<(), ClipboardWriteError>;
-
-    /// Preserve classification on hosts that support native sensitive previews.
-    fn write_classified(
-        &self,
-        payload: &ClipboardPayload,
-        content_type: &str,
         secret: bool,
-    ) -> Result<(), ClipboardWriteError> {
-        let _ = secret;
-        self.write(payload, content_type)
-    }
+    ) -> Result<(), ClipboardWriteError>;
 
     /// Write received content and acknowledge success through the native host,
     /// including when no Flutter notification subscriber is running. Secret
@@ -88,7 +79,7 @@ pub trait ClipboardWriter: Send + Sync {
         content_type: &str,
         secret: bool,
     ) -> Result<(), ClipboardWriteError> {
-        self.write_classified(payload, content_type, secret)
+        self.write(payload, content_type, secret)
     }
 }
 
@@ -104,7 +95,7 @@ impl RuntimeHost for InProcessHost {
         content_type: &str,
         secret: bool,
     ) -> Result<(), ClipboardWriteError> {
-        self.0.write_classified(payload, content_type, secret)
+        self.0.write(payload, content_type, secret)
     }
 
     fn write_received(
@@ -133,7 +124,7 @@ impl RuntimeHost for InProcessHost {
 
 pub(crate) struct UnavailableClipboard;
 impl ClipboardWriter for UnavailableClipboard {
-    fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
+    fn write(&self, _: &ClipboardPayload, _: &str, _: bool) -> Result<(), ClipboardWriteError> {
         Err(ClipboardWriteError::Failed)
     }
 }

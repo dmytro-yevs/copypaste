@@ -1,9 +1,10 @@
 //! The one dispatch of the private IPC contract, for every platform.
 //!
 //! [`Runtime::request`] is the in-process entry point. A host that keeps its
-//! own thread pools routes [`Runtime::runs_on_reactor`] methods there and every
-//! other method to [`Runtime::request_blocking`] on a blocking worker. Both
-//! answer from the same handlers; no method has a second implementation.
+//! own thread pools asks [`Runtime::route`] where a method runs: reactor
+//! methods go to [`Runtime::request`], every other method to
+//! [`Runtime::request_blocking`] on a blocking worker. Both answer from the
+//! same handlers; no method has a second implementation.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -32,14 +33,38 @@ use crate::Runtime;
 /// plausible pinned section, because the history cap itself is 10 000 items.
 pub const MAX_REORDER_IDS: usize = 10_000;
 
-const MSG_SYNC_OFF: &str = "Sync is turned off.";
-const MSG_DOWNLOAD_METADATA: &str = "The download request contains invalid file metadata.";
+/// Where a host runs one request.
+pub enum Route {
+    /// Await [`Runtime::request`]: the method awaits network I/O or a shared
+    /// admission.
+    Reactor,
+    /// Call [`Runtime::request_blocking`] on a blocking worker, holding the
+    /// admission until it returns.
+    Blocking(BlockingAdmission),
+}
+
+/// The shared admission one blocking request holds while it runs.
+pub struct BlockingAdmission {
+    _preview: Option<tokio::sync::SemaphorePermit<'static>>,
+}
 
 impl Runtime {
-    /// Whether a method awaits network I/O or a shared admission, and so
-    /// belongs on the reactor rather than on a blocking worker.
-    #[must_use]
-    pub fn runs_on_reactor(method: &Method) -> bool {
+    /// Decide where `method` runs and take its blocking admission.
+    pub async fn route(&self, method: &Method) -> Route {
+        let offer = matches!(method, Method::SaveFile { id, .. } if self.is_file_offer(id));
+        if offer || Self::runs_on_reactor(method) {
+            return Route::Reactor;
+        }
+        let preview = match method {
+            Method::ImagePreview { .. } => {
+                Some(copypaste_core::image_preview::acquire_preview_source().await)
+            }
+            _ => None,
+        };
+        Route::Blocking(BlockingAdmission { _preview: preview })
+    }
+
+    fn runs_on_reactor(method: &Method) -> bool {
         matches!(
             method,
             Method::Modules { .. }
@@ -69,36 +94,38 @@ impl Runtime {
     /// Dispatch one request in-process.
     pub async fn request(self: &Arc<Self>, id: u64, method: Method) -> Response {
         self.start_module_sync();
-        match method {
-            Method::ImagePreview { .. } => {
-                let _permit = copypaste_core::image_preview::acquire_preview_source().await;
-                self.request_blocking(id, method)
-            }
-            Method::SaveFile {
-                id: item_id,
-                dest_path,
-                download_token,
-            } if self.is_file_offer(&item_id) => {
-                self.save_offer(id, &item_id, &dest_path, download_token)
-                    .await
-            }
-            Method::SetConfig { .. } | Method::SetPrivateMode { .. } => {
-                // A settings change waits for admitted native writes; keep
-                // that wait off the reactor.
-                let runtime = Arc::clone(self);
-                tokio::task::spawn_blocking(move || runtime.request_blocking(id, method))
-                    .await
-                    .unwrap_or_else(|_| {
-                        Response::err(id, ErrorCode::Internal, SettingsError::Store.to_string())
-                    })
-            }
-            method if Self::runs_on_reactor(&method) => self.request_async(id, method).await,
-            method => self.request_blocking(id, method),
+        let admission = match self.route(&method).await {
+            Route::Reactor => return self.request_async(id, method).await,
+            Route::Blocking(admission) => admission,
+        };
+        if matches!(
+            method,
+            Method::SetConfig { .. } | Method::SetPrivateMode { .. }
+        ) {
+            // A settings change waits for admitted native writes; keep that
+            // wait off the reactor.
+            let runtime = Arc::clone(self);
+            return tokio::task::spawn_blocking(move || runtime.request_blocking(id, method))
+                .await
+                .unwrap_or_else(|_| {
+                    Response::err(id, ErrorCode::Internal, SettingsError::Store.to_string())
+                });
         }
+        let response = self.request_blocking(id, method);
+        drop(admission);
+        response
     }
 
     async fn request_async(&self, id: u64, method: Method) -> Response {
         match method {
+            Method::SaveFile {
+                id: item_id,
+                dest_path,
+                download_token,
+            } => {
+                self.save_offer(id, &item_id, &dest_path, download_token)
+                    .await
+            }
             Method::Modules { operation } => match self.modules.request(operation).await {
                 Ok(json) => Response::ok(id, ResponseData::Modules { json }),
                 Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
@@ -466,8 +493,7 @@ impl Runtime {
     }
 
     /// Whether `item_id` is a remote file offer that `SaveFile` must download.
-    #[must_use]
-    pub fn is_file_offer(&self, item_id: &str) -> bool {
+    fn is_file_offer(&self, item_id: &str) -> bool {
         self.store.get(item_id).ok().flatten().is_some_and(|row| {
             copypaste_core::file_transfer::row_offer(&row, &self.keyring.item_key())
                 .ok()
@@ -477,7 +503,7 @@ impl Runtime {
     }
 
     /// Download a remote file offer, reporting progress to runtime watchers.
-    pub async fn save_offer(
+    async fn save_offer(
         &self,
         id: u64,
         item_id: &str,
@@ -1019,13 +1045,23 @@ impl Runtime {
     }
 
     fn set_config(&self, id: u64, patch: &ConfigPatch) -> Response {
-        self.set_config_with_effects(id, patch, |_| {})
+        self.set_config_with(id, patch, |_| {})
     }
 
     /// `SetConfig` with an extra effect run first inside the transition, so a
-    /// host can observe that transitions stay serialised while effects run.
-    #[doc(hidden)]
+    /// host's tests can observe that transitions stay serialised while
+    /// effects run.
+    #[cfg(feature = "test-support")]
     pub fn set_config_with_effects(
+        &self,
+        id: u64,
+        patch: &ConfigPatch,
+        effects: impl FnOnce(&SettingsTransition),
+    ) -> Response {
+        self.set_config_with(id, patch, effects)
+    }
+
+    fn set_config_with(
         &self,
         id: u64,
         patch: &ConfigPatch,
@@ -1040,10 +1076,6 @@ impl Runtime {
             Ok(applied) => {
                 if self.settings_fingerprint() != before {
                     self.note_capture_state_changed();
-                }
-                if patch.sync_enabled.is_some() {
-                    self.modules
-                        .sync_enabled_changed(applied.config.sync_enabled);
                 }
                 Response::ok(
                     id,
@@ -1112,6 +1144,7 @@ impl Runtime {
         }
         if let Some(enabled) = transition.sync_enabled_changed() {
             self.p2p.sync_enabled_changed(enabled);
+            self.modules.sync_enabled_changed(enabled);
             self.note_sync_status_changed();
         }
     }
@@ -1136,7 +1169,7 @@ impl Runtime {
 
     /// A confirmed pairing records the peer's name and answers with the
     /// device it now knows, so no client has to re-list peers to show it.
-    pub fn pairing_progress(&self, id: u64, status: PairingStatus) -> Response {
+    pub(crate) fn pairing_progress(&self, id: u64, status: PairingStatus) -> Response {
         let known_device = if status.phase == PairingPhase::Confirmed {
             if let Some(peer) = &status.peer {
                 if let Err(error) = self.meta.record_device_name(&peer.device_id, &peer.name) {
@@ -1239,7 +1272,7 @@ impl Runtime {
 
     /// Persist what the device on the other end calls itself. Best-effort: a
     /// failure costs a label, never a session that already exchanged rows.
-    pub fn remember_device(&self, outcome: &copypaste_p2p::sync::SyncOutcome) {
+    pub(crate) fn remember_device(&self, outcome: &copypaste_p2p::sync::SyncOutcome) {
         if let Err(error) = self
             .meta
             .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)

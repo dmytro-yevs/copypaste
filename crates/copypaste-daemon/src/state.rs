@@ -31,7 +31,7 @@ pub struct AppState {
     drain_release: watch::Sender<bool>,
     draining: AtomicBool,
     admissions: Arc<RwLock<()>>,
-    backend_name: &'static str,
+    host: Arc<DaemonHost>,
     ready: AtomicBool,
     observed_clipboard_available: AtomicBool,
 }
@@ -59,7 +59,6 @@ pub struct Opened {
 
 impl AppState {
     pub fn open(opened: Opened) -> anyhow::Result<Self> {
-        let backend_name = opened.clipboard.backend_name();
         let clipboard_available = opened.clipboard.is_available();
         let clipboard: SharedClipboard = Arc::new(Mutex::new(opened.clipboard));
         let host = Arc::new(DaemonHost::new(
@@ -78,7 +77,7 @@ impl AppState {
             settings: opened.settings,
             peers: opened.peers,
             port: opened.port,
-            host,
+            host: Arc::clone(&host) as _,
         })?;
         Ok(Self {
             runtime: Arc::new(runtime),
@@ -88,7 +87,7 @@ impl AppState {
             drain_release: watch::channel(false).0,
             draining: AtomicBool::new(false),
             admissions: Arc::new(RwLock::new(())),
-            backend_name,
+            host,
             ready: AtomicBool::new(false),
             observed_clipboard_available: AtomicBool::new(clipboard_available),
         })
@@ -143,7 +142,12 @@ impl AppState {
     }
 
     pub fn backend_name(&self) -> &'static str {
-        self.backend_name
+        self.host.backend_name()
+    }
+
+    /// A capture succeeded: the same copy feedback the runtime asks for.
+    pub fn copy_feedback(&self) {
+        copypaste_runtime::RuntimeHost::copy_feedback(self.host.as_ref());
     }
 
     pub fn is_ready(&self) -> bool {

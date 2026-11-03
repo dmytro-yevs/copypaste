@@ -31,7 +31,7 @@ mod peer_sync;
 pub mod settings;
 
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
-pub use dispatch::MAX_REORDER_IDS;
+pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
 pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost};
 pub use meta::{Meta, Origin};
 pub use p2p::P2p;
@@ -610,7 +610,8 @@ impl Runtime {
     }
 
     /// One scheduled pass under an already held round permit.
-    pub async fn run_peer_round(
+    #[cfg(test)]
+    async fn run_peer_round(
         self: &Arc<Self>,
         permit: copypaste_core::sync::RoundGuard,
         shutdown: watch::Receiver<bool>,
@@ -1064,7 +1065,7 @@ impl Runtime {
 
 /// Source exclusions need authenticated attribution: without an active source
 /// adapter, capture stops rather than recording what it cannot attribute.
-pub fn apply_capture_policy_capabilities(
+fn apply_capture_policy_capabilities(
     capabilities: &mut BTreeMap<PlatformCapability, CapabilityStatus>,
     settings: &copypaste_ipc::ConfigData,
 ) {
@@ -1212,7 +1213,7 @@ mod tests {
         }
     }
 
-    fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
+    pub(crate) fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
         fixture_with(Arc::new(host::UnavailableClipboard))
     }
 
@@ -1233,14 +1234,6 @@ mod tests {
     struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<bool>>);
     impl ClipboardWriter for RecordingClipboard {
         fn write(
-            &self,
-            payload: &ClipboardPayload,
-            content_type: &str,
-        ) -> Result<(), ClipboardWriteError> {
-            self.write_classified(payload, content_type, false)
-        }
-
-        fn write_classified(
             &self,
             payload: &ClipboardPayload,
             _content_type: &str,
@@ -1304,17 +1297,13 @@ mod tests {
     }
 
     impl ClipboardWriter for ReceivingClipboard {
-        fn write(&self, payload: &ClipboardPayload, kind: &str) -> Result<(), ClipboardWriteError> {
-            self.writes.write(payload, kind)
-        }
-
-        fn write_classified(
+        fn write(
             &self,
             payload: &ClipboardPayload,
             kind: &str,
             secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.writes.write_classified(payload, kind, secret)
+            self.writes.write(payload, kind, secret)
         }
 
         fn write_received(
@@ -1323,7 +1312,7 @@ mod tests {
             kind: &str,
             secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.write_classified(payload, kind, secret)?;
+            self.write(payload, kind, secret)?;
             *self.acknowledgements.lock().unwrap() += 1;
             self.concealed.lock().unwrap().push(secret);
             Ok(())
@@ -2065,7 +2054,12 @@ mod tests {
     fn a_failed_copy_does_not_promote_history_or_emit_a_change() {
         struct RefusingClipboard;
         impl ClipboardWriter for RefusingClipboard {
-            fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: bool,
+            ) -> Result<(), ClipboardWriteError> {
                 Err(ClipboardWriteError::Failed)
             }
         }
@@ -3111,5 +3105,106 @@ mod tests {
             second.recv().await.unwrap().event,
             EventKind::Peers
         ));
+    }
+
+    #[test]
+    fn known_device_data_appears_only_after_confirmation() {
+        let (state, _dir) = fixture();
+        let token = copypaste_p2p::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        state
+            .p2p
+            .peers()
+            .upsert(copypaste_p2p::peers::Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let progress = |phase| {
+            state.pairing_progress(
+                1,
+                copypaste_p2p::PairingStatus {
+                    pairing_id: Some(pairing_id.clone()),
+                    role: Some(copypaste_p2p::PairingRole::Initiator),
+                    phase,
+                    sas: None,
+                    peer: None,
+                    error: None,
+                    expires_in_ms: None,
+                },
+            )
+        };
+
+        let awaiting = progress(copypaste_p2p::PairingPhase::AwaitingConfirmation);
+        assert!(matches!(
+            awaiting.data,
+            Some(ResponseData::PairingProgress(
+                copypaste_ipc::PairingProgressData {
+                    known_device: None,
+                    ..
+                }
+            ))
+        ));
+        let confirmed = progress(copypaste_p2p::PairingPhase::Confirmed);
+        assert!(matches!(
+            confirmed.data,
+            Some(ResponseData::PairingProgress(copypaste_ipc::PairingProgressData {
+                known_device: Some(copypaste_ipc::PeerInfo { pairing_id: id, .. }),
+                ..
+            })) if id == pairing_id
+        ));
+    }
+
+    #[test]
+    fn source_exclusions_report_capture_blocked_without_attribution() {
+        use copypaste_ipc::{
+            CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability,
+        };
+        use std::collections::BTreeMap;
+
+        let mut capabilities = BTreeMap::from([
+            (
+                PlatformCapability::ClipboardCapture,
+                CapabilityStatus {
+                    state: CapabilityState::Available,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::Verified,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+            (
+                PlatformCapability::SourceAttribution,
+                CapabilityStatus {
+                    state: CapabilityState::Unsupported,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::None,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+        ]);
+        let settings = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Private".into()],
+            ..Default::default()
+        };
+        apply_capture_policy_capabilities(&mut capabilities, &settings);
+        let capture = &capabilities[&PlatformCapability::ClipboardCapture];
+        assert_eq!(capture.state, CapabilityState::NeedsCompanion);
+        assert_eq!(capture.guarantee, CapabilityGuarantee::None);
+        assert_eq!(
+            capture.backend.as_deref(),
+            Some("linux-wayland-data-control")
+        );
     }
 }

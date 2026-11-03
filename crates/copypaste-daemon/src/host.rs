@@ -38,6 +38,10 @@ impl DaemonHost {
             started_at: Instant::now(),
         }
     }
+
+    pub fn backend_name(&self) -> &'static str {
+        self.backend_name
+    }
 }
 
 impl RuntimeHost for DaemonHost {
@@ -52,7 +56,7 @@ impl RuntimeHost for DaemonHost {
     }
 
     fn copy_feedback(&self) {
-        crate::notify::play_if(self.settings.get().sound_on_copy, self.backend_name);
+        crate::notify::on_copy(self.settings.get().sound_on_copy, self.backend_name);
     }
 
     /// One clipboard lock for the transport probes and both adapter counters.

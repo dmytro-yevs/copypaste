@@ -18,6 +18,8 @@ use tempfile::NamedTempFile;
 pub mod file_lock;
 #[cfg(windows)]
 mod owner_acl;
+#[cfg(windows)]
+pub use owner_acl::{owner_only_descriptor, OwnerScope};
 
 static REPLACE: Mutex<()> = Mutex::new(());
 
@@ -79,8 +81,19 @@ pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     }
     #[cfg(windows)]
     {
-        owner_acl::restrict(path)
+        owner_acl::restrict(path, OwnerScope::Object)
     }
+}
+
+/// Narrow an existing directory to its owner, with access inherited by
+/// everything later created inside it.
+///
+/// # Errors
+///
+/// Any failure to read the account or to apply the access.
+#[cfg(windows)]
+pub fn restrict_tree_to_owner(path: &Path) -> io::Result<()> {
+    owner_acl::restrict(path, OwnerScope::Tree)
 }
 
 /// Replace `path` with `bytes` in one observable step, creating the parent
