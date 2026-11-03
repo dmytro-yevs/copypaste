@@ -18,8 +18,8 @@ use tracing::{debug, error};
 
 use super::listener::WireLease;
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
-use super::{config, dbadmin, items, transfer};
 use crate::AppState;
+use copypaste_runtime::Runtime;
 
 /// A pre-handler rejection and whether the rejected request was a subscription.
 pub(super) struct GateRejection {
@@ -340,384 +340,70 @@ where
     .await
 }
 
-/// Route one request.
+/// Route one request to the shared runtime.
 ///
-/// Two kinds of work, and they belong on different threads. The peer and cloud
-/// operations are network I/O — a TCP connect, a Noise handshake, an HTTPS
-/// round trip — so they run on the reactor and `await` like any other socket
-/// work. Everything else is blocking (SQLite, AEAD, the pasteboard) and takes
-/// one `spawn_blocking` hop, exactly as it did before sync existed.
+/// Two kinds of work, and they belong on different threads. Peer, cloud and
+/// module operations await network I/O and run on the reactor. Everything
+/// else is blocking (SQLite, AEAD, the pasteboard) and takes one admitted
+/// `spawn_blocking` hop.
 pub(super) async fn dispatch_request(
     state: &Arc<AppState>,
     request: Request,
     wire_lease: Option<WireLease>,
 ) -> AdmittedResponse {
     let id = request.id;
-    let response = match request.method {
-        Method::StartFileDownload {
-            id: item_id,
-            dest_path,
-            token,
-        } => {
-            if item_id.len() > 128 || token.len() > 128 || dest_path.len() > 4096 {
-                Response::err(
-                    id,
-                    ErrorCode::InvalidRequest,
-                    "The download request contains invalid file metadata.",
-                )
-            } else {
-                match state.file_downloads.reserve_background() {
-                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-                    Ok(slot) => {
-                        let state = Arc::clone(state);
-                        tokio::spawn(async move {
-                            let _slot = slot;
-                            let settings = state.settings.get().clone();
-                            let _ = state
-                                .file_downloads
-                                .save_with_progress(
-                                    &state.store,
-                                    &state.keyring,
-                                    state.p2p.node(),
-                                    state.meta.device_id(),
-                                    &settings,
-                                    copypaste_core::file_download::FileDownloadRequest {
-                                        id: &item_id,
-                                        destination: std::path::Path::new(&dest_path),
-                                        token: Some(&token),
-                                    },
-                                    Arc::new(|_, _| {}),
-                                )
-                                .await;
-                        });
-                        Response::ok(id, copypaste_ipc::ResponseData::Empty {})
-                    }
-                }
-            }
-        }
-        Method::CancelFileDownload { id: item_id } => {
-            state.file_downloads.cancel(&item_id);
-            Response::ok(id, copypaste_ipc::ResponseData::Empty {})
-        }
-        Method::SaveFile {
-            id: item_id,
-            dest_path,
-            download_token,
-        } => {
-            let is_offer = state.store.get(&item_id).ok().flatten().is_some_and(|row| {
-                copypaste_core::file_transfer::row_offer(&row, &state.keyring.item_key())
-                    .ok()
-                    .flatten()
-                    .is_some()
-            });
-            if is_offer {
-                let settings = state.settings.get().clone();
-                let sender = state.runtime_event_sender();
-                let progress_token = download_token.clone();
-                let last_percent = std::sync::atomic::AtomicU64::new(u64::MAX);
-                match state
-                    .file_downloads
-                    .save_with_progress(
-                        &state.store,
-                        &state.keyring,
-                        state.p2p.node(),
-                        state.meta.device_id(),
-                        &settings,
-                        copypaste_core::file_download::FileDownloadRequest {
-                            id: &item_id,
-                            destination: std::path::Path::new(&dest_path),
-                            token: download_token.as_deref(),
-                        },
-                        Arc::new(move |written, total| {
-                            if progress_token.is_none() || sender.receiver_count() == 0 {
-                                return;
-                            }
-                            let percent = if total == 0 {
-                                100
-                            } else {
-                                ((u128::from(written) * 100) / u128::from(total)).min(100) as u64
-                            };
-                            if last_percent.swap(percent, std::sync::atomic::Ordering::Relaxed)
-                                != percent
-                            {
-                                if let Some(token) = progress_token.as_ref() {
-                                    let _ = sender.send(copypaste_ipc::RuntimeEventData {
-                                        file_operation: None,
-                                        change: None,
-                                        capture: None,
-                                        progress: Some(copypaste_ipc::FileProgress {
-                                            token: token.clone(),
-                                            written,
-                                            total,
-                                        }),
-                                    });
-                                }
-                            }
-                        }),
-                    )
+    let method = request.method;
+    let offer =
+        matches!(&method, Method::SaveFile { id: item_id, .. } if state.is_file_offer(item_id));
+    if offer || Runtime::runs_on_reactor(&method) {
+        let response = match method {
+            Method::SaveFile {
+                id: item_id,
+                dest_path,
+                download_token,
+            } => {
+                state
+                    .save_offer(id, &item_id, &dest_path, download_token)
                     .await
-                {
-                    Ok(()) => Response::ok(id, copypaste_ipc::ResponseData::Empty {}),
-                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-                }
-            } else {
-                let state = Arc::clone(state);
-                return blocking_work(payload_pool(false), 0, wire_lease, move || {
-                    items::save_file(&state, id, &item_id, &dest_path)
-                })
-                .await
-                .unwrap_or_else(|_| AdmittedResponse {
-                    response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
-                    _lease: None,
-                    _wire_lease: None,
-                });
+            }
+            method => state.runtime.request(id, method).await,
+        };
+        return AdmittedResponse {
+            response,
+            _lease: None,
+            _wire_lease: wire_lease,
+        };
+    }
+    let permit = match &method {
+        Method::ImagePreview { .. } => {
+            Some(copypaste_core::image_preview::acquire_preview_source().await)
+        }
+        _ => None,
+    };
+    let units = blocking_weight(&method);
+    let pool = payload_pool(interactive(&method));
+    let state = Arc::clone(state);
+    match blocking_work(pool, units, wire_lease, move || {
+        let _permit = permit;
+        dispatch_store(&state, id, method)
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(e) => {
+            error!(error = %e, "request handler did not complete");
+            AdmittedResponse {
+                response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
+                _lease: None,
+                _wire_lease: None,
             }
         }
-        Method::ImagePreview {
-            id: item_id,
-            max_edge,
-            bounds,
-        } => {
-            let permit = copypaste_core::image_preview::acquire_preview_source().await;
-            let state = Arc::clone(state);
-            return blocking_work(payload_pool(false), 0, wire_lease, move || {
-                let _permit = permit;
-                items::image_preview(&state, id, &item_id, max_edge, bounds)
-            })
-            .await
-            .unwrap_or_else(|e| {
-                error!(error = %e, "request handler did not complete");
-                AdmittedResponse {
-                    response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
-                    _lease: None,
-                    _wire_lease: None,
-                }
-            });
-        }
-        Method::Modules { operation } => match state.modules.request(operation).await {
-            Ok(json) => Response::ok(id, copypaste_ipc::ResponseData::Modules { json }),
-            Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-        },
-        Method::PairCreateInvite => crate::p2p::handlers::pair_create_invite(state, id).await,
-        Method::PairNearby { addr } => crate::p2p::handlers::pair_nearby(state, id, &addr).await,
-        Method::PairJoin { code, addr } => {
-            crate::p2p::handlers::pair_join(state, id, &code, &addr).await
-        }
-        Method::PairProgress => crate::p2p::handlers::pair_get_progress(state, id).await,
-        Method::PairConfirm { accept } => {
-            crate::p2p::handlers::pair_confirm(state, id, accept).await
-        }
-        Method::PairCancel => crate::p2p::handlers::pair_cancel(state, id).await,
-        Method::Unpair { pairing_id } => crate::p2p::handlers::unpair(state, id, &pairing_id).await,
-        Method::Revoke { pairing_id } => crate::p2p::handlers::revoke(state, id, &pairing_id).await,
-        Method::Peers => crate::p2p::handlers::peers(state, id).await,
-        Method::SyncNow { pairing_id } => {
-            crate::p2p::handlers::sync_now(state, id, pairing_id.as_deref()).await
-        }
-        Method::Discovered => crate::p2p::handlers::discovered(state, id).await,
-        Method::Rescan => crate::p2p::handlers::rescan(state, id).await,
-        method @ (Method::CloudSignIn { .. }
-        | Method::CloudSignUp { .. }
-        | Method::CloudSetEndpoint { .. }
-        | Method::CloudSignOut
-        | Method::CloudStatus
-        | Method::CloudSyncNow) => state.modules.cloud_request(id, method).await,
-        // Not `_`: a method added to the enum lands here and then fails to
-        // build inside `dispatch_store`, which is where it has to be handled.
-        method => {
-            let units = blocking_weight(&method);
-            let pool = payload_pool(interactive(&method));
-            let state = Arc::clone(state);
-            return match blocking_work(pool, units, wire_lease, move || {
-                dispatch_store(&state, id, method)
-            })
-            .await
-            {
-                Ok(response) => response,
-                Err(e) => {
-                    error!(error = %e, "request handler did not complete");
-                    AdmittedResponse {
-                        response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
-                        _lease: None,
-                        _wire_lease: None,
-                    }
-                }
-            };
-        }
-    };
-    AdmittedResponse {
-        response,
-        _lease: None,
-        _wire_lease: wire_lease,
     }
 }
 
-/// The blocking half of [`dispatch_request`]. Exhaustive over `Method` by design.
+/// The blocking half of [`dispatch_request`].
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
-    match method {
-        Method::CancelFileDownload { id: item_id } => {
-            state.file_downloads.cancel(&item_id);
-            Response::ok(id, copypaste_ipc::ResponseData::Empty {})
-        }
-        Method::Status => items::status(state, id),
-        Method::Modules { .. } => unreachable!("module operations use their shared blocking host"),
-        Method::SetDeviceName { name } => items::set_device_name(state, id, &name),
-        Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
-        Method::Search { query, limit } => items::search(state, id, &query, limit),
-        Method::HistoryQuery {
-            query,
-            limit,
-            cursor,
-        } => items::history_query(state, id, &query, limit, cursor.as_deref()),
-        Method::HistoryFacets => items::history_facets(state, id),
-        Method::HistoryTags { clip_ids } => match state.store.history_tags(&clip_ids) {
-            Ok(tags) => Response::ok(id, copypaste_ipc::ResponseData::HistoryTags(tags)),
-            Err(_) => Response::err(id, copypaste_ipc::ErrorCode::InvalidRequest, "Tags could not be loaded."),
-        },
-        Method::MutateHistoryTags { mutation } => match state.store.mutate_history_tags(&state.keyring.item_key(), &mutation) {
-            Ok(()) => { state.note_local_change(); Response::ok(id, copypaste_ipc::ResponseData::Empty {}) },
-            Err(_) => Response::err(id, copypaste_ipc::ErrorCode::InvalidRequest, "The tag change is invalid. Use a unique name of up to 64 characters and select pinned clips."),
-        },
-        Method::GetSpoilerState => {
-            let (revision, revealed_ids) = state.spoilers.snapshot();
-            Response::ok(
-                id,
-                copypaste_ipc::ResponseData::SpoilerState {
-                    revision,
-                    revealed_ids,
-                },
-            )
-        }
-        Method::SetSpoilerRevealed {
-            id: item_id,
-            revealed,
-        } => items::set_spoiler_revealed(state, id, item_id.as_deref(), revealed),
-        Method::Copy { id: item_id } => items::copy(state, id, &item_id),
-        Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
-        Method::CopyText { id: item_id, text } => items::copy_text(state, id, &item_id, &text),
-        Method::Get { id: item_id } => items::get(state, id, &item_id),
-        Method::ImagePreview {
-            id: item_id,
-            max_edge,
-            bounds,
-        } => items::image_preview(state, id, &item_id, max_edge, bounds),
-        Method::SourceAppIcon { id: item_id } => items::source_app_icon(state, id, &item_id),
-        Method::SaveFile {
-            id: item_id,
-            dest_path,
-            ..
-        } => items::save_file(state, id, &item_id, &dest_path),
-        Method::FileOperations {
-            clear,
-            before,
-            id: operation_id,
-        } => match state
-            .store
-            .file_operations(clear, before.as_deref(), operation_id.as_deref())
-        {
-            Ok(records) => Response::ok(id, copypaste_ipc::ResponseData::FileOperations(records)),
-            Err(_) => Response::err(
-                id,
-                ErrorCode::Internal,
-                "File operations could not be loaded.",
-            ),
-        },
-        Method::DownloadedFile { id: item_id } => {
-            let path = state
-                .store
-                .downloaded_file(&item_id)
-                .ok()
-                .flatten()
-                .filter(|path| std::path::Path::new(path).is_file());
-            Response::ok(id, copypaste_ipc::ResponseData::DownloadedFile(path))
-        }
-        Method::StartFileDownload { .. } => Response::err(
-            id,
-            ErrorCode::InvalidRequest,
-            "Use the asynchronous download dispatcher.",
-        ),
-        Method::ImportFileReference {
-            reference,
-            filename,
-            mime_type,
-            size_hint,
-        } => match copypaste_core::file_reference::import(
-            &state.store,
-            &state.keyring,
-            &reference,
-            &filename,
-            &mime_type,
-            &state.settings.get(),
-            size_hint,
-        ) {
-            Ok(_) => {
-                state.note_local_change();
-                Response::ok(id, copypaste_ipc::ResponseData::Empty {})
-            }
-            Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-        },
-        Method::Add { content } => items::add(state, id, &content),
-        Method::ImportFile {
-            path,
-            filename,
-            mime_type,
-            source_reference,
-        } => items::import_file(
-            state,
-            id,
-            &path,
-            &filename,
-            &mime_type,
-            source_reference.as_deref(),
-        ),
-        Method::Delete { id: item_id } => items::delete(state, id, &item_id),
-        Method::DeleteAll { through } => items::delete_all(state, id, through),
-        Method::HistoryCeiling => items::history_ceiling(state, id),
-        Method::Pin {
-            id: item_id,
-            pinned,
-        } => items::pin(state, id, &item_id, pinned),
-        Method::SetSecret {
-            id: item_id,
-            secret,
-        } => items::set_secret(state, id, &item_id, secret),
-        Method::ReorderPinned { ids } => items::reorder_pinned(state, id, &ids),
-        Method::Export { limit } => transfer::export(state, id, limit),
-        Method::Import { items } => transfer::import(state, id, items),
-        Method::Backup { dest_path } => dbadmin::backup(state, id, &dest_path),
-        Method::Restore { src_path, confirm } => dbadmin::restore(state, id, &src_path, confirm),
-        Method::GetConfig => config::get(state, id),
-        Method::SetConfig { patch } => config::set(state, id, &patch),
-        Method::GetPrivateMode => config::private_mode(state, id),
-        Method::SetPrivateMode { enabled } => config::set_private_mode(state, id, enabled),
-        // Unreachable: `dispatch` takes these first. Spelled out rather than
-        // left to a `_` so that adding a method to the enum is still a compile
-        // error here, which is the whole point of dispatching on a type.
-        Method::PairCreateInvite
-        | Method::PairJoin { .. }
-        | Method::PairNearby { .. }
-        | Method::PairProgress
-        | Method::PairConfirm { .. }
-        | Method::PairCancel
-        | Method::Unpair { .. }
-        | Method::Revoke { .. }
-        | Method::Peers
-        | Method::SyncNow { .. }
-        | Method::Discovered
-        | Method::Rescan
-        | Method::CloudSignIn { .. }
-        | Method::CloudSignUp { .. }
-        | Method::CloudSetEndpoint { .. }
-        | Method::CloudSignOut
-        | Method::CloudStatus
-        | Method::CloudSyncNow
-        | Method::Watch
-        | Method::WatchRuntime
-        | Method::Shutdown => {
-            error!("a network operation reached the blocking dispatcher");
-            Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
-        }
-    }
+    state.request_blocking(id, method)
 }
 
 #[cfg(test)]

@@ -1,39 +1,8 @@
-//! IPC envelope and runtime effects for the shared backup policy.
-use crate::AppState;
-#[cfg(test)]
-use copypaste_core::storage::open_validated;
-#[cfg(test)]
-use copypaste_ipc::ErrorCode;
-use copypaste_ipc::{BackupData, Response, ResponseData};
-#[cfg(test)]
-use std::path::Path;
+//! Backup and restore through the daemon host.
 
-pub(super) fn backup(state: &AppState, id: u64, destination: &str) -> Response {
-    match copypaste_core::history_backup::backup(&state.store, destination) {
-        Ok(size_bytes) => Response::ok(id, ResponseData::Backup(BackupData { size_bytes })),
-        Err(error) => error.response(id),
-    }
-}
-pub(super) fn restore(state: &AppState, id: u64, source: &str, confirm: bool) -> Response {
-    match copypaste_core::history_backup::restore(
-        &state.store,
-        &state.keyring.db_key(),
-        source,
-        confirm,
-    ) {
-        Ok(floor) => {
-            if let Some(oldest) = floor {
-                state.modules.note_version(oldest);
-                state.p2p.node().note_local_version(oldest);
-            }
-            state.note_local_change();
-            Response::ok(id, ResponseData::Empty {})
-        }
-        Err(error) => error.response(id),
-    }
-}
+#[allow(unused_imports)]
+use crate::testutil::calls::*;
 
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{add, contents, test_state};
@@ -256,13 +225,10 @@ mod tests {
         let (state, dir) = test_state("alpha");
         state
             .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    poll_interval_ms: Some(250),
-                    ..Default::default()
-                },
-            )
+            .apply(&copypaste_ipc::ConfigPatch {
+                poll_interval_ms: Some(250),
+                ..Default::default()
+            })
             .unwrap();
         let device_id = state.meta.device_id().to_string();
         let dest = dir.path().join("history.backup");

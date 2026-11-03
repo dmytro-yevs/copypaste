@@ -791,6 +791,7 @@ dependencies = [
  "copypaste-modules",
  "copypaste-p2p",
  "copypaste-retry",
+ "copypaste-runtime",
  "copypaste-runtime-log",
  "copypaste-source-app",
  "copypaste-sync",

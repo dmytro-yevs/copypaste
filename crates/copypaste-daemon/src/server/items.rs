@@ -1,602 +1,9 @@
-//! The handlers for the history operations, and the decrypt-to-wire step they
-//! all share.
-//!
-//! Everything here is blocking (SQLite, AEAD, the pasteboard) and is reached
-//! through one `spawn_blocking` hop in [`super::dispatch`]. The peer operations
-//! are network I/O and live in `crate::p2p::handlers` instead — the split
-//! between the two files is the split between the two thread pools.
+//! History dispatch through the daemon host: the shared runtime answering
+//! with this daemon's clipboard, origin metadata and capture state.
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-#[cfg(test)]
-use copypaste_core::StoredItem;
-use copypaste_core::{p2p_contract, HistoryCursor, ItemCursor, StoreError};
-use copypaste_ipc::{
-    clamp_page, CapabilityGuarantee, CapabilityState, CapabilityStatus, ErrorCode, HistoryQuery,
-    PlatformCapability, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE,
-    MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
-};
-use std::collections::BTreeMap;
-use tracing::{error, warn};
+#[allow(unused_imports)]
+use crate::testutil::calls::*;
 
-mod copy;
-mod wire;
-
-pub(super) use self::copy::{copy, copy_plain_text, copy_text, save_file};
-use self::wire::{
-    bound_item_preview, decrypt_rows, is_oversized_text, preview_rows, to_wire, to_wire_and_payload,
-};
-use super::messages::{
-    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_BAD_HISTORY_QUERY, MSG_CONTENT_TOO_LARGE,
-    MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY,
-    MSG_TOO_BIG,
-};
-use crate::capture::{self, IngestError};
-use crate::AppState;
-
-/// Ceiling on one `reorder_pinned` request.
-///
-/// The frame cap already bounds the bytes; this bounds the *work*, so one
-/// request cannot hold the write transaction over a list nobody could have
-/// dragged. It is above any plausible pinned section — the history cap itself
-/// is 10 000 items — so a real ordering is never refused.
-const MAX_REORDER_IDS: usize = 10_000;
-
-pub(crate) fn status(state: &AppState, id: u64) -> Response {
-    // `status` never fails: an unreadable count is reported as zero rather than
-    // turned into an error, because the caller may be probing precisely because
-    // the database is unhappy.
-    let item_count = match state.store.count() {
-        Ok(count) => count,
-        Err(e) => {
-            warn!(error = ?e, "could not count items for status");
-            0
-        }
-    };
-
-    let (
-        capture_revision,
-        private_mode,
-        private_mode_epoch,
-        settings_health,
-        sync_enabled,
-        capture_running,
-        clipboard_available,
-        settings,
-    ) = loop {
-        let revision = state.capture_revision();
-        let settings = state.settings.get();
-        let fields = (
-            revision,
-            settings.private_mode,
-            settings.private_mode_epoch(),
-            settings.health().cloned(),
-            settings.sync_enabled,
-            state.capture_running(),
-            state.clipboard_available(),
-            (*settings).clone(),
-        );
-        if revision == state.capture_revision() {
-            break fields;
-        }
-    };
-    let device_name = state.meta.device_name();
-    let listen_addr = state.p2p.listen_addr();
-    let (clipboard_backend, mut platform_capabilities) = {
-        let clipboard = state.clipboard();
-        (
-            clipboard.backend_name().to_string(),
-            clipboard.platform_capabilities(),
-        )
-    };
-    let unprobed = CapabilityStatus {
-        state: CapabilityState::Error,
-        backend: None,
-        reason: Some("No daemon-side probe is registered for this capability.".into()),
-        permissions: Vec::new(),
-        guarantee: CapabilityGuarantee::None,
-        mime_types: Vec::new(),
-        max_bytes: None,
-    };
-    for kind in [
-        PlatformCapability::GlobalShortcuts,
-        PlatformCapability::QuickPaste,
-        PlatformCapability::DesktopIntegration,
-        PlatformCapability::Updates,
-    ] {
-        platform_capabilities.insert(kind, unprobed.clone());
-    }
-    platform_capabilities.insert(
-        PlatformCapability::SecureStorage,
-        if cfg!(target_os = "linux") {
-            CapabilityStatus {
-                state: CapabilityState::Available,
-                backend: Some("secret_service".into()),
-                reason: Some(
-                    "Device key loaded at daemon startup; current lock state was not probed."
-                        .into(),
-                ),
-                permissions: Vec::new(),
-                guarantee: CapabilityGuarantee::BestEffort,
-                mime_types: Vec::new(),
-                max_bytes: None,
-            }
-        } else {
-            unprobed
-        },
-    );
-    apply_capture_policy_capabilities(&mut platform_capabilities, &settings);
-    if !capture_running {
-        if let Some(capture) = platform_capabilities.get_mut(&PlatformCapability::ClipboardCapture)
-        {
-            capture.state = CapabilityState::Error;
-            capture.guarantee = CapabilityGuarantee::None;
-            capture.reason = Some("Capture loop is stopped.".into());
-        }
-    } else if private_mode {
-        if let Some(capture) = platform_capabilities.get_mut(&PlatformCapability::ClipboardCapture)
-        {
-            capture.reason = Some("Capture is paused by private mode.".into());
-        }
-    }
-    Response::ok(
-        id,
-        ResponseData::Status(StatusData {
-            platform_capabilities,
-            runtime_watch: true,
-            capture_watch: true,
-            capture_revision,
-            sync_status: state.p2p.node().sync_status(sync_enabled),
-            device_details: Some(p2p_contract::local_device_details(
-                &device_name,
-                listen_addr.as_deref(),
-            )),
-            device_name,
-            device_id: Some(state.meta.device_id().to_string()),
-            version: crate::DAEMON_VERSION.to_string(),
-            protocol_version: PROTOCOL_VERSION,
-            listen_addr,
-            item_count,
-            capture_running,
-            clipboard_available,
-            clipboard_backend,
-            private_mode,
-            private_mode_epoch,
-            counters: state.counters(),
-            // Carried on `status` for the reason the counters are: a client
-            // that had to make a second call could render the settings screen
-            // before it learned they were not the user's own values.
-            settings_health,
-        }),
-    )
-}
-
-fn apply_capture_policy_capabilities(
-    capabilities: &mut BTreeMap<PlatformCapability, CapabilityStatus>,
-    settings: &copypaste_ipc::ConfigData,
-) {
-    if settings.excluded_app_bundle_ids.is_empty() {
-        return;
-    }
-    let source_is_unsupported = capabilities
-        .get(&PlatformCapability::SourceAttribution)
-        .is_some_and(|source| source.state == CapabilityState::Unsupported);
-    if source_is_unsupported {
-        if let Some(capture) = capabilities.get_mut(&PlatformCapability::ClipboardCapture) {
-            if capture.state == CapabilityState::Available {
-                capture.state = CapabilityState::NeedsCompanion;
-                capture.guarantee = CapabilityGuarantee::None;
-                capture.reason = Some(
-                    "Source exclusions stop capture until an authenticated source adapter is active."
-                        .into(),
-                );
-            }
-        }
-    }
-}
-
-pub(super) fn set_device_name(state: &AppState, id: u64, name: &str) -> Response {
-    match state.meta.set_device_name(name) {
-        Ok(()) => {
-            state
-                .meta
-                .publish_device_name(|name| state.p2p.node().set_device_name(name));
-            Response::ok(id, ResponseData::Empty {})
-        }
-        Err(error) => storage_error(id, "rename device", &error),
-    }
-}
-
-pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) -> Response {
-    let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
-    let after = match cursor.map(ItemCursor::parse).transpose() {
-        Ok(after) => after,
-        // Never "start from the top": a load-more that silently restarted would
-        // repeat the whole history, and the client cannot tell that from a list
-        // that really does begin again.
-        Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR),
-    };
-
-    let page = match state.store.list_previews_bounded(
-        after.as_ref(),
-        limit,
-        MAX_PAGE_CONTENT_BYTES,
-        &state.keyring.item_key(),
-        &state.keyring.preview_key(),
-    ) {
-        Ok(page) => page,
-        Err(e) => return storage_error(id, "list", &e),
-    };
-
-    let next = page.next.map(|cursor| cursor.token());
-    let mut wire = preview_rows(state, page.items);
-    wire.next_cursor = next;
-    Response::ok(id, ResponseData::Page(wire))
-}
-
-pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Response {
-    let limit = clamp_page(limit, DEFAULT_SEARCH_PAGE);
-    match state
-        .modules
-        .search(&state.store, query, limit, MAX_PAGE_CONTENT_BYTES)
-    {
-        Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
-        Err(e) => storage_error(id, "search", &e),
-    }
-}
-
-/// Query all retained history before applying the cursor.
-///
-/// The cursor is authenticated to the exact filter/order set by the core
-/// store, so changing a filter cannot silently resume an unrelated list.
-pub(super) fn history_query(
-    state: &AppState,
-    id: u64,
-    query: &HistoryQuery,
-    limit: u32,
-    cursor: Option<&str>,
-) -> Response {
-    let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
-    let after = match cursor
-        .map(|token| HistoryCursor::parse_for(token, query))
-        .transpose()
-    {
-        Ok(after) => after,
-        Err(StoreError::InvalidCursor) => {
-            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR)
-        }
-        Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY),
-    };
-    let page = match state.modules.query_history_previews(
-        &state.store,
-        query,
-        after.as_ref(),
-        limit,
-        MAX_PAGE_CONTENT_BYTES,
-        Some(state.meta.device_id()),
-        (&state.keyring.item_key(), &state.keyring.preview_key()),
-    ) {
-        Ok(page) => page,
-        Err(StoreError::InvalidCursor) => {
-            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR)
-        }
-        Err(StoreError::InvalidHistoryQuery) => {
-            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY)
-        }
-        Err(error) => return storage_error(id, "history_query", &error),
-    };
-    let mut wire = preview_rows(state, page.items);
-    wire.next_cursor = page.next.map(|cursor| cursor.token());
-    Response::ok(id, ResponseData::Page(wire))
-}
-
-pub(super) fn history_facets(state: &AppState, id: u64) -> Response {
-    match state.store.history_facets(
-        state.meta.device_id(),
-        &state.meta.device_name(),
-        state.meta.device_class(),
-    ) {
-        Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
-        Err(error) => storage_error(id, "history_facets", &error),
-    }
-}
-
-/// Produce a small PNG only when a history row needs to draw an image.
-///
-/// This is deliberately not part of `list`: decrypting every screenshot in a
-/// long history would spend memory and expose data the user has not viewed.
-pub(super) fn image_preview(
-    state: &AppState,
-    id: u64,
-    item_id: &str,
-    max_edge: Option<u32>,
-    bounds: Option<copypaste_ipc::ImagePreviewBounds>,
-) -> Response {
-    // Release the encrypted row and decrypted source before encoding the response.
-    let thumbnail = {
-        let row = match state.store.get(item_id) {
-            Ok(Some(row)) => row,
-            Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-            Err(error) => return storage_error(id, "image_preview", &error),
-        };
-        if !matches!(
-            copypaste_ipc::content_type::classify(&row.content_type),
-            copypaste_ipc::ContentClass::Image
-        ) {
-            return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
-        }
-        let bytes = match copypaste_core::open_binary(
-            &row.content_ciphertext,
-            &state.keyring.item_key(),
-            &row.id,
-        ) {
-            Ok(bytes) => bytes,
-            Err(error) => return decrypt_error(id, &error),
-        };
-        let budget = state.settings.get().max_decoded_image_mb;
-        match copypaste_core::thumbnail_png(
-            &bytes,
-            budget,
-            max_edge,
-            bounds.map(|bounds| (bounds.width, bounds.height)),
-        ) {
-            Ok(thumbnail) => thumbnail,
-            Err(error) => {
-                warn!(id = %row.id, error = ?error, "image preview unavailable");
-                return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
-            }
-        }
-    };
-    Response::ok(
-        id,
-        ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
-            png_base64: STANDARD.encode(thumbnail.png),
-            width: thumbnail.width,
-            height: thumbnail.height,
-        }),
-    )
-}
-
-/// Return a shared source-application asset without opening clipboard bodies.
-pub(super) fn source_app_icon(state: &AppState, id: u64, item_id: &str) -> Response {
-    let icon = match state.store.source_app_icon_by_id(item_id) {
-        Ok(icon) => icon,
-        Err(error) => return storage_error(id, "source_app_icon", &error),
-    };
-    let Some(icon) = icon else {
-        return Response::ok(id, ResponseData::Empty {});
-    };
-    Response::ok(
-        id,
-        ResponseData::SourceAppIcon(copypaste_ipc::ImagePreview {
-            png_base64: icon.png_base64,
-            width: icon.width,
-            height: icon.height,
-        }),
-    )
-}
-
-pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
-    // Same ingest path as the capture loop: encrypt, dedup, insert and evict.
-    match capture::ingest(state, content, copypaste_ipc::content_type::TEXT) {
-        Ok(ingested) => match to_wire(state, ingested.into_item()) {
-            Ok(item) => {
-                state.note_local_change();
-                Response::ok(id, ResponseData::Item(item))
-            }
-            Err(e) => decrypt_error(id, &e),
-        },
-        Err(IngestError::Empty) => Response::err(id, ErrorCode::InvalidRequest, MSG_EMPTY_CONTENT),
-        Err(IngestError::TooLarge) => Response::err(id, ErrorCode::InvalidRequest, MSG_TOO_BIG),
-        Err(e @ IngestError::Crypto(_)) => {
-            error!(error = ?e, "add failed to encrypt");
-            Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
-        }
-        Err(IngestError::InvalidMetadata) => Response::err(id, ErrorCode::Internal, MSG_ENCRYPT),
-        Err(IngestError::Storage(e)) => storage_error(id, "add", &e),
-    }
-}
-
-pub(super) fn import_file(
-    state: &AppState,
-    id: u64,
-    path: &str,
-    filename: &str,
-    mime_type: &str,
-    source_reference: Option<&str>,
-) -> Response {
-    match copypaste_core::file_import::import_file(
-        &state.store,
-        &state.keyring,
-        std::path::Path::new(path),
-        filename,
-        mime_type,
-        source_reference,
-        &state.settings.get(),
-    ) {
-        Ok(_) => {
-            state.note_local_change();
-            Response::ok(id, ResponseData::Empty {})
-        }
-        Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-    }
-}
-
-/// One item, decrypted, with nothing else touched.
-///
-/// Deliberately not `copy`: reading an item must not publish it to the system
-/// pasteboard as a side effect. The two handlers share `to_wire` and differ in
-/// exactly that.
-pub(super) fn get(state: &AppState, id: u64, item_id: &str) -> Response {
-    match state.store.get(item_id) {
-        Ok(Some(row)) => match to_wire_and_payload(state, row) {
-            Ok((_, payload)) if is_oversized_text(&payload) => {
-                Response::err(id, ErrorCode::ContentTooLarge, MSG_CONTENT_TOO_LARGE)
-            }
-            Ok((item, _)) => Response::ok(id, ResponseData::Item(item)),
-            Err(e) => decrypt_error(id, &e),
-        },
-        Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => storage_error(id, "get", &e),
-    }
-}
-
-pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
-    // Read first so an unknown id is `not_found` rather than a silent success:
-    // a client that deleted nothing needs to know it deleted nothing.
-    match state.store.get(item_id) {
-        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", &e),
-        Ok(Some(_)) => {}
-    };
-
-    let mutation_started = copypaste_core::now_ms();
-    match state.store.delete(item_id) {
-        Ok(_) => {
-            state.modules.note_version(mutation_started);
-            state.note_local_change();
-            Response::ok(id, ResponseData::Empty {})
-        }
-        Err(e) => storage_error(id, "delete", &e),
-    }
-}
-
-pub(super) fn delete_all(state: &AppState, id: u64, through: Option<i64>) -> Response {
-    // Manifest 03 (`CopyPaste-cb7u`) has `delete_all` tombstone only the
-    // non-pinned rows — a pin is the user saying "keep this". The predicate
-    // lives in `Store::delete_all_through` and is deliberately not repeated
-    // here: filtering in the server would put one manifest rule in two places.
-    let mutation_started = copypaste_core::now_ms();
-    let result = match through {
-        Some(through) => state.store.delete_all_through(through),
-        None => state.store.delete_all(),
-    };
-    match result {
-        Ok(deleted) => {
-            if deleted > 0 {
-                state.modules.note_version(mutation_started);
-                state.note_local_change();
-            }
-            Response::ok(id, ResponseData::Count(deleted))
-        }
-        Err(e) => storage_error(id, "delete_all", &e),
-    }
-}
-
-pub(super) fn history_ceiling(state: &AppState, id: u64) -> Response {
-    match state.store.max_rowid() {
-        Ok(ceiling) => Response::ok(id, ResponseData::Count(ceiling.max(0) as u64)),
-        Err(e) => storage_error(id, "history_ceiling", &e),
-    }
-}
-
-pub(super) fn set_spoiler_revealed(
-    state: &AppState,
-    id: u64,
-    item_id: Option<&str>,
-    revealed: bool,
-) -> Response {
-    if revealed {
-        let Some(item_id) = item_id else {
-            return Response::err(id, ErrorCode::InvalidRequest, "A clip is required.");
-        };
-        match state.store.get(item_id) {
-            Ok(Some(item)) if item.clipboard_privacy().secret => {}
-            Ok(_) => {
-                return Response::err(id, ErrorCode::NotFound, "The secret clip was not found.")
-            }
-            Err(error) => return storage_error(id, "reveal", &error),
-        }
-    }
-    let (revision, revealed_ids, changed) = state.spoilers.set_with_change(item_id, revealed);
-    if changed {
-        state.note_remote_change();
-    }
-    Response::ok(
-        id,
-        ResponseData::SpoilerState {
-            revision,
-            revealed_ids,
-        },
-    )
-}
-
-pub(super) fn set_secret(state: &AppState, id: u64, item_id: &str, secret: bool) -> Response {
-    match state.store.set_secret(&state.keyring, item_id, secret) {
-        Ok(true) => {
-            state.spoilers.set(Some(item_id), false);
-            state.note_local_change();
-            get(state, id, item_id)
-        }
-        Ok(false) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(error) => storage_error(id, "set_secret", &error),
-    }
-}
-
-pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Response {
-    match state.store.get(item_id) {
-        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", &e),
-        Ok(Some(_)) => {}
-    }
-
-    if let Err(e) = state
-        .store
-        .set_pinned_synced(item_id, pinned, &state.keyring.item_key())
-    {
-        return storage_error(id, "set_pinned", &e);
-    }
-    state.note_local_change();
-
-    // Reply with the updated row so a client does not have to re-list to learn
-    // the new state.
-    match state.store.get(item_id) {
-        Ok(Some(row)) => match to_wire_and_payload(state, row) {
-            Ok((mut item, payload)) => {
-                if is_oversized_text(&payload) {
-                    bound_item_preview(&mut item);
-                }
-                Response::ok(id, ResponseData::Item(item))
-            }
-            Err(e) => decrypt_error(id, &e),
-        },
-        Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => storage_error(id, "get", &e),
-    }
-}
-
-/// Rewrite the pinned ordering.
-///
-/// The whole ordering, applied in one transaction by `Store::reorder_pinned` —
-/// see [`copypaste_ipc::Method::ReorderPinned`] for why a move-one verb is not
-/// offered. Ids the caller no longer owns are ignored there rather than
-/// refused here, so a peer deleting a pinned item between the client's read and
-/// its write does not lose the reorder the user just made.
-///
-/// Answers with the count of rows renumbered — which may exceed `ids.len()`,
-/// because pinned rows the caller did not name are renumbered behind the ones
-/// it did.
-pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Response {
-    if ids.len() > MAX_REORDER_IDS {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_REORDER_TOO_MANY);
-    }
-    match state
-        .store
-        .reorder_pinned_synced(ids, &state.keyring.item_key())
-    {
-        Ok(0) => Response::ok(id, ResponseData::Count(0)),
-        Ok(renumbered) => {
-            // A pin is local and never travels (`Store::upsert` preserves both
-            // `pinned` and `pin_order` across an incoming version), so this
-            // wakes the watchers and nothing else. Waking the sync loops for a
-            // change no transport will carry would be a round trip per drag.
-            state.note_remote_change();
-            Response::ok(id, ResponseData::Count(renumbered))
-        }
-        Err(e) => storage_error(id, "reorder_pinned", &e),
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::dispatch::dispatch_store;
@@ -945,7 +352,7 @@ mod tests {
         let (state, _dir) = test_state("old name");
         assert!(set_device_name(&state, 1, "  Kitchen Mac  ").ok);
 
-        let reopened = crate::meta::Meta::open(&state.store, "ignored hostname").unwrap();
+        let reopened = copypaste_runtime::Meta::open(&state.store, "ignored hostname").unwrap();
         assert_eq!(reopened.device_id(), state.meta.device_id());
         assert_eq!(reopened.device_name(), "Kitchen Mac");
         match status(&state, 2).data {
@@ -1172,7 +579,7 @@ mod tests {
     fn spoiler_conceal_of_an_empty_session_does_not_reload_history() {
         let (state, _dir, writes) =
             crate::testutil::test_state_watching_clipboard("spoiler-idempotent");
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let response = set_spoiler_revealed(&state, 1, None, false);
         assert!(response.ok);
         assert!(matches!(
@@ -1191,8 +598,8 @@ mod tests {
             _ => panic!("expected item"),
         };
         assert!(set_secret(&state, 2, &item.id, true).ok);
-        let mut first = state.subscribe();
-        let mut second = state.subscribe();
+        let mut first = state.subscribe_events();
+        let mut second = state.subscribe_events();
         let revealed = set_spoiler_revealed(&state, 3, Some(&item.id), true);
         assert!(
             matches!(revealed.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids == [item.id.clone()])
@@ -1656,7 +1063,7 @@ mod tests {
             b"remote bytes",
             Some(&metadata),
         );
-        crate::sync::store_source(&state)
+        crate::testutil::calls::store_source(&state)
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "remote-file-copy",
                 content: "",
@@ -1906,7 +1313,7 @@ mod tests {
         // no name until a session with that device has told us one. Applied
         // through the real merge path a peer's item takes, because that is what
         // stamps `origin_device_id` on the row.
-        crate::sync::store_source(&state)
+        crate::testutil::calls::store_source(&state)
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "from-the-phone",
                 content: "arrived over the peer transport",
@@ -1957,7 +1364,7 @@ mod tests {
             Some(ResponseData::Item(item)) => item,
             other => panic!("{other:?}"),
         };
-        crate::sync::store_source(&state)
+        crate::testutil::calls::store_source(&state)
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "from-the-phone",
                 content: "captured remotely",
@@ -2021,7 +1428,7 @@ mod tests {
         };
         let ahead = added.created_at.saturating_add(60_000);
         state
-            .meta
+            .store
             .set_state_all(&[
                 (
                     "module:copypaste.supabase:cloud_upload_floor_ms",
@@ -2037,7 +1444,7 @@ mod tests {
         assert!(delete(&state, 2, &added.id).ok);
 
         let floor = state
-            .meta
+            .store
             .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
             .unwrap();
         assert!(
@@ -2057,14 +1464,14 @@ mod tests {
         assert!(add(&state, 1, "clear me").ok);
         let ahead = copypaste_core::now_ms().saturating_add(60_000);
         state
-            .meta
+            .store
             .set_state_ms("module:copypaste.supabase:cloud_upload_floor_ms", ahead)
             .unwrap();
 
         assert!(delete_all(&state, 2, None).ok);
 
         let floor = state
-            .meta
+            .store
             .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
             .unwrap();
         assert!(floor < ahead, "delete_all left the upload floor ahead");

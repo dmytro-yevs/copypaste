@@ -22,11 +22,16 @@ const FAKE_BACKEND_PREFIX: &str = "fake";
 /// a capture that has already been stored must not be jeopardised by an audio
 /// device.
 pub fn on_copy(state: &AppState) {
+    play_if(state.settings.get().sound_on_copy, state.backend_name());
+}
+
+/// [`on_copy`] for a caller holding the setting and backend name directly.
+pub fn play_if(sound_on_copy: bool, backend_name: &str) {
     #[cfg(test)]
     COPY_REQUESTS.with(|count| count.set(count.get().map(|count| count + 1)));
     if should_play(
-        state.settings.get().sound_on_copy,
-        state.backend_name(),
+        sound_on_copy,
+        backend_name,
         cfg!(any(target_os = "macos", target_os = "windows")),
     ) {
         copypaste_feedback::play();

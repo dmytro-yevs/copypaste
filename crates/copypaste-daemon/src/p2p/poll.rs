@@ -1,59 +1,13 @@
-//! Daemon effects for the shared outgoing peer scheduler.
-use crate::AppState;
-use copypaste_p2p::{node::SyncCycle, Peer};
-use copypaste_sync::peer_driver::PeerSyncHost;
-use std::sync::Arc;
-use tokio::sync::watch;
+//! The shared outgoing peer scheduler driven through the daemon host.
 
-struct DaemonPeerHost(Arc<AppState>);
-impl PeerSyncHost for DaemonPeerHost {
-    fn enabled(&self) -> bool {
-        self.0.settings.get().sync_enabled
-    }
-    fn peers(&self) -> Vec<Peer> {
-        self.0.p2p.peers().list()
-    }
-    fn can_dial(&self, peer: &Peer) -> bool {
-        !self.0.p2p.node().dial_candidates(peer).is_empty()
-    }
-    fn reconcile_discovery(&self) {
-        self.0.p2p.node().reconcile_discovery();
-    }
-    async fn sync_peer(&self, peer: Peer, cycle: SyncCycle) -> u64 {
-        let result = super::handlers::sync_one(&self.0, &peer, &cycle).await;
-        if result.received > 0 {
-            self.0.note_remote_change();
-        }
-        u64::from(result.sent) + u64::from(result.received)
-    }
-}
-pub async fn run(state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
-    let driver = Arc::clone(&state.p2p.driver);
-    driver.run(Arc::new(DaemonPeerHost(state)), shutdown).await;
-}
-#[cfg(test)]
-async fn round(
-    state: &Arc<AppState>,
-    _permit: copypaste_core::sync::RoundGuard,
-    shutdown: &watch::Receiver<bool>,
-) {
-    state
-        .p2p
-        .driver
-        .run_round(
-            Arc::new(DaemonPeerHost(Arc::clone(state))),
-            shutdown.clone(),
-            _permit,
-        )
-        .await;
-}
+#[allow(unused_imports)]
+use crate::testutil::calls::*;
 
-#[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::cadence::{MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL};
     use crate::testutil::{peer_at, test_state};
+    use copypaste_sync::cadence::{MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL};
     use std::time::Duration;
 
     /// One pass, with a permit of its own and nothing asking for shutdown.
@@ -234,13 +188,10 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         state
             .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    sync_enabled: Some(false),
-                    ..Default::default()
-                },
-            )
+            .apply(&copypaste_ipc::ConfigPatch {
+                sync_enabled: Some(false),
+                ..Default::default()
+            })
             .unwrap();
         // No peers either way; what is asserted is that it returns without
         // consulting the peer list or the cadence.

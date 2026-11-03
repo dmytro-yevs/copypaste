@@ -340,7 +340,7 @@
       ],
       "source_references": [
         "crates/copypaste-core/src/image_preview.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "apps/copypaste_flutter/lib/features/history/view/history_screen.dart"
       ],
       "invariant": "Bound individual decode allocations and thumbnail dimensions; avoid full-image list payloads.",
@@ -719,7 +719,7 @@
         "crates/copypaste-daemon/src/server/dispatch.rs",
         "crates/copypaste-core/src/image_preview.rs",
         "crates/copypaste-ipc/src/config.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "crates/copypaste-daemon/src/server/listener.rs",
         "crates/copypaste-ipc/src/lib.rs"
@@ -1497,7 +1497,7 @@
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
         "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
         "crates/copypaste-core/src/spoiler.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/history/controller/history_ocr_controller.dart"
       ],
@@ -3156,7 +3156,7 @@
       "source_references": [
         "crates/copypaste-core/src/history_actions.rs",
         "crates/copypaste-core/src/storage/items.rs",
-        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs"
       ],
       "invariant": "Successful History and Quick Paste copies promote the existing live row and publish a history change. Failed clipboard writes do not change recency. The update preserves ciphertext, source identity and manual pin order, and uses the existing eviction index for the newest unpinned timestamp without materializing another payload.",
@@ -3438,7 +3438,7 @@
         "crates/copypaste-core/src/sync/instant_clipboard.rs",
         "crates/copypaste-daemon/src/notify.rs",
         "crates/copypaste-daemon/src/capture.rs",
-        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "crates/copypaste-flutter-bridge/src/runtime_android.rs",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt",
@@ -3474,7 +3474,7 @@
         "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart",
         "apps/copypaste_flutter/lib/features/settings/controller/quick_paste_settings_controller.dart",
         "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
-        "crates/copypaste-daemon/src/server/config.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "crates/copypaste-core/src/rich_text.rs",
         "crates/copypaste-core/src/history_actions.rs",
@@ -3483,8 +3483,7 @@
         "crates/copypaste-core/src/storage/content_bytes.rs",
         "crates/copypaste-core/src/storage/privacy.rs",
         "crates/copypaste-core/src/storage/items.rs",
-        "crates/copypaste-core/src/storage/dbfile.rs",
-        "crates/copypaste-daemon/src/server/transfer.rs"
+        "crates/copypaste-core/src/storage/dbfile.rs"
       ],
       "invariant": "Capture and synchronization retain file references and metadata; bodies transfer only on explicit request. Android file copy publishes the original content URI or existing download FileProvider URI without opening or copying the body. Terminal transfer state and observed byte progress survive older responses using the existing bounded presentation collections. Auto-paste persistence and shortcut-registration state agree with acknowledged operations. Actual runtime configuration changes publish one existing watch revision; unchanged writes stay quiet. Settings reads coalesce on revisions/reconnect/resume, cannot overwrite newer local mutations, and do not poll on captures. Unconfirmed notification policy never displays content. Rich-text parsing runs only for explicit plain-text copy; input/output use the existing clipboard cap, the RTF parser bounds nesting, and no parser service or result cache is retained. Text export/import preserves privacy classification, including duplicate imports, and older exports remain compatible. Restore retains deferred file references. Metadata-only secrecy changes account for every retained encrypted chunk and shared payload. Imports publish actual duplicate and pin mutations, including progress before a later failure, while unchanged imports stay quiet. Fallback polling reconciles configuration on accepted revision changes. Android native clipboard sensitivity follows received, manual and derived copies without losing ownership receipts.",
       "allocation_lifetime": "No new workers, recurring timers or unbounded collections. Configuration reconciliation retains one in-flight read and one dirty bit. Rich-text DOM/run iteration and converted payloads belong to one copy action and are released afterward. Existing file-transfer, staging and retention owners remain authoritative. Import mutation tracking reuses rows already read inside the existing transaction and retains one aggregate timestamp. Derived copies read classification without loading the source body. Byte accounting uses SQLite BLOB lengths without decrypting or materializing file bodies. Polling reconciliation reuses the existing coalesced read and adds no timer.",

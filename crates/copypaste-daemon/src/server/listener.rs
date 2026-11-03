@@ -360,8 +360,8 @@ async fn handle_connection(
             // any change after a client sees it reaches this connection. Taking
             // the receiver afterwards would drop everything that happened in
             // between, which is a race a client cannot see or retry around.
-            let events = state.subscribe();
-            let runtime_events = typed.then(|| state.subscribe_runtime());
+            let events = state.subscribe_events();
+            let runtime_events = typed.then(|| state.subscribe_runtime_events());
             if send(&mut writer, &Response::ok(id, ResponseData::Empty {}))
                 .await
                 .is_err()

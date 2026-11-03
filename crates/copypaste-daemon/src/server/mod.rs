@@ -5,40 +5,34 @@
 //! * [`listener`] — the socket: binding it, refusing to steal a live one,
 //!   locking it to `0600`, and framing lines off it. `pipe` is the Windows
 //!   half of those first three; the framing is shared.
-//! * [`dispatch`] — parse, the protocol and readiness gates, and the `match`
-//!   that routes a `Method` to a handler. This is also where the split between
-//!   the reactor (peer operations, which are network I/O) and `spawn_blocking`
-//!   (everything else, which is SQLite and AEAD) is decided.
-//! * [`items`] — the history handlers, and the decrypt-to-wire step they share.
-//!   The peer handlers are `crate::p2p::handlers`; the two files divide on the
-//!   same line the two thread pools do.
-//! * [`transfer`] — export and import, and the rules about what may leave.
-//! * [`dbadmin`] — backup, and the validate-then-swap restore.
-//! * [`config`] — reading and changing the daemon's settings.
+//! * [`dispatch`] — parse, the protocol and readiness gates, admission, and
+//!   the split between the reactor and `spawn_blocking`. The handlers
+//!   themselves are the shared `copypaste_runtime` dispatch.
 //! * [`watch`] — the push half: a connection that has subscribed, and what it
 //!   is exempt from.
-//! * [`messages`] — every client-visible failure string, in one place, and the
-//!   classification of the failures that carry a code of their own.
+//! * [`messages`] — the transport's own failure strings; the handler
+//!   sentences live with the shared dispatch.
 //! * [`halted`] — the socket when there is no history to serve at all.
 //!
 //! **Errors never carry a filesystem path.** The socket path discloses the
-//! local username (the privacy contract), and a `StoreError` from SQLite routinely
-//! embeds the database path. Every failure is mapped to one of the fixed
-//! sentences in [`messages`]; the underlying error goes to the local log and
-//! never onto the wire. Gathering them in one file is what lets a single test
-//! pin the whole set.
+//! local username (the privacy contract), so every failure is one of a fixed
+//! set of sentences and the underlying error goes only to the local log.
 
+#[cfg(test)]
 mod config;
 #[cfg(test)]
 mod contract_tests;
+#[cfg(test)]
 mod dbadmin;
 pub(crate) mod dispatch;
 mod halted;
-pub(crate) mod items;
+#[cfg(test)]
+mod items;
 mod listener;
 pub(crate) mod messages;
 #[cfg(windows)]
 mod pipe;
+#[cfg(test)]
 mod transfer;
 mod watch;
 
