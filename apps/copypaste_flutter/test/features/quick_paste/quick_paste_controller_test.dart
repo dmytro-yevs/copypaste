@@ -858,6 +858,36 @@ void main() {
     },
   );
 
+  testWidgets('native reveal restores search focus lost while opening', (
+    tester,
+  ) async {
+    final host = _FrameHost()
+      ..openWhenReady = true
+      ..revealGate = Completer<void>();
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    expect(host.presentedIds, [1]);
+    final search = tester.widget<TextField>(
+      find.byKey(const ValueKey('quick-paste-search')),
+    );
+    search.focusNode!.unfocus();
+    await tester.pump();
+    expect(search.focusNode!.hasPrimaryFocus, isFalse);
+
+    host.revealGate!.complete();
+    await tester.pumpAndSettle();
+    expect(search.focusNode!.hasPrimaryFocus, isTrue);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    tester.testTextInput.enterText('recent');
+    await tester.pumpAndSettle();
+    expect(search.controller!.text, 'recent');
+  });
+
   testWidgets('a superseded media load cannot reveal an older presentation', (
     tester,
   ) async {
@@ -3907,10 +3937,12 @@ class _OcrClipboard implements ClipboardWriter {
 
 class _FrameHost extends _ContextHost implements QuickPasteFrameHost {
   final presentedIds = <int>[];
+  Completer<void>? revealGate;
 
   @override
   Future<bool> presentFrame({required int presentationId}) async {
     presentedIds.add(presentationId);
+    if (revealGate case final gate?) await gate.future;
     return true;
   }
 }
