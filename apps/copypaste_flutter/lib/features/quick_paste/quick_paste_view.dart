@@ -91,7 +91,15 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted || controller.renderablePresentationId != id) return;
         attempted = true;
-        if (await controller.presentFrame(id)) _presentedFrame = id;
+        final presented = await controller.presentFrame(id);
+        if (!presented ||
+            !mounted ||
+            controller.renderablePresentationId != id) {
+          return;
+        }
+        _presentedFrame = id;
+        // Native window activation can displace autofocus on the prepared frame.
+        _searchFocus.requestFocus();
       } finally {
         if (_preparingFrame == id) _preparingFrame = null;
         if (!attempted && mounted) _preparePresentationFrame();
