@@ -1,4 +1,5 @@
 import '../../../platform/permissions/linux_integration.dart';
+import '../../../platform/startup/launch_at_login.dart';
 import '../repository/onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -7,11 +8,14 @@ class LinuxOnboardingSetup extends OnboardingSetup {
   LinuxOnboardingSetup({
     required OnboardingStore store,
     required LinuxIntegrationPort integration,
+    required LaunchAtLoginGateway startup,
   }) : _store = store,
-       _integration = integration;
+       _integration = integration,
+       _startup = startup;
 
   final OnboardingStore _store;
   final LinuxIntegrationPort _integration;
+  final LaunchAtLoginGateway _startup;
 
   LinuxIntegrationStatus? _status;
 
@@ -75,7 +79,9 @@ class LinuxOnboardingSetup extends OnboardingSetup {
   });
 
   Future<void> setStartAtLogin(bool enabled) => _run(() async {
-    if (!await _integration.setStartAtLogin(enabled)) {
+    try {
+      await _startup.setEnabled(enabled);
+    } catch (_) {
       errorMessage = 'Start at login could not be updated.';
     }
     await _refresh();

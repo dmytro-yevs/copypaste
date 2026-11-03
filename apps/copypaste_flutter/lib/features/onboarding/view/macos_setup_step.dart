@@ -1,7 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
-import '../../../platform/macos/macos_setup_gateway.dart';
+import '../../../platform/startup/launch_at_login.dart';
 import '../../../shared/setup_setting_row.dart';
 import '../controller/macos_onboarding_setup.dart';
 
@@ -39,11 +39,9 @@ class MacosSetupStep extends StatelessWidget {
         child: SetupSettingRow(
           icon: LucideIcons.power,
           title: 'Start at login',
-          description:
-              setup.loginItemStatus ==
-                  MacosLoginItemStatus.developmentUnavailable
-              ? 'Available in the installed CopyPaste app.'
-              : 'Open CopyPaste when you sign in',
+          description: setup.launchAtLoginAvailable
+              ? 'Open CopyPaste when you sign in'
+              : 'Available in the installed CopyPaste app.',
           action: Semantics(
             label: 'Start CopyPaste at login',
             toggled: setup.launchAtLogin,
@@ -56,7 +54,7 @@ class MacosSetupStep extends StatelessWidget {
           ),
         ),
       ),
-      if (setup.loginItemStatus == MacosLoginItemStatus.requiresApproval) ...[
+      if (setup.startupStatus == LaunchAtLoginStatus.requiresApproval) ...[
         const Gap(AppSpacing.md),
         Alert(
           title: const Text('Login Item approval is required'),

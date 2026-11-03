@@ -6,9 +6,9 @@ import 'onboarding_setup.dart';
 class WindowsOnboardingSetup extends OnboardingSetup {
   WindowsOnboardingSetup({
     required OnboardingStore store,
-    LaunchAtLoginGateway? startup,
+    required LaunchAtLoginGateway startup,
   }) : _store = store,
-       _startup = startup ?? platformLaunchAtLoginGateway(platform: 'windows');
+       _startup = startup;
 
   static const _disabledInTaskManager =
       'Start at login is disabled in Task Manager. You can enable it in Windows Settings later.';

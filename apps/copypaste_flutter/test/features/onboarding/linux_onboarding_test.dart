@@ -374,6 +374,9 @@ class _Integration implements LinuxIntegrationPort {
   }
 
   @override
+  Future<bool> startAtLogin() async => statusValue.startAtLogin;
+
+  @override
   Future<bool> setStartAtLogin(bool enabled) async {
     startAtLoginUpdates.add(enabled);
     return true;

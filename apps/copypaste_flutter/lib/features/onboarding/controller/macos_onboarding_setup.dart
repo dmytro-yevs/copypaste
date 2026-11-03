@@ -1,4 +1,5 @@
 import '../../../platform/macos/macos_setup_gateway.dart';
+import '../../../platform/startup/launch_at_login.dart';
 import '../repository/onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -7,13 +8,16 @@ class MacosOnboardingSetup extends OnboardingSetup {
   MacosOnboardingSetup({
     required OnboardingStore store,
     required MacosSetupGateway setup,
+    required LaunchAtLoginGateway startup,
   }) : _store = store,
-       _setup = setup;
+       _setup = setup,
+       _startup = startup;
 
   final OnboardingStore _store;
   final MacosSetupGateway _setup;
+  final LaunchAtLoginGateway _startup;
 
-  MacosLoginItemStatus _loginItemStatus = MacosLoginItemStatus.notRegistered;
+  LaunchAtLoginStatus _startupStatus = LaunchAtLoginStatus.disabled;
   bool _accessibilityGranted = false;
   bool _launchAtLogin = true;
   bool _loginDefaultPending = false;
@@ -21,16 +25,15 @@ class MacosOnboardingSetup extends OnboardingSetup {
 
   @override
   String get platformLabel => 'macOS';
-  MacosLoginItemStatus get loginItemStatus => _loginItemStatus;
+  LaunchAtLoginStatus get startupStatus => _startupStatus;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get launchAtLogin => _launchAtLogin;
   bool get launchAtLoginAvailable =>
-      _loginItemStatus != MacosLoginItemStatus.developmentUnavailable &&
-      _loginItemStatus != MacosLoginItemStatus.unavailable;
+      _startupStatus != LaunchAtLoginStatus.unavailable;
   bool get loginItemNeedsAttention =>
       _launchAtLogin &&
       launchAtLoginAvailable &&
-      _loginItemStatus != MacosLoginItemStatus.enabled;
+      _startupStatus != LaunchAtLoginStatus.enabled;
   @override
   String? get noticeMessage => _noticeMessage;
   @override
@@ -121,7 +124,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
   @override
   Future<void> openSystemSettings() async {
     try {
-      await _setup.openLoginItemsSettings();
+      await _startup.openSystemSettings();
     } catch (_) {
       errorMessage = 'Login Items settings could not be opened.';
       notifyIfActive();
@@ -132,12 +135,12 @@ class MacosOnboardingSetup extends OnboardingSetup {
   Future<void> persistCompletion() => _store.markComplete();
 
   bool get _loginItemRegistered =>
-      _loginItemStatus == MacosLoginItemStatus.enabled ||
-      _loginItemStatus == MacosLoginItemStatus.requiresApproval;
+      _startupStatus == LaunchAtLoginStatus.enabled ||
+      _startupStatus == LaunchAtLoginStatus.requiresApproval;
 
   Future<void> _refreshSystemState() async {
     _accessibilityGranted = await _setup.accessibilityGranted();
-    _loginItemStatus = await _setup.loginItemStatus();
+    _startupStatus = await _startup.read();
     if (_loginItemRegistered) _loginDefaultPending = false;
     _launchAtLogin =
         _loginItemRegistered ||
@@ -147,11 +150,11 @@ class MacosOnboardingSetup extends OnboardingSetup {
   Future<void> _updateLaunchAtLogin(bool enabled) async {
     _loginDefaultPending = false;
     try {
-      _loginItemStatus = await _setup.setLaunchAtLogin(enabled);
+      _startupStatus = await _startup.setEnabled(enabled);
       _launchAtLogin = _loginItemRegistered;
-      if (enabled && _loginItemStatus != MacosLoginItemStatus.enabled) {
+      if (enabled && _startupStatus != LaunchAtLoginStatus.enabled) {
         _addNotice(
-          _loginItemStatus == MacosLoginItemStatus.requiresApproval
+          _startupStatus == LaunchAtLoginStatus.requiresApproval
               ? 'Start at login requires approval in System Settings.'
               : 'Start at login could not be enabled. You can continue without it.',
         );

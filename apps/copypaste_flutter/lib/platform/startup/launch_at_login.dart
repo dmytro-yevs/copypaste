@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../macos/macos_setup_gateway.dart';
+import '../permissions/linux_integration.dart';
 
 /// Effective start-at-login state shared by every platform.
 ///
@@ -26,7 +27,9 @@ LaunchAtLoginGateway platformLaunchAtLoginGateway({
   'macos' => MacosLaunchAtLoginGateway(
     MethodChannelMacosSetupGateway(channel: channel),
   ),
-  'linux' => LinuxLaunchAtLoginGateway(channel: channel),
+  'linux' => LinuxLaunchAtLoginGateway(
+    MethodChannelLinuxIntegrationPort(channel: channel),
+  ),
   _ => StartupChannelLaunchAtLoginGateway(channel: channel),
 };
 
@@ -60,28 +63,20 @@ class MacosLaunchAtLoginGateway implements LaunchAtLoginGateway {
 
 /// Linux XDG autostart entry owned by the desktop integration channel.
 class LinuxLaunchAtLoginGateway implements LaunchAtLoginGateway {
-  LinuxLaunchAtLoginGateway({MethodChannel? channel})
-    : _channel =
-          channel ?? const MethodChannel('com.copypaste.app/linux_integration');
+  const LinuxLaunchAtLoginGateway(this._integration);
 
-  final MethodChannel _channel;
+  final LinuxIntegrationPort _integration;
 
   @override
-  Future<LaunchAtLoginStatus> read() async {
-    final status = await _channel.invokeMapMethod<String, Object?>('status');
-    final enabled = status?['startAtLogin'];
-    if (enabled is! bool) {
-      throw const FormatException('Invalid startup status.');
-    }
-    return enabled ? LaunchAtLoginStatus.enabled : LaunchAtLoginStatus.disabled;
-  }
+  Future<LaunchAtLoginStatus> read() async => await _integration.startAtLogin()
+      ? LaunchAtLoginStatus.enabled
+      : LaunchAtLoginStatus.disabled;
 
   @override
   Future<LaunchAtLoginStatus> setEnabled(bool enabled) async {
-    final applied = await _channel.invokeMethod<bool>('setStartAtLogin', {
-      'enabled': enabled,
-    });
-    if (applied != true) throw PlatformException(code: 'startup_update_failed');
+    if (!await _integration.setStartAtLogin(enabled)) {
+      throw PlatformException(code: 'startup_update_failed');
+    }
     return read();
   }
 
