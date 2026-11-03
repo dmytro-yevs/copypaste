@@ -134,15 +134,10 @@ Future<void> quickPasteMain() async {
         imageInput: TemporaryHistoryImageInput(repository: repository),
       ),
       initializeInspector: modules.initialize,
-      ownsHostLifecycle: !Platform.isWindows,
     );
   }
 
-  runApp(
-    Platform.isWindows
-        ? QuickPasteApp.retained(createController: createController, host: host)
-        : QuickPasteApp(controller: createController()),
-  );
+  runApp(QuickPasteApp(controller: createController()));
 }
 
 const _pairingLinksChannel = MethodChannel('com.copypaste.app/pairing_links');

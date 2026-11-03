@@ -27,7 +27,6 @@ class QuickPasteController extends ChangeNotifier {
     FileOperationsController? fileOperations,
     HistoryOcrController? ocr,
     Future<void> Function()? initializeInspector,
-    this.ownsHostLifecycle = true,
   }) : _disposeRepository = disposeRepository,
        _initializeInspector = initializeInspector,
        _preferencesStore = preferencesStore,
@@ -45,10 +44,8 @@ class QuickPasteController extends ChangeNotifier {
        ),
        _preferences = QuickPastePreferences.defaults() {
     history.addListener(_historyChanged);
-    if (ownsHostLifecycle) {
-      _host.setOpenedHandler(opened);
-      _host.setShutdownHandler(shutdown);
-    }
+    _host.setOpenedHandler(opened);
+    _host.setShutdownHandler(shutdown);
   }
 
   final Future<void> Function()? _disposeRepository;
@@ -56,7 +53,6 @@ class QuickPasteController extends ChangeNotifier {
   Future<void>? _inspectorInitialization;
   final QuickPastePreferencesStore _preferencesStore;
   final QuickPasteContextHost _host;
-  final bool ownsHostLifecycle;
   final HistoryController history;
 
   QuickPastePreferences _preferences;
@@ -219,7 +215,7 @@ class QuickPasteController extends ChangeNotifier {
     await _reconcilePinnedShortcuts();
     if (_disposed) return;
     _initialHistoryReady = true;
-    if (ownsHostLifecycle) await _host.signalReady();
+    await _host.signalReady();
     if (!_disposed) notifyListeners();
   }
 
@@ -758,7 +754,7 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   Future<void> shutdown() async {
-    final action = ownsHostLifecycle ? null : _activeAction;
+    final action = _activeAction;
     dispose();
     await action;
     await _repositoryDisposal;
@@ -776,10 +772,8 @@ class QuickPasteController extends ChangeNotifier {
     _cancelInspectorHover();
     _disposed = true;
     _presentationId = null;
-    if (ownsHostLifecycle) {
-      _host.setOpenedHandler(null);
-      _host.setShutdownHandler(null);
-    }
+    _host.setOpenedHandler(null);
+    _host.setShutdownHandler(null);
     history.removeListener(_historyChanged);
     if (!_activating) _disposeHistory();
     final disposeRepository = _disposeRepository;
@@ -787,7 +781,7 @@ class QuickPasteController extends ChangeNotifier {
       _repositoryDisposal = disposeRepository();
       unawaited(_repositoryDisposal!.catchError((Object _) {}));
     }
-    if (ownsHostLifecycle) unawaited(_host.dispose());
+    unawaited(_host.dispose());
     super.dispose();
   }
 }

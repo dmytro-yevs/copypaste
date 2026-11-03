@@ -218,13 +218,12 @@ bool FlutterWindow::OnCreate() {
             const bool pasted = PasteIntoPreviousWindow(id);
             result->Success(flutter::EncodableValue(
                 pasted));
-            if (!::IsWindowVisible(GetHandle())) NotifyQuickPasteHidden(id);
+            ScheduleQuickPasteRetirement();
           } else if (call.method_name() == "close") {
             const auto id = QuickPastePresentationId(call.arguments());
-            const bool current = quick_paste_session_.id() == id;
             quick_paste_session_.Close(id, GetHandle());
             result->Success(flutter::EncodableValue(true));
-            if (current) NotifyQuickPasteHidden(id);
+            ScheduleQuickPasteRetirement();
           } else if (call.method_name() == "openMain") {
             ShowMainWindow(false);
             result->Success(flutter::EncodableValue(true));
@@ -748,7 +747,7 @@ bool PresentQuickPaste(
   MONITORINFO monitor_info{sizeof(MONITORINFO)};
   if (!api.get_monitor_info(monitor, &monitor_info) || !owns()) return fail();
   // Move first so GetDpiForWindow resolves the display at the presentation anchor rather
-  // than the display where this pre-warmed hidden window was created.
+  // than the display where this hidden window was created.
   if (!api.set_window_pos(window, HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
                       SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
   const UINT dpi = api.get_dpi_for_window(window);
@@ -858,13 +857,6 @@ void FlutterWindow::NotifyQuickPasteOpened() {
           nullptr, [failed](const auto&, const auto&, const auto*) { failed(); }, failed));
 }
 
-void FlutterWindow::NotifyQuickPasteHidden(int64_t presentation_id) {
-  if (presentation_id <= 0 || !quick_paste_channel_) return;
-  quick_paste_channel_->InvokeMethod(
-      "hidden", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
-          {flutter::EncodableValue("presentationId"), flutter::EncodableValue(presentation_id)}}));
-}
-
 void FlutterWindow::ScheduleQuickPasteRetirement() {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
   ::PostMessage(main_window_handle_, kRetireQuickPaste,
@@ -939,10 +931,9 @@ bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
 
 void FlutterWindow::ShowMainWindow(bool open_settings) {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
-  const auto id = quick_paste_session_.id();
   quick_paste_session_.Invalidate();
   ::ShowWindow(GetHandle(), SW_HIDE);
-  NotifyQuickPasteHidden(id);
+  ScheduleQuickPasteRetirement();
   ::ShowWindow(main_window_handle_, SW_SHOW);
   ::SetForegroundWindow(main_window_handle_);
   if (quick_paste_channel_) {
@@ -1005,10 +996,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
     if (message == WM_SIZE) UpdateQuickPasteWindowCorners();
     if (message == WM_CLOSE) {
-      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      NotifyQuickPasteHidden(id);
+      ScheduleQuickPasteRetirement();
       return 0;
     }
     if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
@@ -1016,10 +1006,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       // A save dialog owns focus until the inspector's download completes.
       const auto activated_window = reinterpret_cast<HWND>(lparam);
       if (activated_window && ::GetAncestor(activated_window, GA_ROOTOWNER) == hwnd) return 0;
-      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      NotifyQuickPasteHidden(id);
+      ScheduleQuickPasteRetirement();
       return 0;
     }
   } else if (!is_protected_pairing_context_ && message == kFailQuickPasteOpen) {
@@ -1028,7 +1017,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         quick_paste_window_->quick_paste_session_.id(), quick_paste_window_->quick_paste_retiring_)) {
       auto* context = quick_paste_window_.get();
       context->quick_paste_session_.Close(static_cast<int64_t>(lparam), context->GetHandle());
-      context->NotifyQuickPasteHidden(static_cast<int64_t>(lparam));
       context->ScheduleQuickPasteRetirement();
     }
     return 0;
