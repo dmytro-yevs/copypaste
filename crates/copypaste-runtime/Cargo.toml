@@ -17,5 +17,9 @@ tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[features]
+# Test hooks for hosts' own test suites; never enabled by a production build.
+test-support = []
+
 [dev-dependencies]
 tempfile.workspace = true

@@ -3,20 +3,18 @@
 use std::io;
 use std::path::Path;
 
+use anyhow::Context as _;
+use copypaste_fs::{owner_only_descriptor, OwnerScope};
 use copypaste_ipc::transport::{pipe, Listener};
-use interprocess::os::windows::{
-    named_pipe::{pipe_mode::Bytes, PipeListenerOptions},
-    security_descriptor::SecurityDescriptor,
-};
+use interprocess::os::windows::named_pipe::{pipe_mode::Bytes, PipeListenerOptions};
 use tracing::info;
-use widestring::U16CString;
-use win_security_identifier::{GetCurrentSid, SecurityIdentifier};
 
 /// Create the pipe, restricted to this account, and refuse to be the second
 /// daemon on it.
 pub fn bind(path: &Path) -> anyhow::Result<Listener> {
     let name = pipe::name_for(path);
-    let security = owner_only()?;
+    let security = owner_only_descriptor(OwnerScope::Object)
+        .context("could not build the daemon pipe's access list")?;
 
     let listener = PipeListenerOptions::new()
         .path(name.as_os_str())
@@ -33,20 +31,6 @@ pub fn bind(path: &Path) -> anyhow::Result<Listener> {
 
     info!("ipc pipe listening");
     Ok(listener.into())
-}
-
-fn owner_only() -> anyhow::Result<SecurityDescriptor> {
-    let sid = SecurityIdentifier::get_current_user_sid()
-        .map_err(|_| anyhow::anyhow!("could not read this account's identifier"))?;
-    let text = U16CString::from_str(sddl(&sid.to_string()))
-        .map_err(|_| anyhow::anyhow!("could not build the daemon pipe's access list"))?;
-    SecurityDescriptor::deserialize(&text)
-        .map_err(|_| anyhow::anyhow!("could not build the daemon pipe's access list"))
-}
-
-/// One allow-everything entry for this account, in a protected DACL.
-fn sddl(sid: &str) -> String {
-    format!("D:P(A;;GA;;;{sid})")
 }
 
 // The framing, the caps and the deadlines are `super::listener`'s, and its own
@@ -116,20 +100,6 @@ mod tests {
             .expect("a frame")
             .expect("a valid frame");
         serde_json::from_str(&line).expect("a Response")
-    }
-
-    #[test]
-    fn the_pipe_admits_the_owner_and_nobody_else() {
-        let rule = sddl("S-1-5-21-1-2-3-1001");
-        assert_eq!(rule, "D:P(A;;GA;;;S-1-5-21-1-2-3-1001)");
-        for wider in ["WD", "BA", "SY", "AU", "IU"] {
-            assert!(!rule.contains(wider), "{rule} admits {wider}");
-        }
-    }
-
-    #[test]
-    fn this_account_has_an_identifier_the_parser_accepts() {
-        owner_only().expect("the descriptor must parse");
     }
 
     #[tokio::test]

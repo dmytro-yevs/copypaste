@@ -822,8 +822,6 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
- "widestring",
- "win-security-identifier",
  "windows-sys 0.61.2",
  "wl-clipboard-rs",
  "x11rb",

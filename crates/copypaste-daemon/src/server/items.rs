@@ -117,48 +117,6 @@ mod tests {
     }
 
     #[test]
-    fn source_exclusions_report_capture_blocked_without_attribution() {
-        let mut capabilities = BTreeMap::from([
-            (
-                PlatformCapability::ClipboardCapture,
-                CapabilityStatus {
-                    state: CapabilityState::Available,
-                    backend: Some("linux-wayland-data-control".into()),
-                    reason: None,
-                    permissions: Vec::new(),
-                    guarantee: CapabilityGuarantee::Verified,
-                    mime_types: Vec::new(),
-                    max_bytes: None,
-                },
-            ),
-            (
-                PlatformCapability::SourceAttribution,
-                CapabilityStatus {
-                    state: CapabilityState::Unsupported,
-                    backend: Some("linux-wayland-data-control".into()),
-                    reason: None,
-                    permissions: Vec::new(),
-                    guarantee: CapabilityGuarantee::None,
-                    mime_types: Vec::new(),
-                    max_bytes: None,
-                },
-            ),
-        ]);
-        let settings = copypaste_ipc::ConfigData {
-            excluded_app_bundle_ids: vec!["org.example.Private".into()],
-            ..Default::default()
-        };
-        apply_capture_policy_capabilities(&mut capabilities, &settings);
-        let capture = &capabilities[&PlatformCapability::ClipboardCapture];
-        assert_eq!(capture.state, CapabilityState::NeedsCompanion);
-        assert_eq!(capture.guarantee, CapabilityGuarantee::None);
-        assert_eq!(
-            capture.backend.as_deref(),
-            Some("linux-wayland-data-control")
-        );
-    }
-
-    #[test]
     fn explicit_file_import_keeps_each_named_record_and_original_bytes() {
         let (state, dir) = test_state("explicit-file-import");
         let source = dir.path().join("source.pdf");

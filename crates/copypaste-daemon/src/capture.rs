@@ -505,7 +505,7 @@ fn test_persist_outcome() -> Option<CaptureOutcome> {
 
 fn announce_capture(state: &AppState, created_at: i64, item_id: &str) {
     state.note_capture(created_at, item_id);
-    crate::notify::on_copy(state);
+    state.copy_feedback();
 }
 
 /// `settings` is the caller's snapshot, not a second read.

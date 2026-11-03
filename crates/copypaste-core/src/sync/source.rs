@@ -396,7 +396,7 @@ impl SyncSource for StoreSource {
                 id,
                 &metadata.filename,
                 copypaste_ipc::FileOperationKind::Send,
-                self.device_name.clone(),
+                self.device_name(),
                 peer.into(),
                 total,
                 None,

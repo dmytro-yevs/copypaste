@@ -280,10 +280,10 @@ mod tests {
                         history_limit: Some(50),
                         ..Default::default()
                     },
-                    |transition| {
+                    // The runtime's own retention effect runs right after this one.
+                    |_| {
                         effect_ready_tx.send(()).unwrap();
                         release_effect_rx.recv().unwrap();
-                        apply_runtime_effects(&state, transition);
                     },
                 )
             })

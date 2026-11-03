@@ -6,8 +6,6 @@
 //! requires an app bundle and Windows toast identity belongs to the installed
 //! executable. The two settings and permission paths remain independent.
 
-use crate::AppState;
-
 /// The prefix every fake clipboard backend's name carries (`fake-memory`,
 /// `fake-file`).
 ///
@@ -21,12 +19,7 @@ const FAKE_BACKEND_PREFIX: &str = "fake";
 /// Never fails and never blocks the caller: this runs on the capture path, and
 /// a capture that has already been stored must not be jeopardised by an audio
 /// device.
-pub fn on_copy(state: &AppState) {
-    play_if(state.settings.get().sound_on_copy, state.backend_name());
-}
-
-/// [`on_copy`] for a caller holding the setting and backend name directly.
-pub fn play_if(sound_on_copy: bool, backend_name: &str) {
+pub fn on_copy(sound_on_copy: bool, backend_name: &str) {
     #[cfg(test)]
     COPY_REQUESTS.with(|count| count.set(count.get().map(|count| count + 1)));
     if should_play(

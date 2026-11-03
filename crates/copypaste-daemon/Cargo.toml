@@ -72,7 +72,6 @@ clipboard-win = { version = "5.4", features = ["std"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
-    "Win32_Security_Authorization",
     "Win32_System_DataExchange",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
@@ -107,6 +106,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 [dev-dependencies]
 image.workspace = true
+copypaste-runtime = { path = "../copypaste-runtime", features = ["test-support"] }
 copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 # The paste-file staging diagnostics are the one place a filename, a content id
@@ -124,9 +124,7 @@ dev-ephemeral-key = ["copypaste-core/dev-ephemeral-key"]
 # platform backend and is never enabled by product builds.
 dev-fake-clipboard = []
 
-# The pipe's access list. These maintained wrappers own token/SID querying,
-# SDDL memory and listener instance creation.
+# Named-pipe listener instance creation; the pipe's access list is
+# `copypaste-fs`'s.
 [target.'cfg(windows)'.dependencies]
 interprocess.workspace = true
-widestring.workspace = true
-win-security-identifier.workspace = true

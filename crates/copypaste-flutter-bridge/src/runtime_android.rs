@@ -753,14 +753,6 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         &self,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
-    ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, false, false)
-    }
-
-    fn write_classified(
-        &self,
-        payload: &copypaste_core::ClipboardPayload,
-        content_type: &str,
         secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         self.write_native(payload, content_type, false, secret)

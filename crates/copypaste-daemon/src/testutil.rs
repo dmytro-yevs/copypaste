@@ -279,15 +279,13 @@ pub fn test_socket_path(
 /// through the shared runtime dispatch with this daemon as its host.
 pub(crate) mod calls {
     pub use base64::Engine as _;
-    pub use copypaste_ipc::{CapabilityGuarantee, CapabilityState, PlatformCapability};
     pub use copypaste_ipc::{
         ConfigApplied, ConfigData, ConfigPatch, ErrorCode, ExportItem, HistoryQuery, Method,
         PrivateModeData, Response, ResponseData,
     };
     pub use copypaste_p2p::peers::Peer;
-    pub use copypaste_p2p::{NodeError, PairingPhase, PairingStatus};
+    pub use copypaste_p2p::NodeError;
     pub use copypaste_runtime::messages::*;
-    pub use std::collections::BTreeMap;
     pub use std::path::Path;
     pub use std::sync::Arc;
     pub use tokio::net::TcpListener;
@@ -297,11 +295,8 @@ pub(crate) mod calls {
     pub use crate::AppState;
     pub use copypaste_core::storage::open_validated;
     pub use copypaste_core::StoredItem;
-    pub use copypaste_ipc::{
-        CapabilityStatus, PairingProgressData, PeerInfo, MAX_PAGE_CONTENT_BYTES,
-    };
-    pub use copypaste_p2p::sync::SyncOutcome;
-    pub use copypaste_runtime::{apply_capture_policy_capabilities, MAX_REORDER_IDS};
+    pub use copypaste_ipc::MAX_PAGE_CONTENT_BYTES;
+    pub use copypaste_runtime::MAX_REORDER_IDS;
 
     pub fn set_with_effects(
         state: &AppState,
@@ -311,8 +306,6 @@ pub(crate) mod calls {
     ) -> Response {
         state.set_config_with_effects(id, patch, effects)
     }
-    /// The runtime applies its own effects right after the injected one.
-    pub fn apply_runtime_effects(_: &AppState, _: &copypaste_runtime::SettingsTransition) {}
 
     pub fn failed(id: u64, error: NodeError) -> Response {
         Response::err(
@@ -548,44 +541,12 @@ pub(crate) mod calls {
     pub fn store_source(state: &AppState) -> Arc<copypaste_core::StoreSource> {
         Arc::clone(&state.source)
     }
-    pub use store_source as peer_source;
 
-    pub fn remember_device(state: &AppState, outcome: &copypaste_p2p::sync::SyncOutcome) {
-        state.remember_device(outcome);
-    }
-    pub fn pairing_progress(
-        state: &AppState,
-        id: u64,
-        status: copypaste_p2p::PairingStatus,
-    ) -> Response {
-        state.pairing_progress(id, status)
-    }
     pub async fn listen(
         listener: tokio::net::TcpListener,
         state: Arc<AppState>,
         shutdown: tokio::sync::watch::Receiver<bool>,
     ) {
         Arc::clone(&state.runtime).listen(listener, shutdown).await;
-    }
-    /// The runtime subscribes its own receivers, synchronously, before this
-    /// returns; the ones a test took are only kept alive.
-    pub fn forward_pairing_changes<A, B, C>(
-        state: Arc<AppState>,
-        _pairing: A,
-        _sync: B,
-        _group: C,
-        shutdown: tokio::sync::watch::Receiver<bool>,
-    ) -> impl std::future::Future<Output = ()> + Send + 'static {
-        state.runtime.forward_changes(shutdown)
-    }
-    pub async fn run(state: Arc<AppState>, shutdown: tokio::sync::watch::Receiver<bool>) {
-        Arc::clone(&state.runtime).run_peer_sync(shutdown).await;
-    }
-    pub async fn round(
-        state: &Arc<AppState>,
-        permit: copypaste_core::sync::RoundGuard,
-        shutdown: &tokio::sync::watch::Receiver<bool>,
-    ) {
-        state.runtime.run_peer_round(permit, shutdown.clone()).await;
     }
 }

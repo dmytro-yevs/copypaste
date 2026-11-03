@@ -1,7 +1,6 @@
 //! Peer sync through the daemon host: two daemons over loopback.
 
 pub mod handlers;
-pub mod poll;
 
 #[allow(unused_imports)]
 use crate::testutil::calls::*;
@@ -12,34 +11,6 @@ mod tests {
     use copypaste_ipc::{EventKind, ResponseData};
     use copypaste_p2p::peers::Peer;
     use std::net::SocketAddr;
-
-    #[test]
-    fn remember_device_persists_the_authenticated_device_class() {
-        let (state, _dir) = test_state("server");
-        remember_device(
-            &state,
-            &SyncOutcome {
-                stats: Default::default(),
-                peer_device_id: "phone-id".into(),
-                peer_device_name: "Phone".into(),
-                peer_profile: Some(copypaste_p2p::DeviceProfile {
-                    device_class: copypaste_ipc::DeviceClass::Phone,
-                    ..Default::default()
-                }),
-                peer_listen_addr: None,
-                cursor: Default::default(),
-                applied_floor: None,
-            },
-        );
-
-        assert_eq!(
-            state
-                .store
-                .device_classes(&["phone-id".to_string()])
-                .unwrap()["phone-id"],
-            copypaste_ipc::DeviceClass::Phone
-        );
-    }
 
     /// Pair two states over loopback and hand back the address A listens on.
     ///
@@ -92,9 +63,6 @@ mod tests {
         let (initiator, _initiator_dir) = test_state("initiator");
         let mut events = responder.subscribe_events();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let changes = responder.p2p.node().subscribe_pairing_changes();
-        let sync_changes = responder.p2p.node().subscribe_sync_changes();
-        let group_changes = responder.p2p.peers().subscribe_group_changes();
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("listener address");
         tokio::spawn(listen(
@@ -103,13 +71,7 @@ mod tests {
             shutdown_rx.clone(),
         ));
 
-        let bridge = tokio::spawn(forward_pairing_changes(
-            Arc::clone(&responder),
-            changes,
-            sync_changes,
-            group_changes,
-            shutdown_rx.clone(),
-        ));
+        let bridge = tokio::spawn(responder.runtime.forward_changes(shutdown_rx.clone()));
         let invite = match crate::testutil::calls::pair_create_invite(&responder, 1)
             .await
             .data
@@ -158,16 +120,7 @@ mod tests {
         let (sender, _sender_dir) = test_state("sender");
         let mut events = receiver.subscribe_events();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let pairing_changes = receiver.p2p.node().subscribe_pairing_changes();
-        let sync_changes = receiver.p2p.node().subscribe_sync_changes();
-        let group_changes = receiver.p2p.peers().subscribe_group_changes();
-        let bridge = tokio::spawn(forward_pairing_changes(
-            Arc::clone(&receiver),
-            pairing_changes,
-            sync_changes,
-            group_changes,
-            shutdown_rx.clone(),
-        ));
+        let bridge = tokio::spawn(receiver.runtime.forward_changes(shutdown_rx.clone()));
         let (pairing_id, addr) = pair(&receiver, &sender, shutdown_rx).await;
 
         let peer = sender.p2p.peers().get(&pairing_id).unwrap();

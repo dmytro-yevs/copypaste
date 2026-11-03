@@ -455,7 +455,8 @@
       "source_references": [
         "crates/copypaste-sync/src/peer_driver.rs",
         "crates/copypaste-sync/src/cadence.rs",
-        "crates/copypaste-daemon/src/p2p/poll.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-runtime/src/p2p.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
       "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
@@ -3212,8 +3213,7 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFloatingActivity.kt",
-        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ClipboardFloatingActivityTest.kt",
-        "docs/adr/0005-android-capture-in-rust-kotlin-reports.md"
+        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ClipboardFloatingActivityTest.kt"
       ],
       "invariant": "The focused 1x1 clipboard hand-off remains focusable for native reads but cannot become an input-method target. It preserves keyboard visibility and existing deferred closure without suppressing clipboard events or adding timers, workers, caches or retained payloads.",
       "next_step": "Validate receiving clips and immediate local copies in the installed app on physical Android. Measure app/runtime and keyboard transitions, peaks, steady state and growth; CPU, wakeup, I/O and growth thresholds remain unresolved in runtime-resource-budgets.json.",
@@ -3346,8 +3346,7 @@
         "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/settings/view/sync_header_action.dart",
         "crates/copypaste-ipc/src/sync_issue.rs",
-        "crates/copypaste-core/src/sync/diagnostics.rs",
-        "docs/engineering/synchronization-status-contract.json"
+        "crates/copypaste-core/src/sync/diagnostics.rs"
       ],
       "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. A measured Offline observation remains Offline during renewal without extending its probe freshness or retry cadence. Positive presence and RTT still expire. Flutter schedules no freshness-only timer for confirmed Offline presence. No extra timers or services are introduced.",
       "allocation_lifetime": "One bounded journal per node and one atomic last-published sync revision per daemon; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",

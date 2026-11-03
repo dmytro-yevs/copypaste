@@ -46,59 +46,6 @@ mod tests {
         assert!(matches!(listed.data, Some(ResponseData::Peers(ref rows)) if rows.is_empty()));
     }
 
-    #[test]
-    fn known_device_data_appears_only_after_confirmation() {
-        let (state, _dir) = test_state("alpha");
-        let token = PairingToken::generate();
-        let pairing_id = token.pairing_id();
-        state
-            .p2p
-            .peers()
-            .upsert(Peer {
-                pairing_id: pairing_id.clone(),
-                device_id: None,
-                name: "phone".into(),
-                psk: token.psk(),
-                last_addr: None,
-                last_seen_ms: 1,
-                profile: None,
-                profile_observed_at_ms: 0,
-            })
-            .unwrap();
-        let progress = |phase| {
-            pairing_progress(
-                &state,
-                1,
-                PairingStatus {
-                    pairing_id: Some(pairing_id.clone()),
-                    role: Some(copypaste_p2p::PairingRole::Initiator),
-                    phase,
-                    sas: None,
-                    peer: None,
-                    error: None,
-                    expires_in_ms: None,
-                },
-            )
-        };
-
-        let awaiting = progress(PairingPhase::AwaitingConfirmation);
-        assert!(matches!(
-            awaiting.data,
-            Some(ResponseData::PairingProgress(PairingProgressData {
-                known_device: None,
-                ..
-            }))
-        ));
-        let confirmed = progress(PairingPhase::Confirmed);
-        assert!(matches!(
-            confirmed.data,
-            Some(ResponseData::PairingProgress(PairingProgressData {
-                known_device: Some(PeerInfo { pairing_id: id, .. }),
-                ..
-            })) if id == pairing_id
-        ));
-    }
-
     #[tokio::test]
     async fn a_second_ceremony_is_refused_until_the_first_is_cancelled() {
         let (state, _dir) = test_state("alpha");
