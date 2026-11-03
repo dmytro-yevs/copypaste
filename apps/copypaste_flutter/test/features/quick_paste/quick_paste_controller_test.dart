@@ -34,229 +34,6 @@ import 'package:copypaste_flutter/features/transfers/file_operations_controller.
 import '../modules/modules_test_support.dart';
 
 void main() {
-  testWidgets(
-    'retained Windows engine releases hidden views and watches and reloads fresh sessions',
-    (tester) async {
-      final host = _ContextHost();
-      final preferences = MemoryQuickPastePreferencesStore();
-      final repositories = <_RetainedRepository>[];
-      final operations = <_RetainedOperations>[];
-      final controllers = <QuickPasteController>[];
-      var disposed = 0;
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        repository.clips.removeWhere((clip) => clip.pinned);
-        repositories.add(repository);
-        repository.clips
-          ..clear()
-          ..add(
-            HistoryClip(
-              id: 'session-${repositories.length}',
-              pinned: false,
-              contentType: 'text',
-              preview: 'Fresh session ${repositories.length}',
-              createdAt: DateTime.utc(2026),
-            ),
-          );
-        final transfers = _RetainedOperations();
-        operations.add(transfers);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: preferences,
-          host: host,
-          ownsHostLifecycle: false,
-          fileOperations: FileOperationsController(transfers),
-          disposeRepository: () async {
-            disposed++;
-          },
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      expect(host.readyCalls, 1);
-      expect(repositories, isEmpty);
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(repositories.single.activeWatches, 1);
-      expect(operations.single.activeWatches, 1);
-      await host.hiddenHandler!(1);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsNothing);
-      expect(repositories.single.activeWatches, 0);
-      expect(operations.single.activeWatches, 0);
-      expect(disposed, 1);
-      preferences.value = preferences.value.copyWith(autoPaste: false);
-      await host.openedHandler!(2, inspectorVisible: true);
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(controllers.last.autoPaste, isFalse);
-      expect(controllers.last.inspectorOpen, isTrue);
-      expect(repositories.last.queryCalls, greaterThan(0));
-      expect(controllers.last.items.single.id, 'session-2');
-      expect(repositories.last.activeWatches, 1);
-      expect(host.readyCalls, 1);
-      await host.hiddenHandler!(1); // Old native hide cannot remove session 2.
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(disposed, 1);
-      await host.hiddenHandler!(2);
-      await tester.pumpAndSettle();
-      expect(disposed, 2);
-      expect(repositories.last.activeWatches, 0);
-      expect(operations.last.activeWatches, 0);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine waits for old Copy without stale paste before reopening',
-    (tester) async {
-      final host = _ContextHost()..permissionGranted = true;
-      final repositories = <_RetainedRepository>[];
-      final controllers = <QuickPasteController>[];
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        repositories.add(repository);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      final old = repositories.single;
-      old.copyGate = Completer<void>();
-      final action = controllers.single.activate(
-        controllers.single.items.first,
-      );
-      await old.copyStarted.future;
-      final hidden = host.hiddenHandler!(1);
-      final reopened = host.openedHandler!(2, inspectorVisible: false);
-      await tester.pump();
-      expect(controllers, hasLength(1));
-      old.copyGate!.complete();
-      await action;
-      await hidden;
-      await reopened;
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(old.activeWatches, 0);
-      expect(host.pasteIds, isEmpty);
-      await controllers.last.activate(controllers.last.items.first);
-      expect(host.pasteIds, [2]);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine ignores late bootstrap completion after hide and reopen',
-    (tester) async {
-      final host = _ContextHost();
-      final gate = Completer<void>();
-      final controllers = <QuickPasteController>[];
-      final repositories = <_RetainedRepository>[];
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        if (repositories.isEmpty) repository.queryGate = gate;
-        repositories.add(repository);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      final first = host.openedHandler!(1, inspectorVisible: false);
-      await tester.pump();
-      await host.hiddenHandler!(1);
-      await host.openedHandler!(2, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(repositories.first.activeWatches, 0);
-      expect(repositories.last.activeWatches, 1);
-      gate.complete();
-      await first;
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(host.pasteIds, isEmpty);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine never reveals media from a hidden session',
-    (tester) async {
-      final host = _FrameHost();
-      final gate = Completer<void>();
-      var created = 0;
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        if (created++ == 0) {
-          repository.imageLoadGate = gate;
-          repository.clips.insert(
-            0,
-            HistoryClip(
-              id: 'image',
-              pinned: false,
-              contentType: 'image/png',
-              preview: '[image]',
-              createdAt: DateTime.utc(2026),
-            ),
-          );
-        }
-        return QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pump();
-      await tester.pump();
-      await host.hiddenHandler!(1);
-      await host.openedHandler!(2, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      gate.complete();
-      await tester.pumpAndSettle();
-      expect(host.presentedIds, [2]);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
   test(
     'inspector refreshes completed metadata on each opening, not in the background',
     () async {
@@ -3353,35 +3130,31 @@ void main() {
     },
   );
 
-  test(
-    'retained shutdown completes when deferred action cleanup throws',
-    () async {
-      final repository = _Repository();
-      final host = _ContextHost()..permissionGranted = true;
-      final operations = _ThrowingDisposeOperations();
-      final controller = QuickPasteController(
-        repository: repository,
-        preferencesStore: MemoryQuickPastePreferencesStore(),
-        host: host,
-        ownsHostLifecycle: false,
-        fileOperations: operations,
-      );
-      await controller.initialize();
-      await controller.opened(1);
-      repository.copyGate = Completer<void>();
-      final action = controller.activate(controller.history.items.last);
-      await repository.copyStarted.future;
-      final shutdown = controller.shutdown();
-      final failedAction = expectLater(action, throwsStateError);
-      repository.copyGate!.complete();
-      await failedAction;
-      await shutdown;
-      expect(host.pasteIds, isEmpty);
-      expect(host.closeIds, isEmpty);
-      // Finish the deliberately failed cleanup without leaving test watchers.
-      controller.history.dispose();
-    },
-  );
+  test('shutdown completes when deferred action cleanup throws', () async {
+    final repository = _Repository();
+    final host = _ContextHost()..permissionGranted = true;
+    final operations = _ThrowingDisposeOperations();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+      fileOperations: operations,
+    );
+    await controller.initialize();
+    await controller.opened(1);
+    repository.copyGate = Completer<void>();
+    final action = controller.activate(controller.history.items.last);
+    await repository.copyStarted.future;
+    final shutdown = controller.shutdown();
+    final failedAction = expectLater(action, throwsStateError);
+    repository.copyGate!.complete();
+    await failedAction;
+    await shutdown;
+    expect(host.pasteIds, isEmpty);
+    expect(host.closeIds, isEmpty);
+    // Finish the deliberately failed cleanup without leaving test watchers.
+    controller.history.dispose();
+  });
 
   for (final copyFails in [false, true]) {
     test(
@@ -3693,7 +3466,7 @@ class _PagedRepository extends _Repository {
 }
 
 class _ThrowingDisposeOperations extends FileOperationsController {
-  _ThrowingDisposeOperations() : super(_RetainedOperations());
+  _ThrowingDisposeOperations() : super(_NoopOperations());
 
   bool _throwOnce = true;
 
@@ -3707,37 +3480,9 @@ class _ThrowingDisposeOperations extends FileOperationsController {
   }
 }
 
-class _RetainedRepository extends _Repository {
-  int activeWatches = 0;
-  Completer<void>? queryGate;
+class _NoopOperations implements FileOperationsRepository {
   @override
-  Future<HistoryClipPage> query({
-    required HistoryQuery query,
-    required int limit,
-    String? cursor,
-  }) async {
-    await queryGate?.future;
-    return super.query(query: query, limit: limit, cursor: cursor);
-  }
-
-  @override
-  Stream<HistoryRuntimeEvent> watch() => Stream.multi((sink) {
-    activeWatches++;
-    sink.onCancel = () {
-      activeWatches--;
-    };
-  });
-}
-
-class _RetainedOperations implements FileOperationsRepository {
-  int activeWatches = 0;
-  @override
-  Stream<FileOperationsChange> watch() => Stream.multi((sink) {
-    activeWatches++;
-    sink.onCancel = () {
-      activeWatches--;
-    };
-  });
+  Stream<FileOperationsChange> watch() => const Stream.empty();
   @override
   Future<List<FileOperation>> load({
     bool clear = false,
@@ -3752,11 +3497,7 @@ class _RetainedOperations implements FileOperationsRepository {
   Future<void> openFile(String path) async {}
 }
 
-class _ContextHost implements RetainedQuickPasteContextHost {
-  Future<void> Function(int)? hiddenHandler;
-  @override
-  void setHiddenHandler(Future<void> Function(int)? handler) =>
-      hiddenHandler = handler;
+class _ContextHost implements QuickPasteContextHost {
   @override
   void setShutdownHandler(Future<void> Function()? handler) {
     shutdownHandler = handler;

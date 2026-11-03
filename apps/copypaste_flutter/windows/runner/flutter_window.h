@@ -126,7 +126,6 @@ class FlutterWindow : public Win32Window {
   bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember);
   bool PasteIntoPreviousWindow(int64_t presentation_id);
   void NotifyQuickPasteOpened();
-  void NotifyQuickPasteHidden(int64_t presentation_id);
   void ScheduleQuickPasteRetirement();
   void BeginQuickPasteShutdown();
   void ShowMainWindow(bool open_settings);
