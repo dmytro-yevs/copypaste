@@ -88,6 +88,19 @@ class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
       }
       return AppUpdateAvailability.available(linuxInstallation: installation);
     }
+    if (target == AppUpdateTarget.macos) {
+      return switch (raw['installationType']) {
+        'homebrew' => const AppUpdateAvailability.available(
+          macosInstallation: MacosAppUpdateInstallation.homebrew,
+        ),
+        'bundle' => const AppUpdateAvailability.available(
+          macosInstallation: MacosAppUpdateInstallation.bundle,
+        ),
+        _ => const AppUpdateAvailability.unavailable(
+          'This macOS installation cannot update automatically.',
+        ),
+      };
+    }
     return const AppUpdateAvailability.available();
   }
 

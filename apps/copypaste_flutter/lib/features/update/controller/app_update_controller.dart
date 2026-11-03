@@ -36,6 +36,7 @@ class AppUpdateController extends ChangeNotifier {
   Version? _currentVersion;
   AppRelease? _release;
   DownloadedAppUpdate? _downloaded;
+  MacosAppUpdateInstallation? _macosInstallation;
   String? _message;
   double _downloadProgress = 0;
   bool _disposed = false;
@@ -131,6 +132,7 @@ class AppUpdateController extends ChangeNotifier {
       _release = release;
       _downloaded = null;
       _downloadProgress = 0;
+      _macosInstallation = null;
       if (release == null) {
         _setPhase(AppUpdatePhase.upToDate);
         return;
@@ -139,6 +141,13 @@ class AppUpdateController extends ChangeNotifier {
       if (_disposed) return;
       if (!availability.available) {
         _message = availability.reason;
+        _setPhase(AppUpdatePhase.unavailable);
+        return;
+      }
+      _macosInstallation = availability.macosInstallation;
+      if (_macosInstallation == MacosAppUpdateInstallation.bundle &&
+          release.asset == null) {
+        _message = 'This release has no signed macOS update package.';
         _setPhase(AppUpdatePhase.unavailable);
         return;
       }
@@ -163,7 +172,10 @@ class AppUpdateController extends ChangeNotifier {
     if (release == null || busy || _disposed) return;
     try {
       var package = _downloaded;
-      if (_platform.target != AppUpdateTarget.macos && package == null) {
+      final downloads =
+          _platform.target != AppUpdateTarget.macos ||
+          _macosInstallation == MacosAppUpdateInstallation.bundle;
+      if (downloads && package == null) {
         _downloadProgress = 0;
         _setPhase(AppUpdatePhase.downloading);
         package = await _repository.download(
@@ -297,6 +309,12 @@ class AppUpdateController extends ChangeNotifier {
     'installer_launch_failed' =>
       'CopyPaste could not start the system installer.',
     'update_busy' => 'An update installation is already in progress.',
+    'install_location_translocated' =>
+      'Move CopyPaste to the Applications folder and open it from there to update.',
+    'install_location_unwritable' =>
+      'CopyPaste cannot replace itself in its current folder. Use the release page to update.',
+    'replacement_blocked' =>
+      'macOS blocked replacing CopyPaste. Allow it in App Management settings or use the release page.',
     'open_failed' => 'CopyPaste could not open the release page.',
     _ => 'CopyPaste could not install the update.',
   };

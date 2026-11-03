@@ -95,6 +95,44 @@ void main() {
     expect(release?.asset, isNull);
   });
 
+  test('macOS bundles select the signed disk image for their architecture', () {
+    const dmg = 'CopyPaste-v1.0.1-macos-arm64.dmg';
+    final raw = _release(
+      '1.0.1',
+      prerelease: false,
+      target: AppUpdateTarget.android,
+    );
+    raw['assets'] = [
+      for (final name in [dmg, '$dmg.sig', 'CopyPaste-v1.0.1-macos-x86_64.dmg'])
+        {
+          'name': name,
+          'browser_download_url':
+              'https://github.com/dmytro-yevs/copypaste/releases/download/v1.0.1/$name',
+          'digest': 'sha256:${'c' * 64}',
+          'size': 2048,
+        },
+    ];
+
+    AppRelease? select(MacosAppUpdateArchitecture architecture) =>
+        parser.latestFor(
+          jsonEncode([raw]),
+          currentVersion: Version.parse('1.0.0'),
+          target: AppUpdateTarget.macos,
+          macosArchitecture: architecture,
+        );
+
+    expect(select(MacosAppUpdateArchitecture.arm64)?.asset?.name, dmg);
+    // A disk image without its updater signature is never offered.
+    final unsigned = select(MacosAppUpdateArchitecture.x86_64);
+    expect(unsigned?.version, Version.parse('1.0.1'));
+    expect(unsigned?.asset, isNull);
+    expect(
+      currentMacosUpdateArchitecture(abi: Abi.macosArm64),
+      MacosAppUpdateArchitecture.arm64,
+    );
+    expect(currentMacosUpdateArchitecture(abi: Abi.linuxArm64), isNull);
+  });
+
   test('Android process ABI selects ARM variants or universal', () {
     expect(
       currentAndroidUpdateArchitecture(abi: Abi.androidArm64),

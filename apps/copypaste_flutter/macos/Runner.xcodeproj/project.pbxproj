@@ -35,6 +35,7 @@
 		C0DE0A112610030000000002 /* MacosSetupChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0A112610030000000001 /* MacosSetupChannel.swift */; };
 		C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0B112610040000000001 /* QuickPasteGeometry.swift */; };
 		C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */; };
+		C0DE0C112610050000000004 /* MacosBundleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0C112610050000000003 /* MacosBundleUpdater.swift */; };
 		C0DE0D112610060000000002 /* HotkeyManagerMacosPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */; };
 		C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */; };
 		C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */; };
@@ -100,6 +101,7 @@
 		C0DE0A112610030000000001 /* MacosSetupChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosSetupChannel.swift; sourceTree = "<group>"; };
 		C0DE0B112610040000000001 /* QuickPasteGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickPasteGeometry.swift; sourceTree = "<group>"; };
 		C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosAppUpdateChannel.swift; sourceTree = "<group>"; };
+		C0DE0C112610050000000003 /* MacosBundleUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosBundleUpdater.swift; sourceTree = "<group>"; };
 		C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManagerMacosPluginTests.swift; sourceTree = "<group>"; };
 		C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureProtectedLayerTree.swift; sourceTree = "<group>"; };
 		C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosScreenshotProtection.swift; sourceTree = "<group>"; };
@@ -199,6 +201,7 @@
 				C0DE0A112610030000000001 /* MacosSetupChannel.swift */,
 				C0DE0B112610040000000001 /* QuickPasteGeometry.swift */,
 				C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */,
+				C0DE0C112610050000000003 /* MacosBundleUpdater.swift */,
 				C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */,
 				C0DE11112610190000000001 /* MacosWindowCommands.swift */,
 				F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */,
@@ -419,6 +422,7 @@
 				C0DE0A112610030000000002 /* MacosSetupChannel.swift in Sources */,
 				C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */,
 				C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */,
+				C0DE0C112610050000000004 /* MacosBundleUpdater.swift in Sources */,
 				C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */,
 				C0DE11112610190000000002 /* MacosWindowCommands.swift in Sources */,
 				F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */,

@@ -337,6 +337,57 @@ void main() {
     );
   });
 
+  test('macOS bundles download the verified disk image first', () async {
+    final repository = _FakeUpdateRepository(release: _release());
+    final platform = _FakeUpdatePlatform(
+      target: AppUpdateTarget.macos,
+      installResults: [AppUpdateInstallResult.restartRequired],
+      availabilityResult: const AppUpdateAvailability.available(
+        macosInstallation: MacosAppUpdateInstallation.bundle,
+      ),
+    );
+    final controller = AppUpdateController(
+      repository: repository,
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.install();
+
+    expect(repository.downloadCalls, 1);
+    expect(platform.installedPackage?.asset.name, _release().asset!.name);
+    expect(controller.phase, AppUpdatePhase.restartRequired);
+  });
+
+  test('macOS bundles report a release without a signed package', () async {
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(
+        release: AppRelease(
+          version: Version.parse('1.0.1'),
+          releaseUri: Uri.parse(
+            'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+          ),
+          prerelease: false,
+        ),
+      ),
+      platform: _FakeUpdatePlatform(
+        target: AppUpdateTarget.macos,
+        availabilityResult: const AppUpdateAvailability.available(
+          macosInstallation: MacosAppUpdateInstallation.bundle,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.phase, AppUpdatePhase.unavailable);
+    expect(
+      controller.message,
+      'This release has no signed macOS update package.',
+    );
+  });
+
   test('restart waits for completion and ignores duplicate requests', () async {
     final completion = Completer<void>();
     var restartCalls = 0;
@@ -499,6 +550,7 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   final AppUpdateTarget target;
   final List<AppUpdateInstallResult> _installResults;
   int installCalls = 0;
+  DownloadedAppUpdate? installedPackage;
   String version = '1.0.0';
   final Completer<AppUpdateInstallResult>? installCompletion;
   final Completer<AppUpdateInstallResult?>? restoreCompletion;
@@ -522,6 +574,7 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   }) async {
     final index = installCalls.clamp(0, _installResults.length - 1);
     installCalls += 1;
+    installedPackage = package;
     if (installCompletion != null) return installCompletion!.future;
     return _installResults[index];
   }
