@@ -265,7 +265,14 @@ fn isolated_socket_path(_data_dir: &Path) -> Result<PathBuf, RuntimeError> {
     {
         use std::os::unix::ffi::OsStrExt;
 
-        let path = std::env::temp_dir().join(format!("cp-{}.sock", std::process::id()));
+        // Linux's temp dir is the shared /tmp; macOS's is already per-user.
+        #[cfg(target_os = "linux")]
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| _data_dir.to_path_buf());
+        #[cfg(not(target_os = "linux"))]
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("cp-{}.sock", std::process::id()));
         if path.as_os_str().as_bytes().len() >= 104 {
             return Err(RuntimeError::daemon_start_failed());
         }

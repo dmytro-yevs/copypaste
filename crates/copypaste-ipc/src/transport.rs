@@ -116,11 +116,14 @@ impl Listener {
     }
 }
 
-/// Dial the endpoint at `path`.
+/// Dial the endpoint at `path`, refusing one served by another account: the
+/// endpoint carries credentials and history, so whoever answers must be us.
 pub async fn connect(path: &Path) -> io::Result<Stream> {
     #[cfg(unix)]
     {
-        tokio::net::UnixStream::connect(path).await.map(Stream)
+        let stream = tokio::net::UnixStream::connect(path).await?;
+        ensure_own_uid(stream.peer_cred()?.uid())?;
+        Ok(Stream(stream))
     }
     #[cfg(windows)]
     {
@@ -130,6 +133,23 @@ pub async fn connect(path: &Path) -> io::Result<Stream> {
     {
         let _ = path;
         Err(unsupported())
+    }
+}
+
+/// What a caller is told when the endpoint belongs to another account.
+pub const MSG_FOREIGN_ENDPOINT: &str = "the local IPC endpoint belongs to another account";
+
+#[cfg(any(unix, windows))]
+pub(crate) fn foreign_endpoint() -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, MSG_FOREIGN_ENDPOINT)
+}
+
+#[cfg(unix)]
+fn ensure_own_uid(peer: u32) -> io::Result<()> {
+    if peer == rustix::process::geteuid().as_raw() {
+        Ok(())
+    } else {
+        Err(foreign_endpoint())
     }
 }
 
@@ -254,6 +274,15 @@ mod tests {
 
     /// The message reaches users, so the privacy contract applies to it whether or not a
     /// platform is currently returning it.
+    #[cfg(unix)]
+    #[test]
+    fn an_endpoint_served_by_another_uid_is_refused() {
+        let ours = rustix::process::geteuid().as_raw();
+        assert!(ensure_own_uid(ours).is_ok());
+        let err = ensure_own_uid(ours.wrapping_add(1)).expect_err("foreign uid");
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    }
+
     #[test]
     fn the_unsupported_failure_names_no_path() {
         let err = unsupported();

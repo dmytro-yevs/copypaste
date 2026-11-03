@@ -1,6 +1,7 @@
 //! The typed daemon wire contract and local transport.
 
-#![forbid(unsafe_code)]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+#![cfg_attr(windows, deny(unsafe_code))]
 
 mod clipboard_privacy;
 pub mod config;

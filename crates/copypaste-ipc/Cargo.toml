@@ -31,3 +31,13 @@ tempfile.workspace = true
 interprocess.workspace = true
 sha2.workspace = true
 hex.workspace = true
+# Verifying the pipe server's account before a request is sent.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Threading",
+] }
+
+# The peer-uid check on a dialled socket.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }
