@@ -382,9 +382,9 @@ pub struct ChangeSignal {
     pub(crate) available: std::sync::atomic::AtomicBool,
 }
 
-impl ChangeSignal {
-    #[cfg(target_os = "windows")]
-    fn new() -> Self {
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl Default for ChangeSignal {
+    fn default() -> Self {
         Self {
             notify: tokio::sync::Notify::new(),
             available: std::sync::atomic::AtomicBool::new(true),

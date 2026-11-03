@@ -3833,6 +3833,38 @@
       "measured_saving": null,
       "evidence_refs": [],
       "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-080",
+      "title": "Wake Linux clipboard capture from native events",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Linux ClipboardSource",
+      "platforms": [
+        "Linux"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/linux.rs",
+        "crates/copypaste-daemon/src/clipboard/linux/wayland.rs",
+        "crates/copypaste-daemon/src/clipboard/linux/gnome.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "One ChangeSignal per adaptive Linux source survives adapter replacement. XFixes selection-owner events, data-control selection events and bridge OwnerChanged signals wake capture only for a foreign change; self-write sentinels stay silent. The dirty cursor remains authoritative. Transport loss wakes capture once; unavailable transports, pending reads and required reprobes keep the timed poll_interval_ms wait and the five-second reprobe cadence.",
+      "allocation_lifetime": "Reuses each adapter's existing event thread and the shared tokio Notify; no thread, timer or buffer is added.",
+      "bounds": {
+        "added_threads": 0
+      },
+      "cancellation": "Adapters notify the shared signal from their existing workers and release it with the adaptive source.",
+      "tradeoffs": "A healthy idle X11, data-control or bridge adapter drops the fixed poll_interval_ms capture wakeup. Data-control with source exclusions and no bridge still polls for its reprobe. Linux is type-checked by cross-target clippy only; native behavior, latency and wakeups are unmeasured.",
+      "next_step": "Measure daemon idle wakeups, CPU and copy latency on X11, wlroots data-control, GNOME and KDE before native resource qualification.",
+      "native_resource_qualification": {
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "linux_cross_target_clippy_only_native_tests_pending"
     }
   ]
 }

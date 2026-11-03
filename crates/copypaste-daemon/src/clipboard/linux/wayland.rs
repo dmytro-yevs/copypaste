@@ -35,7 +35,7 @@ use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_source_v1::ZwlrDataControlSourceV1,
 };
 
-use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
+use super::super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
 
 const MAX_MIMES: usize = 64;
 const MAX_MIME_BYTES: usize = 255;
@@ -55,6 +55,21 @@ struct PublicState {
     dirty: bool,
     sequence: u64,
     protocol_unsupported: bool,
+    signal: Arc<ChangeSignal>,
+}
+
+impl PublicState {
+    fn deactivate(&mut self) {
+        let was_active = self.active;
+        self.active = false;
+        self.dirty = false;
+        self.sequence = 0;
+        // Wake only on loss, so the capture loop resumes timed reconnects
+        // without a wakeup per failed reconnect attempt.
+        if was_active {
+            self.signal.notify.notify_one();
+        }
+    }
 }
 
 enum Command {
@@ -173,12 +188,15 @@ impl WaylandClipboard {
             })
     }
 
-    pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
+    pub(super) fn new(data_dir: &Path, signal: Arc<ChangeSignal>) -> std::io::Result<Self> {
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
         let (read, write) = UnixStream::pair()?;
         read.set_nonblocking(true)?;
         write.set_nonblocking(true)?;
-        let state = Arc::new(Mutex::new(PublicState::default()));
+        let state = Arc::new(Mutex::new(PublicState {
+            signal,
+            ..PublicState::default()
+        }));
         let worker_state = Arc::clone(&state);
         let sender = Arc::new(Sender {
             commands: Mutex::new(VecDeque::new()),
@@ -270,6 +288,11 @@ impl Drop for WaylandClipboard {
 }
 
 impl ClipboardSource for WaylandClipboard {
+    fn change_signal(&self) -> Option<Arc<ChangeSignal>> {
+        let state = self.state.lock().ok()?;
+        Some(Arc::clone(&state.signal))
+    }
+
     fn poll(&mut self) -> Option<Capture> {
         self.read(&copypaste_ipc::ConfigData::default())
     }
@@ -421,14 +444,15 @@ impl Worker {
             public.active = true;
             public.sequence = self.sequence;
             public.dirty = dirty;
+            if dirty {
+                public.signal.notify.notify_one();
+            }
         }
     }
 
     fn deactivate(&self) {
         if let Ok(mut public) = self.public.lock() {
-            public.active = false;
-            public.dirty = false;
-            public.sequence = 0;
+            public.deactivate();
         }
     }
 
@@ -771,9 +795,7 @@ fn drain_wake(wake: &mut UnixStream) {
 
 fn deactivate(state: &Arc<Mutex<PublicState>>) {
     if let Ok(mut state) = state.lock() {
-        state.active = false;
-        state.dirty = false;
-        state.sequence = 0;
+        state.deactivate();
     }
 }
 
@@ -1130,7 +1152,8 @@ mod tests {
     #[test]
     fn dropping_with_a_full_command_queue_unblocks_the_worker() {
         let dir = tempfile::tempdir().expect("staging directory");
-        let clipboard = WaylandClipboard::new(dir.path()).expect("Wayland adapter");
+        let clipboard =
+            WaylandClipboard::new(dir.path(), Default::default()).expect("Wayland adapter");
         let sender = Arc::clone(&clipboard.sender);
         let mut pending = sender.commands.lock().expect("command queue");
         for _ in 0..COMMAND_CAPACITY {
@@ -1176,7 +1199,8 @@ mod tests {
     #[ignore = "requires a running native Wayland data-control compositor and wl-clipboard"]
     fn data_control_interoperates_with_independent_wl_clipboard_clients() {
         let dir = tempfile::tempdir().expect("staging directory");
-        let mut clipboard = WaylandClipboard::new(dir.path()).expect("Wayland adapter");
+        let mut clipboard =
+            WaylandClipboard::new(dir.path(), Default::default()).expect("Wayland adapter");
         let settings = copypaste_ipc::ConfigData::default();
         wait_until_active(&clipboard);
 
