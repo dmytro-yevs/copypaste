@@ -21,9 +21,11 @@ class GitHubAppUpdateRepository
     HttpClient? client,
     Uri? releasesUri,
     AndroidAppUpdateArchitecture? Function()? androidArchitecture,
+    MacosAppUpdateArchitecture? Function()? macosArchitecture,
   }) : _temporaryDirectory = temporaryDirectory,
        _androidArchitecture =
            androidArchitecture ?? currentAndroidUpdateArchitecture,
+       _macosArchitecture = macosArchitecture ?? currentMacosUpdateArchitecture,
        _client = client ?? HttpClient(),
        _releasesUri =
            releasesUri ??
@@ -40,6 +42,7 @@ class GitHubAppUpdateRepository
 
   final UpdateTemporaryDirectoryProvider _temporaryDirectory;
   final AndroidAppUpdateArchitecture? Function() _androidArchitecture;
+  final MacosAppUpdateArchitecture? Function() _macosArchitecture;
   final HttpClient _client;
   late final _downloader = GitHubArtifactDownloader(
     _client,
@@ -127,6 +130,9 @@ class GitHubAppUpdateRepository
       target: target,
       androidArchitecture: target == AppUpdateTarget.android
           ? _androidArchitecture()
+          : null,
+      macosArchitecture: target == AppUpdateTarget.macos
+          ? _macosArchitecture()
           : null,
       linuxInstallation: linuxInstallation,
     );
@@ -294,6 +300,7 @@ class GitHubReleaseParser {
     required Version currentVersion,
     required AppUpdateTarget target,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    MacosAppUpdateArchitecture? macosArchitecture,
     LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     final Object? decoded;
@@ -325,22 +332,20 @@ class GitHubReleaseParser {
       if (version == null || version <= currentVersion) continue;
 
       final releaseUri = _releaseUri(rawRelease['html_url'], tag);
-      final asset = target == AppUpdateTarget.macos
-          ? null
-          : _assetFor(
-              rawRelease['assets'],
-              target: target,
-              version: versionText,
-              androidArchitecture: androidArchitecture,
-              linuxInstallation: linuxInstallation,
-            );
+      final asset = _assetFor(
+        rawRelease['assets'],
+        target: target,
+        version: versionText,
+        androidArchitecture: androidArchitecture,
+        macosArchitecture: macosArchitecture,
+        linuxInstallation: linuxInstallation,
+      );
+      // Homebrew installations need only the release; bundle installations
+      // require the signed disk image and report its absence explicitly.
       final releasePageOnly =
-          target == AppUpdateTarget.linux && linuxInstallation == null;
-      if (target != AppUpdateTarget.macos &&
-          !releasePageOnly &&
-          asset == null) {
-        continue;
-      }
+          target == AppUpdateTarget.macos ||
+          (target == AppUpdateTarget.linux && linuxInstallation == null);
+      if (!releasePageOnly && asset == null) continue;
       final candidate = AppRelease(
         version: version,
         releaseUri: releaseUri,
@@ -362,16 +367,19 @@ class GitHubReleaseParser {
     required AppUpdateTarget target,
     required String version,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    MacosAppUpdateArchitecture? macosArchitecture,
     LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     if (rawAssets is! List<Object?>) return null;
-    if (target == AppUpdateTarget.linux && linuxInstallation == null) {
+    if ((target == AppUpdateTarget.linux && linuxInstallation == null) ||
+        (target == AppUpdateTarget.macos && macosArchitecture == null)) {
       return null;
     }
     final expectedName = switch (target) {
       AppUpdateTarget.windows => 'CopyPaste-v$version-windows-x86_64-setup.exe',
       AppUpdateTarget.android => 'CopyPaste-v$version-android.apk',
-      AppUpdateTarget.macos => throw StateError('macOS uses Homebrew.'),
+      AppUpdateTarget.macos =>
+        'CopyPaste-v$version-macos-${macosArchitecture!.name}.dmg',
       AppUpdateTarget.linux => _linuxAssetName(
         version: version,
         installation: linuxInstallation,

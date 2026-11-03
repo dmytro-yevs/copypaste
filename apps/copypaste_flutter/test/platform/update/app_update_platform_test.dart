@@ -66,6 +66,26 @@ void main() {
     );
   });
 
+  test('maps the native macOS installation type', () async {
+    final platform = MethodChannelAppUpdatePlatform(
+      channel: channel,
+      target: AppUpdateTarget.macos,
+    );
+    for (final (type, installation) in [
+      ('homebrew', MacosAppUpdateInstallation.homebrew),
+      ('bundle', MacosAppUpdateInstallation.bundle),
+      ('unknown', null),
+    ]) {
+      messenger.setMockMethodCallHandler(
+        channel,
+        (call) async => {'available': true, 'installationType': type},
+      );
+      final availability = await platform.availability();
+      expect(availability.available, installation != null);
+      expect(availability.macosInstallation, installation);
+    }
+  });
+
   test(
     'restores a completed Linux package transaction when the host reports one',
     () async {

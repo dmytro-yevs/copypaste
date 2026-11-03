@@ -11,6 +11,7 @@ final class MacosAppUpdateChannel {
     label: "com.copypaste.app.update",
     qos: .userInitiated
   )
+  private var installingBundle = false
 
   init(binaryMessenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -33,25 +34,31 @@ final class MacosAppUpdateChannel {
       result("\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)")
     case "availability":
       workQueue.async {
-        guard let brew = Self.brewExecutable() else {
+        if Self.homebrewInstalled() {
           self.complete(result, value: [
-            "available": false,
-            "reason": "Install CopyPaste with Homebrew to update it here.",
+            "available": true,
+            "installationType": "homebrew",
           ])
           return
         }
-        let installed = Self.run(
-          brew,
-          arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
-          timeout: 30
-        )
-        let availability: [String: Any] = installed
-          ? ["available": true]
-          : [
-              "available": false,
-              "reason": "Install CopyPaste with Homebrew to update it here.",
-            ]
-        self.complete(result, value: availability)
+        guard let updater = MacosBundleUpdater.current() else {
+          self.complete(result, value: [
+            "available": false,
+            "reason": "This macOS installation cannot update automatically.",
+          ])
+          return
+        }
+        if let problem = updater.locationProblem() {
+          self.complete(result, value: [
+            "available": false,
+            "reason": problem.reason,
+          ])
+          return
+        }
+        self.complete(result, value: [
+          "available": true,
+          "installationType": "bundle",
+        ])
       }
     case "install":
       install(call, result: result)
@@ -77,6 +84,15 @@ final class MacosAppUpdateChannel {
       result(FlutterError(code: "invalid_arguments", message: nil, details: nil))
       return
     }
+    if let path = arguments["path"] as? String {
+      installBundle(
+        image: URL(fileURLWithPath: path),
+        sha256: arguments["sha256"] as? String,
+        version: expectedVersion,
+        result: result
+      )
+      return
+    }
     workQueue.async {
       guard let brew = Self.brewExecutable() else {
         self.complete(
@@ -94,6 +110,56 @@ final class MacosAppUpdateChannel {
         )
       }
     }
+  }
+
+  private func installBundle(
+    image: URL,
+    sha256: String?,
+    version: String,
+    result: @escaping FlutterResult
+  ) {
+    guard !installingBundle, let sha256, image.path.hasPrefix("/") else {
+      result(FlutterError(
+        code: installingBundle ? "update_busy" : "invalid_arguments",
+        message: nil,
+        details: nil
+      ))
+      return
+    }
+    installingBundle = true
+    workQueue.async {
+      let failure: MacosBundleUpdateError?
+      // Homebrew must keep ownership of the bundles it installed.
+      if Self.homebrewInstalled() {
+        failure = .invalidArguments
+      } else if let updater = MacosBundleUpdater.current() {
+        do {
+          try updater.install(image: image, sha256: sha256, version: version)
+          failure = nil
+        } catch let error as MacosBundleUpdateError {
+          failure = error
+        } catch {
+          failure = .failed
+        }
+      } else {
+        failure = .failed
+      }
+      DispatchQueue.main.async {
+        self.installingBundle = false
+        result(failure.map {
+          FlutterError(code: $0.code, message: nil, details: nil)
+        } ?? "restart_required")
+      }
+    }
+  }
+
+  private static func homebrewInstalled() -> Bool {
+    guard let brew = brewExecutable() else { return false }
+    return run(
+      brew,
+      arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
+      timeout: 30
+    )
   }
 
   static func installUpdate(using brew: URL, expectedVersion: String) -> Bool {
@@ -169,7 +235,7 @@ final class MacosAppUpdateChannel {
     return nil
   }
 
-  private static func run(
+  static func run(
     _ executable: URL,
     arguments: [String],
     timeout: TimeInterval
@@ -197,7 +263,7 @@ final class MacosAppUpdateChannel {
     return process.terminationStatus == 0
   }
 
-  private static func runCapturing(
+  static func runCapturing(
     _ executable: URL,
     arguments: [String],
     timeout: TimeInterval

@@ -8,6 +8,12 @@ enum LinuxAppUpdateArchitecture { x86_64, aarch64 }
 
 enum LinuxAppUpdatePackage { appImage, deb, rpm }
 
+enum MacosAppUpdateArchitecture { arm64, x86_64 }
+
+/// Homebrew owns cask installations; other bundles replace themselves from a
+/// verified release disk image.
+enum MacosAppUpdateInstallation { homebrew, bundle }
+
 /// The native runner identifies the installed package before an update is
 /// selected, so the updater never substitutes another Linux package format.
 class LinuxAppUpdateInstallation {
@@ -100,17 +106,21 @@ class DownloadedAppUpdate {
 }
 
 class AppUpdateAvailability {
-  const AppUpdateAvailability.available({this.linuxInstallation})
-    : available = true,
-      reason = null;
+  const AppUpdateAvailability.available({
+    this.linuxInstallation,
+    this.macosInstallation,
+  }) : available = true,
+       reason = null;
 
   const AppUpdateAvailability.unavailable(this.reason)
     : available = false,
-      linuxInstallation = null;
+      linuxInstallation = null,
+      macosInstallation = null;
 
   final bool available;
   final String? reason;
   final LinuxAppUpdateInstallation? linuxInstallation;
+  final MacosAppUpdateInstallation? macosInstallation;
 }
 
 enum AppUpdateInstallResult {

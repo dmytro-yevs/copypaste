@@ -9,7 +9,7 @@ Future<void> removeInstalledUpdatePackages(
   Version installed,
 ) async {
   final package = RegExp(
-    r'^CopyPaste-v(.+?)-(?:android(?:-(?:arm64|armv7))?\.apk|windows-x86_64-setup\.exe|linux-(?:x86_64|aarch64)\.(?:deb|rpm|AppImage))(?:\.sig|\.part)?$',
+    r'^CopyPaste-v(.+?)-(?:android(?:-(?:arm64|armv7))?\.apk|windows-x86_64-setup\.exe|macos-(?:arm64|x86_64)\.dmg|linux-(?:x86_64|aarch64)\.(?:deb|rpm|AppImage))(?:\.sig|\.part)?$',
   );
   try {
     if (!await directory.exists()) return;

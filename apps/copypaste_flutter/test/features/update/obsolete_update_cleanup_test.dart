@@ -47,6 +47,7 @@ void main() {
         'CopyPaste-v1.0.29-windows-x86_64-setup.exe',
         'CopyPaste-v1.0.29-android-armv7.apk.part',
         'CopyPaste-v1.0.29-linux-aarch64.deb',
+        'CopyPaste-v1.0.29-macos-arm64.dmg.sig',
         'CopyPaste-v1.0.29-rc.1-android.apk',
       ];
       const retained = [
