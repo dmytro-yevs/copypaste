@@ -3806,6 +3806,33 @@
       "measured_saving": null,
       "evidence_refs": [],
       "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-079",
+      "title": "Lay out only visible slices of large History clip bodies",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/view/history_selectable_text.dart",
+        "apps/copypaste_flutter/test/features/history/history_selectable_text_test.dart"
+      ],
+      "invariant": "Clip bodies above 32 Ki code units are measured slice by slice with the exact SelectableText paragraph inputs and only slices near the viewport, or holding the current selection, stay laid out. Slice boundaries fall on hard line breaks or soft-wrap line starts, so wrapping, height and glyph positions match one paragraph. Select-all copies the whole clip, copy reads the full selected range, and the selection edge is revealed in the enclosing scroll view. Smaller bodies keep the single SelectableText.",
+      "next_step": "Measure native application peak and recovered footprint when selecting 1 MiB and 4 MiB text clips in History and Quick Paste on macOS, Android and Windows. Widget-test RSS for 1 MiB of text fell from about 350 MiB to about 9 MiB; that host measurement is not native qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
     }
   ]
 }
