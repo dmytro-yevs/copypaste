@@ -649,6 +649,7 @@ fn reject_file_input(reason: crate::clipboard::file_capture::FileReadError) {
     warn!(message = reason.message());
 }
 
+#[cfg(test)]
 pub fn ingest(
     state: &AppState,
     content: &str,
@@ -663,6 +664,7 @@ pub fn ingest(
 /// keeps a restored history in order and its ages honest. The dedup window is
 /// applied around *that* stamp, not around now, so importing a file twice
 /// collapses rather than doubling.
+#[cfg(test)]
 pub fn ingest_at(
     state: &AppState,
     content: &str,
@@ -857,7 +859,7 @@ mod tests {
                 polls: Arc::clone(&polls),
             }),
         );
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let guard = TestPersistGuard::set(TestPersistMode::Busy);
         let busy_completed = guard.busy_completed();
         let task = tokio::spawn(run(Arc::clone(&state), state.shutdown_rx()));
@@ -866,10 +868,7 @@ mod tests {
         busy_completed
             .await
             .expect("accepted capture completed its Busy attempt");
-        state
-            .settings
-            .apply(&state.meta, &patch)
-            .expect("apply policy");
+        state.settings.apply(&patch).expect("apply policy");
         state.request_shutdown();
         tokio::time::advance(Duration::from_millis(state.settings.get().poll_interval_ms)).await;
 
@@ -1143,7 +1142,7 @@ mod tests {
                 polls: polls.clone(),
             }),
         );
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let guard = TestPersistGuard::set(TestPersistMode::Panic);
         let (persist_entered, release_tick) = guard.gate(TestWorkerPhase::Persist);
         let task = tokio::spawn(run(Arc::clone(&state), state.shutdown_rx()));
@@ -1186,7 +1185,7 @@ mod tests {
             }),
         );
         let guard = TestPersistGuard::set(TestPersistMode::Busy);
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let mut pending = None;
         assert!(matches!(
             tick(&state, &mut pending),
@@ -1223,7 +1222,7 @@ mod tests {
                 polls: polls.clone(),
             }),
         );
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let guard = TestPersistGuard::set(TestPersistMode::Busy);
         let busy_completed = guard.busy_completed();
         let (drain_entered, release_drain) = guard.gate(TestWorkerPhase::Drain);
@@ -1487,13 +1486,10 @@ mod tests {
         let snapshot = state.settings.get().clone();
         state
             .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    max_text_size_bytes: Some(copypaste_ipc::MIN_TEXT_SIZE_BYTES),
-                    ..Default::default()
-                },
-            )
+            .apply(&copypaste_ipc::ConfigPatch {
+                max_text_size_bytes: Some(copypaste_ipc::MIN_TEXT_SIZE_BYTES),
+                ..Default::default()
+            })
             .unwrap();
         let content = "x".repeat(copypaste_ipc::MIN_TEXT_SIZE_BYTES as usize + 1);
 
@@ -1558,7 +1554,7 @@ mod tests {
         .into_item();
         assert_eq!(state.store.count().unwrap(), 1);
 
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let mut pending = None;
         assert_eq!(
             crate::notify::count_requests(|| {
@@ -1645,7 +1641,7 @@ mod tests {
                 polls: polls.clone(),
             }),
         );
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
         let guard = TestPersistGuard::set(TestPersistMode::Busy);
         crate::clipboard::file_capture::reset_test_open_count();
         let mut slot = None;
@@ -1898,7 +1894,7 @@ mod tests {
                     path,
                 }),
             );
-            let mut events = state.subscribe();
+            let mut events = state.subscribe_events();
             let worker = state.clone();
             let capture = std::thread::spawn(move || {
                 crate::clipboard::file_capture::reset_test_open_count();
@@ -1953,7 +1949,7 @@ mod tests {
             );
             let guard = TestPersistGuard::set(TestPersistMode::Busy);
             let mut slot = None;
-            let mut events = state.subscribe();
+            let mut events = state.subscribe_events();
             assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
             std::fs::remove_file(&path).unwrap();
             for enabled in [true, false] {
@@ -2139,7 +2135,7 @@ mod tests {
                     release: release_rx,
                 }),
             );
-            let mut events = state.subscribe();
+            let mut events = state.subscribe_events();
             let worker_state = state.clone();
             let capture = std::thread::spawn(move || tick(&worker_state, &mut None));
             entered_rx.recv().unwrap();
