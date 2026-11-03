@@ -734,6 +734,7 @@ dependencies = [
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-payload",
+ "copypaste-process",
  "core-foundation",
  "criterion",
  "csscolorparser",
@@ -965,6 +966,7 @@ dependencies = [
  "copypaste-fs",
  "copypaste-ipc",
  "copypaste-payload",
+ "copypaste-process",
  "criterion",
  "data-encoding",
  "ed25519-dalek",
@@ -1006,6 +1008,13 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "copypaste-process"
+version = "1.1.2"
+dependencies = [
+ "rustix",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 //! Optional Supabase account and encrypted background synchronization.
 mod host;
 mod realtime;
+use copypaste_clock::now_ms;
 use copypaste_cloud::{
     credentials::{AccountChange, CloudStateKey, CredentialState, CredentialStore},
     derive_sync_key, CloudConfig, CloudSync, SupabaseAuth, SupabaseRest,
@@ -517,10 +518,6 @@ fn configuration(url: &str, key: &str) -> Result<CloudConfig, String> {
     #[cfg(not(feature = "test-endpoints"))]
     let config = CloudConfig::new(url, key);
     config.map_err(|_| "The Supabase project URL must use HTTPS.".into())
-}
-fn now_ms() -> i64 {
-    use copypaste_clock::WallClock;
-    copypaste_clock::SystemWallClock.now_ms()
 }
 fn state_error<T>(_: T) -> String {
     "Encrypted account state is unavailable.".into()

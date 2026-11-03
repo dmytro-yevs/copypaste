@@ -1,6 +1,7 @@
 //! Starting up and shutting down: what `main` does around the work itself.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::server;
 use anyhow::Context;
@@ -42,6 +43,7 @@ where
         refusal,
         stop.clone(),
     ));
+    announce_listening();
     wait_for_shutdown(stop.subscribe()).await?;
     let _ = stop.send(true);
     if let Err(e) = served.await {
@@ -102,6 +104,19 @@ pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::
     Ok(())
 }
 
+static APP_PARENT: AtomicBool = AtomicBool::new(false);
+
+/// Tells the bundled desktop app, over the stdout pipe it awaits, that the IPC
+/// endpoint is accepting connections. Nothing else writes to stdout.
+pub fn announce_listening() {
+    use std::io::Write as _;
+    if APP_PARENT.load(Ordering::Relaxed) {
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{}", copypaste_ipc::APP_PARENT_READY_LINE);
+        let _ = stdout.flush();
+    }
+}
+
 /// Start observing the stdin pipe the bundled desktop app passes to its daemon.
 /// A CLI invocation never sets the hidden flag, so it does not acquire this
 /// watcher and its stdin remains untouched.
@@ -110,6 +125,7 @@ pub fn watch_app_parent(enabled: bool) -> anyhow::Result<()> {
     if !enabled {
         return Ok(());
     }
+    APP_PARENT.store(true, Ordering::Relaxed);
     std::thread::Builder::new()
         .name("copypaste-parent-liveness".into())
         .spawn(move || match wait_for_app_parent(std::io::stdin()) {

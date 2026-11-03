@@ -49,6 +49,10 @@ if-addrs = "0.15"
 [target.'cfg(target_os = "macos")'.dependencies]
 # Fast native hardware identifier used directly on the runtime path.
 sysctl = "0.7"
+copypaste-process = { path = "../copypaste-process" }
+
+[target.'cfg(unix)'.dev-dependencies]
+copypaste-process = { path = "../copypaste-process" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # The registry supplies the product model; firmware supplies the chassis class.
