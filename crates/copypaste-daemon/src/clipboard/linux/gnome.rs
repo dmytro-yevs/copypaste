@@ -16,7 +16,7 @@ use tracing::debug;
 use zbus::blocking::{connection::Builder, Connection, Proxy};
 use zbus::fdo::RequestNameFlags;
 
-use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
+use super::super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
 
 const DAEMON: &str = "app.copypaste.Daemon";
 const GNOME_BRIDGE: &str = "app.copypaste.GnomeIntegration";
@@ -74,8 +74,26 @@ struct State {
     mimes: Vec<String>,
     source: Option<SourceIdentity>,
     owner: Option<String>,
+    signal: Arc<ChangeSignal>,
     #[cfg(test)]
     watch_diagnostics: WatchDiagnostics,
+}
+
+impl State {
+    /// Fence the current owner. The wakeup lets the capture loop observe the
+    /// loss and resume its timed reprobe.
+    fn invalidate(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        self.active = false;
+        self.watching = false;
+        self.dirty = false;
+        self.sequence = 0;
+        self.owned_sequence = None;
+        self.mimes.clear();
+        self.source = None;
+        self.owner = None;
+        self.signal.notify.notify_one();
+    }
 }
 
 #[cfg(test)]
@@ -120,18 +138,25 @@ impl GnomeClipboard {
         probe_bridge(KWIN)
     }
 
-    pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
-        Self::with_bridge(data_dir, GNOME)
+    pub(super) fn new(data_dir: &Path, signal: Arc<ChangeSignal>) -> std::io::Result<Self> {
+        Self::with_bridge(data_dir, GNOME, signal)
     }
 
-    pub(super) fn new_kwin(data_dir: &Path) -> std::io::Result<Self> {
-        Self::with_bridge(data_dir, KWIN)
+    pub(super) fn new_kwin(data_dir: &Path, signal: Arc<ChangeSignal>) -> std::io::Result<Self> {
+        Self::with_bridge(data_dir, KWIN, signal)
     }
 
-    fn with_bridge(data_dir: &Path, bridge: Bridge) -> std::io::Result<Self> {
+    fn with_bridge(
+        data_dir: &Path,
+        bridge: Bridge,
+        signal: Arc<ChangeSignal>,
+    ) -> std::io::Result<Self> {
         // The cleanup owner exists before the D-Bus worker can accept a file.
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
-        let state = Arc::new(Mutex::new(State::default()));
+        let state = Arc::new(Mutex::new(State {
+            signal,
+            ..State::default()
+        }));
         let (commands, receiver) = mpsc::channel();
         let worker_state = Arc::clone(&state);
         // zbus::blocking owns a global runtime. Never construct or call it
@@ -300,6 +325,10 @@ impl Drop for GnomeClipboard {
 }
 
 impl ClipboardSource for GnomeClipboard {
+    fn change_signal(&self) -> Option<Arc<ChangeSignal>> {
+        let state = self.state.lock().ok()?;
+        Some(Arc::clone(&state.signal))
+    }
     fn poll(&mut self) -> Option<Capture> {
         self.read(&copypaste_ipc::ConfigData::default())
     }
@@ -677,15 +706,7 @@ fn watch_clipboard(
         }
         if let Ok(mut state) = state.lock() {
             if state.epoch == epoch && state.owner.as_deref() == Some(owner.as_str()) {
-                state.epoch = state.epoch.wrapping_add(1);
-                state.active = false;
-                state.watching = false;
-                state.dirty = false;
-                state.sequence = 0;
-                state.owned_sequence = None;
-                state.mimes.clear();
-                state.source = None;
-                state.owner = None;
+                state.invalidate();
             }
         }
     });
@@ -693,15 +714,7 @@ fn watch_clipboard(
 
 fn invalidate(state: &Arc<Mutex<State>>) {
     if let Ok(mut state) = state.lock() {
-        state.epoch = state.epoch.wrapping_add(1);
-        state.active = false;
-        state.watching = false;
-        state.dirty = false;
-        state.sequence = 0;
-        state.owned_sequence = None;
-        state.mimes.clear();
-        state.source = None;
-        state.owner = None;
+        state.invalidate();
     }
 }
 
@@ -712,15 +725,7 @@ fn invalidate_owner(state: &Arc<Mutex<State>>, owner: Option<&str>) {
     if owner.is_some_and(|owner| state.owner.as_deref() != Some(owner)) {
         return;
     }
-    state.epoch = state.epoch.wrapping_add(1);
-    state.active = false;
-    state.watching = false;
-    state.dirty = false;
-    state.sequence = 0;
-    state.owned_sequence = None;
-    state.mimes.clear();
-    state.source = None;
-    state.owner = None;
+    state.invalidate();
 }
 
 fn current_epoch(state: &Arc<Mutex<State>>, epoch: u64, sequence: u64) -> bool {
@@ -746,6 +751,7 @@ fn apply_owner_changed(
         state.dirty = false;
     } else {
         state.dirty = true;
+        state.signal.notify.notify_one();
     }
 }
 
@@ -1075,7 +1081,8 @@ mod tests {
         let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
         let mut clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+            GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+                .expect("compositor clipboard");
         wait_for_active(&clipboard);
         let competitor = Connection::session().expect("competing daemon connection");
         let bus = Proxy::new(
@@ -1112,7 +1119,8 @@ mod tests {
         let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
         let mut clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+            GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+                .expect("compositor clipboard");
         wait_for_active(&clipboard);
 
         fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
@@ -1141,7 +1149,8 @@ mod tests {
         let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
         let mut clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+            GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+                .expect("compositor clipboard");
         wait_for_active(&clipboard);
 
         fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
@@ -1158,7 +1167,8 @@ mod tests {
         let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
         let mut clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+            GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+                .expect("compositor clipboard");
         wait_for_active(&clipboard);
 
         fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
@@ -1279,7 +1289,7 @@ mod tests {
             "stalled bridge Read exceeded the bounded caller wait"
         );
         drop(clipboard);
-        let replacement = GnomeClipboard::with_bridge(directory.path(), bridge)
+        let replacement = GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
             .expect("replacement compositor clipboard");
         wait_for_active(&replacement);
         fixture.release_name();
@@ -1303,7 +1313,8 @@ mod tests {
         let (snapshot_started, snapshot_release) = original.stall_next_snapshot();
         let directory = tempfile::tempdir().expect("fixture data dir");
         let mut clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+            GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+                .expect("compositor clipboard");
         snapshot_started
             .recv_timeout(RPC_TIMEOUT)
             .expect("fixture Snapshot did not stall");
@@ -1330,8 +1341,8 @@ mod tests {
         original.update_owner(1, vec!["text/plain;charset=utf-8".into()]);
         let (snapshot_started, snapshot_release) = original.stall_next_snapshot();
         let directory = tempfile::tempdir().expect("fixture data dir");
-        let clipboard =
-            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        let clipboard = GnomeClipboard::with_bridge(directory.path(), bridge, Default::default())
+            .expect("compositor clipboard");
         snapshot_started
             .recv_timeout(RPC_TIMEOUT)
             .expect("fixture Snapshot did not stall");
@@ -1506,11 +1517,14 @@ mod tests {
             owned_sequence: Some(5),
             ..Default::default()
         };
+        use futures_util::FutureExt as _;
         apply_owner_changed(&mut state, 5, vec!["text/plain;charset=utf-8".into()], None);
         assert!(!state.dirty);
+        assert!(state.signal.notify.notified().now_or_never().is_none());
         state.owned_sequence = Some(6);
         apply_owner_changed(&mut state, 7, vec!["text/plain;charset=utf-8".into()], None);
         assert!(state.dirty);
         assert_eq!(state.sequence, 7);
+        assert!(state.signal.notify.notified().now_or_never().is_some());
     }
 }
