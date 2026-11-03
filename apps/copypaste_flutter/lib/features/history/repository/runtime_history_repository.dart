@@ -26,34 +26,15 @@ class RuntimeHistoryRepository
         HistoryFileDownloadCancellation,
         HistoryFileProgressRepository,
         HistoryDownloadedFileRepository {
-  RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
-    : _watchLease = watchLease;
-
-  final RuntimeWatchLease? _watchLease;
   bool _disposed = false;
   final _downloadTokens = <String, String>{};
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
     _ensureActive();
-    if (_watchLease == null) {
-      return RuntimeEventService.instance.events
-          .where((event) => event.kind == 'items' || event.kind == 'ready')
-          .map((_) => HistoryRuntimeEvent.itemsChanged);
-    }
-    return _watch();
-  }
-
-  Stream<HistoryRuntimeEvent> _watch() async* {
-    final lease = _watchLease!;
-    final watchId = await lease.watchId;
-    try {
-      await for (final event in runtime.watchRuntime(watchId: watchId)) {
-        if (event.kind == 'items') yield HistoryRuntimeEvent.itemsChanged;
-      }
-    } finally {
-      await lease.release(watchId);
-    }
+    return RuntimeEventService.instance.events
+        .where((event) => event.kind == 'items' || event.kind == 'ready')
+        .map((_) => HistoryRuntimeEvent.itemsChanged);
   }
 
   @override
@@ -237,7 +218,7 @@ class RuntimeHistoryRepository
       runtime.downloadedClipFile(id: id);
 
   @override
-  Future<bool> saveFileWithProgress(
+  Future<void> saveFileWithProgress(
     String id,
     String destinationPath,
     void Function(int written, int total) onProgress,
@@ -320,7 +301,6 @@ class RuntimeHistoryRepository
       );
       await reconcile();
       await finished.future;
-      return true;
     } finally {
       if (_downloadTokens[id] == token) _downloadTokens.remove(id);
       await subscription.cancel();
@@ -433,7 +413,6 @@ class RuntimeHistoryRepository
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    await _watchLease?.dispose();
   }
 
   void _ensureActive() {
@@ -450,57 +429,6 @@ class RuntimeHistoryRepository
   static HistoryImagePreview mapImagePreview(
     runtime.ClipImagePreview preview,
   ) => _fromRuntimeImagePreview(preview);
-}
-
-/// Owns one generated runtime Watch handle without affecting other features.
-class RuntimeWatchLease {
-  RuntimeWatchLease({required this.allocate, required this.cancel});
-
-  final Future<BigInt> Function() allocate;
-  final Future<void> Function(BigInt watchId) cancel;
-  Future<BigInt>? _watchId;
-  bool _disposed = false;
-
-  Future<BigInt> get watchId {
-    if (_disposed) {
-      return Future<BigInt>.error(
-        StateError('Runtime Watch lease is disposed.'),
-      );
-    }
-    final active = _watchId;
-    if (active != null) return active;
-    final allocated = allocate();
-    _watchId = allocated;
-    unawaited(_clearFailedAllocation(allocated));
-    return allocated;
-  }
-
-  Future<void> _clearFailedAllocation(Future<BigInt> allocation) async {
-    try {
-      await allocation;
-    } catch (_) {
-      if (identical(_watchId, allocation)) _watchId = null;
-    }
-  }
-
-  Future<void> release(BigInt watchId) async {
-    final active = _watchId;
-    if (active == null ||
-        await active != watchId ||
-        !identical(_watchId, active)) {
-      return;
-    }
-    _watchId = null;
-    await cancel(watchId);
-  }
-
-  Future<void> dispose() async {
-    if (_disposed) return;
-    _disposed = true;
-    final watchId = _watchId;
-    _watchId = null;
-    if (watchId != null) await cancel(await watchId);
-  }
 }
 
 HistoryClip _fromRuntimeListClip(runtime.Clip clip) =>

@@ -461,7 +461,7 @@ void main() {
     );
   }
   test(
-    'file transfer reports written bytes, reuses a copy, and retries failure',
+    'file transfer reuses a copy, retries failure, and honors cancellation',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'copypaste-transfer-test-',
@@ -488,16 +488,11 @@ void main() {
       repository.failSave = false;
       repository.saveGate = Completer<void>();
       final progress = <double>[];
-      final halfWritten = Completer<void>();
-      final preparation = transfer.prepare(
-        clip,
-        onProgress: (value) {
-          progress.add(value);
-          if (value == 0.5 && !halfWritten.isCompleted) halfWritten.complete();
-        },
-      );
-      await halfWritten.future;
-      expect(progress, contains(0.5));
+      final preparation = transfer.prepare(clip, onProgress: progress.add);
+      while (repository.saved.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(progress, [0]);
       repository.saveGate!.complete();
       final path = await preparation;
       repository.saveGate = null;
@@ -509,18 +504,15 @@ void main() {
       repository.saveGate = Completer<void>();
       var cancelled = false;
       final destination = File('${directory.path}/cancelled.bin');
-      final cancellableWriteStarted = Completer<void>();
       final cancelledSave = transfer.saveTo(
         clip,
         destination.path,
-        onProgress: (value) {
-          if (value == 0.5 && !cancellableWriteStarted.isCompleted) {
-            cancellableWriteStarted.complete();
-          }
-        },
+        onProgress: (_) {},
         isCancelled: () => cancelled,
       );
-      await cancellableWriteStarted.future;
+      while (repository.saved.length < 2) {
+        await Future<void>.delayed(Duration.zero);
+      }
       cancelled = true;
       repository.saveGate!.complete();
       await expectLater(

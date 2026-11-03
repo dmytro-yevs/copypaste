@@ -38,10 +38,9 @@ abstract interface class HistoryFileDownloadCancellation {
   Future<void> cancelFileDownload(String id);
 }
 
-/// Uses native writer events when the backend supports them. Returns false
-/// without starting a save when the legacy filesystem fallback is required.
+/// Reports native writer progress and completes when the save is committed.
 abstract interface class HistoryFileProgressRepository {
-  Future<bool> saveFileWithProgress(
+  Future<void> saveFileWithProgress(
     String id,
     String destinationPath,
     void Function(int written, int total) onProgress,

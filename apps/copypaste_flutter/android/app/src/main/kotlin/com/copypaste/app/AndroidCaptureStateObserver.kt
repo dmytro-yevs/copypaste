@@ -3,9 +3,10 @@ package com.copypaste.app
 import android.app.AppOpsManager
 import android.content.Context
 
-/** Observes the system-owned capture prerequisites while the Flutter stream has a listener. */
+/** Observes system-owned setup AppOps while a Flutter setup stream has a listener. */
 internal class AndroidCaptureStateObserver(
     context: Context,
+    private val observedAppOps: Set<String> = captureAppOps,
     private val changed: () -> Unit,
 ) {
     private val app = context.applicationContext
@@ -31,7 +32,7 @@ internal class AndroidCaptureStateObserver(
     }
 
     companion object {
-        private val observedAppOps = setOf(
+        private val captureAppOps = setOf(
             "android:run_in_background",
             "android:run_any_in_background",
             AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,

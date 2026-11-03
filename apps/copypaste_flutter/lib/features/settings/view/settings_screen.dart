@@ -1189,14 +1189,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(switch (defaultTargetPlatform) {
                           TargetPlatform.macOS =>
                             'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
-                          TargetPlatform.windows =>
-                            'Skip automatic capture from identified clipboard owners in this list.',
+                          TargetPlatform.windows || TargetPlatform.linux =>
+                            'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
                           TargetPlatform.android =>
                             'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
-                          TargetPlatform.linux =>
-                            'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
                           TargetPlatform.iOS || TargetPlatform.fuchsia =>
-                            'Application exclusions are supported on macOS, Windows, and Android.',
+                            'Application exclusions are supported on macOS, Windows, Android, and Linux.',
                         }).muted().textSmall(),
                       ],
                     ),

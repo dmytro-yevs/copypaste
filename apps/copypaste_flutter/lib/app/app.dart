@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import '../features/modules/controller/modules_controller.dart';
 
@@ -94,8 +93,10 @@ class CopyPasteApp extends StatelessWidget {
               ? SystemUiOverlayStyle.light
               : SystemUiOverlayStyle.dark;
           Widget buildContent(bool windowReady) {
-            final unifiedTitleBar =
-                Platform.isMacOS && desktopWindow != null && windowReady;
+            final unifiedTitleBar = usesUnifiedMacosTitleBar(
+              desktopWindow,
+              windowReady: windowReady,
+            );
             final shell = AppShell(
               controller: navigation,
               unifiedTitleBar: unifiedTitleBar,

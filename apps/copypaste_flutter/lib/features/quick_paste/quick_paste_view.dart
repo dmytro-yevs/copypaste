@@ -692,8 +692,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         onQuit: controller.quit,
       ),
       desktopShortcut(LogicalKeyboardKey.keyF): _find,
-      desktopShortcut(LogicalKeyboardKey.keyR): () =>
-          unawaited(controller.history.reload()),
+      ...desktopRefreshBindings(() => unawaited(controller.history.reload())),
       if (defaultTargetPlatform != TargetPlatform.macOS) ...{
         const SingleActivator(
           LogicalKeyboardKey.f4,
@@ -701,11 +700,6 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           includeRepeats: false,
         ): () =>
             unawaited(controller.close()),
-        const SingleActivator(
-          LogicalKeyboardKey.f5,
-          includeRepeats: false,
-        ): () =>
-            unawaited(controller.history.reload()),
       },
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(controller.close()),

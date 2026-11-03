@@ -38,6 +38,18 @@ Map<ShortcutActivator, VoidCallback> desktopWindowBindings({
   },
 };
 
+/// Refresh uses Cmd/Ctrl+R everywhere and the F5 convention off macOS.
+Map<ShortcutActivator, VoidCallback> desktopRefreshBindings(
+  VoidCallback onRefresh,
+) => {
+  if (usesDesktopShortcuts) ...{
+    desktopShortcut(LogicalKeyboardKey.keyR): onRefresh,
+    if (defaultTargetPlatform != TargetPlatform.macOS)
+      const SingleActivator(LogicalKeyboardKey.f5, includeRepeats: false):
+          onRefresh,
+  },
+};
+
 /// Supplement Flutter's platform editing defaults only where a convention is
 /// missing. EditableText/SelectableText retain ownership of the actual actions.
 Map<ShortcutActivator, Intent> get desktopTextEditingShortcuts =>

@@ -2160,7 +2160,7 @@
     },
     {
       "id": "RUN-043",
-      "title": "Use one filesystem probe per file progress tick",
+      "title": "Remove filesystem polling from file progress",
       "domain": "runtime",
       "implementation_status": "present_in_source",
       "priority": "P1",
@@ -2174,15 +2174,15 @@
         "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
         "apps/copypaste_flutter/test/features/history/history_file_transfer_test.dart"
       ],
-      "invariant": "Legacy progress fallback performs one stat per tick; typed runtime backends instead consume writer progress events.",
+      "invariant": "No filesystem progress polling remains: typed runtime backends consume writer progress events, and repositories without progress report only start and completion.",
       "allocation_lifetime": "One current FileStat result during the existing active-save progress callback.",
       "bounds": {
-        "legacy_filesystem_probes_per_tick": 1,
-        "legacy_timer_interval_ms": 40,
+        "legacy_filesystem_probes_per_tick": 0,
+        "legacy_timer_interval_ms": null,
         "typed_timer_interval_ms": null
       },
-      "cancellation": "Existing timer cancellation, partial-file rollback and caller cancellation are unchanged.",
-      "tradeoffs": "Source-level reduction from two filesystem probes to one per active tick. No isolated native CPU or IO saving is claimed; event-driven writer progress remains separate work.",
+      "cancellation": "Partial-file rollback and caller cancellation are unchanged; no progress timer exists.",
+      "tradeoffs": "Source-level removal of the dead 40 ms stat fallback; the production repository always reports writer progress (RUN-053). No isolated native CPU or IO saving is claimed.",
       "next_step": "Measure the isolated runtime effect and full-app scenarios on supported platforms; unresolved budgets and missing native evidence prevent qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2432,7 +2432,9 @@
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureSignals.kt",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureChannel.kt",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureSignals.kt",
-        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureStateObserver.kt"
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureStateObserver.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidSmsModuleChannel.kt",
+        "apps/copypaste_flutter/lib/features/modules/controller/sms_access_setup_controller.dart"
       ],
       "invariant": "Initial/reconnect/lag snapshots preserve capture/private/health state; both capabilities must be present before retiring fallback polling.",
       "allocation_lifetime": "One lazy shared watch per engine, released after the last subscriber; Android screenshot listeners follow settings presentation.",
@@ -2441,10 +2443,10 @@
         "fallback_interval_seconds": 3,
         "android_pending_state_tasks": 1,
         "android_setup_fallback_seconds": 1,
-        "android_setup_fallback_condition": "active stream, focused window, unresolved privileged grants"
+        "android_setup_fallback_condition": "active stream, focused window, unresolved privileged grants or SMS grants"
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Legacy/unsupported/disconnected runtime backends retain polling. Android setup uses process-local signals, public own-UID AppOps observers and window resume/focus callbacks; a focused unresolved-grant setup stream retains a one-second fallback for READ_LOGS changes lacking a public listener. Signals coalesce to one pending UI task.",
+      "tradeoffs": "Legacy/unsupported/disconnected runtime backends retain polling. Android setup uses process-local signals, public own-UID AppOps observers and window resume/focus callbacks; a focused unresolved-grant setup stream retains a one-second fallback for READ_LOGS changes lacking a public listener. SMS access setup reuses the same native stream, observers and sampler instead of a Dart one-second poll. Signals coalesce to one pending UI task.",
       "next_step": "Physical Android and installed Windows runtime/resource evidence remain unavailable; qualification is not established.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2519,7 +2521,7 @@
         "progress_events_per_transfer_maximum": 101
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Production background file jobs publish typed operation updates through the existing shared runtime connection. Legacy token writer events remain compatible, and non-runtime repository adapters retain their polling fallback. RUN-056 defines durable ownership and cross-engine presentation; native resource qualification remains unestablished.",
+      "tradeoffs": "Production background file jobs publish typed operation updates through the existing shared runtime connection. Legacy token writer events remain compatible; the filesystem polling fallback was removed (RUN-043). RUN-056 defines durable ownership and cross-engine presentation; native resource qualification remains unestablished.",
       "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
       "native_resource_qualification": {
         "macOS": "not_established",

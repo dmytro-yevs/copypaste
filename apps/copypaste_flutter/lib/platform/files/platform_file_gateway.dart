@@ -1,8 +1,11 @@
 import 'dart:io';
 
+import 'package:dbus/dbus.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:mime/mime.dart';
+
+import 'file_names.dart';
 
 /// Shared native presentation for files created by CopyPaste.
 class PlatformFileGateway {
@@ -22,16 +25,14 @@ class PlatformFileGateway {
     final directory = Directory(
       '${root.path}/${persistent ? "copypaste-downloads" : "clipboard"}',
     );
+    // AndroidClipboardCache owns expiry of the flat cache/clipboard files.
     await directory.create(recursive: true);
-    if (!persistent) {
-      await _removeExpiredStagingFiles(directory);
-    }
-    final safeName = suggestedName
-        .split(RegExp(r'[/\\]'))
-        .last
-        .replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_')
-        .trim();
-    final filename = safeName.isEmpty ? 'copypaste-file' : safeName;
+    // The timestamp prefix stays below 40 bytes of the 255-byte name limit.
+    final filename = safeFileName(
+      suggestedName,
+      maxBytes: 215,
+      fallback: 'copypaste-file',
+    );
     return '${directory.path}/copypaste-${DateTime.now().microsecondsSinceEpoch}-$filename';
   }
 
@@ -54,6 +55,7 @@ class PlatformFileGateway {
       });
       return;
     }
+    if (Platform.isLinux && await _showItemOnLinux(path)) return;
     final result = Platform.isMacOS
         ? await Process.run('open', ['-R', path])
         : Platform.isWindows
@@ -64,20 +66,27 @@ class PlatformFileGateway {
     }
   }
 
-  Future<void> _removeExpiredStagingFiles(Directory directory) async {
-    final cutoff = DateTime.now().subtract(const Duration(days: 1));
-    await for (final entry in directory.list()) {
-      if (entry is! File ||
-          !entry.path.split('/').last.startsWith('copypaste-')) {
-        continue;
-      }
-      try {
-        if ((await entry.stat()).modified.isBefore(cutoff)) {
-          await entry.delete();
-        }
-      } on FileSystemException {
-        // Cache cleanup is best-effort and must not block a new file.
-      }
+  /// Selects the file through the freedesktop file-manager interface. Returns
+  /// false when no file manager implements it, so the folder opens instead.
+  Future<bool> _showItemOnLinux(String path) async {
+    final client = DBusClient.session();
+    try {
+      await client.callMethod(
+        destination: 'org.freedesktop.FileManager1',
+        path: DBusObjectPath('/org/freedesktop/FileManager1'),
+        interface: 'org.freedesktop.FileManager1',
+        name: 'ShowItems',
+        values: [
+          DBusArray.string([Uri.file(path).toString()]),
+          const DBusString(''),
+        ],
+        replySignature: DBusSignature.empty,
+      );
+      return true;
+    } on Object {
+      return false;
+    } finally {
+      await client.close();
     }
   }
 }

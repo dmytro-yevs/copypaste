@@ -244,9 +244,6 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   late final SettingsPresentationLifecycle _settingsPresentation;
   late final UiMemoryController _uiMemory;
 
-  bool _usesUnifiedMacosTitleBar(bool windowReady) =>
-      Platform.isMacOS && _desktopWindow != null && windowReady;
-
   @override
   void initState() {
     super.initState();
@@ -830,7 +827,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   Widget _buildPresentation({required bool windowReady}) {
     if (_uiMemory.suspended) return const SizedBox.expand();
-    final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
+    final unifiedTitleBar = usesUnifiedMacosTitleBar(
+      _desktopWindow,
+      windowReady: windowReady,
+    );
     if (!_macosOnboardingReady ||
         !_androidOnboardingReady ||
         !_linuxOnboardingReady ||

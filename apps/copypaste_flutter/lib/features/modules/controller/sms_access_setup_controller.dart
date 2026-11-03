@@ -31,7 +31,7 @@ class SmsAccessSetupController extends ChangeNotifier {
   bool _refreshFailed = false;
   bool _automaticGrantsAttempted = false;
   int _revision = 0;
-  Timer? _monitor;
+  StreamSubscription<SmsModuleAccessState>? _monitor;
 
   void selectMethod(int index) {
     if (_busy || _disposed || index == _methodIndex) return;
@@ -44,15 +44,27 @@ class SmsAccessSetupController extends ChangeNotifier {
   void setMonitoring(bool enabled) {
     if (_disposed) return;
     if (!enabled) {
-      _monitor?.cancel();
+      unawaited(_monitor?.cancel());
       _monitor = null;
       return;
     }
     if (_monitor != null) return;
-    // ADB can change grants without a Shizuku callback or an app resume.
-    _monitor = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(refresh());
-    });
+    // The native stream owns change detection, including ADB grants.
+    _monitor = _access.smsChanges.listen(
+      (state) {
+        if (_disposed) return;
+        _acceptState(state);
+        _loading = false;
+        notifyListeners();
+        _applyAuthorizedSetup();
+      },
+      onError: (Object _) {
+        if (_disposed) return;
+        _refreshFailed = true;
+        _errorMessage = 'SMS access could not be verified.';
+        notifyListeners();
+      },
+    );
     unawaited(refresh());
   }
 
@@ -170,7 +182,7 @@ class SmsAccessSetupController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _monitor?.cancel();
+    unawaited(_monitor?.cancel());
     super.dispose();
   }
 }

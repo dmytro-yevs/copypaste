@@ -47,6 +47,9 @@ class Access implements ModuleAccessRepository {
   bool failsRead = false;
   Completer<SmsModuleAccessState>? pendingRead;
   int synchronizations = 0;
+  final changes = StreamController<SmsModuleAccessState>.broadcast();
+  @override
+  Stream<SmsModuleAccessState> get smsChanges => changes.stream;
   @override
   Future<SmsModuleAccessState> smsState() async {
     reads++;
@@ -329,14 +332,12 @@ void main() {
     expect(find.byIcon(LucideIcons.copyCheck), findsOneWidget);
     expect(setup.state?.granted, isFalse);
     access.granted = true;
-    await tester.pump(const Duration(seconds: 1));
+    access.changes.add(await access.smsState());
     await tester.pumpAndSettle();
     expect(setup.state?.granted, isTrue);
     expect(access.grants, 0);
     await tester.pumpWidget(const SizedBox.shrink());
-    final reads = access.reads;
-    await tester.pump(const Duration(seconds: 2));
-    expect(access.reads, reads);
+    expect(access.changes.hasListener, isFalse);
   });
 
   testWidgets(
@@ -442,6 +443,10 @@ void main() {
     setup.setMonitoring(true);
     await tester.pump();
     expect(setup.state?.granted, isTrue);
+    access.granted = false;
+    access.changes.add(await access.smsState());
+    await tester.pump();
+    expect(setup.state?.granted, isFalse);
     setup.setMonitoring(false);
   });
 

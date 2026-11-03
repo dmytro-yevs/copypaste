@@ -68,14 +68,13 @@ internal object AndroidClipboardCache {
         val canonicalRoot = root.canonicalFile
         root.listFiles()?.forEach { entry ->
             if (entry.name in protected || entry.lastModified() >= cutoff) return@forEach
-            // PlatformFileGateway owns these flat share/export files. Their
-            // existing one-day grace also applies when no new share occurs.
+            // This cleanup is the only owner of the flat share/export files
+            // that PlatformFileGateway stages here; they keep the same grace.
             if (entry.isFile && entry.name.startsWith("copypaste-")) {
                 runCatching { entry.delete() }
                 return@forEach
             }
-            // Only this writer's UUID directories belong to this cleanup.
-            // Export/share files under the same root have a separate owner.
+            // Only this writer's UUID directories are removed recursively.
             if (unknownPublication !in protected && entry.isDirectory && uuid.matches(entry.name) &&
                 entry.canonicalFile == File(canonicalRoot, entry.name)) {
                 runCatching {

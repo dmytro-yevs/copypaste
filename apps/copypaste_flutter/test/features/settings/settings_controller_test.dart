@@ -848,15 +848,15 @@ void main() {
     TargetPlatform.macOS:
         'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
     TargetPlatform.windows:
-        'Skip automatic capture from identified clipboard owners in this list.',
+        'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
     TargetPlatform.android:
         'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
     TargetPlatform.iOS:
-        'Application exclusions are supported on macOS, Windows, and Android.',
+        'Application exclusions are supported on macOS, Windows, Android, and Linux.',
     TargetPlatform.linux:
         'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
     TargetPlatform.fuchsia:
-        'Application exclusions are supported on macOS, Windows, and Android.',
+        'Application exclusions are supported on macOS, Windows, Android, and Linux.',
   }.entries) {
     testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
       final controller = SettingsController(
