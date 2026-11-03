@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
+import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'onboarding_test_support.dart';
@@ -27,7 +28,7 @@ void main() {
       await controller.continueFromSetup();
 
       expect(setup.launchAtLoginValues, [true]);
-      expect(controller.macos.loginItemStatus, MacosLoginItemStatus.enabled);
+      expect(controller.macos.startupStatus, LaunchAtLoginStatus.enabled);
       expect(controller.noticeMessage, isNull);
     },
   );

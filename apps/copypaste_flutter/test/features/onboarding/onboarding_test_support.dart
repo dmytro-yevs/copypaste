@@ -14,12 +14,16 @@ OnboardingController macosOnboarding({
   required OnboardingStore store,
   required MacosSetupGateway setup,
 }) => OnboardingController(
-  setup: MacosOnboardingSetup(store: store, setup: setup),
+  setup: MacosOnboardingSetup(
+    store: store,
+    setup: setup,
+    startup: MacosLaunchAtLoginGateway(setup),
+  ),
 );
 
 OnboardingController windowsOnboarding({
   required OnboardingStore store,
-  LaunchAtLoginGateway? startup,
+  required LaunchAtLoginGateway startup,
 }) => OnboardingController(
   setup: WindowsOnboardingSetup(store: store, startup: startup),
 );
@@ -28,7 +32,11 @@ OnboardingController linuxOnboarding({
   required OnboardingStore store,
   required LinuxIntegrationPort integration,
 }) => OnboardingController(
-  setup: LinuxOnboardingSetup(store: store, integration: integration),
+  setup: LinuxOnboardingSetup(
+    store: store,
+    integration: integration,
+    startup: LinuxLaunchAtLoginGateway(integration),
+  ),
 );
 
 OnboardingController androidOnboarding({

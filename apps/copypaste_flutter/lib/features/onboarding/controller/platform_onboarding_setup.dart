@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../../platform/android/android_capture_setup_gateway.dart';
 import '../../../platform/macos/macos_setup_gateway.dart';
 import '../../../platform/permissions/linux_integration.dart';
+import '../../../platform/startup/launch_at_login.dart';
 import '../repository/android_onboarding_store.dart';
 import '../repository/onboarding_store.dart';
 import 'android_onboarding_setup.dart';
@@ -12,13 +13,18 @@ import 'onboarding_setup.dart';
 import 'windows_onboarding_setup.dart';
 
 /// Creates the setup step for the host platform, or null when it has none.
-OnboardingSetup? platformOnboardingSetup() {
+///
+/// [startup] is the host start-at-login adapter shared with Settings.
+OnboardingSetup? platformOnboardingSetup({
+  required LaunchAtLoginGateway startup,
+}) {
   if (Platform.isMacOS) {
     return MacosOnboardingSetup(
       store: SharedPreferencesOnboardingStore(
         platform: OnboardingPlatform.macos,
       ),
       setup: MethodChannelMacosSetupGateway(),
+      startup: startup,
     );
   }
   if (Platform.isWindows) {
@@ -26,6 +32,7 @@ OnboardingSetup? platformOnboardingSetup() {
       store: SharedPreferencesOnboardingStore(
         platform: OnboardingPlatform.windows,
       ),
+      startup: startup,
     );
   }
   if (Platform.isLinux) {
@@ -34,6 +41,7 @@ OnboardingSetup? platformOnboardingSetup() {
         platform: OnboardingPlatform.linux,
       ),
       integration: MethodChannelLinuxIntegrationPort(),
+      startup: startup,
     );
   }
   if (Platform.isAndroid) {

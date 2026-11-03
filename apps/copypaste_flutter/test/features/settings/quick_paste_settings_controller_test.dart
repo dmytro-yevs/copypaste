@@ -416,6 +416,9 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   Future<bool> registerCopypasteUri() async => true;
 
   @override
+  Future<bool> startAtLogin() async => value.startAtLogin;
+
+  @override
   Future<bool> setStartAtLogin(bool enabled) async => true;
 
   @override

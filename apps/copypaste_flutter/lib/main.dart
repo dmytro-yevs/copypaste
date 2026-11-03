@@ -188,9 +188,8 @@ class CopyPasteRoot extends StatefulWidget {
 }
 
 class _CopyPasteRootState extends State<CopyPasteRoot> {
-  final _launchAtLogin = LaunchAtLoginController(
-    platformLaunchAtLoginGateway(),
-  );
+  final _startupGateway = platformLaunchAtLoginGateway();
+  late final _launchAtLogin = LaunchAtLoginController(_startupGateway);
   late final AppNavigationController _navigation = AppNavigationController();
   late final DesktopWindowController? _desktopWindow = widget.desktopWindow;
   late final AppUpdateController? _appUpdateController =
@@ -574,7 +573,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     final injected = widget.onboardingController;
     if (injected != null) {
       _onboarding = injected;
-    } else if (platformOnboardingSetup() case final setup?) {
+    } else if (platformOnboardingSetup(startup: _startupGateway)
+        case final setup?) {
       _onboarding = OnboardingController(setup: setup);
       _ownsOnboarding = true;
     }

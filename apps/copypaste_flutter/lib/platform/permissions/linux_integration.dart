@@ -198,6 +198,9 @@ abstract interface class LinuxIntegrationPort {
 
   Future<bool> openCompanionSetup();
 
+  /// Reads only the XDG autostart state, without probing the daemon.
+  Future<bool> startAtLogin();
+
   Future<bool> setStartAtLogin(bool enabled);
 
   Future<bool> registerCopypasteUri();
@@ -374,6 +377,14 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
   @override
   Future<bool> openCompanionSetup() async =>
       await _channel.invokeMethod<bool>('openCompanionSetup') ?? false;
+
+  @override
+  Future<bool> startAtLogin() async {
+    final status = await _channel.invokeMapMethod<String, Object?>('status');
+    final enabled = status?['startAtLogin'];
+    if (enabled is! bool) throw const FormatException('Invalid Linux status.');
+    return enabled;
+  }
 
   @override
   Future<bool> setStartAtLogin(bool enabled) async =>
