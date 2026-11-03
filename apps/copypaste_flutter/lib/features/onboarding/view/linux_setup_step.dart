@@ -1,103 +1,18 @@
-import 'dart:async';
-
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/setup_setting_row.dart';
-import '../controller/linux_onboarding_controller.dart';
-import 'onboarding_intro.dart';
-import 'onboarding_scaffold.dart';
+import '../controller/linux_onboarding_setup.dart';
 
-class LinuxOnboardingScreen extends StatefulWidget {
-  const LinuxOnboardingScreen({
-    super.key,
-    required this.controller,
-    required this.onFinished,
-  });
+class LinuxSetupStep extends StatelessWidget {
+  const LinuxSetupStep({super.key, required this.setup});
 
-  final LinuxOnboardingController controller;
-  final Future<void> Function() onFinished;
-
-  @override
-  State<LinuxOnboardingScreen> createState() => _LinuxOnboardingScreenState();
-}
-
-class _LinuxOnboardingScreenState extends State<LinuxOnboardingScreen>
-    with WidgetsBindingObserver {
-  LinuxOnboardingController get controller => widget.controller;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        controller.step == LinuxOnboardingStep.integration) {
-      unawaited(controller.refreshIntegration());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
-    builder: (context, child) => OnboardingScaffold(
-      stepIndex: controller.step.index,
-      stepCount: LinuxOnboardingStep.values.length,
-      platform: 'Linux',
-      busy: controller.busy,
-      errorMessage: controller.errorMessage,
-      onBack:
-          controller.step == LinuxOnboardingStep.integration && !controller.busy
-          ? controller.showPreviousStep
-          : null,
-      action: Button.primary(
-        onPressed: controller.busy
-            ? null
-            : switch (controller.step) {
-                LinuxOnboardingStep.welcome => controller.showIntegration,
-                LinuxOnboardingStep.integration =>
-                  controller.continueFromIntegration,
-                LinuxOnboardingStep.sync => _finish,
-              },
-        child: Text(
-          controller.step == LinuxOnboardingStep.sync
-              ? 'Get started'
-              : 'Continue',
-        ),
-      ),
-      child: switch (controller.step) {
-        LinuxOnboardingStep.welcome => const OnboardingIntro.welcome(),
-        LinuxOnboardingStep.integration => _IntegrationSetup(
-          controller: controller,
-        ),
-        LinuxOnboardingStep.sync => const OnboardingIntro.ready(),
-      },
-    ),
-  );
-
-  Future<void> _finish() async {
-    if (await controller.finish()) await widget.onFinished();
-  }
-}
-
-class _IntegrationSetup extends StatelessWidget {
-  const _IntegrationSetup({required this.controller});
-
-  final LinuxOnboardingController controller;
+  final LinuxOnboardingSetup setup;
 
   @override
   Widget build(BuildContext context) {
-    final status = controller.status;
+    final status = setup.status;
     if (status == null) {
       return const Text('Checking your Linux desktop session.');
     }
@@ -164,9 +79,9 @@ class _IntegrationSetup extends StatelessWidget {
                   action: companionReady
                       ? null
                       : Button.secondary(
-                          onPressed: controller.busy
+                          onPressed: setup.busy
                               ? null
-                              : controller.openCompanionSetup,
+                              : setup.openCompanionSetup,
                           child: const Text('Open setup'),
                         ),
                 ),
@@ -190,9 +105,9 @@ class _IntegrationSetup extends StatelessWidget {
                       status.remoteDesktop ==
                           LinuxRemoteDesktopState.consentRequired
                       ? Button.secondary(
-                          onPressed: controller.busy
+                          onPressed: setup.busy
                               ? null
-                              : controller.requestRemoteDesktop,
+                              : setup.requestRemoteDesktop,
                           child: const Text('Allow keyboard control'),
                         )
                       : null,
@@ -218,9 +133,9 @@ class _IntegrationSetup extends StatelessWidget {
                   state: status.startAtLogin
                       ? CheckboxState.checked
                       : CheckboxState.unchecked,
-                  onChanged: controller.busy
+                  onChanged: setup.busy
                       ? null
-                      : (state) => controller.setStartAtLogin(
+                      : (state) => setup.setStartAtLogin(
                           state == CheckboxState.checked,
                         ),
                   trailing: const Text('Enable'),
@@ -239,9 +154,9 @@ class _IntegrationSetup extends StatelessWidget {
                 action: status.uriRegistered
                     ? null
                     : Button.secondary(
-                        onPressed: controller.busy
+                        onPressed: setup.busy
                             ? null
-                            : controller.registerCopypasteUri,
+                            : setup.registerCopypasteUri,
                         child: const Text('Register links'),
                       ),
               ),
@@ -260,7 +175,7 @@ class _IntegrationSetup extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: Button.ghost(
-            onPressed: controller.busy ? null : controller.refreshIntegration,
+            onPressed: setup.busy ? null : setup.refresh,
             child: const Text('Check again'),
           ),
         ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,19 +44,20 @@ void main() {
   test(
     'completion serializes persistence and retries only after an actual failure',
     () async {
-      final controller = _Controller();
+      final setup = _Setup();
+      final controller = await _ready(setup);
       final pending = Completer<void>();
-      final first = controller.finish(() => pending.future);
+      setup.persist = () => pending.future;
+      final first = controller.finish();
       expect(controller.busy, isTrue);
-      expect(
-        await controller.finish(() async => fail('duplicate persistence')),
-        isFalse,
-      );
+      setup.persist = () async => fail('duplicate persistence');
+      expect(await controller.finish(), isFalse);
       pending.completeError(StateError('storage failed'));
       expect(await first, isFalse);
       expect(controller.complete, isFalse);
       expect(controller.errorMessage, isNotNull);
-      expect(await controller.finish(() async {}), isTrue);
+      setup.persist = () async {};
+      expect(await controller.finish(), isTrue);
       expect(controller.complete, isTrue);
       expect(controller.errorMessage, isNull);
       controller.dispose();
@@ -65,20 +67,87 @@ void main() {
   test(
     'late completion after disposal never completes the setup flow',
     () async {
-      final controller = _Controller();
+      final setup = _Setup();
+      final controller = await _ready(setup);
       final pending = Completer<void>();
-      final result = controller.finish(() => pending.future);
+      setup.persist = () => pending.future;
+      final result = controller.finish();
       controller.dispose();
       pending.complete();
       expect(await result, isFalse);
       expect(controller.complete, isFalse);
     },
   );
+
+  test(
+    'visible setup refreshes on resume or follows the change stream',
+    () async {
+      final refreshing = _Setup();
+      final flow = OnboardingController(setup: refreshing);
+      addTearDown(flow.dispose);
+      await flow.initialize();
+      flow.setAttached(true);
+      flow.setForeground(false);
+      flow.setForeground(true);
+      expect(refreshing.refreshes, 0, reason: 'Welcome is not the setup step.');
+      await flow.showSetup();
+      flow.setForeground(false);
+      flow.setForeground(true);
+      expect(refreshing.refreshes, 1);
+
+      final streaming = _Setup(monitorsChanges: true);
+      final monitored = OnboardingController(setup: streaming);
+      addTearDown(monitored.dispose);
+      await monitored.initialize();
+      monitored.setAttached(true);
+      await monitored.showSetup();
+      expect(streaming.monitoring, isTrue);
+      monitored.setForeground(false);
+      expect(streaming.monitoring, isFalse);
+      monitored.setForeground(true);
+      expect(streaming.monitoring, isTrue);
+      expect(streaming.refreshes, 0);
+      monitored.showPreviousStep();
+      expect(streaming.monitoring, isFalse);
+    },
+  );
 }
 
-class _Controller extends OnboardingController {
-  Future<bool> finish(Future<void> Function() persist) =>
-      finishOnboarding(canFinish: true, persist: persist);
+Future<OnboardingController> _ready(_Setup setup) async {
+  final controller = OnboardingController(setup: setup);
+  await controller.initialize();
+  await controller.showSetup();
+  expect(await controller.continueFromSetup(), isTrue);
+  expect(controller.step, OnboardingStep.ready);
+  return controller;
+}
+
+class _Setup extends OnboardingSetup {
+  _Setup({this.monitorsChanges = false});
+
+  @override
+  final bool monitorsChanges;
+  Future<void> Function() persist = () async {};
+  int refreshes = 0;
+  bool monitoring = false;
+
+  @override
+  String get platformLabel => 'Test';
+
+  @override
+  Future<OnboardingResume> restore() async => OnboardingResume.welcome;
+
+  @override
+  Future<bool> apply() async => true;
+
+  @override
+  Future<void> persistCompletion() => persist();
+
+  @override
+  Future<void> refresh() async => refreshes++;
+
+  @override
+  void setMonitoring(bool enabled) => monitoring = enabled;
 }
 
 class _Preferences implements SharedPreferencesAsync {

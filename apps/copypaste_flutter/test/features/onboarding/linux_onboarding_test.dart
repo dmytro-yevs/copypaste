@@ -1,9 +1,12 @@
-import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_setup.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/view/linux_onboarding_screen.dart';
+import 'package:copypaste_flutter/features/onboarding/view/onboarding_screen.dart';
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import 'onboarding_test_support.dart';
 
 void main() {
   test('failed readiness refresh cannot advance using stale success', () async {
@@ -18,24 +21,24 @@ void main() {
         screenshotProtection: false,
       ),
     );
-    final controller = LinuxOnboardingController(
+    final controller = linuxOnboarding(
       store: MemoryOnboardingStore(),
       integration: integration,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    await controller.showIntegration();
-    expect(controller.integrationReady, isTrue);
+    await controller.showSetup();
+    expect(controller.linux.integrationReady, isTrue);
 
     integration.failStatus = true;
-    await controller.continueFromIntegration();
-    expect(controller.step, LinuxOnboardingStep.integration);
+    await controller.continueFromSetup();
+    expect(controller.step, OnboardingStep.setup);
     expect(controller.errorMessage, contains('could not be refreshed'));
     expect(await controller.finish(), isFalse);
 
     integration.failStatus = false;
-    await controller.continueFromIntegration();
-    expect(controller.step, LinuxOnboardingStep.sync);
+    await controller.continueFromSetup();
+    expect(controller.step, OnboardingStep.ready);
     expect(controller.errorMessage, isNull);
   });
 
@@ -55,16 +58,16 @@ void main() {
           uriRegistered: false,
         ),
       );
-      final controller = LinuxOnboardingController(
+      final controller = linuxOnboarding(
         store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      await controller.showIntegration();
-      await controller.continueFromIntegration();
-      expect(controller.step, LinuxOnboardingStep.integration);
+      await controller.showSetup();
+      await controller.continueFromSetup();
+      expect(controller.step, OnboardingStep.setup);
       expect(
         controller.errorMessage,
         contains('signed GNOME or KDE companion'),
@@ -81,8 +84,8 @@ void main() {
         startAtLogin: false,
         uriRegistered: false,
       );
-      await controller.continueFromIntegration();
-      expect(controller.step, LinuxOnboardingStep.sync);
+      await controller.continueFromSetup();
+      expect(controller.step, OnboardingStep.ready);
     },
   );
 
@@ -100,17 +103,17 @@ void main() {
           screenshotProtection: false,
         ),
       );
-      final controller = LinuxOnboardingController(
+      final controller = linuxOnboarding(
         store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      await controller.showIntegration();
-      await controller.continueFromIntegration();
+      await controller.showSetup();
+      await controller.continueFromSetup();
 
-      expect(controller.step, LinuxOnboardingStep.integration);
+      expect(controller.step, OnboardingStep.setup);
       expect(
         controller.errorMessage,
         contains('Clipboard access is unavailable'),
@@ -125,9 +128,9 @@ void main() {
         quickPaste: true,
         screenshotProtection: false,
       );
-      await controller.continueFromIntegration();
+      await controller.continueFromSetup();
 
-      expect(controller.step, LinuxOnboardingStep.sync);
+      expect(controller.step, OnboardingStep.ready);
     },
   );
 
@@ -145,14 +148,14 @@ void main() {
           screenshotProtection: false,
         ),
       );
-      final controller = LinuxOnboardingController(
+      final controller = linuxOnboarding(
         store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      expect(controller.integrationReady, isFalse);
+      expect(controller.linux.integrationReady, isFalse);
 
       integration.statusValue = const LinuxIntegrationStatus(
         session: LinuxDesktopSession.wayland,
@@ -163,9 +166,9 @@ void main() {
         quickPaste: true,
         screenshotProtection: false,
       );
-      await controller.refreshIntegration();
+      await controller.linux.refresh();
 
-      expect(controller.integrationReady, isFalse);
+      expect(controller.linux.integrationReady, isFalse);
     },
   );
 
@@ -190,13 +193,13 @@ void main() {
           },
         ),
       );
-      final controller = LinuxOnboardingController(
+      final controller = linuxOnboarding(
         store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      expect(controller.integrationReady, isFalse);
+      expect(controller.linux.integrationReady, isFalse);
     },
   );
 
@@ -212,14 +215,14 @@ void main() {
         screenshotProtection: false,
       ),
     );
-    final controller = LinuxOnboardingController(
+    final controller = linuxOnboarding(
       store: MemoryOnboardingStore(),
       integration: integration,
     );
     addTearDown(controller.dispose);
 
     await controller.initialize();
-    expect(controller.integrationReady, isFalse);
+    expect(controller.linux.integrationReady, isFalse);
 
     integration.statusValue = const LinuxIntegrationStatus(
       session: LinuxDesktopSession.wayland,
@@ -230,16 +233,16 @@ void main() {
       quickPaste: true,
       screenshotProtection: false,
     );
-    await controller.showIntegration();
+    await controller.showSetup();
 
-    expect(controller.step, LinuxOnboardingStep.integration);
-    expect(controller.integrationReady, isTrue);
+    expect(controller.step, OnboardingStep.setup);
+    expect(controller.linux.integrationReady, isTrue);
   });
 
   testWidgets('Linux setup states the screenshot protection exception', (
     tester,
   ) async {
-    final controller = LinuxOnboardingController(
+    final controller = linuxOnboarding(
       store: MemoryOnboardingStore(),
       integration: _Integration(
         const LinuxIntegrationStatus(
@@ -257,14 +260,11 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    await controller.showIntegration();
+    await controller.showSetup();
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: LinuxOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -281,7 +281,7 @@ void main() {
   testWidgets('Wayland data control shows the source policy limitation', (
     tester,
   ) async {
-    final controller = LinuxOnboardingController(
+    final controller = linuxOnboarding(
       store: MemoryOnboardingStore(),
       integration: _Integration(
         const LinuxIntegrationStatus(
@@ -304,14 +304,11 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    await controller.showIntegration();
+    await controller.showSetup();
 
     await tester.pumpWidget(
       ShadcnApp(
-        home: LinuxOnboardingScreen(
-          controller: controller,
-          onFinished: () async {},
-        ),
+        home: OnboardingScreen(controller: controller, onFinished: () async {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -340,15 +337,15 @@ void main() {
           screenshotProtection: false,
         ),
       );
-      final controller = LinuxOnboardingController(
+      final controller = linuxOnboarding(
         store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
 
-      await controller.setStartAtLogin(true);
-      await controller.registerCopypasteUri();
+      await controller.linux.setStartAtLogin(true);
+      await controller.linux.registerCopypasteUri();
 
       expect(integration.startAtLoginUpdates, [true]);
       expect(integration.uriRegistrations, 1);
@@ -387,4 +384,8 @@ class _Integration implements LinuxIntegrationPort {
     if (failStatus) throw StateError('Desktop disconnected');
     return statusValue;
   }
+}
+
+extension on OnboardingController {
+  LinuxOnboardingSetup get linux => setup as LinuxOnboardingSetup;
 }

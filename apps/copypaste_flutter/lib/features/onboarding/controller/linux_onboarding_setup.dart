@@ -1,12 +1,10 @@
-import 'onboarding_controller.dart';
-
 import '../../../platform/permissions/linux_integration.dart';
 import '../repository/onboarding_store.dart';
+import 'onboarding_setup.dart';
 
-enum LinuxOnboardingStep { welcome, integration, sync }
-
-class LinuxOnboardingController extends OnboardingController {
-  LinuxOnboardingController({
+/// Verified desktop integration setup for Linux.
+class LinuxOnboardingSetup extends OnboardingSetup {
+  LinuxOnboardingSetup({
     required OnboardingStore store,
     required LinuxIntegrationPort integration,
   }) : _store = store,
@@ -15,11 +13,10 @@ class LinuxOnboardingController extends OnboardingController {
   final OnboardingStore _store;
   final LinuxIntegrationPort _integration;
 
-  LinuxOnboardingStep _step = LinuxOnboardingStep.welcome;
   LinuxIntegrationStatus? _status;
-  bool _initialized = false;
 
-  LinuxOnboardingStep get step => _step;
+  @override
+  String get platformLabel => 'Linux';
   LinuxIntegrationStatus? get status => _status;
 
   bool get integrationReady {
@@ -38,41 +35,30 @@ class LinuxOnboardingController extends OnboardingController {
     };
   }
 
-  Future<void> initialize() async {
-    if (_initialized) return;
+  @override
+  Future<OnboardingResume> restore() async {
     busy = true;
     notifyIfActive();
     try {
-      complete = await _store.isComplete();
-      await _refresh();
-      errorMessage = null;
-    } catch (_) {
-      errorMessage = 'CopyPaste could not read Linux integration status.';
+      final complete = await _store.isComplete();
+      try {
+        await _refresh();
+        errorMessage = null;
+      } catch (_) {
+        errorMessage = 'CopyPaste could not read Linux integration status.';
+      }
+      return complete ? OnboardingResume.complete : OnboardingResume.welcome;
     } finally {
-      _initialized = true;
       busy = false;
       notifyIfActive();
     }
   }
 
-  Future<void> showIntegration() async {
-    if (busy || _step != LinuxOnboardingStep.welcome) return;
-    _step = LinuxOnboardingStep.integration;
-    notifyIfActive();
-    await _run(_refresh);
-  }
+  @override
+  Future<void> enter() => _run(_refresh);
 
-  void showPreviousStep() {
-    if (busy) return;
-    _step = switch (_step) {
-      LinuxOnboardingStep.welcome => LinuxOnboardingStep.welcome,
-      LinuxOnboardingStep.integration => LinuxOnboardingStep.welcome,
-      LinuxOnboardingStep.sync => LinuxOnboardingStep.integration,
-    };
-    notifyIfActive();
-  }
-
-  Future<void> refreshIntegration() => _run(_refresh);
+  @override
+  Future<void> refresh() => _run(_refresh);
 
   Future<void> openCompanionSetup() => _run(() async {
     if (!await _integration.openCompanionSetup()) {
@@ -102,8 +88,9 @@ class LinuxOnboardingController extends OnboardingController {
     await _refresh();
   });
 
-  Future<void> continueFromIntegration() async {
-    if (busy) return;
+  @override
+  Future<bool> apply() async {
+    if (busy) return false;
     var refreshed = false;
     await _run(() async {
       await _refresh();
@@ -111,22 +98,15 @@ class LinuxOnboardingController extends OnboardingController {
     });
     // A failed probe must not turn a previously ready snapshot into current
     // permission to advance. Preserve the refresh error and allow a retry.
-    if (!refreshed || disposed) return;
-    if (busy || integrationReady) {
-      if (integrationReady) {
-        _step = LinuxOnboardingStep.sync;
-        notifyIfActive();
-      }
-      return;
-    }
+    if (!refreshed || disposed || busy) return false;
+    if (integrationReady) return true;
     errorMessage = _integrationRequirement();
     notifyIfActive();
+    return false;
   }
 
-  Future<bool> finish() => finishOnboarding(
-    canFinish: _step == LinuxOnboardingStep.sync,
-    persist: _store.markComplete,
-  );
+  @override
+  Future<void> persistCompletion() => _store.markComplete();
 
   Future<void> _run(Future<void> Function() action) async {
     if (busy) return;

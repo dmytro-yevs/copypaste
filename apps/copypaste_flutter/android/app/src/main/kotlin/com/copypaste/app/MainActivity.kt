@@ -170,7 +170,9 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/startup")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "getEnabled" -> result.success(StartupPreferences.enabled(this))
+                    "getStatus" -> result.success(
+                        if (StartupPreferences.enabled(this)) "enabled" else "disabled",
+                    )
                     "setEnabled" -> {
                         val enabled = call.argument<Boolean>("enabled")
                         if (enabled == null) result.error("invalid_arguments", null, null)

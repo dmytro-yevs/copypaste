@@ -829,7 +829,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 startup.error ??
                 switch (startup.status) {
                   LaunchAtLoginStatus.requiresApproval =>
-                    'Allow CopyPaste in System Settings → General → Login Items.',
+                    defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Disabled in Task Manager. Enable CopyPaste in Settings → Apps → Startup.'
+                        : 'Allow CopyPaste in System Settings → General → Login Items.',
                   LaunchAtLoginStatus.unavailable =>
                     'Automatic startup is unavailable in this installation.',
                   _ =>

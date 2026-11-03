@@ -1,15 +1,13 @@
 import 'dart:async';
 
-import 'onboarding_controller.dart';
-
 import '../../../platform/android/android_capture_setup_gateway.dart';
 import '../../../platform/clipboard/clipboard_writer.dart';
 import '../repository/android_onboarding_store.dart';
+import 'onboarding_setup.dart';
 
-enum AndroidOnboardingStep { welcome, capture, sync }
-
-class AndroidOnboardingController extends OnboardingController {
-  AndroidOnboardingController({
+/// Full or Limited clipboard capture setup for Android.
+class AndroidOnboardingSetup extends OnboardingSetup {
+  AndroidOnboardingSetup({
     required AndroidOnboardingStore store,
     required AndroidCaptureSetupGateway setup,
     ClipboardWriter clipboard = const SystemClipboardWriter(),
@@ -21,11 +19,10 @@ class AndroidOnboardingController extends OnboardingController {
   final AndroidCaptureSetupGateway _setup;
   final ClipboardWriter _clipboard;
 
-  AndroidOnboardingStep _step = AndroidOnboardingStep.welcome;
+  bool _current = false;
   AndroidCaptureMode _selectedMode = AndroidCaptureMode.full;
   AndroidCaptureSetupMethod _method = AndroidCaptureSetupMethod.shizuku;
   AndroidCaptureSetupState? _setupState;
-  bool _initialized = false;
   bool _verifying = false;
   bool _verified = false;
   int? _verificationBaseline;
@@ -33,14 +30,18 @@ class AndroidOnboardingController extends OnboardingController {
   bool _automaticGrantsAttempted = false;
   bool _grantError = false;
 
-  AndroidOnboardingStep get step => _step;
+  @override
+  String get platformLabel => 'Android';
+  @override
+  bool get monitorsChanges => true;
+  @override
+  bool get reopenable => true;
   AndroidCaptureMode get mode => _setupState?.backgroundCaptureRunning == true
       ? AndroidCaptureMode.full
       : AndroidCaptureMode.limited;
   AndroidCaptureMode get selectedMode => _selectedMode;
   AndroidCaptureSetupMethod get method => _method;
   AndroidCaptureSetupState? get setupState => _setupState;
-  bool get initialized => _initialized;
   bool get verifying => _verifying;
   bool get verified => _verified;
   String get adbCommandText => _setupState?.adbCommands.join('\n') ?? '';
@@ -57,10 +58,12 @@ class AndroidOnboardingController extends OnboardingController {
     }
   }
 
-  bool get canContinueCapture =>
+  @override
+  bool get canContinue =>
       !busy && (_selectedMode == AndroidCaptureMode.limited || _verified);
 
-  /// Observe Android only while the setup screen is visible and resumed.
+  /// Observe Android only while the setup step is visible and resumed.
+  @override
   void setMonitoring(bool enabled) {
     if (disposed) return;
     if (!enabled) {
@@ -83,54 +86,49 @@ class AndroidOnboardingController extends OnboardingController {
     unawaited(refresh());
   }
 
-  Future<void> initialize() async {
-    if (_initialized) return;
+  @override
+  Future<OnboardingResume> restore() async {
     busy = true;
     notifyIfActive();
     try {
       final progress = await _store.read();
       _method = progress.method;
-      complete = progress.complete;
-      _step = progress.captureStarted
-          ? AndroidOnboardingStep.capture
-          : AndroidOnboardingStep.welcome;
+      _current = !progress.complete && progress.captureStarted;
       _verificationBaseline = progress.verificationBaseline;
       _verifying = _verificationBaseline != null;
       _acceptState(await _setup.state());
       _selectedMode = progress.complete || mode == AndroidCaptureMode.full
           ? mode
           : progress.mode;
-      if (complete && !await _setup.setForegroundCaptureEnabled(true)) {
+      if (progress.complete &&
+          !await _setup.setForegroundCaptureEnabled(true)) {
         errorMessage = 'Clipboard intake could not be enabled.';
       } else {
         errorMessage = null;
       }
+      return progress.complete
+          ? OnboardingResume.complete
+          : _current
+          ? OnboardingResume.setup
+          : OnboardingResume.welcome;
     } catch (_) {
       errorMessage = 'CopyPaste could not read Android setup state.';
+      return OnboardingResume.welcome;
     } finally {
-      _initialized = true;
       busy = false;
       notifyIfActive();
     }
   }
 
-  void showCapture() {
-    if (busy || _step != AndroidOnboardingStep.welcome) return;
-    _step = AndroidOnboardingStep.capture;
+  @override
+  Future<void> enter() async {
+    _current = true;
     unawaited(_saveCaptureProgress());
-    notifyIfActive();
     _applyAuthorizedSetup();
   }
 
-  void showPreviousStep() {
-    if (busy) return;
-    _step = switch (_step) {
-      AndroidOnboardingStep.welcome => AndroidOnboardingStep.welcome,
-      AndroidOnboardingStep.capture => AndroidOnboardingStep.welcome,
-      AndroidOnboardingStep.sync => AndroidOnboardingStep.capture,
-    };
-    notifyIfActive();
-  }
+  @override
+  void leave() => _current = false;
 
   Future<void> selectMode(AndroidCaptureMode mode) async {
     if (busy || _selectedMode == mode) return;
@@ -159,6 +157,7 @@ class AndroidOnboardingController extends OnboardingController {
     _applyAuthorizedSetup();
   }
 
+  @override
   Future<void> refresh() async {
     if (disposed) return;
     try {
@@ -219,7 +218,7 @@ class AndroidOnboardingController extends OnboardingController {
     if (disposed ||
         busy ||
         _automaticGrantsAttempted ||
-        _step != AndroidOnboardingStep.capture ||
+        !_current ||
         _selectedMode != AndroidCaptureMode.full ||
         _method != AndroidCaptureSetupMethod.shizuku ||
         state == null ||
@@ -291,34 +290,36 @@ class AndroidOnboardingController extends OnboardingController {
     }
   }
 
-  Future<void> continueFromCapture() async {
-    if (!canContinueCapture) return;
+  @override
+  Future<bool> apply() async {
+    if (!canContinue) return false;
     busy = true;
     errorMessage = null;
     notifyIfActive();
     try {
       if (!await _setup.setForegroundCaptureEnabled(true)) {
         errorMessage = 'Clipboard intake could not be enabled.';
-        return;
+        return false;
       }
       // Capture setup is complete before the optional pairing screen. A process
       // restart must not require the user to repeat verified permissions.
       await _store.markComplete(mode: _selectedMode, method: _method);
-      _step = AndroidOnboardingStep.sync;
+      return true;
     } catch (_) {
       errorMessage = 'CopyPaste could not save onboarding progress.';
+      return false;
     } finally {
       busy = false;
       notifyIfActive();
     }
   }
 
-  Future<bool> finish() => finishOnboarding(
-    canFinish: _step == AndroidOnboardingStep.sync,
-    persist: () => _store.markComplete(mode: _selectedMode, method: _method),
-  );
+  @override
+  Future<void> persistCompletion() =>
+      _store.markComplete(mode: _selectedMode, method: _method);
 
-  Future<bool> reopenCaptureSetup() async {
+  @override
+  Future<bool> reopen() async {
     if (busy) return false;
     busy = true;
     errorMessage = null;
@@ -326,8 +327,7 @@ class AndroidOnboardingController extends OnboardingController {
     try {
       _acceptState(await _setup.state());
       await _store.writeCaptureProgress();
-      complete = false;
-      _step = AndroidOnboardingStep.capture;
+      _current = true;
       _selectedMode = mode;
       _automaticGrantsAttempted = false;
       return true;
