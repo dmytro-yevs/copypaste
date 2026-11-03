@@ -8,6 +8,7 @@ members = [
     "crates/copypaste-clock",
     "crates/copypaste-feedback",
     "crates/copypaste-retry",
+    "crates/copypaste-process",
     "crates/copypaste-fs",
     "crates/copypaste-ipc",
     "crates/copypaste-runtime-log",

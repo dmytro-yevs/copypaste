@@ -347,38 +347,20 @@ fn windows_model() -> Option<String> {
 /// Runs a platform probe without ever allowing a child process to hold up
 /// discovery or runtime startup. A timed-out child is killed and reaped before
 /// returning the fallback value.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 fn command_output_with_timeout(
     command: &mut std::process::Command,
     timeout: std::time::Duration,
 ) -> Option<std::process::Output> {
     use std::process::Stdio;
 
-    let child = command
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    child_output_with_timeout(child, timeout)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn child_output_with_timeout(
-    mut child: std::process::Child,
-    timeout: std::time::Duration,
-) -> Option<std::process::Output> {
-    let deadline = std::time::Instant::now().checked_add(timeout)?;
-    loop {
-        match child.try_wait().ok()? {
-            Some(_) => return child.wait_with_output().ok(),
-            None if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            None => std::thread::sleep(std::time::Duration::from_millis(5)),
-        }
-    }
+    copypaste_process::wait_or_kill(&mut child, timeout).ok()??;
+    child.wait_with_output().ok()
 }
 
 #[cfg(test)]

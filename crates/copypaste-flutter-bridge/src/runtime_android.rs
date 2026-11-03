@@ -261,7 +261,7 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_drainHost(
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_begin(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
     host: jlong,
     cancellation: JObject,
@@ -981,7 +981,7 @@ pub(crate) async fn watch(
     let mut events = runtime.subscribe_events();
     let mut runtime_events = runtime.subscribe_runtime_events();
     let mut transfers = runtime.store.subscribe_file_operations();
-    if sink.add(crate::client::runtime_ready(true)).is_err() {
+    if sink.add(crate::client::runtime_ready()).is_err() {
         return Ok(());
     }
     if !push_capture_snapshot(runtime, &sink).await? {
@@ -997,7 +997,7 @@ pub(crate) async fn watch(
             event = events.recv() => match event {
                 Ok(event) => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(event), capture: None, progress: None }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if sink.add(crate::client::runtime_ready()).is_err() { return Ok(()); }
                     if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
                     continue;
                 },
@@ -1007,7 +1007,7 @@ pub(crate) async fn watch(
             event = runtime_events.recv() => match event {
                 Ok(event) => crate::client::typed_runtime_event(event),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if sink.add(crate::client::runtime_ready()).is_err() { return Ok(()); }
                     if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
                     continue;
                 },

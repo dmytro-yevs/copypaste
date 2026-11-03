@@ -64,6 +64,9 @@ use serde::{Deserialize, Serialize};
 /// Bumped on any breaking change to the request or response shape.
 pub const PROTOCOL_VERSION: u32 = 6;
 
+/// The one stdout line an `--app-parent` daemon writes once it is listening.
+pub const APP_PARENT_READY_LINE: &str = "copypaste-daemon-listening";
+
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {

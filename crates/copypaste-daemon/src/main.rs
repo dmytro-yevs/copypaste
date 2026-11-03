@@ -41,7 +41,9 @@ use crate::p2p::P2p;
 #[cfg(not(target_os = "macos"))]
 use crate::runtime::run_with_bounded_shutdown;
 use crate::settings::Settings;
-use crate::startup::{halt_or_fail, relocate, wait_for_shutdown, watch_app_parent};
+use crate::startup::{
+    announce_listening, halt_or_fail, relocate, wait_for_shutdown, watch_app_parent,
+};
 
 pub use crate::state::AppState;
 
@@ -226,6 +228,7 @@ async fn run() -> anyhow::Result<()> {
     // the *other* side dials in or a human runs `copypaste sync`.
     let peer_sync = tokio::spawn(p2p::poll::run(Arc::clone(&state), shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
+    announce_listening();
 
     // Either a signal or a client asking. One path out, so the IPC verb
     // unwinds exactly as SIGTERM does rather than through a second teardown

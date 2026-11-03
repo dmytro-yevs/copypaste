@@ -79,6 +79,7 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
+    #[cfg(not(target_os = "android"))]
     pub(crate) fn daemon_unreachable() -> Self {
         Self {
             code: "daemon_unreachable".into(),
@@ -86,6 +87,7 @@ impl RuntimeError {
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     pub(crate) fn timeout() -> Self {
         Self {
             code: "runtime_timeout".into(),
@@ -104,14 +106,6 @@ impl RuntimeError {
         Self {
             code: "export_write_failed".into(),
             message: "The text history export could not be saved.".into(),
-        }
-    }
-
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub(crate) fn android_runtime_unavailable() -> Self {
-        Self {
-            code: "android_runtime_unavailable".into(),
-            message: "The Android runtime is not available yet.".into(),
         }
     }
 

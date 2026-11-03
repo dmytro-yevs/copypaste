@@ -3,7 +3,6 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    time::Instant,
 };
 
 use core_foundation::url::CFURL;
@@ -136,7 +135,6 @@ fn collect(
     timeout: std::time::Duration,
     limit: usize,
 ) -> Result<(i32, Zeroizing<Vec<u8>>), CryptoError> {
-    let deadline = Instant::now() + timeout;
     let result = (|| {
         if let Some(input) = input {
             child
@@ -146,15 +144,9 @@ fn collect(
                 .write_all(input)
                 .map_err(|_| unavailable())?;
         }
-        let status = loop {
-            if let Some(status) = child.try_wait().map_err(|_| unavailable())? {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                return Err(unavailable());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
+        let status = copypaste_process::wait_or_kill(&mut child, timeout)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
         let mut output = Zeroizing::new(Vec::with_capacity(limit));
         child
             .stdout
