@@ -37,8 +37,86 @@ pub fn name_for(path: &Path) -> OsString {
     ))
 }
 
+/// Pipe names are machine-global, so another account can create ours first;
+/// the server's process must run as this account before anything is sent.
 pub async fn connect(path: &Path) -> io::Result<Stream> {
-    Stream::connect_by_path(name_for(path)).await
+    let stream = Stream::connect_by_path(name_for(path)).await?;
+    account::ensure_own_account(stream.server_process_id()?)?;
+    Ok(stream)
+}
+
+/// The only `unsafe` in this crate: reading which account a process runs as.
+#[allow(unsafe_code)]
+mod account {
+    use std::io;
+
+    pub(super) fn ensure_own_account(pid: u32) -> io::Result<()> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::EqualSid;
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        // SAFETY: returns a pseudo-handle that needs no closing.
+        let ours = token_user(unsafe { GetCurrentProcess() })?;
+        // SAFETY: plain syscall; a null handle is checked below.
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() {
+            return Err(super::super::foreign_endpoint());
+        }
+        let theirs = token_user(process);
+        // SAFETY: `process` is a handle this function owns.
+        unsafe { CloseHandle(process) };
+        let theirs = theirs.map_err(|_| super::super::foreign_endpoint())?;
+        // SAFETY: both pointers come from live TOKEN_USER buffers.
+        if unsafe { EqualSid(ours.sid(), theirs.sid()) } == 0 {
+            return Err(super::super::foreign_endpoint());
+        }
+        Ok(())
+    }
+
+    /// A `TOKEN_USER` buffer, `u64`-backed for the struct's pointer alignment.
+    struct TokenUser(Vec<u64>);
+
+    impl TokenUser {
+        fn sid(&self) -> windows_sys::Win32::Security::PSID {
+            // SAFETY: the buffer was filled by GetTokenInformation(TokenUser).
+            unsafe {
+                (*self
+                    .0
+                    .as_ptr()
+                    .cast::<windows_sys::Win32::Security::TOKEN_USER>())
+                .User
+                .Sid
+            }
+        }
+    }
+
+    fn token_user(process: windows_sys::Win32::Foundation::HANDLE) -> io::Result<TokenUser> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::{GetTokenInformation, TokenUser as Class, TOKEN_QUERY};
+        use windows_sys::Win32::System::Threading::OpenProcessToken;
+
+        let mut token = std::ptr::null_mut();
+        // SAFETY: `token` is a valid out pointer.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut len = 0u32;
+        // SAFETY: a size query with no buffer.
+        unsafe { GetTokenInformation(token, Class, std::ptr::null_mut(), 0, &mut len) };
+        let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+        // SAFETY: `buf` holds at least `len` bytes.
+        let ok =
+            unsafe { GetTokenInformation(token, Class, buf.as_mut_ptr().cast(), len, &mut len) };
+        let err = io::Error::last_os_error();
+        // SAFETY: `token` is a handle this function owns.
+        unsafe { CloseHandle(token) };
+        if ok == 0 {
+            return Err(err);
+        }
+        Ok(TokenUser(buf))
+    }
 }
 
 /// A private connected pair for transport tests.
