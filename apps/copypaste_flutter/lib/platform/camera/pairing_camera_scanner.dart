@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:camera/camera.dart';
+import 'package:camera_platform_interface/camera_platform_interface.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'qr_frame.dart';
@@ -189,28 +190,40 @@ class PairingCameraScanner with WidgetsBindingObserver {
   };
 }
 
-/// Production plugin source for macOS, Android, and Windows. The package's
-/// desktop implementation supplies BGRA frames; Android supplies YUV or NV21.
+/// Production desktop source. Android pairing uses the system scanner, so the
+/// app depends on the platform interface and desktop implementation only and
+/// never bundles a mobile camera implementation. Desktop supplies BGRA frames.
 class CameraPluginPairingSource implements PairingCameraSource {
   const CameraPluginPairingSource();
 
   @override
   Future<PairingCameraLease?> open() async {
-    final cameras = await availableCameras();
+    final platform = CameraPlatform.instance;
+    final cameras = await platform.availableCameras();
     if (cameras.isEmpty) {
       return null;
     }
     final camera = _preferredCamera(cameras);
-    final controller = CameraController(
-      camera,
-      ResolutionPreset.medium,
-      enableAudio: false,
-    );
+    int? cameraId;
     try {
-      await controller.initialize();
-      return _CameraPluginPairingLease(controller);
+      final id = await platform.createCameraWithSettings(
+        camera,
+        const MediaSettings(resolutionPreset: ResolutionPreset.medium),
+      );
+      cameraId = id;
+      final initialized = platform.onCameraInitialized(id).first;
+      await platform.initializeCamera(id);
+      final event = await initialized;
+      return _CameraPluginPairingLease(
+        id,
+        camera,
+        event.previewWidth / event.previewHeight,
+      );
+    } on PlatformException catch (error) {
+      if (cameraId != null) await platform.dispose(cameraId);
+      throw CameraException(error.code, error.message);
     } on Object {
-      await controller.dispose();
+      if (cameraId != null) await platform.dispose(cameraId);
       rethrow;
     }
   }
@@ -226,34 +239,46 @@ class CameraPluginPairingSource implements PairingCameraSource {
 }
 
 class _CameraPluginPairingLease implements PairingCameraLease {
-  _CameraPluginPairingLease(this._controller);
+  _CameraPluginPairingLease(this._cameraId, this._camera, this._aspectRatio);
 
-  final CameraController _controller;
+  final int _cameraId;
+  final CameraDescription _camera;
+  final double _aspectRatio;
+  StreamSubscription<CameraImageData>? _frames;
 
   @override
-  Widget get preview => CameraPreview(_controller);
+  Widget get preview => AspectRatio(
+    aspectRatio: _aspectRatio,
+    child: CameraPlatform.instance.buildPreview(_cameraId),
+  );
 
   @override
-  Future<void> startFrames(void Function(QrCameraFrame frame) onFrame) {
-    return _controller.startImageStream((image) {
-      final frame = _toQrFrame(image, _controller.description);
-      if (frame != null) {
-        onFrame(frame);
-      }
-    });
+  Future<void> startFrames(void Function(QrCameraFrame frame) onFrame) async {
+    await _frames?.cancel();
+    _frames = CameraPlatform.instance
+        .onStreamedFrameAvailable(_cameraId)
+        .listen((image) {
+          final frame = _toQrFrame(image);
+          if (frame != null) {
+            onFrame(frame);
+          }
+        });
   }
 
   @override
   Future<void> stopFrames() async {
-    if (_controller.value.isStreamingImages) {
-      await _controller.stopImageStream();
-    }
+    final frames = _frames;
+    _frames = null;
+    await frames?.cancel();
   }
 
   @override
-  Future<void> dispose() => _controller.dispose();
+  Future<void> dispose() async {
+    await stopFrames();
+    await CameraPlatform.instance.dispose(_cameraId);
+  }
 
-  QrCameraFrame? _toQrFrame(CameraImage image, CameraDescription camera) {
+  QrCameraFrame? _toQrFrame(CameraImageData image) {
     final format = switch (image.format.group) {
       ImageFormatGroup.yuv420 => QrFrameFormat.yuv420,
       ImageFormatGroup.nv21 => QrFrameFormat.nv21,
@@ -267,8 +292,8 @@ class _CameraPluginPairingLease implements PairingCameraLease {
       width: image.width,
       height: image.height,
       format: format,
-      rotationDegrees: camera.sensorOrientation,
-      mirrored: camera.lensDirection == CameraLensDirection.front,
+      rotationDegrees: _camera.sensorOrientation,
+      mirrored: _camera.lensDirection == CameraLensDirection.front,
       planes: image.planes
           .map(
             (plane) => QrFramePlane(

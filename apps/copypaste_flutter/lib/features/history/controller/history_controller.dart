@@ -272,9 +272,7 @@ class HistoryController extends ChangeNotifier {
 
   StreamSubscription<HistoryRuntimeEvent>? _watchSubscription;
   Future<void>? _watchCancellation;
-  Timer? _watchReconnectTimer;
   int _watchGeneration = 0;
-  int _watchReconnectAttempts = 0;
   Timer? _searchTimer;
   HistoryQuery _query = const HistoryQuery();
   HistoryFacets _facets = const HistoryFacets();
@@ -767,21 +765,18 @@ class HistoryController extends ChangeNotifier {
     if (_disposed) return;
     _suspended = false;
     spoilers.disconnected();
-    await _ensureWatch(resetBackoff: true);
+    await _ensureWatch();
     await _reloadItemsAndFacets();
     await spoilers.refresh();
     await _awaitCurrentSelectedDetail();
   }
 
-  Future<bool> _ensureWatch({bool resetBackoff = false}) async {
-    if (resetBackoff) {
-      _watchReconnectAttempts = 0;
-      _watchReconnectTimer?.cancel();
-      _watchReconnectTimer = null;
-    }
+  /// The repository watch reconnects itself (RuntimeEventService owns the
+  /// policy). Errors only mark History stale until the next change event.
+  Future<void> _ensureWatch() async {
     await _watchCancellation;
-    if (_disposed || _suspended) return false;
-    if (_watchSubscription != null) return true;
+    if (_disposed || _suspended) return;
+    if (_watchSubscription != null) return;
     final generation = ++_watchGeneration;
     try {
       _watchSubscription = _repository.watch().listen(
@@ -790,10 +785,8 @@ class HistoryController extends ChangeNotifier {
             _watchErrored(generation),
         onDone: () => _watchEnded(generation),
       );
-      return true;
     } catch (_) {
       _watchEnded(generation);
-      return false;
     }
   }
 
@@ -805,7 +798,6 @@ class HistoryController extends ChangeNotifier {
     }
     _organizationChanges.value++;
     unawaited(spoilers.refresh());
-    _watchReconnectAttempts = 0;
     if (_isBulkMutating) {
       _refreshAfterBulkMutation = true;
       return;
@@ -847,7 +839,6 @@ class HistoryController extends ChangeNotifier {
 
   void _watchErrored(int generation) {
     if (generation != _watchGeneration) return;
-    _cancelWatch();
     _watchUnavailable();
   }
 
@@ -856,34 +847,10 @@ class HistoryController extends ChangeNotifier {
     spoilers.disconnected();
     _errorMessage = _watchUnavailableMessage;
     notifyListeners();
-    _scheduleWatchReconnect();
-  }
-
-  void _scheduleWatchReconnect() {
-    if (_watchReconnectTimer != null) return;
-    final generation = _watchGeneration;
-    final delay = switch (_watchReconnectAttempts++) {
-      0 => const Duration(milliseconds: 100),
-      1 => const Duration(milliseconds: 500),
-      _ => const Duration(seconds: 2),
-    };
-    _watchReconnectTimer = Timer(delay, () {
-      _watchReconnectTimer = null;
-      if (_disposed || _suspended || generation != _watchGeneration) return;
-      unawaited(_reconnectWatch());
-    });
-  }
-
-  Future<void> _reconnectWatch() async {
-    if (!await _ensureWatch()) return;
-    if (_disposed || _suspended) return;
-    await _refreshItemsAndFacets(resetWatchBackoff: false);
   }
 
   void _cancelWatch() {
     _watchGeneration++;
-    _watchReconnectTimer?.cancel();
-    _watchReconnectTimer = null;
     final subscription = _watchSubscription;
     _watchSubscription = null;
     if (subscription == null) return;
@@ -899,32 +866,24 @@ class HistoryController extends ChangeNotifier {
     unawaited(cancellation);
   }
 
-  Future<void> _reloadItemsAndFacets({bool resetWatchBackoff = true}) async {
-    await Future.wait([
-      reload(resetWatchBackoff: resetWatchBackoff),
-      refreshFacets(),
-    ]);
+  Future<void> _reloadItemsAndFacets() async {
+    await Future.wait([reload(), refreshFacets()]);
   }
 
-  Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
+  Future<void> _refreshItemsAndFacets() {
     late final Future<void> refresh;
-    refresh =
-        _refreshVisibleItemsAndFacets(
-          resetWatchBackoff: resetWatchBackoff,
-        ).whenComplete(() {
-          if (identical(_visibleItemsRefresh, refresh)) {
-            _visibleItemsRefresh = null;
-          }
-        });
+    refresh = _refreshVisibleItemsAndFacets().whenComplete(() {
+      if (identical(_visibleItemsRefresh, refresh)) {
+        _visibleItemsRefresh = null;
+      }
+    });
     _visibleItemsRefresh = refresh;
     return refresh;
   }
 
-  Future<void> _refreshVisibleItemsAndFacets({
-    bool resetWatchBackoff = true,
-  }) async {
+  Future<void> _refreshVisibleItemsAndFacets() async {
     if (_state != HistoryLoadState.ready) {
-      await _reloadItemsAndFacets(resetWatchBackoff: resetWatchBackoff);
+      await _reloadItemsAndFacets();
       return;
     }
     final epoch = ++_queryEpoch;
@@ -1310,9 +1269,9 @@ class HistoryController extends ChangeNotifier {
     await reload();
   }
 
-  Future<void> reload({bool resetWatchBackoff = true}) async {
+  Future<void> reload() async {
     if (_disposed || _suspended) return;
-    await _ensureWatch(resetBackoff: resetWatchBackoff);
+    await _ensureWatch();
     if (_disposed || _suspended) return;
     if (_draggedPinnedId != null || _isReorderingPinned) {
       _queryEpoch++;

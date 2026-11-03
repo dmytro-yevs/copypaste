@@ -615,23 +615,28 @@ void main() {
       expect(controller.items.single.file?.sourceAvailable, isTrue);
     });
 
-    test('reconnects a completed watch and refreshes missed history', () async {
-      final first = StreamController<HistoryRuntimeEvent>.broadcast();
-      final second = StreamController<HistoryRuntimeEvent>.broadcast();
-      final repository = _RestartingWatchRepository([first, second]);
-      final controller = HistoryController(repository);
-      addTearDown(controller.dispose);
-      addTearDown(second.close);
+    test(
+      'keeps the self-reconnecting watch and refreshes missed history',
+      () async {
+        final watch = StreamController<HistoryRuntimeEvent>.broadcast();
+        final repository = _RestartingWatchRepository([watch]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        addTearDown(watch.close);
 
-      await controller.initialize();
-      expect(repository.watchCalls, 1);
-      repository.current = _clip('after-reconnect');
-      await first.close();
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(repository.watchCalls, 2);
-      expect(controller.items.single.id, 'after-reconnect');
-      expect(controller.errorMessage, isNull);
-    });
+        await controller.initialize();
+        watch.addError(StateError('Runtime watch disconnected'));
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.errorMessage, isNotNull);
+        expect(watch.hasListener, isTrue);
+        repository.current = _clip('after-reconnect');
+        watch.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(repository.watchCalls, 1);
+        expect(controller.items.single.id, 'after-reconnect');
+        expect(controller.errorMessage, isNull);
+      },
+    );
 
     test(
       'suspension cancels the watch before initialize opens a replacement',

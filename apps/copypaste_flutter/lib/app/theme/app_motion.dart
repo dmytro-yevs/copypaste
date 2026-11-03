@@ -22,7 +22,6 @@ abstract final class AppMotion {
   static const Duration settingsHighlightHold = Duration(milliseconds: 1200);
   static const Duration navigation = Duration(milliseconds: 320);
   static const Duration navigationHold = Duration(milliseconds: 375);
-  static const Duration navigationSettle = Duration(milliseconds: 450);
   static const double navigationPressScale = 1.012;
   static const double navigationHoldScale = 1.019;
   static const double navigationPressVelocity = -0.45;
@@ -192,18 +191,15 @@ class AppNavigationMotion {
     );
   }
 
-  void settleSelector(double target) {
-    unawaited(
-      selector.animateWith(
-        SpringSimulation(
-          AppMotion.navigationSelectorSpring,
-          selector.value,
-          target,
-          0,
-        ),
-      ),
-    );
-  }
+  /// Completes when the spring settles, or is cancelled by a new gesture.
+  TickerFuture settleSelector(double target) => selector.animateWith(
+    SpringSimulation(
+      AppMotion.navigationSelectorSpring,
+      selector.value,
+      target,
+      0,
+    ),
+  );
 
   void dispose() {
     press.dispose();

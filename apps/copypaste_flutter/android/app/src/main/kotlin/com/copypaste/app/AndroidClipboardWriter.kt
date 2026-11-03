@@ -60,8 +60,7 @@ internal object AndroidClipboardWriter {
         var staged: File? = null
         val written = runCatching {
             val directory = File(context.cacheDir, "clipboard/${UUID.randomUUID()}").also { it.mkdirs() }
-            val safeName = filename.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
-            val file = File(directory, safeName.ifBlank { "copypaste" })
+            val file = File(directory, safeFileName(filename, fallback = "copypaste"))
             staged = file
             file.writeBytes(bytes)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.clipboard", file)

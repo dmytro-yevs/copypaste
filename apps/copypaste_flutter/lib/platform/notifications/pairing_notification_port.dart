@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -58,26 +57,7 @@ class PlatformPairingNotificationPort implements PairingNotificationPort {
   }
 
   @override
-  Future<bool> requestPermission() async {
-    await _service.initialize();
-    if (Platform.isMacOS) {
-      return await _service.plugin
-              .resolvePlatformSpecificImplementation<
-                MacOSFlutterLocalNotificationsPlugin
-              >()
-              ?.requestPermissions(alert: true, badge: false, sound: true) ??
-          false;
-    }
-    if (Platform.isAndroid) {
-      return await _service.plugin
-              .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin
-              >()
-              ?.requestNotificationsPermission() ??
-          false;
-    }
-    return Platform.isWindows || Platform.isLinux;
-  }
+  Future<bool> requestPermission() => _service.requestPermission(sound: true);
 
   @override
   Future<void> dismiss() async {

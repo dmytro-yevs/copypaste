@@ -18,6 +18,9 @@ class SmsModuleAccessState {
 
 abstract interface class ModuleAccessRepository {
   Future<SmsModuleAccessState> smsState();
+
+  /// Native setup changes, published only while a listener is attached.
+  Stream<SmsModuleAccessState> get smsChanges;
   Future<SmsModuleAccessState> configureSms();
   Future<SmsModuleAccessState> requestSmsNotifications();
   Future<bool> openShizuku();

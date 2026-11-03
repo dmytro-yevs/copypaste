@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -21,9 +20,6 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
           ? AppNotificationService.instance
           : AppNotificationService(plugin: plugin);
 
-  static const _androidCapture = MethodChannel(
-    'com.copypaste.app/android_capture',
-  );
   final AppNotificationService _notifications;
   FlutterLocalNotificationsPlugin get _plugin => _notifications.plugin;
   bool _initialized = false;
@@ -37,24 +33,7 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
   }
 
   @override
-  Future<bool> requestPermission() async {
-    if (Platform.isAndroid) {
-      final state = await _androidCapture.invokeMapMethod<String, Object?>(
-        'requestNotifications',
-      );
-      return state?['notificationGranted'] == true;
-    }
-    await initialize();
-    if (Platform.isMacOS) {
-      return await _plugin
-              .resolvePlatformSpecificImplementation<
-                MacOSFlutterLocalNotificationsPlugin
-              >()
-              ?.requestPermissions(alert: true, badge: false, sound: false) ??
-          false;
-    }
-    return Platform.isWindows || Platform.isLinux;
-  }
+  Future<bool> requestPermission() => _notifications.requestPermission();
 
   @override
   Future<void> showCaptured({CaptureNotificationPreview? preview}) async {

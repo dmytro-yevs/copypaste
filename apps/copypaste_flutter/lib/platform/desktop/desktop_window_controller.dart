@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -70,6 +71,12 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
 
   Future<void> dispose();
 }
+
+/// macOS draws the app header in the native title bar once its window is ready.
+bool usesUnifiedMacosTitleBar(
+  DesktopWindowController? window, {
+  required bool windowReady,
+}) => Platform.isMacOS && window != null && windowReady;
 
 class DesktopWindowController {
   bool _changingFullScreen = false;

@@ -294,14 +294,8 @@ class _AppShellState extends State<AppShell> {
                         unawaited(widget.controller.handleEscape()),
                   desktopShortcut(LogicalKeyboardKey.keyF):
                       widget.controller.findInHistory,
-                  if (widget.onRefresh != null) ...{
-                    desktopShortcut(LogicalKeyboardKey.keyR): widget.onRefresh!,
-                    if (defaultTargetPlatform != TargetPlatform.macOS)
-                      const SingleActivator(
-                        LogicalKeyboardKey.f5,
-                        includeRepeats: false,
-                      ): widget.onRefresh!,
-                  },
+                  if (widget.onRefresh != null)
+                    ...desktopRefreshBindings(widget.onRefresh!),
                   if (defaultTargetPlatform != TargetPlatform.macOS) ...{
                     const SingleActivator(
                       LogicalKeyboardKey.browserBack,
@@ -316,13 +310,10 @@ class _AppShellState extends State<AppShell> {
                         unawaited(widget.controller.handleEscape()),
                   },
                 },
-                SingleActivator(
-                  LogicalKeyboardKey.comma,
-                  meta: defaultTargetPlatform == TargetPlatform.macOS,
-                  control: defaultTargetPlatform != TargetPlatform.macOS,
-                ): () => _selectDestination(
-                  const ValueKey<AppDestination>(AppDestination.settings),
-                ),
+                desktopShortcut(LogicalKeyboardKey.comma): () =>
+                    _selectDestination(
+                      const ValueKey<AppDestination>(AppDestination.settings),
+                    ),
                 const SingleActivator(LogicalKeyboardKey.escape): () async {
                   if (!await widget.controller.handleEscape()) {
                     await widget.onExitFullScreen?.call();

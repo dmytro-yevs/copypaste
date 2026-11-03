@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart';
 
+import '../../../platform/files/file_names.dart';
 import '../../../platform/files/temporary_artifacts.dart';
 
 import '../models/history_models.dart';
@@ -57,8 +58,7 @@ class HistoryFileTransfer {
       final downloads = Directory('${root.path}/copypaste-downloads');
       await downloads.create(recursive: true);
       final destination = await downloads.createTemp('file-');
-      final name = _safeFileName(details.name);
-      final path = '${destination.path}/${name.isEmpty ? 'file' : name}';
+      final path = '${destination.path}/${safeFileName(details.name)}';
       // The runtime may still be writing after a request or presentation fails.
       // It owns partial-file cleanup; keep its directory available for retry.
       await saveTo(clip, path, onProgress: onProgress);
@@ -98,10 +98,9 @@ class HistoryFileTransfer {
           .convert(utf8.encode(clip.id))
           .toString()
           .substring(0, 16);
-      final name = _safeFileName(details.name);
-      var destination = File(
-        '${directory.path}/$id-$digest-${name.isEmpty ? 'file' : name}',
-      );
+      // The id and digest prefix uses 82 bytes of the 255-byte name limit.
+      final name = safeFileName(details.name, maxBytes: 255 - 82);
+      var destination = File('${directory.path}/$id-$digest-$name');
       if (await destination.exists() &&
           (await sha256.bind(destination.openRead()).first).toString() !=
               digest) {
@@ -139,7 +138,6 @@ class HistoryFileTransfer {
     bool Function()? isCancelled,
   }) async {
     final destination = File(destinationPath);
-    final total = clip.file?.sizeBytes;
     var lastPercent = -1;
     void report(double value) {
       final percent = (value * 100).floor();
@@ -150,73 +148,31 @@ class HistoryFileTransfer {
 
     report(0);
     if (_repository case final HistoryFileProgressRepository repository) {
-      final handled = await repository.saveFileWithProgress(
-        clip.id,
-        destination.path,
-        (written, total) {
-          if (total > 0) report((written / total).clamp(0, 0.99));
-        },
-      );
-      if (handled) {
-        // A backend with native cancellation owns the terminal outcome and
-        // cleanup. A late UI flag must not delete its committed destination.
-        if (_repository is! HistoryFileDownloadCancellation &&
-            (isCancelled?.call() ?? false)) {
-          if (await destination.exists()) await destination.delete();
-          throw const HistoryFileTransferCancelled();
-        }
-        report(1);
-        return;
+      await repository.saveFileWithProgress(clip.id, destination.path, (
+        written,
+        total,
+      ) {
+        if (total > 0) report((written / total).clamp(0, 0.99));
+      });
+      // A backend with native cancellation owns the terminal outcome and
+      // cleanup. A late UI flag must not delete its committed destination.
+      if (_repository is! HistoryFileDownloadCancellation &&
+          (isCancelled?.call() ?? false)) {
+        if (await destination.exists()) await destination.delete();
+        throw const HistoryFileTransferCancelled();
       }
+      report(1);
+      return;
     }
     if (isCancelled?.call() ?? false) {
       throw const HistoryFileTransferCancelled();
     }
-    var reading = false;
-    var finished = false;
-    final timer = Timer.periodic(const Duration(milliseconds: 40), (_) async {
-      if (reading || finished) return;
-      reading = true;
-      try {
-        if (total != null && total > 0) {
-          final stat = await destination.stat();
-          if (!finished && stat.type == FileSystemEntityType.file) {
-            report((stat.size / total).clamp(0, 0.99));
-          }
-        }
-      } on FileSystemException {
-        // The writer may be creating or rolling back the destination.
-      } finally {
-        reading = false;
-      }
-    });
-    try {
-      await _repository.saveFile(clip.id, destination.path);
-      if (isCancelled?.call() ?? false) {
-        if (await destination.exists()) await destination.delete();
-        throw const HistoryFileTransferCancelled();
-      }
-      finished = true;
-      report(1);
-    } finally {
-      finished = true;
-      timer.cancel();
+    await _repository.saveFile(clip.id, destination.path);
+    if (isCancelled?.call() ?? false) {
+      if (await destination.exists()) await destination.delete();
+      throw const HistoryFileTransferCancelled();
     }
-  }
-
-  String _safeFileName(String? value) {
-    var name = (value ?? 'file')
-        .split(RegExp(r'[/\\]'))
-        .last
-        .replaceAll(RegExp('[^A-Za-z0-9._ -]'), '_');
-    if (name.length > 100) {
-      final dot = name.lastIndexOf('.');
-      final extension = dot > 0 && name.length - dot <= 16
-          ? name.substring(dot)
-          : '';
-      name = '${name.substring(0, 100 - extension.length)}$extension';
-    }
-    return name.isEmpty ? 'file' : name;
+    report(1);
   }
 
   Future<void> discard(String path) async {
