@@ -2427,6 +2427,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"written tiff",
                 None,
+                false,
             )
             .expect("write TIFF to X11");
         let (connection, _) = x11rb::connect(None).expect("fixture verification X server");
