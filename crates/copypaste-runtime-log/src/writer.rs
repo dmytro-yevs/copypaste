@@ -1,6 +1,6 @@
 //! Size-bounded append-only segments preserve log-reader byte-offset identity.
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
 };
@@ -56,15 +56,8 @@ impl BoundedLog {
         let path = self
             .directory
             .join(format!("{}.{}.log", self.process.prefix(), key));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
         // Open first, so a permission/storage failure never removes old logs.
-        let file = options.open(path)?;
+        let file = copypaste_fs::create_private(&path)?;
         self.file = Some(file);
         self.key = key;
         self.bytes = 0;

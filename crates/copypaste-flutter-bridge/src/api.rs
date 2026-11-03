@@ -987,8 +987,8 @@ pub async fn export_text_history(file_path: String) -> Result<TextExportSummary,
         return Err(RuntimeError::internal());
     };
     let encoded = serde_json::to_vec_pretty(&export).map_err(|_| RuntimeError::internal())?;
-    let mut file =
-        create_private_file(&file_path).map_err(|_| RuntimeError::export_write_failed())?;
+    let mut file = copypaste_fs::create_private(std::path::Path::new(&file_path))
+        .map_err(|_| RuntimeError::export_write_failed())?;
     file.write_all(&encoded)
         .and_then(|()| file.write_all(b"\n"))
         .map_err(|_| RuntimeError::export_write_failed())?;
@@ -1494,24 +1494,6 @@ fn runtime_settings_health(health: copypaste_ipc::SettingsHealth) -> RuntimeSett
         record_unreadable: health.record_unreadable,
         unreadable_fields: health.unreadable_fields,
     }
-}
-
-#[cfg(unix)]
-fn create_private_file(path: &str) -> std::io::Result<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn create_private_file(path: &str) -> std::io::Result<std::fs::File> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
 }
 
 fn device_details(details: copypaste_ipc::DeviceDetails) -> DeviceDetails {

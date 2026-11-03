@@ -145,14 +145,7 @@ impl ClipboardPayload {
                 "the clipboard payload is not an image or file",
             ));
         };
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(destination)?;
+        let mut file = copypaste_fs::create_private(destination)?;
         if let Err(error) = std::io::Write::write_all(&mut file, bytes) {
             drop(file);
             let _ = std::fs::remove_file(destination);

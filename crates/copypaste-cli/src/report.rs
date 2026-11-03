@@ -267,20 +267,9 @@ fn write_export(path: &Path, export: &ExportData) -> Result<(), CliError> {
     use std::io::Write;
 
     let encoded = encode_export(export)?;
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
     // An export is a whole clipboard history, so it is created owner-only
-    // rather than tightened afterwards. **Unverified on Windows**: the file
-    // inherits the destination directory's ACL, which is owner-only under the
-    // user profile and is not wherever else the user points `--out`. Setting a
-    // DACL needs a design decision this cfg deliberately does not make.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = opts
-        .open(path)
+    // rather than tightened afterwards.
+    let mut file = copypaste_fs::create_private(path)
         .map_err(|e| CliError::local(format!("could not create the export: {e}")))?;
     file.write_all(format!("{encoded}\n").as_bytes())
         .map_err(|e| CliError::local(format!("could not write the export: {e}")))

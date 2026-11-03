@@ -60,12 +60,8 @@ pub fn restore(
     Ok(store.oldest_version_ms().ok().flatten())
 }
 
-#[cfg(unix)]
 fn restrict_backup(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+    if let Err(error) = copypaste_fs::restrict_to_owner(path) {
         tracing::warn!(?error, "could not restrict the backup to its owner");
     }
 }
-#[cfg(not(unix))]
-fn restrict_backup(_path: &Path) {}

@@ -126,8 +126,7 @@ fn bind_owner_only(path: &Path) -> anyhow::Result<UnixListener> {
 #[cfg(unix)]
 fn bind_staged(staged: &Path, path: &Path) -> anyhow::Result<UnixListener> {
     let listener = UnixListener::bind(staged).context("bind the daemon socket")?;
-    std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
-        .context("restrict the daemon socket to the owner")?;
+    copypaste_fs::restrict_to_owner(staged).context("restrict the daemon socket to the owner")?;
     std::fs::rename(staged, path).context("move the daemon socket into place")?;
     Ok(listener)
 }
