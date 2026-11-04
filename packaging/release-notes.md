@@ -1,11 +1,9 @@
-- Filter the complete clipboard history by a calendar date or date range, combine filters, and reset them from the toolbar.
-- Organize pinned clips with multiple tags. Sync tags, assignments, pin state, and pinned order between devices.
-- Keep history controls on one row at narrow widths and scale expanded search to match. Mark active filters and add tooltips and clearer popup boundaries.
-- Open compact editors in bottom drawers on narrow screens, fit the calendar to the available space, and keep action buttons visible. Opening a drawer closes the previous drawer.
-- Fix Text filtering when history contains images or other clips without a text index, and keep filters available when retrying a failed history request.
-- Recognize credential clips, conceal sensitive previews, and preserve clipboard sensitivity during capture, sync, manual copy, and derived copy actions.
-- Copy rich-text clips as readable plain text and preserve their privacy settings.
-- Keep file references deferred until their content is needed, with consistent storage and transfer handling.
-- Apply runtime settings updates consistently across History, Quick Paste, devices, and file operations.
-- Preserve Android clipboard sensitivity and copy feedback, and avoid interrupting the active keyboard session during clipboard capture.
-- Keep offline peer presence stable across address renewal and play copy feedback only after successful clipboard activity.
+- Update CopyPaste installed from the macOS disk image in place from inside the app, with the same signed-package verification as Windows and Linux. Homebrew installations continue to update through Homebrew.
+- Keep secret clips concealed when they are copied back: macOS, Windows, and Linux mark them for clipboard managers and keep them out of Windows clipboard history and cloud clipboard. Android capture notifications no longer preview detected credentials.
+- Connect the app and command-line tool only to a background service that runs under the same account, and keep the Linux service endpoint in the per-user runtime directory.
+- Restrict private files, such as keys, backups, exports, and logs, to the current account on Windows as on macOS, Linux, and Android.
+- Share one request implementation between desktop and Android, so device renames, sync after deletes, pins and tags, page limits, and error messages behave the same on every platform.
+- Show whether start at login is disabled in Windows Task Manager, and use one onboarding flow on every platform.
+- Retire the Windows Quick Paste window after each use, as on macOS, and wake Linux clipboard capture from system events instead of a timer.
+- Keep Unicode file names, including Cyrillic, when saving and sharing files on Android, and select revealed files in the Linux file manager.
+- Remove unused camera components from the Android app and update SMS access setup from system events.
