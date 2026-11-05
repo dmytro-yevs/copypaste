@@ -17,6 +17,7 @@ internal data class CaptureFeedbackPreview(val text: String, val imagePng: ByteA
 internal object AndroidCaptureFeedback {
     private const val channelId = "clipboard-capture-events-silent"
     private const val notificationId = 2300
+    private const val thumbnailEdge = 256
 
     fun textPreview(text: String): String {
         val normalized = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -26,16 +27,21 @@ internal object AndroidCaptureFeedback {
         else normalized.substring(0, normalized.offsetByCodePoints(0, 1000)) + "…"
     }
 
-    fun imagePreview(image: Bitmap): CaptureFeedbackPreview {
-        val text = "Image · ${image.width} × ${image.height}"
+    /** [width] and [height] describe the source when [image] is subsampled. */
+    fun imagePreview(
+        image: Bitmap,
+        width: Int = image.width,
+        height: Int = image.height,
+    ): CaptureFeedbackPreview {
+        val text = "Image · $width × $height"
         if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
             return CaptureFeedbackPreview(text)
         }
-        val scale = minOf(1.0, 256.0 / maxOf(image.width, image.height))
+        val scale = minOf(1.0, thumbnailEdge.toDouble() / maxOf(width, height))
         val thumbnail = Bitmap.createScaledBitmap(
             image,
-            maxOf(1, (image.width * scale).toInt()),
-            maxOf(1, (image.height * scale).toInt()),
+            maxOf(1, (width * scale).toInt()),
+            maxOf(1, (height * scale).toInt()),
             true,
         )
         return try {
@@ -54,13 +60,31 @@ internal object AndroidCaptureFeedback {
         if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
             return CaptureFeedbackPreview("Image")
         }
-        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0 ||
+            width.toLong() > AndroidClipboardReader.maximumDecodedImageBytes / 4 / height.toLong()
+        ) {
+            return CaptureFeedbackPreview("Image")
+        }
+        val options = BitmapFactory.Options().apply { inSampleSize = thumbnailSampleSize(width, height) }
+        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             ?: return CaptureFeedbackPreview("Image")
         return try {
-            imagePreview(image)
+            imagePreview(image, width, height)
         } finally {
             image.recycle()
         }
+    }
+
+    /** The largest power-of-two subsampling that still covers the thumbnail edge. */
+    internal fun thumbnailSampleSize(width: Int, height: Int): Int {
+        val edge = maxOf(width, height)
+        var sample = 1
+        while (edge / (sample * 2) >= thumbnailEdge) sample *= 2
+        return sample
     }
 
     fun onCaptured(context: Context, preview: CaptureFeedbackPreview? = null) {

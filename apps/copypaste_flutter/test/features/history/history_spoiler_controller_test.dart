@@ -56,6 +56,25 @@ void main() {
     expect(controller.isRevealed('clip'), isFalse);
   });
 
+  test('refreshes during a read share one follow-up read', () async {
+    final repository = _Repository();
+    final controller = HistorySpoilerController(repository);
+    addTearDown(controller.dispose);
+    final first = Completer<HistorySpoilerState>();
+    repository.pending = first;
+    final refreshes = [
+      controller.refresh(),
+      controller.refresh(),
+      controller.refresh(),
+    ];
+    repository.pending = null;
+    repository.state = const HistorySpoilerState(1, {'clip'});
+    first.complete(const HistorySpoilerState(0, {}));
+    await Future.wait(refreshes);
+    expect(repository.reads, 2);
+    expect(controller.isRevealed('clip'), isTrue);
+  });
+
   test(
     'failed reveal stays concealed and disposal ignores in-flight reads',
     () async {
@@ -77,10 +96,13 @@ class _Repository implements HistorySpoilerRepository {
   HistorySpoilerState state = const HistorySpoilerState(0, {});
   Completer<HistorySpoilerState>? pending;
   bool fail = false;
+  int reads = 0;
 
   @override
-  Future<HistorySpoilerState> readSpoilers() async =>
-      pending == null ? state : await pending!.future;
+  Future<HistorySpoilerState> readSpoilers() async {
+    reads++;
+    return pending == null ? state : await pending!.future;
+  }
 
   @override
   Future<HistorySpoilerState> setSpoilerRevealed(

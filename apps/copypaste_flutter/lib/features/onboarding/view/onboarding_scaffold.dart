@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/shell/macos_window_header.dart';
+import '../../../app/theme/app_brand_logo.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
 
@@ -130,11 +131,7 @@ class _OnboardingTitle extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const Image(
-        image: AssetImage('assets/brand/copypaste.png'),
-        width: AppIconSize.md,
-        height: AppIconSize.md,
-      ),
+      const AppBrandLogo(size: AppIconSize.md),
       const Gap(AppSpacing.sm),
       const Flexible(
         child: Text(

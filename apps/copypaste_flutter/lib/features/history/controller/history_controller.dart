@@ -281,6 +281,7 @@ class HistoryController extends ChangeNotifier {
   String? _selectedId;
   HistoryClip? _selectedClip;
   int _selectedDetailEpoch = 0;
+  int? _loadedDetailEpoch;
   Future<void>? _selectedDetailLoad;
   int? _selectedDetailLoadEpoch;
   String? _errorMessage;
@@ -308,6 +309,8 @@ class HistoryController extends ChangeNotifier {
   String? _draggedPinnedId;
   String? _cancelledPinnedId;
   Future<void>? _visibleItemsRefresh;
+  bool _visibleRefreshQueued = false;
+  int _visibleRefreshGeneration = 0;
   int _queryEpoch = 0;
   bool _disposed = false;
   bool _suspended = false;
@@ -349,6 +352,8 @@ class HistoryController extends ChangeNotifier {
     _nextCursor = null;
     _isLoadingMore = false;
     _visibleItemsRefresh = null;
+    _visibleRefreshQueued = false;
+    _visibleRefreshGeneration++;
     _state = HistoryLoadState.initial;
     _spoilerContent.clear();
     _imagePreviews.clear();
@@ -870,15 +875,49 @@ class HistoryController extends ChangeNotifier {
     await Future.wait([reload(), refreshFacets()]);
   }
 
+  /// Requests made while a refresh runs coalesce into one follow-up pass; the
+  /// returned future completes after that pass.
   Future<void> _refreshItemsAndFacets() {
+    final running = _visibleItemsRefresh;
+    if (running != null) {
+      _visibleRefreshQueued = true;
+      return running;
+    }
+    final generation = _visibleRefreshGeneration;
     late final Future<void> refresh;
-    refresh = _refreshVisibleItemsAndFacets().whenComplete(() {
-      if (identical(_visibleItemsRefresh, refresh)) {
-        _visibleItemsRefresh = null;
+    refresh = () async {
+      try {
+        while (true) {
+          await _refreshVisibleItemsAndFacets();
+          if (!_visibleRefreshQueued ||
+              generation != _visibleRefreshGeneration) {
+            return;
+          }
+          _visibleRefreshQueued = false;
+          if (_deferVisibleRefresh()) return;
+        }
+      } finally {
+        // Cleared with the final queue check so no request joins a done pass.
+        if (identical(_visibleItemsRefresh, refresh)) {
+          _visibleItemsRefresh = null;
+        }
       }
-    });
+    }();
     _visibleItemsRefresh = refresh;
     return refresh;
+  }
+
+  /// Interactions that cancel a running refresh also take its queued pass.
+  bool _deferVisibleRefresh() {
+    if (_disposed || _suspended) return true;
+    if (isBulkDragSelecting) {
+      _refreshAfterBulkDrag = true;
+    } else if (_draggedPinnedId != null || _isReorderingPinned) {
+      _refreshAfterPinnedInteraction = true;
+    } else {
+      return false;
+    }
+    return true;
   }
 
   Future<void> _refreshVisibleItemsAndFacets() async {
@@ -1012,8 +1051,23 @@ class HistoryController extends ChangeNotifier {
       (sum, page) => sum + page.skippedUndecryptable,
     );
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
-    final selectedId = _selectedId;
-    if (selectedId != null) unawaited(select(selectedId));
+    _refreshSelection();
+  }
+
+  /// Keeps the loaded detail while its summary row is unchanged; any summary
+  /// change, missing row or unfinished detail selects the clip again.
+  void _refreshSelection() {
+    final id = _selectedId;
+    if (id == null) return;
+    final selected = _selectedClip;
+    final row = _items.where((item) => item.id == id).firstOrNull;
+    if (selected != null &&
+        row != null &&
+        _loadedDetailEpoch == _selectedDetailEpoch &&
+        _sameSummary(historySummary(selected), row)) {
+      return;
+    }
+    unawaited(select(id));
   }
 
   /// A changed boundary invalidates later keyset cursors. Rebuild metadata in
@@ -1150,8 +1204,7 @@ class HistoryController extends ChangeNotifier {
       (sum, page) => sum + page.skippedUndecryptable,
     );
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
-    final selectedId = _selectedId;
-    if (selectedId != null) unawaited(select(selectedId));
+    _refreshSelection();
   }
 
   // Retain the row object only when every field supplied to the UI is equal.
@@ -1200,15 +1253,30 @@ class HistoryController extends ChangeNotifier {
     try {
       final facets = await _repository.facets();
       if (!_disposed && !_suspended && epoch == _mediaEpoch) {
-        _facets = facets;
+        final changed = !_sameFacets(_facets, facets);
+        if (changed) _facets = facets;
         tags.updateCatalogue(facets.tags);
         _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
-        notifyListeners();
+        if (changed) notifyListeners();
       }
     } catch (_) {
       // History remains usable when optional filter choices are unavailable.
     }
   }
+
+  bool _sameFacets(HistoryFacets a, HistoryFacets b) =>
+      listEquals(
+        [for (final f in a.originDevices) (f.id, f.label, f.deviceClass)],
+        [for (final f in b.originDevices) (f.id, f.label, f.deviceClass)],
+      ) &&
+      listEquals(
+        [for (final f in a.sourceApps) (f.id, f.label, f.iconId)],
+        [for (final f in b.sourceApps) (f.id, f.label, f.iconId)],
+      ) &&
+      listEquals(
+        [for (final tag in a.tags) (tag.id, tag.name)],
+        [for (final tag in b.tags) (tag.id, tag.name)],
+      );
 
   Future<void> setDateRange(DateTime? start, DateTime? end) {
     if (start == null || end == null) {
@@ -1279,6 +1347,11 @@ class HistoryController extends ChangeNotifier {
       return;
     }
     final epoch = ++_queryEpoch;
+    if (_visibleRefreshQueued) {
+      // This first page supersedes the queued row pass, but not its facets.
+      _visibleRefreshQueued = false;
+      unawaited(refreshFacets());
+    }
     _isLoadingMore = false;
     _nextCursor = null;
     _replaceItems([]);
@@ -1491,6 +1564,7 @@ class HistoryController extends ChangeNotifier {
         return;
       }
       _selectedClip = fullClip;
+      _loadedDetailEpoch = detailEpoch;
       _replace(fullClip);
       notifyListeners();
     } catch (_) {

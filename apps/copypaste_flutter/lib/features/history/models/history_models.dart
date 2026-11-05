@@ -309,9 +309,11 @@ class HistoryImagePreview {
 }
 
 class HistorySourceAppIcon {
-  const HistorySourceAppIcon(this.bytes);
+  const HistorySourceAppIcon(this.bytes, {this.width, this.height});
 
   final Uint8List bytes;
+  final int? width;
+  final int? height;
 }
 
 enum HistoryRuntimeEvent { itemsChanged, unavailable }

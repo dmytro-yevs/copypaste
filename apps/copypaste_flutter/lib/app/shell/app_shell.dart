@@ -8,6 +8,7 @@ import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../theme/app_brand_logo.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_overlays.dart';
 import '../theme/app_theme.dart';
@@ -186,11 +187,9 @@ class _AppShellState extends State<AppShell> {
                             Button.ghost(
                               style: AppTheme.brandButtonStyle,
                               onPressed: _openHistory,
-                              child: const Image(
+                              child: const AppBrandLogo(
                                 key: ValueKey<String>('header-brand-logo'),
-                                image: AssetImage('assets/brand/copypaste.png'),
-                                width: AppIconSize.md,
-                                height: AppIconSize.md,
+                                size: AppIconSize.md,
                                 semanticLabel: 'Open History',
                               ),
                             ),
@@ -422,11 +421,9 @@ class _AppShellState extends State<AppShell> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Image(
+              const AppBrandLogo(
                 key: ValueKey<String>('copypaste-brand-logo'),
-                image: AssetImage('assets/brand/copypaste.png'),
-                width: AppIconSize.xl,
-                height: AppIconSize.xl,
+                size: AppIconSize.xl,
                 semanticLabel: 'Open History',
               ),
               if (expanded) ...[
