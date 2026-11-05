@@ -4,7 +4,7 @@ mod realtime;
 use copypaste_clock::now_ms;
 use copypaste_cloud::{
     credentials::{AccountChange, CloudStateKey, CredentialState, CredentialStore},
-    derive_sync_key, CloudConfig, CloudSync, SupabaseAuth, SupabaseRest,
+    derive_sync_key, CloudConfig, CloudSync, HttpClient, SupabaseAuth, SupabaseRest,
 };
 use copypaste_ipc::{CloudStatusData, CloudSyncData};
 use copypaste_module_sdk::{
@@ -109,8 +109,13 @@ struct State {
     last_error: Option<String>,
     wake: Arc<Notify>,
     revision: Option<u64>,
+    /// Created on first use and released once no account remains.
+    http: Option<HttpClient>,
 }
 impl State {
+    fn http(&mut self) -> HttpClient {
+        self.http.get_or_insert_with(HttpClient::default).clone()
+    }
     async fn stop_account(&mut self) {
         if let Some(account) = self.account.take() {
             account.driver.fence_session(None);
@@ -187,10 +192,11 @@ impl State {
         key: copypaste_cloud::SyncKey,
     ) {
         let persistence = self.host.clone();
+        let http = self.http();
         let driver = Arc::new(
             CloudSync::new(
-                SupabaseRest::new(config.clone()),
-                SupabaseAuth::new(config.clone()),
+                SupabaseRest::with_client(config.clone(), http.clone()),
+                SupabaseAuth::with_client(config.clone(), http),
                 key,
                 config,
                 session,
@@ -343,7 +349,7 @@ impl State {
                 if passphrase.chars().count() < copypaste_cloud::crypto::key::MIN_PASSPHRASE_CHARS {
                     return Err("Use a sync passphrase of at least 12 characters.".into());
                 }
-                let auth = SupabaseAuth::new(config.clone());
+                let auth = SupabaseAuth::with_client(config.clone(), self.http());
                 let session = if invocation.command == "sign-up" {
                     auth.sign_up(&email, &password).await
                 } else {
@@ -376,7 +382,9 @@ impl State {
                 self.stop_account().await;
                 self.host.clear_cloud_credentials().map_err(state_error)?;
                 if let (Some(config), Some(token)) = (self.config.clone(), token) {
-                    let _ = SupabaseAuth::new(config).sign_out(&token).await;
+                    let _ = SupabaseAuth::with_client(config, self.http())
+                        .sign_out(&token)
+                        .await;
                 }
                 self.last_error = None;
                 Ok(self.status_output("Signed out."))
@@ -473,6 +481,7 @@ async fn run(
         last_error: None,
         wake: Arc::new(Notify::new()),
         revision: None,
+        http: None,
     };
     let mut next_round = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
@@ -499,6 +508,9 @@ async fn run(
                 }
                 next_round = tokio::time::Instant::now() + state.next_delay();
             }
+        }
+        if state.account.is_none() {
+            state.http = None;
         }
     }
     state.stop_account().await;

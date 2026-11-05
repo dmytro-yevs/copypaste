@@ -146,9 +146,9 @@ impl SyncServices {
             .clear_state(&keys.iter().map(String::as_str).collect::<Vec<_>>())
             .map_err(|_| ModuleError::State)
     }
-    pub(crate) fn request(&self, id: &str, input: Value) -> Result<Value, ModuleError> {
-        let request: SyncHostRequest =
-            serde_json::from_value(input).map_err(|_| ModuleError::State)?;
+    /// Results stay a JSON tree because its sorted object keys are the exact
+    /// reply bytes installed modules already receive.
+    pub(crate) fn request(&self, id: &str, request: SyncHostRequest) -> Result<Value, ModuleError> {
         match request {
             SyncHostRequest::GroupSnapshot => {
                 self.require_enabled()?;
@@ -360,18 +360,17 @@ mod tests {
         service
             .request(
                 "copypaste.supabase",
-                serde_json::to_value(SyncHostRequest::Scan {
+                SyncHostRequest::Scan {
                     since_ms: 1000,
                     after_item_id: Some("zz".into()),
-                })
-                .unwrap(),
+                },
             )
             .unwrap();
         service.note_version("copypaste.supabase", 1000).unwrap();
         service
             .request(
                 "copypaste.supabase",
-                serde_json::to_value(SyncHostRequest::CommitUpload { started_ms: 2000 }).unwrap(),
+                SyncHostRequest::CommitUpload { started_ms: 2000 },
             )
             .unwrap();
         assert_eq!(
@@ -389,10 +388,9 @@ mod tests {
             service
                 .request(
                     id,
-                    serde_json::to_value(SyncHostRequest::WriteState {
+                    SyncHostRequest::WriteState {
                         values: BTreeMap::from([("refresh_token".into(), "secret".into())]),
-                    })
-                    .unwrap(),
+                    },
                 )
                 .unwrap();
         }
@@ -414,10 +412,9 @@ mod tests {
         assert!(service
             .request(
                 "copypaste.supabase",
-                serde_json::to_value(SyncHostRequest::ReadState {
+                SyncHostRequest::ReadState {
                     keys: vec!["../other".into()]
-                })
-                .unwrap()
+                }
             )
             .is_err());
     }

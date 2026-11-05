@@ -130,7 +130,7 @@ impl Session {
             return Err(TransportError::Malformed);
         }
         let payload = Zeroizing::new(serde_json::to_vec(msg).map_err(|_| TransportError::Codec)?);
-        self.write_message(&payload).await
+        self.write_parts(&[&payload]).await
     }
 
     /// Send an already-encoded message body, exactly as given.
@@ -147,29 +147,56 @@ impl Session {
         if self.poisoned {
             return Err(TransportError::Malformed);
         }
-        self.write_message(&payload).await
+        self.write_parts(&[&payload]).await
     }
 
-    async fn write_message(&mut self, payload: &[u8]) -> Result<(), TransportError> {
-        if payload.len() > self.message_limit() {
+    /// Send one logical message given as consecutive parts, so a caller can
+    /// write large payloads from where they already live. Records are cut
+    /// exactly as for the concatenated bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::send_bytes`].
+    pub async fn send_parts(&mut self, parts: &[&[u8]]) -> Result<(), TransportError> {
+        if self.poisoned {
+            return Err(TransportError::Malformed);
+        }
+        self.write_parts(parts).await
+    }
+
+    async fn write_parts(&mut self, parts: &[&[u8]]) -> Result<(), TransportError> {
+        let mut left = parts
+            .iter()
+            .try_fold(0usize, |total, part| total.checked_add(part.len()))
+            .ok_or(TransportError::TooLarge)?;
+        if left > self.message_limit() {
             return Err(TransportError::TooLarge);
         }
-
-        // `chunks` yields nothing for an empty slice, and an empty logical
-        // message still needs one record or the peer's `recv` blocks.
-        let mut records = payload.chunks(MAX_RECORD_PAYLOAD).peekable();
-        if records.peek().is_none() {
-            return self.write_record(RECORD_FINAL, &[]).await;
+        let mut parts = parts.iter().copied();
+        let mut pending: &[u8] = &[];
+        // An empty logical message still needs one record or the peer's
+        // `recv` blocks.
+        loop {
+            let take = left.min(MAX_RECORD_PAYLOAD);
+            left -= take;
+            self.plain.clear();
+            self.plain
+                .push(if left > 0 { RECORD_MORE } else { RECORD_FINAL });
+            let mut need = take;
+            while need > 0 {
+                if pending.is_empty() {
+                    pending = parts.next().ok_or(TransportError::TooLarge)?;
+                }
+                let (now, rest) = pending.split_at(need.min(pending.len()));
+                self.plain.extend_from_slice(now);
+                need -= now.len();
+                pending = rest;
+            }
+            self.seal_record().await?;
+            if left == 0 {
+                return Ok(());
+            }
         }
-        while let Some(chunk) = records.next() {
-            let marker = if records.peek().is_some() {
-                RECORD_MORE
-            } else {
-                RECORD_FINAL
-            };
-            self.write_record(marker, chunk).await?;
-        }
-        Ok(())
     }
 
     /// Receive one logical message.
@@ -198,6 +225,17 @@ impl Session {
 
     /// Receive bounded authenticated bytes without applying a payload codec.
     pub async fn recv_bytes(&mut self) -> Result<Option<Zeroizing<Vec<u8>>>, TransportError> {
+        self.recv_bytes_sized(|_| None).await
+    }
+
+    /// As [`Session::recv_bytes`], with `announced` reading the total length a
+    /// multi-record message declares in its first record. The buffer is then
+    /// allocated once at that length, capped at the message limit; a wrong
+    /// announcement only costs normal growth.
+    pub async fn recv_bytes_sized(
+        &mut self,
+        announced: fn(&[u8]) -> Option<usize>,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, TransportError> {
         if self.poisoned {
             return Err(TransportError::Malformed);
         }
@@ -255,6 +293,11 @@ impl Session {
             {
                 self.poisoned = true;
                 return Err(TransportError::TooLarge);
+            }
+            if !started && marker == RECORD_MORE {
+                if let Some(total) = announced(&self.plain[RECORD_HEADER_LEN..len]) {
+                    message.reserve_total(total.min(self.message_limit()));
+                }
             }
             if let Err(err) = message.push(&self.plain[RECORD_HEADER_LEN..len]) {
                 self.poisoned = true;
@@ -337,11 +380,10 @@ impl Session {
         }
     }
 
-    async fn write_record(&mut self, marker: u8, body: &[u8]) -> Result<(), TransportError> {
-        debug_assert!(body.len() <= MAX_RECORD_PAYLOAD);
-        self.plain.clear();
-        self.plain.push(marker);
-        self.plain.extend_from_slice(body);
+    /// Seal and write the record staged in `plain`: one marker byte and at
+    /// most [`MAX_RECORD_PAYLOAD`] payload bytes.
+    async fn seal_record(&mut self) -> Result<(), TransportError> {
+        debug_assert!(self.plain.len() <= MAX_NOISE_PLAINTEXT);
         self.cipher.resize(MAX_NOISE_MESSAGE, 0);
 
         let sealed = self.noise.write_message(&self.plain, &mut self.cipher);
@@ -375,11 +417,12 @@ impl fmt::Debug for Session {
 
 /// The buffer one logical message is reassembled into.
 ///
-/// Sized by our own limits, never by a length the peer chose. It starts at one
-/// Noise message's worth of plaintext, so the ordinary single-record message
-/// never allocates against peer input at all, and it will not grow past
-/// [`MAX_MESSAGE_BYTES`] — the same ceiling [`Session::send`] refuses at, rather
-/// than a second limit that could drift away from it.
+/// Bounded by our own limits. It starts at one Noise message's worth of
+/// plaintext, so the ordinary single-record message never allocates against
+/// peer input at all. A length announced in the first record may size it
+/// once, but never past the session's message limit, and it will not grow
+/// past [`MAX_MESSAGE_BYTES`] — the same ceiling [`Session::send`] refuses at,
+/// rather than a second limit that could drift away from it.
 ///
 /// Growth replaces the allocation *through* `Zeroizing`, so what a reallocation
 /// leaves behind is wiped and not merely freed: a `Vec` that grows on its own
@@ -408,18 +451,29 @@ impl Reassembly {
             return Err(TransportError::TooLarge);
         }
         if wanted > self.0.capacity() {
-            let capacity = self
-                .0
-                .capacity()
-                .saturating_mul(2)
-                .clamp(wanted, MAX_MESSAGE_BYTES);
-            let mut grown = Zeroizing::new(Vec::with_capacity(capacity));
-            grown.extend_from_slice(&self.0);
-            // The old buffer is wiped here, on its way out.
-            self.0 = grown;
+            self.grow_to(
+                self.0
+                    .capacity()
+                    .saturating_mul(2)
+                    .clamp(wanted, MAX_MESSAGE_BYTES),
+            );
         }
         self.0.extend_from_slice(body);
         Ok(())
+    }
+
+    /// Allocate once for a message of `total` bytes, within the ceiling.
+    fn reserve_total(&mut self, total: usize) {
+        if total > self.0.capacity() {
+            self.grow_to(total.min(MAX_MESSAGE_BYTES));
+        }
+    }
+
+    fn grow_to(&mut self, capacity: usize) {
+        let mut grown = Zeroizing::new(Vec::with_capacity(capacity));
+        grown.extend_from_slice(&self.0);
+        // The old buffer is wiped here, on its way out.
+        self.0 = grown;
     }
 
     fn into_inner(self) -> Zeroizing<Vec<u8>> {
@@ -786,6 +840,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parts_reassemble_into_one_message_allocated_at_its_announced_length() {
+        let (listener, addr) = loopback().await;
+        let psk = PairingToken::generate().psk();
+        let head = b"LEN?".to_vec();
+        let large: Vec<u8> = (0..=255).cycle().take(MAX_RECORD_PAYLOAD + 10).collect();
+        let total = head.len() + 3 + large.len();
+        let expected = [&head[..], b"abc", &large].concat();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut session = Session::accept(stream, &psk).await.expect("responder");
+            session
+                .recv_bytes_sized(|first| first.starts_with(b"LEN?").then_some(1 << 20))
+                .await
+                .expect("recv ok")
+                .expect("a message")
+        });
+
+        let mut client = Session::connect(addr, &psk).await.expect("initiator");
+        client
+            .send_parts(&[&head, b"abc", &[], &large])
+            .await
+            .expect("send parts");
+        let received = server.await.expect("server task");
+        assert_eq!(received.len(), total);
+        assert_eq!(&received[..], &expected[..]);
+        assert_eq!(
+            received.capacity(),
+            1 << 20,
+            "allocated once at the announcement"
+        );
+    }
+
+    #[tokio::test]
     async fn truncation_mid_message_is_not_a_clean_close() {
         let (listener, addr) = loopback().await;
         let psk = PairingToken::generate().psk();
@@ -794,10 +882,10 @@ mod tests {
             let (stream, _) = listener.accept().await.expect("accept");
             let mut session = Session::accept(stream, &psk).await.expect("responder");
             // One record marked "more follows", then hang up.
-            session
-                .write_record(RECORD_MORE, b"half a message")
-                .await
-                .expect("partial record");
+            session.plain.clear();
+            session.plain.push(RECORD_MORE);
+            session.plain.extend_from_slice(b"half a message");
+            session.seal_record().await.expect("partial record");
             drop(session);
         });
 
