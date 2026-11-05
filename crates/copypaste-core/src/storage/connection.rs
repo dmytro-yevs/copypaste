@@ -55,6 +55,28 @@ const CONNECTION_PRAGMAS: &[&str] = &[
     "PRAGMA analysis_limit = 400",
 ];
 
+/// Process-wide soft cap on SQLite heap memory.
+///
+/// The bundled build enables `SQLITE_ENABLE_MEMORY_MANAGEMENT`, so every
+/// connection shares one page-cache LRU and this limit recycles clean pages
+/// across the pool instead of letting each connection keep its own 8 MiB
+/// target warm. It is soft: no allocation fails because of it. 10 MiB is the
+/// smallest limit that still fits one connection's full target above the
+/// ~1.2 MiB of schema, statement and codec state measured for four
+/// connections. `temp_store = MEMORY` keeps the sorter from spilling decrypted
+/// rows to disk when this limit is reached.
+const SOFT_HEAP_LIMIT_PRAGMA: &str = "PRAGMA soft_heap_limit = 10485760";
+
+pub(super) fn limit_process_heap(conn: &Connection) -> rusqlite::Result<()> {
+    run_pragma(conn, SOFT_HEAP_LIMIT_PRAGMA)
+}
+
+/// Frees every unpinned cached page in the process. Because the page cache is
+/// shared, shrinking through one connection releases the whole pool's pages.
+pub(super) fn release_cached_pages(conn: &Connection) -> rusqlite::Result<()> {
+    run_pragma(conn, "PRAGMA shrink_memory")
+}
+
 /// Runs `PRAGMA optimize` as the pool retires a connection.
 ///
 /// Nothing else in the tree writes `sqlite_stat1`, so the planner works from

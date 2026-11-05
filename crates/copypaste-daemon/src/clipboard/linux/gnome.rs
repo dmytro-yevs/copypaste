@@ -241,14 +241,15 @@ impl GnomeClipboard {
             attach_source(&mut capture, source);
             return Some(capture);
         }
+        let (content, binary_content) = if binary {
+            (String::new(), Some(bytes))
+        } else {
+            (crate::clipboard::format::text_from_utf8(bytes), None)
+        };
         Some(Capture {
             privacy,
-            content: if binary {
-                String::new()
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            },
-            binary_content: binary.then_some(bytes),
+            content,
+            binary_content,
             file_path: None,
             file_metadata: None,
             content_type: content_type.into(),
