@@ -1,3 +1,8 @@
+- Use less memory while the window is hidden and under load: CopyPaste frees the closed Quick Paste view and allocator caches, caps the database cache, stops reloading the selected clip on every change, and decodes the logo, app icons and Android notification images at the size they are shown.
+- Sync devices on the local network with a faster protocol that sends clips, including images, as raw bytes. Update every device to 1.2.0: earlier versions cannot sync with it.
+- Lower the memory used by cloud sync uploads and module requests.
+- Install on Windows with WinGet: `winget install DmytroYevs.CopyPaste`.
+- Show up to four lines per clip in Quick Paste and trim blank lines around clip previews.
 - Update CopyPaste installed from the macOS disk image in place from inside the app, with the same signed-package verification as Windows and Linux. Homebrew installations continue to update through Homebrew.
 - Keep secret clips concealed when they are copied back: macOS, Windows, and Linux mark them for clipboard managers and keep them out of Windows clipboard history and cloud clipboard. Android capture notifications no longer preview detected credentials.
 - Connect the app and command-line tool only to a background service that runs under the same account, and keep the Linux service endpoint in the per-user runtime directory.
@@ -7,3 +12,4 @@
 - Retire the Windows Quick Paste window after each use, as on macOS, and wake Linux clipboard capture from system events instead of a timer.
 - Keep Unicode file names, including Cyrillic, when saving and sharing files on Android, and select revealed files in the Linux file manager.
 - Remove unused camera components from the Android app and update SMS access setup from system events.
+- Update the zip library to close a parser differential.
