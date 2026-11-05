@@ -5,11 +5,8 @@
 //! user content.  All process paths remain transient too.
 
 use std::collections::VecDeque;
-use std::io::Read;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
 
-use rustix::fs::{openat, Mode, OFlags, CWD};
 use x11rb::connection::Connection;
 use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _};
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
@@ -17,7 +14,6 @@ use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
 const MAX_CLIENT_WINDOWS: usize = 256;
 const MAX_CLIENT_TREE_DEPTH: usize = 3;
 const MAX_WM_CLASS_BYTES: u32 = 512;
-const MAX_DESKTOP_ENTRY_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceApp {
@@ -283,88 +279,7 @@ fn valid_desktop_id(value: &str) -> bool {
 }
 
 fn desktop_for_class(class: &str) -> Option<(String, String)> {
-    data_roots().into_iter().find_map(|root| {
-        let applications = root.join("applications");
-        let direct = applications.join(format!("{class}.desktop"));
-        desktop_entry(&direct)
-            .map(|name| (class.to_owned(), name))
-            .or_else(|| {
-                std::fs::read_dir(applications)
-                    .ok()?
-                    .take(512)
-                    .find_map(|entry| {
-                        let path = entry.ok()?.path();
-                        let id = path.file_stem()?.to_str()?;
-                        valid_desktop_id(id).then_some(())?;
-                        let (name, startup) = desktop_entry_fields(
-                            &String::from_utf8(read_bounded(&path, MAX_DESKTOP_ENTRY_BYTES)?)
-                                .ok()?,
-                        )?;
-                        (startup.as_deref() == Some(class)).then_some((id.to_owned(), name))
-                    })
-            })
-    })
-}
-
-fn data_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(home) = std::env::var_os("XDG_DATA_HOME") {
-        let path = PathBuf::from(home);
-        if path.is_absolute() {
-            roots.push(path);
-        }
-    } else if let Some(home) = std::env::var_os("HOME") {
-        roots.push(PathBuf::from(home).join(".local/share"));
-    }
-    let dirs =
-        std::env::var_os("XDG_DATA_DIRS").unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    roots.extend(std::env::split_paths(&dirs).filter(|path| path.is_absolute()));
-    roots
-}
-
-fn desktop_entry(path: &Path) -> Option<String> {
-    desktop_entry_fields(&String::from_utf8(read_bounded(path, MAX_DESKTOP_ENTRY_BYTES)?).ok()?)
-        .map(|(name, _)| name)
-}
-fn desktop_entry_fields(text: &str) -> Option<(String, Option<String>)> {
-    let mut desktop = false;
-    let mut name = None;
-    let mut startup = None;
-    for line in text.lines().map(str::trim) {
-        if line.starts_with('[') && line.ends_with(']') {
-            desktop = line == "[Desktop Entry]";
-            continue;
-        }
-        if !desktop || line.starts_with('#') || line.starts_with(';') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key == "Name" {
-            let value = value.trim();
-            name = (!value.is_empty() && value.len() <= 255).then(|| value.to_owned());
-        } else if key == "StartupWMClass" {
-            let value = value.trim();
-            startup = valid_desktop_id(value).then(|| value.to_owned());
-        }
-    }
-    name.map(|name| (name, startup))
-}
-
-fn read_bounded(path: &Path, cap: u64) -> Option<Vec<u8>> {
-    let file = std::fs::File::from(
-        openat(CWD, path, OFlags::RDONLY | OFlags::NONBLOCK, Mode::empty()).ok()?,
-    );
-    let metadata = file.metadata().ok()?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > cap {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(cap.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .ok()?;
-    (bytes.len() as u64 <= cap).then_some(bytes)
+    copypaste_source_app::linux_desktop_application(class).map(|(id, name)| (id, name.into_inner()))
 }
 
 #[cfg(test)]
@@ -379,12 +294,5 @@ mod tests {
         assert_eq!(wm_class(b"editor\0/opt/editor\0"), None);
         assert_eq!(wm_class(b"editor\0firefox\0"), Some("firefox".into()));
         assert_eq!(wm_class(b"editor"), None);
-    }
-    #[test]
-    fn names_are_only_read_from_the_desktop_entry_group() {
-        assert_eq!(
-            desktop_entry_fields("Name=bad\n[Desktop Entry]\nName=Editor\n"),
-            Some(("Editor".into(), None))
-        );
     }
 }
