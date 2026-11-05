@@ -39,7 +39,9 @@ class HistorySelectionGesture {
   }
 
   void pointerMove(PointerMoveEvent event) {
-    if (event.pointer != _pointer || !controller.isBulkDragSelecting) return;
+    if (event.pointer != _pointer || !controller.bulk.isBulkDragSelecting) {
+      return;
+    }
     _position = event.position;
     _moved = true;
     _scheduleUpdate();
@@ -56,7 +58,7 @@ class HistorySelectionGesture {
   void begin(String id, Offset position, ScrollableState scrollable) {
     if (_disposed ||
         _pointer == null ||
-        !controller.beginBulkDragSelection(id)) {
+        !controller.bulk.beginBulkDragSelection(id)) {
       return;
     }
     _position = position;
@@ -71,7 +73,7 @@ class HistorySelectionGesture {
   }
 
   void _changed() {
-    if (!controller.isBulkDragSelecting) {
+    if (!controller.bulk.isBulkDragSelecting) {
       _autoScroller?.stopAutoScroll();
       return;
     }
@@ -79,17 +81,19 @@ class HistorySelectionGesture {
   }
 
   void updateAfterScroll() {
-    if (!controller.isBulkDragSelecting) return;
+    if (!controller.bulk.isBulkDragSelecting) return;
     _moved = true;
     _scheduleUpdate();
   }
 
   void _scheduleUpdate() {
-    if (_disposed || _framePending || !controller.isBulkDragSelecting) return;
+    if (_disposed || _framePending || !controller.bulk.isBulkDragSelecting) {
+      return;
+    }
     _framePending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _framePending = false;
-      if (_disposed || !controller.isBulkDragSelecting) return;
+      if (_disposed || !controller.bulk.isBulkDragSelecting) return;
       final position = _position;
       if (position == null) return;
       final visible = viewportBounds();
@@ -99,7 +103,7 @@ class HistorySelectionGesture {
       }
       final id = _moved ? clipAt(position) : null;
       if (id != null) {
-        controller.updateBulkDragSelection(id, orderedIds: orderedIds());
+        controller.bulk.updateBulkDragSelection(id, orderedIds: orderedIds());
       }
       final scrollable = _autoScroller?.scrollable;
       final viewport = scrollable?.context.findRenderObject();
@@ -118,8 +122,8 @@ class HistorySelectionGesture {
       if (position.dy >= visible.bottom - AppControlSize.touch &&
           scrollable!.position.extentAfter <=
               AppControlSize.touch + bottomClearance &&
-          controller.canLoadMore) {
-        unawaited(controller.loadMore());
+          controller.window.canLoadMore) {
+        unawaited(controller.window.loadMore());
       }
       _autoScroller?.startAutoScrollIfNecessary(
         Rect.fromCenter(
@@ -141,7 +145,7 @@ class HistorySelectionGesture {
     _pointer = null;
     _position = null;
     _moved = false;
-    controller.endBulkDragSelection();
+    controller.bulk.endBulkDragSelection();
   }
 
   void dispose() {

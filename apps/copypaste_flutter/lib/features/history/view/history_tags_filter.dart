@@ -20,7 +20,7 @@ class HistoryTagsFilter extends StatelessWidget {
   final bool compact;
 
   static String selectionLabel(HistoryController controller) {
-    final query = controller.query;
+    final query = controller.window.query;
     if (query.tagIds.isEmpty) return 'All tags';
     if (query.tagIds.length > 1) return '${query.tagIds.length} tags';
     for (final tag in controller.tags.tags) {
@@ -33,7 +33,7 @@ class HistoryTagsFilter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final query = controller.query;
+    final query = controller.window.query;
     final tags = controller.tags.tags;
     final label = selectionLabel(controller);
     final selected = query.tagIds.toSet();
@@ -105,8 +105,8 @@ class HistoryTagsFilter extends StatelessWidget {
               return next;
             },
             onChanged: (value) => unawaited(
-              controller.updateQuery(
-                controller.query.copyWith(
+              controller.window.updateQuery(
+                controller.window.query.copyWith(
                   tagIds: value?.toList() ?? const [],
                   untaggedOnly: false,
                 ),

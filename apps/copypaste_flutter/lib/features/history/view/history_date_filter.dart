@@ -17,7 +17,7 @@ class HistoryDateFilter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final query = controller.query;
+    final query = controller.window.query;
     final from = query.capturedFrom;
     final before = query.capturedBefore;
     final end = before == null
@@ -85,7 +85,10 @@ class _DateEditorState extends State<_DateEditor> {
       : CalendarValue.range(widget.start!, widget.end!);
 
   Future<void> _preset(int? days, {bool yesterday = false}) async {
-    final pending = widget.controller.setDatePreset(days, yesterday: yesterday);
+    final pending = widget.controller.window.setDatePreset(
+      days,
+      yesterday: yesterday,
+    );
     await closeOverlay(context);
     await pending;
   }
@@ -179,7 +182,7 @@ class _DateEditorState extends State<_DateEditor> {
                   ? null
                   : () async {
                       final range = _value!.toRange();
-                      final pending = widget.controller.setDateRange(
+                      final pending = widget.controller.window.setDateRange(
                         range.start,
                         range.end,
                       );

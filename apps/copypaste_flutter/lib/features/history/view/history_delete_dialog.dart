@@ -12,16 +12,18 @@ Future<void> showHistoryBulkDeleteDialog(
     icon: LucideIcons.trash2,
     title: AnimatedBuilder(
       animation: controller,
-      builder: (context, _) =>
-          Text('Delete ${controller.bulkSelectedIds.length} selected clips?'),
+      builder: (context, _) => Text(
+        'Delete ${controller.bulk.bulkSelectedIds.length} selected clips?',
+      ),
     ),
     actionLabel: 'Delete',
     changes: controller,
     canConfirm: () =>
-        !controller.isBulkMutating && controller.bulkSelectedIds.isNotEmpty,
-    onConfirm: controller.deleteBulkSelection,
+        !controller.bulk.isBulkMutating &&
+        controller.bulk.bulkSelectedIds.isNotEmpty,
+    onConfirm: controller.bulk.deleteBulkSelection,
     failureMessage: () =>
-        controller.errorMessage ?? 'The selected clips could not be deleted.',
+        controller.errors.message ?? 'The selected clips could not be deleted.',
   );
 }
 
@@ -36,9 +38,9 @@ Future<void> showHistoryDeleteDialog(
     title: const Text('Delete this clip?'),
     actionLabel: 'Delete',
     changes: controller,
-    canConfirm: () => !controller.isDeletePending(clipId),
-    onConfirm: () => controller.deleteClip(clipId),
+    canConfirm: () => !controller.mutations.isDeletePending(clipId),
+    onConfirm: () => controller.mutations.deleteClip(clipId),
     failureMessage: () =>
-        controller.errorMessage ?? 'This clip could not be deleted.',
+        controller.errors.message ?? 'This clip could not be deleted.',
   );
 }

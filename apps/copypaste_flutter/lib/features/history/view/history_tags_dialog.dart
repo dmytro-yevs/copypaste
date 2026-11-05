@@ -27,7 +27,7 @@ Future<void> showHistoryTagsDialog(
         ),
     builder: (_) => _TagsEditor(history: controller, clipIds: clipIds),
   );
-  await controller.refreshFacets();
+  await controller.window.refreshFacets();
 }
 
 enum _TagAction { rename, delete }

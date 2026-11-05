@@ -85,7 +85,7 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.updateQuery(
+      await controller.window.updateQuery(
         const HistoryQuery(
           search: 'needle',
           sourceApp: 'editor',
@@ -192,11 +192,11 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.setDateRange(
+      await controller.window.setDateRange(
         DateTime(2026, 10, 25),
         DateTime(2026, 10, 25),
       );
-      expect(controller.query.capturedBefore, DateTime(2026, 10, 26));
+      expect(controller.window.query.capturedBefore, DateTime(2026, 10, 26));
       await tester.pumpWidget(_app(controller));
       await tester.tap(find.text('Tag both'));
       await tester.pumpAndSettle();

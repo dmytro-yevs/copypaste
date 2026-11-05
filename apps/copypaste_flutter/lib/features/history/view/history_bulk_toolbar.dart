@@ -18,9 +18,10 @@ class HistoryBulkToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busy = controller.isBulkMutating;
-    final hasSelection = controller.bulkSelectedIds.isNotEmpty;
-    final canApply = hasSelection && !busy && !controller.isBulkDragSelecting;
+    final busy = controller.bulk.isBulkMutating;
+    final hasSelection = controller.bulk.bulkSelectedIds.isNotEmpty;
+    final canApply =
+        hasSelection && !busy && !controller.bulk.isBulkDragSelecting;
     final actions = Wrap(
       alignment: WrapAlignment.end,
       spacing: AppSpacing.sm,
@@ -33,11 +34,11 @@ class HistoryBulkToolbar extends StatelessWidget {
           child: Button.secondary(
             key: const ValueKey('history-bulk-tags'),
             style: AppTheme.historyToolbarIconStyle,
-            onPressed: canApply && controller.canTagBulkSelection
+            onPressed: canApply && controller.bulk.canTagBulkSelection
                 ? () => showHistoryTagsDialog(
                     context,
                     controller: controller,
-                    clipIds: controller.bulkSelectedIds.toList(),
+                    clipIds: controller.bulk.bulkSelectedIds.toList(),
                   )
                 : null,
             child: const AppIconFrame(
@@ -54,7 +55,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             child: Button.secondary(
               key: const ValueKey('history-bulk-close'),
               style: AppTheme.historyToolbarIconStyle,
-              onPressed: busy ? null : controller.endBulkSelection,
+              onPressed: busy ? null : controller.bulk.endBulkSelection,
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.x, size: AppIconSize.md),
@@ -72,7 +73,7 @@ class HistoryBulkToolbar extends StatelessWidget {
               style: AppTheme.historyToolbarIconStyle,
               onPressed: !canApply
                   ? null
-                  : () => unawaited(controller.setBulkPinned(true)),
+                  : () => unawaited(controller.bulk.setBulkPinned(true)),
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.pin, size: AppIconSize.md),
@@ -90,7 +91,7 @@ class HistoryBulkToolbar extends StatelessWidget {
               style: AppTheme.historyToolbarIconStyle,
               onPressed: !canApply
                   ? null
-                  : () => unawaited(controller.setBulkPinned(false)),
+                  : () => unawaited(controller.bulk.setBulkPinned(false)),
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.pinOff, size: AppIconSize.md),
@@ -127,7 +128,7 @@ class HistoryBulkToolbar extends StatelessWidget {
         ),
       ],
     );
-    final label = '${controller.bulkSelectedIds.length} selected';
+    final label = '${controller.bulk.bulkSelectedIds.length} selected';
     final count = Semantics(liveRegion: true, child: Text(label));
     return LayoutBuilder(
       builder: (context, constraints) {

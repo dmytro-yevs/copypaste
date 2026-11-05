@@ -27,7 +27,7 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
+      await controller.selection.select('clip');
       await tester.pumpWidget(
         ShadcnApp(
           theme: AppTheme.light,
@@ -55,7 +55,7 @@ void main() {
       await tester.tap(action);
       await tester.pump();
       expect(repository.clip.secret, isTrue);
-      expect(controller.selectedClip!.secret, isTrue);
+      expect(controller.selection.selectedClip!.secret, isTrue);
       expect(find.text('Synthetic private text').hitTestable(), findsNothing);
       expect(find.byIcon(LucideIcons.lockOpen), findsOneWidget);
       expect(
@@ -70,8 +70,8 @@ void main() {
       expect(repository.clip.secret, isFalse);
       expect(find.text('Synthetic private text').hitTestable(), findsOneWidget);
       expect(find.byIcon(LucideIcons.lockKeyhole), findsOneWidget);
-      await controller.select('clip');
-      expect(controller.selectedClip!.secret, isFalse);
+      await controller.selection.select('clip');
+      expect(controller.selection.selectedClip!.secret, isFalse);
       expect(repository.choices, [true, false]);
       expect(tester.takeException(), isNull);
     }, variant: TargetPlatformVariant({platform}));
@@ -87,7 +87,7 @@ void main() {
           final controller = HistoryController(repository);
           addTearDown(controller.dispose);
           await controller.initialize();
-          await controller.select('clip');
+          await controller.selection.select('clip');
           await tester.pumpWidget(
             ShadcnApp(
               theme: AppTheme.light,
@@ -116,8 +116,8 @@ void main() {
           await tester.pump();
           await tester.pump();
 
-          expect(controller.items.single.secret, isTrue);
-          expect(controller.selectedClip!.secret, isTrue);
+          expect(controller.window.items.single.secret, isTrue);
+          expect(controller.selection.selectedClip!.secret, isTrue);
           expect(
             find.text('Synthetic private text').hitTestable(),
             findsNothing,
@@ -146,7 +146,7 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
+      await controller.selection.select('clip');
       repository.clip = repository.clip.copyWith(secret: true);
       repository.includeInPage = false;
       final pending = Completer<HistoryClip>();
@@ -154,12 +154,12 @@ void main() {
 
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.items, isEmpty);
-      expect(controller.selectedClip, isNull);
+      expect(controller.window.items, isEmpty);
+      expect(controller.selection.selectedClip, isNull);
 
       pending.complete(repository.clip);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip!.secret, isTrue);
+      expect(controller.selection.selectedClip!.secret, isTrue);
     },
   );
 
@@ -171,16 +171,16 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
+      await controller.selection.select('clip');
       repository.clip = repository.clip.copyWith(secret: true);
-      await controller.reload();
-      expect(controller.selectedClip!.secret, isTrue);
+      await controller.window.reload();
+      expect(controller.selection.selectedClip!.secret, isTrue);
 
       repository.clip = repository.clip.copyWith(secret: false);
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip!.secret, isFalse);
-      expect(controller.selectedClip!.body, 'Synthetic private text');
+      expect(controller.selection.selectedClip!.secret, isFalse);
+      expect(controller.selection.selectedClip!.body, 'Synthetic private text');
     },
   );
 
@@ -202,21 +202,21 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
-      controller.beginPinnedDrag('clip');
-      expect(controller.draggedPinnedId, 'clip');
+      await controller.selection.select('clip');
+      controller.pinnedOrder.beginPinnedDrag('clip');
+      expect(controller.pinnedOrder.draggedPinnedId, 'clip');
 
       repository.clip = repository.clip.copyWith(secret: true);
       final pending = Completer<HistoryClip>();
       repository.pendingGet = pending;
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip, isNull);
+      expect(controller.selection.selectedClip, isNull);
 
       pending.complete(repository.clip);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip!.secret, isTrue);
-      controller.endPinnedDrag();
+      expect(controller.selection.selectedClip!.secret, isTrue);
+      controller.pinnedOrder.endPinnedDrag();
     },
   );
 
@@ -239,8 +239,8 @@ void main() {
 
     final oldPublic = Completer<HistoryClip>();
     repository.getResponses.add(oldPublic.future);
-    final selecting = controller.select('clip');
-    controller.beginPinnedDrag('clip');
+    final selecting = controller.selection.select('clip');
+    controller.pinnedOrder.beginPinnedDrag('clip');
     repository.clip = repository.clip.copyWith(secret: true);
     final currentSecret = Completer<HistoryClip>();
     repository.getResponses.add(currentSecret.future);
@@ -249,12 +249,12 @@ void main() {
 
     currentSecret.complete(repository.clip);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.selectedClip!.secret, isTrue);
+    expect(controller.selection.selectedClip!.secret, isTrue);
 
     oldPublic.complete(_Repository.initialClip.copyWith(pinned: true));
     await selecting;
-    expect(controller.selectedClip!.secret, isTrue);
-    controller.endPinnedDrag();
+    expect(controller.selection.selectedClip!.secret, isTrue);
+    controller.pinnedOrder.endPinnedDrag();
   });
 
   test(
@@ -269,21 +269,21 @@ void main() {
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
-      final import = controller.chooseFiles();
+      await controller.selection.select('clip');
+      final import = controller.transfers.chooseFiles();
       await Future<void>.delayed(Duration.zero);
-      expect(controller.isImportingFiles, isTrue);
+      expect(controller.transfers.isImportingFiles, isTrue);
 
       repository.clip = repository.clip.copyWith(secret: true);
       final pending = Completer<HistoryClip>();
       repository.pendingGet = pending;
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip, isNull);
+      expect(controller.selection.selectedClip, isNull);
 
       pending.complete(repository.clip);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.selectedClip!.secret, isTrue);
+      expect(controller.selection.selectedClip!.secret, isTrue);
       repository.pendingGet = null;
       picked.complete(const []);
       await import;
@@ -298,20 +298,32 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('clip');
+      await controller.selection.select('clip');
       repository.pending = Completer<void>();
-      final operation = controller.toggleSecret(controller.selectedClip!);
-      expect(controller.isSecretPending('clip'), isTrue);
+      final operation = controller.mutations.toggleSecret(
+        controller.selection.selectedClip!,
+      );
+      expect(controller.mutations.isSecretPending('clip'), isTrue);
       expect(controller.canSuspend, isFalse);
-      expect(await controller.toggleSecret(controller.selectedClip!), isFalse);
+      expect(
+        await controller.mutations.toggleSecret(
+          controller.selection.selectedClip!,
+        ),
+        isFalse,
+      );
       repository.pending!.completeError(StateError('offline'));
       expect(await operation, isFalse);
-      expect(controller.selectedClip!.secret, isFalse);
-      expect(controller.isSecretPending('clip'), isFalse);
-      expect(controller.errorMessage, isNotNull);
+      expect(controller.selection.selectedClip!.secret, isFalse);
+      expect(controller.mutations.isSecretPending('clip'), isFalse);
+      expect(controller.errors.message, isNotNull);
       repository.pending = null;
-      expect(await controller.toggleSecret(controller.selectedClip!), isTrue);
-      expect(controller.selectedClip!.secret, isTrue);
+      expect(
+        await controller.mutations.toggleSecret(
+          controller.selection.selectedClip!,
+        ),
+        isTrue,
+      );
+      expect(controller.selection.selectedClip!.secret, isTrue);
     },
   );
 
@@ -321,20 +333,22 @@ void main() {
     final controller = HistoryController(repository);
     addTearDown(controller.dispose);
     await controller.initialize();
-    await controller.select('clip');
+    await controller.selection.select('clip');
 
     repository.pending = Completer<void>();
-    final toggle = controller.toggleSecret(controller.selectedClip!);
+    final toggle = controller.mutations.toggleSecret(
+      controller.selection.selectedClip!,
+    );
     final stalePublic = Completer<HistoryClip>();
     repository.getResponses.add(stalePublic.future);
-    final selecting = controller.select('clip');
+    final selecting = controller.selection.select('clip');
     repository.pending!.complete();
     await toggle;
-    expect(controller.selectedClip!.secret, isTrue);
+    expect(controller.selection.selectedClip!.secret, isTrue);
 
     stalePublic.complete(_Repository.initialClip);
     await selecting;
-    expect(controller.selectedClip!.secret, isTrue);
+    expect(controller.selection.selectedClip!.secret, isTrue);
   });
 }
 
