@@ -696,7 +696,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting => 'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.starting =>
+          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
         _RuntimeState.failed => _runtimeFailureMessage,
         _RuntimeState.idle || _RuntimeState.ready => null,
       },
