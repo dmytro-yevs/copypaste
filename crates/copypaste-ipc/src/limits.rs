@@ -79,7 +79,11 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
 pub const LIST_PREVIEW_BYTES: usize = 1024;
 
 /// Borrow the preview so callers can copy only the displayed prefix.
+///
+/// Surrounding whitespace is never displayed, so it does not consume the
+/// preview budget and dropping it alone does not mark the preview truncated.
 pub fn preview_text(content: &str) -> (&str, bool) {
+    let content = content.trim_start();
     if content.len() > MAX_CONTENT_BYTES {
         let first = unicode_segmentation::UnicodeSegmentation::graphemes(content, true)
             .next()
@@ -89,7 +93,7 @@ pub fn preview_text(content: &str) -> (&str, bool) {
         }
     }
     if content.len() <= LIST_PREVIEW_BYTES {
-        return (content, false);
+        return (content.trim_end(), false);
     }
     let mut cut = 0;
     for (at, cluster) in unicode_segmentation::UnicodeSegmentation::grapheme_indices(content, true)
@@ -99,7 +103,7 @@ pub fn preview_text(content: &str) -> (&str, bool) {
         }
         cut = at + cluster.len();
     }
-    (&content[..cut], true)
+    (content[..cut].trim_end(), true)
 }
 
 pub fn bound_preview(content: &mut String) -> bool {
@@ -129,6 +133,13 @@ mod tests {
         let mut content = "a".repeat(LIST_PREVIEW_BYTES + 1);
         assert!(bound_preview(&mut content));
         assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+    }
+
+    #[test]
+    fn surrounding_whitespace_neither_hides_nor_truncates_the_text() {
+        let mut content = format!("{}word\n \n", "\n".repeat(LIST_PREVIEW_BYTES * 2));
+        assert!(!bound_preview(&mut content));
+        assert_eq!(content, "word");
     }
 
     #[test]

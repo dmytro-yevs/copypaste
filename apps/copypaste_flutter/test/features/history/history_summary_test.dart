@@ -31,6 +31,12 @@ void main() {
     },
   );
 
+  test('surrounding whitespace neither hides nor truncates the text', () {
+    final summary = historySummary(detail('${'\n' * 2048}word\n \n'));
+    expect(summary.preview, 'word');
+    expect(summary.truncated, isFalse);
+  });
+
   test('preview boundaries preserve complete multi-codepoint graphemes', () {
     const cluster = '👨‍👩‍👧‍👦';
     final summary = historySummary(detail(cluster * 100));

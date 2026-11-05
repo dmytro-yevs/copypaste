@@ -8,7 +8,10 @@ HistoryClip historySummary(HistoryClip clip) {
   if (clip.body == null) return clip;
   final preview = StringBuffer();
   var bytes = 0;
+  var cut = false;
   for (final cluster in clip.preview.characters) {
+    // As on the server, surrounding whitespace is not part of the preview.
+    if (bytes == 0 && cluster.trim().isEmpty) continue;
     var clusterBytes = 0;
     for (final rune in cluster.runes) {
       clusterBytes += rune <= 0x7f
@@ -20,14 +23,16 @@ HistoryClip historySummary(HistoryClip clip) {
           : 4;
     }
     // As on the server, preserve an indivisible first grapheme.
-    if (bytes > 0 && bytes + clusterBytes > 1024) break;
+    if (bytes > 0 && bytes + clusterBytes > 1024) {
+      cut = true;
+      break;
+    }
     preview.write(cluster);
     bytes += clusterBytes;
   }
-  final bounded = preview.toString();
   return clip.copyWith(
-    preview: bounded,
+    preview: preview.toString().trimRight(),
     clearBody: true,
-    truncated: clip.truncated || bounded.length < clip.preview.length,
+    truncated: clip.truncated || cut,
   );
 }
