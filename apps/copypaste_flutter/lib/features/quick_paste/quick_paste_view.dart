@@ -12,6 +12,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../history/presentation/secret_spoiler.dart';
 
+import '../../app/theme/app_brand_logo.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
@@ -139,7 +140,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           );
           if (mounted && icon != null) {
             await precacheImage(
-              MemoryImage(icon.bytes),
+              SourceAppLabel.iconImage(context, icon),
               context,
               onError: (_, _) {},
             );
@@ -372,11 +373,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             key: const ValueKey('quick-paste-home'),
             style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             onPressed: controller.openMainWindow,
-            child: const Image(
+            child: const AppBrandLogo(
               key: ValueKey('quick-paste-logo'),
-              image: AssetImage('assets/brand/copypaste.png'),
-              width: AppIconSize.sm,
-              height: AppIconSize.sm,
+              size: AppIconSize.sm,
               semanticLabel: 'Open CopyPaste',
             ),
           ),

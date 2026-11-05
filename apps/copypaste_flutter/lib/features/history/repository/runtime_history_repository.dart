@@ -171,7 +171,11 @@ class RuntimeHistoryRepository
     _ensureActive();
     final preview = await runtime.sourceAppIcon(id: id);
     if (preview == null) return null;
-    return HistorySourceAppIcon(preview.pngBytes);
+    return HistorySourceAppIcon(
+      preview.pngBytes,
+      width: preview.width,
+      height: preview.height,
+    );
   }
 
   @override

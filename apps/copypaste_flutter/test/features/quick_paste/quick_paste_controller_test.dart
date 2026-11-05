@@ -1661,7 +1661,14 @@ void main() {
         matching: find.byType(Avatar),
       );
       final provider = tester.widget<Avatar>(iconFinder).provider;
-      expect(provider, isNotNull);
+      expect(
+        provider,
+        isA<ResizeImage>().having(
+          (image) => image.width,
+          'decoded width',
+          (AppIconSize.sm * tester.view.devicePixelRatio).ceil(),
+        ),
+      );
       controller.focus(controller.items[1]);
       for (var frame = 0; frame < 4; frame++) {
         await tester.pump(const Duration(milliseconds: 100));

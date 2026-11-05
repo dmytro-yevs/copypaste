@@ -10,6 +10,13 @@ class AndroidCaptureFeedbackTest {
     }
 
     @Test
+    fun thumbnailSubsamplingKeepsTheThumbnailEdge() {
+        assertEquals(1, AndroidCaptureFeedback.thumbnailSampleSize(511, 300))
+        assertEquals(2, AndroidCaptureFeedback.thumbnailSampleSize(300, 512))
+        assertEquals(8, AndroidCaptureFeedback.thumbnailSampleSize(4032, 3024))
+    }
+
+    @Test
     fun previewDoesNotSplitUnicodeCharacters() {
         assertEquals("😀".repeat(1000) + "…", AndroidCaptureFeedback.textPreview("😀".repeat(1001)))
     }

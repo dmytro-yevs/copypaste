@@ -1,5 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../../app/theme/app_brand_logo.dart';
 import '../../../app/theme/app_tokens.dart';
 
 /// Brand and concise introductory content shared by the first and final steps.
@@ -13,11 +14,7 @@ class OnboardingIntro extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Image(
-        image: AssetImage('assets/brand/copypaste.png'),
-        width: AppIconSize.hero,
-        height: AppIconSize.hero,
-      ),
+      const AppBrandLogo(size: AppIconSize.hero),
       const Gap(AppSpacing.xxl),
       Text(
         ready ? 'CopyPaste is ready' : 'Welcome to CopyPaste',

@@ -22,6 +22,30 @@ class SourceAppLabel extends StatelessWidget {
   final TextStyle? style;
   final StrutStyle? strutStyle;
 
+  /// Decodes the icon for the physical size of the square avatar. The avatar
+  /// covers its frame, so a known non-square icon scales by its shorter side.
+  static ImageProvider iconImage(
+    BuildContext context,
+    HistorySourceAppIcon icon, {
+    double size = AppIconSize.sm,
+  }) {
+    final edge = (size * MediaQuery.devicePixelRatioOf(context)).ceil();
+    final source = MemoryImage(icon.bytes);
+    final width = icon.width;
+    final height = icon.height;
+    if (width != null && height != null && width != height) {
+      return width < height
+          ? ResizeImage(source, width: edge)
+          : ResizeImage(source, height: edge);
+    }
+    return ResizeImage(
+      source,
+      width: edge,
+      height: edge,
+      policy: ResizeImagePolicy.fit,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<HistorySourceAppIcon?>(
@@ -34,7 +58,9 @@ class SourceAppLabel extends StatelessWidget {
           child: Avatar(
             initials: Avatar.getInitials(name),
             size: iconSize,
-            provider: sourceIcon == null ? null : MemoryImage(sourceIcon.bytes),
+            provider: sourceIcon == null
+                ? null
+                : iconImage(context, sourceIcon, size: iconSize),
           ),
         );
         if (!showName) return ExcludeSemantics(child: leading);

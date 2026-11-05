@@ -2,6 +2,7 @@ import 'dart:ui' show Tristate;
 
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
+import 'package:copypaste_flutter/app/theme/app_brand_logo.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -682,11 +683,10 @@ void main() {
       expect(tester.getCenter(iconFinder).dx, closeTo(railCenter, 1));
       expect(tester.widget<Icon>(iconFinder).size, AppIconSize.md);
     }
-    final compactLogo = tester.widget<Image>(
+    final compactLogo = tester.widget<AppBrandLogo>(
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
     );
-    expect(compactLogo.width, AppIconSize.xl);
-    expect(compactLogo.height, AppIconSize.xl);
+    expect(compactLogo.size, AppIconSize.xl);
     expect(
       tester
           .getCenter(find.byKey(const ValueKey<String>('copypaste-brand-logo')))
@@ -737,11 +737,10 @@ void main() {
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
       findsOneWidget,
     );
-    final expandedLogo = tester.widget<Image>(
+    final expandedLogo = tester.widget<AppBrandLogo>(
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
     );
-    expect(expandedLogo.width, AppIconSize.xl);
-    expect(expandedLogo.height, AppIconSize.xl);
+    expect(expandedLogo.size, AppIconSize.xl);
     final rail = find.byType(NavigationRail);
     final theme = Theme.of(tester.element(rail));
     expect(expandedRail.backgroundColor, theme.colorScheme.secondary);

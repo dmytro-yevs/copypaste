@@ -589,6 +589,76 @@ void main() {
       expect(controller.items, isNot(same(before)));
     });
 
+    test(
+      'refresh keeps the loaded selection until its summary changes',
+      () async {
+        HistoryClip detail({required bool pinned}) => HistoryClip(
+          id: 'one',
+          sourceAppIconId: 'app:one',
+          contentType: 'text/plain',
+          preview: 'one',
+          body: 'one',
+          createdAt: DateTime.utc(2026),
+          pinned: pinned,
+        );
+        final repository = _HistoryRepository()
+          ..detailClip = detail(pinned: false)
+          ..pages.addAll([
+            Future.value(HistoryClipPage(items: [_clip('one')])),
+            Future.value(HistoryClipPage(items: [_clip('one')])),
+            Future.value(
+              HistoryClipPage(items: [_clip('one').copyWith(pinned: true)]),
+            ),
+          ]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await controller.select('one');
+        final loaded = controller.selectedClip;
+        expect(loaded?.body, 'one');
+
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.selectedClip, same(loaded));
+        expect(repository.getCalls, 1);
+
+        repository.detailClip = detail(pinned: true);
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(repository.getCalls, 2);
+        expect(controller.selectedClip?.pinned, isTrue);
+        expect(controller.selectedClip?.body, 'one');
+      },
+    );
+
+    test('coalesces a burst of watch events into one follow-up', () async {
+      final running = Completer<HistoryClipPage>();
+      final repository = _HistoryRepository()
+        ..pages.addAll([
+          Future.value(HistoryClipPage(items: [_clip('one')])),
+          running.future,
+          Future.value(
+            HistoryClipPage(
+              items: [_clip('three'), _clip('two'), _clip('one')],
+            ),
+          ),
+        ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      for (var event = 0; event < 5; event++) {
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.requests, hasLength(2));
+      running.complete(HistoryClipPage(items: [_clip('two'), _clip('one')]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.requests, hasLength(3));
+      expect(controller.items.map((clip) => clip.id), ['three', 'two', 'one']);
+    });
+
     test('refresh replaces a row when file metadata changes', () async {
       HistoryClip file(bool available) => HistoryClip(
         id: 'file',
@@ -1050,6 +1120,7 @@ class _HistoryRepository implements HistoryRepository {
   Future<HistorySourceAppIcon?>? sourceIconFuture;
   int sourceIconCalls = 0;
   HistoryClip? detailClip;
+  int getCalls = 0;
   final List<(String, String)> savedFiles = [];
   Future<void>? savePending;
   Object? saveError;
@@ -1072,7 +1143,10 @@ class _HistoryRepository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryClip> get(String id) async => detailClip ?? _clip(id);
+  Future<HistoryClip> get(String id) async {
+    getCalls++;
+    return detailClip ?? _clip(id);
+  }
 
   @override
   Future<HistoryImagePreview?> imagePreview(

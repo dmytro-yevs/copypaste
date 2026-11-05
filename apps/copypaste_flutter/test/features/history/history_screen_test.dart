@@ -1852,7 +1852,14 @@ void main() {
     final editorAvatar = tester.widget<Avatar>(
       find.descendant(of: editorLabel, matching: find.byType(Avatar)),
     );
-    expect(editorAvatar.provider, isA<MemoryImage>());
+    expect(
+      editorAvatar.provider,
+      isA<ResizeImage>().having(
+        (image) => image.imageProvider,
+        'source',
+        isA<MemoryImage>(),
+      ),
+    );
     expect(repository.requestedSourceIconIds, ['app:com.example.editor']);
     expect(find.text('com.example.editor'), findsNothing);
     controller.dispose();
