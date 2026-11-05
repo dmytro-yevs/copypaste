@@ -6,6 +6,15 @@ optional OCR, semantic search, SMS Codes, and Supabase Sync modules.
 
 Download the latest release from [GitHub Releases](https://github.com/dmytro-yevs/copypaste/releases).
 
+On Windows, install with WinGet. Windows SmartScreen warns about the installer
+when it is downloaded in a browser, because it is not signed by a commercial
+certificate authority; WinGet verifies the installer hash and does not show
+that warning.
+
+```powershell
+winget install DmytroYevs.CopyPaste
+```
+
 ## History organization
 
 History supports local-calendar date ranges, quick periods, and combined server-side
