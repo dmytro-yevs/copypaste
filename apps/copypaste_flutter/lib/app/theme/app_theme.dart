@@ -17,12 +17,14 @@ enum AppSelectVariant {
 abstract final class AppTheme {
   static const mode = ThemeMode.system;
 
+  static Color popupBorder(BuildContext context) =>
+      Theme.of(context).colorScheme.foreground.withValues(alpha: 0.18);
+
   static ThemeData popupTheme(BuildContext context) {
     final theme = Theme.of(context);
     return theme.copyWith(
-      colorScheme: () => theme.colorScheme.copyWith(
-        border: () => theme.colorScheme.foreground.withValues(alpha: 0.18),
-      ),
+      colorScheme: () =>
+          theme.colorScheme.copyWith(border: () => popupBorder(context)),
     );
   }
 

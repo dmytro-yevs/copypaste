@@ -75,7 +75,7 @@ fn hash_blob(
 
 fn fingerprint(conn: &Connection, row: &Row<'_>, item: &StoredItem) -> rusqlite::Result<[u8; 32]> {
     let mut hash = Sha256::new();
-    hash.update(b"copypaste/history-preview-source/v2");
+    hash.update(b"copypaste/history-preview-source/v3");
     hash_field(&mut hash, item.id.as_bytes());
     hash_field(&mut hash, &item.nonce);
     hash_field(&mut hash, item.content_type.as_bytes());

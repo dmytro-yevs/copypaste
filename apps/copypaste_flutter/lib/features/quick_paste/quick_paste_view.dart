@@ -538,7 +538,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           if (pinnedIds.isNotEmpty) ...[
             if (recentIds.isNotEmpty) ...[
               const Gap(AppSpacing.xs),
-              const Divider(),
+              Divider(color: AppTheme.popupBorder(context)),
               const Gap(AppSpacing.xs),
             ],
             ConstrainedBox(
@@ -988,7 +988,7 @@ class _ClipContent extends StatelessWidget {
     if (clip.contentKind != HistoryClipKind.image) {
       return Text(
         clip.preview.isEmpty ? clip.contentKind.label : clip.preview,
-        maxLines: 1,
+        maxLines: 4,
         overflow: TextOverflow.ellipsis,
       );
     }
