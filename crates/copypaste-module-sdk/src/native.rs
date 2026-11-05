@@ -142,6 +142,49 @@ pub struct NativeHostApiV2 {
 /// module commands retain their existing 1 MiB limit.
 pub const MAX_HOST_BYTES: usize = 32 * 1024 * 1024;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum EncodeError {
+    Invalid,
+    TooLarge,
+}
+
+/// Serializes into a buffer allocated once at its final size, refusing output
+/// over `max` before allocating it. The host channel carries plaintext; a
+/// growing buffer overshoots by up to 2x and leaves copies in freed memory.
+pub fn to_exact_vec<T: serde::Serialize + ?Sized>(
+    value: &T,
+    max: usize,
+) -> Result<Vec<u8>, EncodeError> {
+    struct Count {
+        len: usize,
+        max: usize,
+    }
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.len = self.len.saturating_add(bytes.len());
+            if self.len > self.max {
+                return Err(std::io::Error::other("over the limit"));
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count { len: 0, max };
+    serde_json::to_writer(&mut count, value).map_err(|_| {
+        if count.len > max {
+            EncodeError::TooLarge
+        } else {
+            EncodeError::Invalid
+        }
+    })?;
+    let mut bytes = Vec::with_capacity(count.len);
+    serde_json::to_writer(&mut bytes, value).map_err(|_| EncodeError::Invalid)?;
+    debug_assert_eq!(bytes.len(), count.len);
+    Ok(bytes)
+}
+
 #[derive(Clone)]
 pub struct HostClient {
     api: NativeHostApi,
@@ -156,10 +199,10 @@ impl HostClient {
         &self,
         input: &I,
     ) -> Result<O, String> {
-        let mut bytes = serde_json::to_vec(input).map_err(|_| "Invalid host request.")?;
-        if bytes.len() > MAX_HOST_BYTES {
-            return Err("The host request exceeds its limit.".into());
-        }
+        let mut bytes = to_exact_vec(input, MAX_HOST_BYTES).map_err(|error| match error {
+            EncodeError::Invalid => "Invalid host request.",
+            EncodeError::TooLarge => "The host request exceeds its limit.",
+        })?;
         // SAFETY: callback ownership is established by create_with_host.
         unsafe {
             let reply = (self.api.request)(self.api.context, bytes.as_ptr(), bytes.len());
@@ -398,6 +441,18 @@ mod host_tests {
         };
         assert!(!module.is_null());
         unsafe { destroy::<TestModule>(module) };
+    }
+    #[test]
+    fn exact_encoding_matches_serde_json_and_refuses_oversize_output() {
+        let value = serde_json::json!({"operation": "apply", "items": ["a\"b", 1, null]});
+        let expected = serde_json::to_vec(&value).unwrap();
+        let encoded = to_exact_vec(&value, expected.len()).unwrap();
+        assert_eq!(encoded, expected);
+        assert_eq!(encoded.capacity(), encoded.len());
+        assert_eq!(
+            to_exact_vec(&value, expected.len() - 1),
+            Err(EncodeError::TooLarge)
+        );
     }
     #[test]
     fn already_revoked_subscription_notifies_immediately() {

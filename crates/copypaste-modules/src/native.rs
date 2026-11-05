@@ -2,7 +2,8 @@
 use crate::ModuleError;
 use copypaste_module_sdk::{
     native::{
-        NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply, MAX_HOST_BYTES,
+        to_exact_vec, NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply,
+        MAX_HOST_BYTES,
     },
     ModuleEnvironment, ModuleInvocation, ModuleOutput, ModuleUnloadPolicy, MAX_INVOCATION_BYTES,
     MODULE_API_VERSION,
@@ -318,25 +319,17 @@ unsafe extern "C" fn host_request(
         // SAFETY: NativeModule retains the bridge until its module and all workers are destroyed.
         let bridge = unsafe { &*context.cast::<HostBridge>() };
         // SAFETY: the caller lends this bounded input for the callback duration.
-        let input: serde_json::Value =
-            serde_json::from_slice(unsafe { std::slice::from_raw_parts(data, len) })
-                .map_err(|_| ModuleError::State)?;
+        let input = unsafe { std::slice::from_raw_parts(data, len) };
         // Already admitted token rotations may finish saving encrypted metadata
         // during teardown. History access and the live lease close immediately.
-        if !bridge.accepting.load(Ordering::Acquire)
-            && !matches!(
-                input.get("operation").and_then(serde_json::Value::as_str),
-                Some("read_state" | "write_state" | "clear_state")
-            )
-        {
+        if !bridge.accepting.load(Ordering::Acquire) && !is_state_operation(input) {
             return Err(ModuleError::Disabled);
         }
-        let output = bridge.services.request(&bridge.id, input)?;
-        let bytes = serde_json::to_vec(&output).map_err(|_| ModuleError::State)?;
-        if bytes.len() > MAX_HOST_BYTES {
-            return Err(ModuleError::State);
-        }
-        Ok(bytes)
+        // Parsed straight into the typed request: an intermediate JSON tree
+        // would hold another copy of the plaintext outside `Zeroizing`.
+        let request = serde_json::from_slice(input).map_err(|_| ModuleError::State)?;
+        let output = bridge.services.request(&bridge.id, request)?;
+        to_exact_vec(&output, MAX_HOST_BYTES).map_err(|_| ModuleError::State)
     }))
     .unwrap_or(Err(ModuleError::State));
     let (status, bytes) = match result {
@@ -353,6 +346,20 @@ unsafe extern "C" fn host_request(
         },
     }
 }
+/// Reads only the operation name, borrowed from the request.
+fn is_state_operation(input: &[u8]) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Operation<'a> {
+        #[serde(borrow)]
+        operation: std::borrow::Cow<'a, str>,
+    }
+    serde_json::from_slice::<Operation>(input).is_ok_and(|request| {
+        matches!(
+            &*request.operation,
+            "read_state" | "write_state" | "clear_state"
+        )
+    })
+}
 unsafe extern "C" fn host_release(buffer: NativeBuffer) {
     if !buffer.data.is_null() {
         // SAFETY: the caller releases exactly the host allocation returned by host_request.
@@ -360,5 +367,20 @@ unsafe extern "C" fn host_release(buffer: NativeBuffer) {
             unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(buffer.data, buffer.len)) };
         use zeroize::Zeroize;
         bytes.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn teardown_admits_only_state_operations() {
+        assert!(super::is_state_operation(
+            br#"{"operation":"write_state","values":{"k":"v"}}"#
+        ));
+        assert!(!super::is_state_operation(
+            br#"{"operation":"scan","since_ms":0,"after_item_id":null}"#
+        ));
+        assert!(!super::is_state_operation(br#"{"keys":[]}"#));
+        assert!(!super::is_state_operation(b"not json"));
     }
 }

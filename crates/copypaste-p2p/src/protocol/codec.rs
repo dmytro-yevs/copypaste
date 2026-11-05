@@ -1,4 +1,5 @@
-//! JSON codec and fail-closed validation for sync wire messages.
+//! Wire codec and fail-closed validation for sync messages: binary envelopes
+//! for item payloads and file chunks, JSON for everything else.
 //!
 //! Every peer-controlled bound is enforced at `SyncMessage::decode`, the only
 //! ingress path. Encoding applies the same policy so local defects fail before
@@ -8,8 +9,11 @@
 
 use std::net::SocketAddr;
 
+use zeroize::Zeroizing;
+
 use crate::DeviceProfile;
 
+use super::items::{self, ItemsFrame};
 use super::{
     SyncItem, SyncMessage, FILE_CHUNK_BYTES, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES,
     MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE,
@@ -79,30 +83,67 @@ pub enum ProtocolError {
 }
 
 impl SyncMessage {
-    /// Serialises ordinary messages to JSON and file chunks to their compact
-    /// binary envelope after checking every bound.
+    /// Serialises items and file chunks to their binary envelopes and other
+    /// messages to JSON, after checking every bound.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
-        if let Self::FileChunk { index, bytes } = self {
-            let mut encoded = Vec::with_capacity(FILE_CHUNK_HEADER_BYTES + bytes.len());
-            encoded.extend_from_slice(&FILE_CHUNK_MAGIC);
-            encoded.extend_from_slice(&index.to_be_bytes());
-            encoded.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-            encoded.extend_from_slice(bytes);
-            return Ok(encoded);
+        match self {
+            Self::FileChunk { index, bytes } => {
+                let mut encoded = Vec::with_capacity(FILE_CHUNK_HEADER_BYTES + bytes.len());
+                encoded.extend_from_slice(&FILE_CHUNK_MAGIC);
+                encoded.extend_from_slice(&index.to_be_bytes());
+                encoded.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+                encoded.extend_from_slice(bytes);
+                return Ok(encoded);
+            }
+            Self::Items { items } => return Ok(ItemsFrame::new(items)?.to_vec()),
+            _ => {}
         }
-        let bytes = serde_json::to_vec(self).map_err(|e| ProtocolError::Encode(e.to_string()))?;
-        if bytes.len() > MAX_MESSAGE_BYTES {
+        // Counting first allocates the buffer once at its final size. A
+        // growing `Vec` overshoots by up to 2x and leaves the plaintext it
+        // copied behind in freed memory.
+        let len = json_len(self)?;
+        if len > MAX_MESSAGE_BYTES {
             return Err(ProtocolError::MessageTooLarge {
-                bytes: bytes.len(),
+                bytes: len,
                 max: MAX_MESSAGE_BYTES,
             });
         }
+        let mut bytes = Vec::with_capacity(len);
+        serde_json::to_writer(&mut bytes, self)
+            .map_err(|e| ProtocolError::Encode(e.to_string()))?;
+        debug_assert_eq!(bytes.len(), len);
         Ok(bytes)
     }
 
-    /// Parses a JSON message or compact binary file chunk and enforces every
-    /// bound before returning it.
+    /// The items envelope as borrowed parts after checking every bound, or
+    /// `None` for any other message.
+    pub(crate) fn items_frame(&self) -> Option<Result<ItemsFrame<'_>, ProtocolError>> {
+        let Self::Items { items } = self else {
+            return None;
+        };
+        Some(self.validate().and_then(|()| ItemsFrame::new(items)))
+    }
+
+    /// The length a message announces in its first received bytes, so the
+    /// transport can allocate it once. Only the items envelope announces one.
+    pub fn announced_len(first: &[u8]) -> Option<usize> {
+        items::announced_len(first)
+    }
+
+    /// As [`Self::decode`], but the largest item payload keeps `raw`'s
+    /// allocation instead of being copied out of it.
+    pub fn decode_owned(mut raw: Zeroizing<Vec<u8>>) -> Result<Self, ProtocolError> {
+        if raw.len() <= MAX_MESSAGE_BYTES && raw.starts_with(&items::MAGIC) {
+            return Self::checked(Self::Items {
+                items: items::decode_owned(&mut raw)?,
+            });
+        }
+        Self::decode(&raw)
+    }
+
+    /// Parses a JSON message or a binary envelope and enforces every bound
+    /// before returning it.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         if bytes.len() > MAX_MESSAGE_BYTES {
             return Err(ProtocolError::MessageTooLarge {
@@ -113,7 +154,12 @@ impl SyncMessage {
         if bytes.starts_with(&FILE_CHUNK_MAGIC) {
             return decode_file_chunk(bytes);
         }
-        let mut msg: Self = match serde_json::from_slice(bytes) {
+        if bytes.starts_with(&items::MAGIC) {
+            return Self::checked(Self::Items {
+                items: items::decode(bytes)?,
+            });
+        }
+        let msg: Self = match parse_json(bytes) {
             Ok(message) => message,
             Err(error) => {
                 // A future protocol may introduce an unknown message tag.
@@ -133,6 +179,10 @@ impl SyncMessage {
                 return Err(ProtocolError::Decode(error.to_string()));
             }
         };
+        Self::checked(msg)
+    }
+
+    fn checked(mut msg: Self) -> Result<Self, ProtocolError> {
         msg.clamp_timestamps();
         if let Err(error) = msg.validate() {
             zeroize_file_chunk(&mut msg);
@@ -330,6 +380,59 @@ fn decode_file_chunk(bytes: &[u8]) -> Result<SyncMessage, ProtocolError> {
 fn zeroize_file_chunk(message: &mut SyncMessage) {
     if let SyncMessage::FileChunk { bytes, .. } = message {
         zeroize::Zeroize::zeroize(bytes);
+    }
+}
+
+/// The JSON length of `value`, measured without retaining the bytes.
+pub(super) fn json_len<T: serde::Serialize + ?Sized>(value: &T) -> Result<usize, ProtocolError> {
+    let mut counted = ByteCount(0);
+    serde_json::to_writer(&mut counted, value).map_err(|e| ProtocolError::Encode(e.to_string()))?;
+    Ok(counted.0)
+}
+
+struct ByteCount(usize);
+
+impl std::io::Write for ByteCount {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("message size overflow"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Body of [`SyncMessage::Summary`]. The tag field is declared so a duplicate
+/// tag still fails, as it does through the derived enum.
+#[derive(serde::Deserialize)]
+struct SummaryBody {
+    #[serde(rename = "t")]
+    _tag: serde::de::IgnoredAny,
+    items: Vec<super::ItemSummary>,
+    more: bool,
+}
+
+/// Decodes summary pages straight into their final type.
+///
+/// serde reads an internally tagged enum into an intermediate tree of 32-byte
+/// nodes before it picks the variant. Our encoder always writes the tag first;
+/// any other layout keeps the derived path.
+fn parse_json(bytes: &[u8]) -> serde_json::Result<SyncMessage> {
+    let tag = bytes
+        .strip_prefix(br#"{"t":""#)
+        .and_then(|rest| rest.split(|&b| b == b'"').next());
+    match tag {
+        Some(b"summary") => {
+            serde_json::from_slice::<SummaryBody>(bytes).map(|body| SyncMessage::Summary {
+                items: body.items,
+                more: body.more,
+            })
+        }
+        _ => serde_json::from_slice(bytes),
     }
 }
 
@@ -1007,6 +1110,40 @@ mod tests {
     }
 
     #[test]
+    fn json_encoding_is_exactly_sized_and_byte_identical_to_serde_json() {
+        let message = SyncMessage::Summary {
+            items: vec![summary("a"), summary("b")],
+            more: true,
+        };
+        let encoded = message.encode().expect("valid page encodes");
+        assert_eq!(encoded, serde_json::to_vec(&message).unwrap());
+        assert_eq!(encoded.capacity(), encoded.len());
+    }
+
+    #[test]
+    fn summary_body_decoding_matches_the_derived_enum() {
+        let page = SyncMessage::Summary {
+            items: vec![summary("a")],
+            more: true,
+        };
+        assert_eq!(SyncMessage::decode(&page.encode().unwrap()).unwrap(), page);
+        let reordered = br#"{"more":false,"items":[],"t":"summary"}"#;
+        assert_eq!(
+            SyncMessage::decode(reordered).unwrap(),
+            SyncMessage::Summary {
+                items: Vec::new(),
+                more: false
+            }
+        );
+        let duplicate_tag = br#"{"t":"summary","items":[],"more":false,"t":"summary"}"#;
+        assert!(serde_json::from_slice::<SyncMessage>(duplicate_tag).is_err());
+        assert!(matches!(
+            SyncMessage::decode(duplicate_tag),
+            Err(ProtocolError::Decode(_))
+        ));
+    }
+
+    #[test]
     fn an_oversized_frame_is_refused_without_parsing() {
         let bytes = vec![b'x'; MAX_MESSAGE_BYTES + 1];
         assert!(matches!(
@@ -1025,17 +1162,6 @@ mod tests {
         };
         assert_eq!(items[0].created_at, 0, "negative was not clamped");
         assert_eq!(items[1].created_at, 7, "positive was altered");
-    }
-
-    #[test]
-    fn negative_timestamps_are_clamped_inside_items_too() {
-        let raw = br#"{"t":"items","items":[
-            {"item_id":"a","content":"c","content_type":"text","created_at":-999,
-             "deleted":false,"content_hash":"h","origin_device_id":"d","pinned":false,"pin_order":null}]}"#;
-        let SyncMessage::Items { items } = SyncMessage::decode(raw).unwrap() else {
-            panic!("wrong variant");
-        };
-        assert_eq!(items[0].created_at, 0);
     }
 
     #[test]

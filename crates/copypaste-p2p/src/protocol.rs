@@ -5,20 +5,25 @@
 //! ciphertext is sealed under a device-local key with the item id in its AEAD,
 //! so forwarding it would produce data the receiver cannot open. Nothing in
 //! this module should reach disk or a log.
+//!
+//! Item payloads, text and binary alike, travel as raw bytes after a JSON
+//! metadata header in one binary items envelope; other messages are JSON.
 
 use serde::{Deserialize, Serialize};
 
 use crate::DeviceProfile;
 
 mod codec;
+mod items;
 
 pub(crate) use codec::validate_device_profile;
 pub use codec::ProtocolError;
 
 /// Version of the message set. Bumped whenever two builds would disagree on a
 /// field. No negotiation and no compatibility shim: a mismatch is a clear error
-/// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 10;
+/// rather than a degraded session. v11 moved item payloads out of JSON into the
+/// binary items envelope.
+pub const PROTOCOL_VERSION: u32 = 11;
 pub const FILE_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
@@ -53,10 +58,10 @@ pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_ITEM_BYTES_PER_MESSAGE: usize =
     MAX_CONTENT_BYTES + copypaste_ipc::MAX_SYNC_METADATA_BYTES;
 
-/// Hard ceiling on one encoded message, checked before any parsing. Well above
-/// [`MAX_ITEM_BYTES_PER_MESSAGE`] because JSON escaping inflates control
-/// characters to six bytes (`\u00XX`) each; 8× the content budget covers that
-/// worst case and still refuses an unbounded stream before parsing.
+/// Hard ceiling on one encoded message, checked before any parsing. Item
+/// payloads travel raw, so an items envelope stays near
+/// [`MAX_ITEM_BYTES_PER_MESSAGE`]; the margin covers JSON escaping of metadata
+/// and summary pages and still refuses an unbounded stream before parsing.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Longest item id, device id, or origin device id.
@@ -122,15 +127,17 @@ pub fn plaintext_content_hash(content: &[u8]) -> String {
 pub use plaintext_content_hash as content_hash_bytes;
 
 /// An item being transferred. `content` is plaintext — see the module docs.
+///
+/// The serde form is the item's entry in the items envelope header: metadata
+/// only. Both payload fields travel as raw bytes after that header.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SyncItem {
     pub item_id: String,
     /// UTF-8 text payload. Empty for a binary payload or tombstone.
+    #[serde(skip)]
     pub content: String,
-    /// Raw binary payload. JSON serialises this as a byte array rather than
-    /// pretending it is UTF-8/base64 text. Incompatible message sets fail the
-    /// protocol-version check before interpreting it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Raw binary payload. Empty for a text payload or tombstone.
+    #[serde(skip)]
     pub binary_content: Vec<u8>,
     /// File metadata is structured JSON rather than a source path. It travels
     /// with the bytes so a receiving device can materialise a safe paste URL.
@@ -221,6 +228,8 @@ pub enum SyncMessage {
     Request {
         item_ids: Vec<String>,
     },
+    /// Encoded only as the binary items envelope, never as JSON.
+    #[serde(skip)]
     Items {
         items: Vec<SyncItem>,
     },

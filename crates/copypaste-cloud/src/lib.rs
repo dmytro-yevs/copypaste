@@ -37,6 +37,11 @@ pub use sync::{CloudSync, SyncError, SyncStats};
 use url::Host;
 use url::Url;
 
+/// One HTTP connection pool and TLS configuration. Clones share it, so the
+/// auth and REST clients of one account reuse the same connections.
+#[derive(Clone, Default)]
+pub struct HttpClient(reqwest::Client);
+
 /// Where the deployment lives and which anon key to present.
 #[derive(Clone)]
 pub struct CloudConfig {
