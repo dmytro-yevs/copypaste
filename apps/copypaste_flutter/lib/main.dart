@@ -492,46 +492,23 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   /// Releases feature state during widget disposal and before Windows Quit.
   /// macOS committed process exit closes the owned daemon's app-parent pipe.
   Future<void> _prepareForTermination() async {
-    final historyController = _historyController;
-    final devicesController = _devicesController;
-    final historyRepository = _historyRepository;
-    final devicesGateway = _devicesGateway;
-    final quickPasteSettings = _quickPasteSettings;
-    final settingsController = _settingsController;
-    _historyController = null;
-    _devicesController = null;
-    _historyRepository = null;
-    _devicesGateway = null;
-    _quickPasteSettings = null;
-    _settingsController = null;
-    historyController?.dispose();
-    _modulesController?.dispose();
-    _modulesController = null;
-    _notifications?.dispose();
-    _notifications = null;
-    devicesController?.dispose();
-    quickPasteSettings?.dispose();
-    settingsController?.removeListener(_syncCaptureControls);
-    settingsController?.dispose();
-    _desktopWindow?.setCaptureToggle(null);
-    unawaited(
-      _desktopWindow?.updateCaptureState(
-        state: CaptureControlState.unavailable,
-      ),
-    );
-    if (widget.runtimeEnabled &&
-        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
-      await runtime.stopDesktopRuntime();
-    }
-    if (historyRepository != null) {
-      unawaited(historyRepository.dispose().catchError((Object _) {}));
-    }
-    if (devicesGateway != null) {
-      unawaited(devicesGateway.dispose().catchError((Object _) {}));
-    }
+    final connections = _releaseFeatureState();
+    await _stopDesktopRuntime();
+    unawaited(connections.history?.dispose().catchError((Object _) {}));
+    unawaited(connections.devices?.dispose().catchError((Object _) {}));
   }
 
   Future<void> _stopRuntime() async {
+    final connections = _releaseFeatureState();
+    await connections.history?.dispose();
+    await connections.devices?.dispose();
+    await _stopDesktopRuntime();
+  }
+
+  /// Disposes feature controllers and hands back the runtime connections,
+  /// which each teardown path closes in its own order.
+  ({RuntimeHistoryRepository? history, FlutterRustDevicesGateway? devices})
+  _releaseFeatureState() {
     final historyController = _historyController;
     final devicesController = _devicesController;
     final historyRepository = _historyRepository;
@@ -559,8 +536,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         state: CaptureControlState.unavailable,
       ),
     );
-    await historyRepository?.dispose();
-    await devicesGateway?.dispose();
+    return (history: historyRepository, devices: devicesGateway);
+  }
+
+  Future<void> _stopDesktopRuntime() async {
     if (widget.runtimeEnabled &&
         (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await runtime.stopDesktopRuntime();
@@ -717,8 +696,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting =>
-          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.starting => 'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
         _RuntimeState.failed => _runtimeFailureMessage,
         _RuntimeState.idle || _RuntimeState.ready => null,
       },
