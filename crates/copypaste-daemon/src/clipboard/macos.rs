@@ -389,7 +389,7 @@ impl ClipboardSource for MacOsClipboard {
                         // §3.6's precedent is lossy conversion rather than dropping
                         // the user's copy, and I-37 forbids panicking on a malformed
                         // payload.
-                        let content = String::from_utf8_lossy(&bytes).into_owned();
+                        let content = super::format::text_from_utf8(bytes);
                         if content.is_empty() {
                             return None;
                         }

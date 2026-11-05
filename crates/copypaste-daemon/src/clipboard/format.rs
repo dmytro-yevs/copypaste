@@ -18,6 +18,14 @@ pub fn preferred<'a>(available: impl IntoIterator<Item = &'a str>) -> Option<&'s
     .find(|candidate| available.contains(candidate))
 }
 
+/// Decodes a text representation exactly as `String::from_utf8_lossy` would.
+/// Valid UTF-8 keeps its buffer, so a capture never holds the read bytes and
+/// a second copy of them at once.
+pub fn text_from_utf8(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
 pub fn supports(content_type: &str) -> bool {
     matches!(
         content_type,
@@ -57,5 +65,21 @@ mod tests {
         assert!(supports(content_type::FILE));
         assert!(supports(content_type::RICH_TEXT));
         assert!(!supports("text/markdown"));
+    }
+
+    #[test]
+    fn text_decoding_reuses_valid_bytes_and_matches_lossy_replacement() {
+        let valid = "naïve — text".as_bytes().to_vec();
+        let address = valid.as_ptr();
+        let text = text_from_utf8(valid);
+        assert_eq!(text, "naïve — text");
+        assert_eq!(text.as_ptr(), address, "valid UTF-8 must not be copied");
+
+        for malformed in [&b"a\xffb"[..], b"\xe2\x82", b"ok\xc0\xafend\xed\xa0\x80"] {
+            assert_eq!(
+                text_from_utf8(malformed.to_vec()),
+                String::from_utf8_lossy(malformed)
+            );
+        }
     }
 }

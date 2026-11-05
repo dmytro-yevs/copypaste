@@ -530,14 +530,15 @@ impl Worker {
         if content_type == copypaste_ipc::content_type::FILE {
             return super::file_capture(bytes, privacy, None);
         }
+        let (content, binary_content) = if binary {
+            (String::new(), Some(bytes))
+        } else {
+            (crate::clipboard::format::text_from_utf8(bytes), None)
+        };
         Some(Capture {
             privacy,
-            content: if binary {
-                String::new()
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            },
-            binary_content: binary.then_some(bytes),
+            content,
+            binary_content,
             file_path: None,
             file_metadata: None,
             content_type: content_type.into(),

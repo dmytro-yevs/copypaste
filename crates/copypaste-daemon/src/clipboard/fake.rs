@@ -177,7 +177,7 @@ impl FakeClipboard {
                     return;
                 }
                 // I-9: byte counts, never content, and never the path.
-                let text = String::from_utf8_lossy(&bytes).into_owned();
+                let text = super::format::text_from_utf8(bytes);
                 // Fake-only affordance: `echo hi > file` is the demo, and the
                 // trailing newline is the shell's, not the user's.
                 let text = text.strip_suffix('\n').unwrap_or(&text).to_string();

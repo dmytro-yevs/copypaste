@@ -1282,14 +1282,15 @@ impl Transfer<'_> {
         if type_ == copypaste_ipc::content_type::FILE {
             return file_capture(bytes, privacy, source);
         }
+        let (content, binary_content) = if binary {
+            (String::new(), Some(bytes))
+        } else {
+            (crate::clipboard::format::text_from_utf8(bytes), None)
+        };
         Some(Capture {
             privacy,
-            content: if binary {
-                String::new()
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            },
-            binary_content: binary.then_some(bytes),
+            content,
+            binary_content,
             file_path: None,
             file_metadata: None,
             content_type: type_.to_owned(),

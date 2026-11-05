@@ -201,6 +201,19 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
     }
 }
 
+/// Returns the runtime's cached history pages to the allocator when Android
+/// reports memory pressure. A runtime that is not open yet holds none.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_MainActivity_releaseRuntimeMemory(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    if let Some(Err(error)) = RUNTIME.get().map(|runtime| runtime.store.release_memory()) {
+        tracing::warn!(%error, "could not release cached history pages");
+    }
+}
+
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_openHost(

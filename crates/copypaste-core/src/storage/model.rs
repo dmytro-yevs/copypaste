@@ -8,11 +8,11 @@ use rusqlite::{ErrorCode, Row};
 /// The projection every read uses. Bound by *name*, never by position;
 /// maintained three parallel positional column lists and an off-by-one panic in
 /// the row mapper was the result (`CopyPaste-crh3.85`).
-/// Imported rows hydrate their authenticated reference with the shared encrypted
-/// blob inside this read; consumers keep the same StoredItem/decryption API.
+/// Imported rows read their shared encrypted blob beside the row's own bytes;
+/// [`row_to_item`] joins the two, so consumers keep one ciphertext.
 macro_rules! item_columns {
     () => {
-        "id, CAST(content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), X'') AS BLOB) AS content_ciphertext, nonce, content_type, content_hash, created_at, \
+        "id, content_ciphertext, (SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id) AS shared_ciphertext, nonce, content_type, content_hash, created_at, \
          pinned, pin_order, pin_updated_at, deleted, origin_device_id, \
          app_bundle_id, app_name, payload_metadata, source_icon_id"
     };
@@ -34,12 +34,14 @@ macro_rules! item_columns_ci_with {
 }
 macro_rules! item_columns_ci {
     () => {
-        $crate::storage::model::item_columns_ci_with!("CAST(ci.content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id), X'') AS BLOB) AS content_ciphertext")
+        $crate::storage::model::item_columns_ci_with!("ci.content_ciphertext AS content_ciphertext, (SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id) AS shared_ciphertext")
     };
 }
 macro_rules! item_columns_preview_ci {
     () => {
-        $crate::storage::model::item_columns_ci_with!("X'' AS content_ciphertext")
+        $crate::storage::model::item_columns_ci_with!(
+            "X'' AS content_ciphertext, NULL AS shared_ciphertext"
+        )
     };
 }
 
@@ -211,7 +213,7 @@ pub enum StoreError {
     InvalidDeviceName,
 }
 
-pub(super) const ITEM_COLUMN_COUNT: usize = 15;
+pub(super) const ITEM_COLUMN_COUNT: usize = 16;
 
 pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
 
@@ -234,6 +236,7 @@ impl ItemColumns {
             "app_name",
             "payload_metadata",
             "source_icon_id",
+            "shared_ciphertext",
         ]) {
             at[slot] = stmt.column_index(name.trim())?;
         }
@@ -249,9 +252,7 @@ pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Res
     let at = &columns.0;
     Ok(StoredItem {
         id: row.get(at[0])?,
-        // NULL only on a tombstone, which no read path returns; map defensively
-        // rather than failing the whole query.
-        content_ciphertext: row.get::<_, Option<Vec<u8>>>(at[1])?.unwrap_or_default(),
+        content_ciphertext: joined_ciphertext(row, at[1], at[15])?,
         nonce: row.get::<_, Option<Vec<u8>>>(at[2])?.unwrap_or_default(),
         content_type: row.get(at[3])?,
         content_hash: row.get(at[4])?,
@@ -266,6 +267,21 @@ pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Res
         payload_metadata: row.get(at[13])?,
         source_icon_id: row.get(at[14])?,
     })
+}
+
+/// The row's own ciphertext followed by its shared payload, built once at exact
+/// capacity rather than concatenated in SQLite and copied again here. NULL own
+/// bytes mean a tombstone, which no read path returns; it maps to empty rather
+/// than failing the whole query, whatever the payload table still holds.
+fn joined_ciphertext(row: &Row<'_>, own: usize, shared: usize) -> rusqlite::Result<Vec<u8>> {
+    let Some(own) = row.get_ref(own)?.as_bytes_or_null()? else {
+        return Ok(Vec::new());
+    };
+    let shared = row.get_ref(shared)?.as_bytes_or_null()?.unwrap_or_default();
+    let mut joined = Vec::with_capacity(own.len() + shared.len());
+    joined.extend_from_slice(own);
+    joined.extend_from_slice(shared);
+    Ok(joined)
 }
 
 // Both classifications match on the SQLite result code, never on message text;
@@ -320,9 +336,10 @@ mod tests {
         for sql in [
             concat!("SELECT ", item_columns!(), " FROM clipboard_items"),
             concat!("SELECT ", item_columns_ci!(), " FROM clipboard_items ci"),
-            "SELECT source_icon_id, payload_metadata, app_name, app_bundle_id, origin_device_id, deleted, \
-             pin_updated_at, pin_order, pinned, created_at, content_hash, \
-             content_type, nonce, content_ciphertext, id FROM clipboard_items",
+            "SELECT NULL AS shared_ciphertext, source_icon_id, payload_metadata, app_name, \
+             app_bundle_id, origin_device_id, deleted, pin_updated_at, pin_order, pinned, \
+             created_at, content_hash, content_type, nonce, content_ciphertext, id \
+             FROM clipboard_items",
         ] {
             let mut stmt = conn.prepare(sql).unwrap();
             let columns = ItemColumns::resolve(&stmt).unwrap();
@@ -331,5 +348,56 @@ mod tests {
                 .unwrap();
             assert_eq!(read, stored, "projection: {sql}");
         }
+    }
+
+    #[test]
+    fn imported_rows_read_the_same_bytes_sqlite_concatenation_produced() {
+        let s = store();
+        let keys = crate::Keyring::from_secret(&[42; 32]);
+        let mut row = item("binary", T0);
+        row.id = "file-import-joined".into();
+        row.content_type = "image/png".into();
+        row.search_text = None;
+        let bytes = b"shared binary payload";
+        let digest = crate::binary::content_digest(bytes);
+        row.content_ciphertext =
+            crate::binary_reference::seal(bytes, &digest, &keys.item_key(), &row.id).unwrap();
+        let envelope = row.content_ciphertext.clone();
+        let id = s.insert(row).unwrap().id;
+
+        let concatenated: Vec<u8> = s
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT CAST(content_ciphertext || COALESCE((SELECT p.ciphertext \
+                 FROM shared_binary_payloads p JOIN history_file_payloads f \
+                 ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), X'') AS BLOB) \
+                 FROM clipboard_items WHERE id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(concatenated, envelope);
+        assert_eq!(s.get(&id).unwrap().unwrap().content_ciphertext, envelope);
+        {
+            let conn = s.conn().unwrap();
+            let mut stmt = conn
+                .prepare(concat!(
+                    "SELECT ",
+                    item_columns_ci!(),
+                    " FROM clipboard_items ci WHERE ci.id = ?1"
+                ))
+                .unwrap();
+            let columns = ItemColumns::resolve(&stmt).unwrap();
+            let read = stmt
+                .query_row([&id], |row| row_to_item(row, &columns))
+                .unwrap();
+            assert_eq!(read.content_ciphertext, envelope);
+        }
+
+        assert!(s.delete(&id).unwrap());
+        let tombstone = s.version(&id).unwrap().unwrap();
+        assert!(tombstone.deleted);
+        assert!(tombstone.content_ciphertext.is_empty());
     }
 }

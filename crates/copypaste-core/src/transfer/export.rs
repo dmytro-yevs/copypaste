@@ -43,7 +43,7 @@ pub fn export(store: &Store, keyring: &Keyring, limit: u32) -> Result<ExportData
         }
         let item = ExportItem {
             privacy: row.clipboard_privacy(),
-            content: String::from_utf8_lossy(&plaintext).into_owned(),
+            content: std::mem::take(&mut *crate::clipboard_payload::text_from_bytes(plaintext)),
             content_type: row.content_type,
             created_at: row.created_at,
             pinned: row.pinned,

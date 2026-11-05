@@ -2,9 +2,11 @@ package com.copypaste.app
 
 import android.Manifest
 import android.net.Uri
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import androidx.core.content.FileProvider
 import java.io.File
 import android.content.Intent
@@ -113,9 +115,28 @@ class MainActivity : FlutterActivity() {
         @Volatile
         private var instance: Context? = null
 
+        @JvmStatic
+        private external fun releaseRuntimeMemory()
+
+        // Registered on the application context: capture services keep the
+        // process-wide runtime open after this activity is gone.
+        private val runtimeMemoryTrim = object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) = releaseRuntimeMemory()
+
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+            @Deprecated("Deprecated in Java")
+            override fun onLowMemory() = releaseRuntimeMemory()
+        }
+        private var runtimeMemoryTrimRegistered = false
+
         @Synchronized
         internal fun ensureRuntime(context: Context) {
             instance = context.applicationContext
+            if (!runtimeMemoryTrimRegistered) {
+                context.applicationContext.registerComponentCallbacks(runtimeMemoryTrim)
+                runtimeMemoryTrimRegistered = true
+            }
             InferenceWorkerHost.initialize(context)
             applicationContextForSources = context.applicationContext
             initializeNdkContext(context.applicationContext)
