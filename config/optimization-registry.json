@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-01",
+  "date": "2026-11-05",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -2877,7 +2877,7 @@
         "file_payload_bytes": 65536,
         "binary_envelope_bytes": 16,
         "file_sessions_per_node": 1,
-        "protocol_version": 9
+        "protocol_version": 11
       },
       "functional_validation": "319 isolated P2P tests, two real encrypted loopback stream tests and three core file-download tests passed; the integrated application candidate requires its final combined validation.",
       "evidence_refs": [
@@ -3867,6 +3867,605 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "linux_cross_target_clippy_only_native_tests_pending"
+    },
+    {
+      "id": "RUN-081",
+      "title": "Release the retired Quick Paste view from AppKit focus-ring state",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS Quick Paste host",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift"
+      ],
+      "invariant": "Before the Quick Paste engine stops, first responder is cleared and the view is detached, so AppKit's focus-ring state cannot retain the FlutterView and its IOSurface; after close only the main window's FlutterView remains.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "retained FlutterView instances after Quick Paste close (macOS debug build; baseline from installed 1.1.2)",
+        "baseline": 2,
+        "candidate": 1,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-082",
+      "title": "Disable the libmalloc large-block cache for the app process family",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS app bundle",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/Info.plist",
+        "crates/copypaste-daemon/src/macos_allocator.rs"
+      ],
+      "invariant": "Every LaunchServices launch starts with MallocLargeCache=0 and child processes inherit it, so freed window-sized buffers are not kept resident; direct binary launches keep the daemon's own policy.",
+      "tradeoffs": "Large allocations always return to the kernel; CPU and latency cost in the UI process is unmeasured.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "app physical footprint bytes after 80 s hidden (macOS debug A/B, inflated by VM-service heap searches)",
+        "baseline": 348700000,
+        "candidate": 281900000,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-083",
+      "title": "Return freed allocator pages after suspension and on memory pressure",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS memory relief",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/lib/platform/lifecycle/native_memory_relief.dart"
+      ],
+      "invariant": "One coalesced malloc_zone_pressure_relief call runs off the main thread after hidden suspension and on OS memory pressure, never on a timer.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "app physical footprint bytes, single macOS debug sample",
+        "baseline": 303500000,
+        "candidate": 291400000,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-084",
+      "title": "Zero the Skia budget while presentation is suspended",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/lib/main.dart"
+      ],
+      "invariant": "AppResourcePolicy sets the Skia resource budget to 0 after image listeners are disposed on suspension and restores 16 MiB before the rebuild; memory pressure purges and restores it while visible.",
+      "tradeoffs": "No measurable change on the macOS debug build; remaining graphics memory is the window-sized surface.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-085",
+      "title": "Forward OS memory pressure to every live desktop engine",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Desktop memory-pressure adapters",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/windows/runner/memory_pressure_monitor.cpp",
+        "apps/copypaste_flutter/windows/runner/memory_pressure_monitor.h",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/lib/app/resource_policy.dart"
+      ],
+      "invariant": "The macOS memory-pressure source and alternating Windows low/recovered resource-notification waits, without polling, send memoryPressure to the main, Quick Paste and pairing engines; engines unregister before shutdown. Android FlutterActivity already forwards onTrimMemory.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS_targeted_tests_passed_windows_not_built_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-086",
+      "title": "Process-wide SQLite soft heap limit over the pooled page caches",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/connection.rs",
+        "crates/copypaste-core/src/storage/store.rs"
+      ],
+      "invariant": "Opening a store sets one process-wide 10 MiB SQLite soft heap limit while RUN-012 stays unchanged (min_idle 1, max 4 connections, 8 MiB per-connection target, existing timeouts). The bundled build keeps SQLITE_ENABLE_MEMORY_MANAGEMENT (pinned by a test) and temp_store = MEMORY, so the limit never spills plaintext.",
+      "bounds": {
+        "sqlite_soft_heap_limit_bytes": 10485760
+      },
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "sqlite3_memory_used bytes after a 4-thread History workload (synthetic 48 MB store, macOS dev host)",
+        "baseline": 41880125,
+        "candidate": 7560233,
+        "peak_baseline": 52166656,
+        "peak_candidate": 11806966,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-087",
+      "title": "Release SQLite page cache on Android memory trim",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android runtime host",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "crates/copypaste-core/src/storage/store.rs"
+      ],
+      "invariant": "One application-context ComponentCallbacks2 releases unpinned SQLite pages process-wide on every onTrimMemory/onLowMemory without waiting for a pooled connection, whether or not MainActivity exists.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-088",
+      "title": "Decode captured text without a second copy",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Clipboard capture",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/format.rs",
+        "crates/copypaste-daemon/src/clipboard/macos.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/read.rs",
+        "crates/copypaste-core/src/transfer/export.rs"
+      ],
+      "invariant": "Valid UTF-8 text becomes the captured String in its own buffer; malformed input yields exactly String::from_utf8_lossy output and export keeps zeroizing invalid source bytes.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS_targeted_tests_passed_windows_linux_not_built"
+    },
+    {
+      "id": "RUN-089",
+      "title": "Join row and shared ciphertext once in Rust",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/model.rs"
+      ],
+      "invariant": "Full-item projections select row and shared ciphertext as separate columns and join them once at exact capacity; bytes match the former SQLite concatenation and NULL row ciphertext maps to empty.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "SQLite heap peak bytes reading one 4 MiB row without a soft limit (macOS dev host)",
+        "baseline": 13841203,
+        "candidate": 9615442,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-090",
+      "title": "Keep loaded History detail across unchanged refreshes",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "HistoryController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+      ],
+      "invariant": "A refresh reloads the selected detail only when its summary changed, its row is missing or its detail is not loaded; the inspector keeps the same HistoryClip instance.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-091",
+      "title": "Single-flight History refresh and spoiler reads",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "HistoryController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_spoiler_controller.dart"
+      ],
+      "invariant": "One running refresh plus at most one coalesced pass; drag and reorder take the queued pass and the final state equals per-event refreshes. Facets notify only on change; spoiler reads coalesce within one generation.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-092",
+      "title": "Bounded capture notification text preview",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Capture notifications",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart"
+      ],
+      "invariant": "Normalization reads at most 2001 runes and yields the same output as full-length normalization; the bridge still reads the full clip.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-093",
+      "title": "Decode brand logo at display size",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AppBrandLogo",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/theme/app_brand_logo.dart",
+        "apps/copypaste_flutter/lib/app/shell/app_shell.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_view.dart"
+      ],
+      "invariant": "AppBrandLogo is the only renderer of the brand asset and decodes at size x devicePixelRatio; the 512 px launcher source is unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-094",
+      "title": "Decode source app icons at avatar size",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "SourceAppLabel",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/source_app_label.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_view.dart",
+        "apps/copypaste_flutter/lib/features/history/models/history_models.dart"
+      ],
+      "invariant": "SourceAppLabel decodes icons at size x devicePixelRatio, scaling by the shorter side for cover, and the Quick Paste precache uses the same provider key.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-095",
+      "title": "Subsample Android notification image decodes",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android capture feedback",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt"
+      ],
+      "invariant": "Notification thumbnails decode bounds first, apply the shared 50 MiB decoded cap and a power-of-two inSampleSize keeping the long edge at least 256 px; thumbnail size and text are unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "kotlin_unit_test_not_run_jdk25_unavailable"
+    },
+    {
+      "id": "RUN-096",
+      "title": "Binary P2P items envelope (protocol v11)",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P protocol",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/protocol.rs",
+        "crates/copypaste-p2p/src/protocol/items.rs",
+        "crates/copypaste-p2p/src/protocol/codec.rs",
+        "crates/copypaste-p2p/src/transport/session.rs",
+        "crates/copypaste-p2p/src/node/channel.rs"
+      ],
+      "invariant": "Text and binary item payloads travel as raw bytes after a JSON metadata header in one CPI1 envelope that announces its exact length; JSON items are refused. Every per-item and per-message bound, UTF-8 validation, content-hash recomputation and the exact protocol-version match are kept; senders write payloads without a second copy and receivers allocate the message once.",
+      "bounds": {
+        "protocol_version": 11,
+        "envelope_prefix_bytes": 12
+      },
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted receive decode peak bytes for a 4 MiB image over a loopback Noise session (developer diagnostic)",
+        "baseline": 218103808,
+        "candidate": 4330619,
+        "wire_bytes": [
+          14977328,
+          4194736
+        ],
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-097",
+      "title": "Exact-size JSON P2P encoding and direct summary decode",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P protocol",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/protocol/codec.rs"
+      ],
+      "invariant": "JSON sync messages are serialized once into an exactly sized buffer after a counting pass, byte-identical to serde_json::to_vec; tag-led summary pages decode straight into their body with identical acceptance.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted transient bytes for a 10k summary page (developer diagnostic)",
+        "baseline": 6710886,
+        "candidate": 3879731,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-098",
+      "title": "Exact-size module host buffers and typed host request parsing",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Module host ABI",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/native.rs",
+        "crates/copypaste-modules/src/sync.rs",
+        "crates/copypaste-module-sdk/src/native.rs"
+      ],
+      "invariant": "Host requests parse as typed values without a serde_json::Value tree and replies serialize into exactly sized buffers; ABI bytes are unchanged, so modules need no update.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted peak bytes for an 8 MiB scan reply (developer diagnostic)",
+        "baseline": 44774195,
+        "candidate": 25165824,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-099",
+      "title": "Shared HTTP client per cloud account",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/lib.rs",
+        "crates/copypaste-cloud/src/auth/client.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "modules/supabase/src/lib.rs"
+      ],
+      "invariant": "Auth and REST clients of one cloud account share one reqwest Client, TLS configuration and connection pool without changing request behavior.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-100",
+      "title": "Single exact-size cloud upsert body",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/client.rs"
+      ],
+      "invariant": "Each upsert chunk is serialized once into an exactly sized JSON body without an intermediate JSON tree and shared by every retry; headers, rows and server schema are unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }
