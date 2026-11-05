@@ -24,6 +24,7 @@
 		C0DE12112610190000000002 /* MacosWindowCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE12112610190000000001 /* MacosWindowCommandsTests.swift */; };
 		C0DE11112610190000000002 /* MacosWindowCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE11112610190000000001 /* MacosWindowCommands.swift */; };
 		F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */; };
+		F1A47B2E96CD4D49B3A77202 /* MacosMemoryPressure.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A47B2E96CD4D49B3A77201 /* MacosMemoryPressure.swift */; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
 		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
@@ -76,6 +77,7 @@
 		C0DE12112610190000000001 /* MacosWindowCommandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosWindowCommandsTests.swift; sourceTree = "<group>"; };
 		C0DE11112610190000000001 /* MacosWindowCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosWindowCommands.swift; sourceTree = "<group>"; };
 		F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosTrayMenuChannel.swift; sourceTree = "<group>"; };
+		F1A47B2E96CD4D49B3A77201 /* MacosMemoryPressure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosMemoryPressure.swift; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
@@ -205,6 +207,7 @@
 				C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */,
 				C0DE11112610190000000001 /* MacosWindowCommands.swift */,
 				F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */,
+				F1A47B2E96CD4D49B3A77201 /* MacosMemoryPressure.swift */,
 				A1B2C3D10102030405060708 /* ProtectedPairingBridge.h */,
 				A1B2C3D20102030405060708 /* Runner-Bridging-Header.h */,
 				A1B2C3D30102030405060708 /* ProtectedPairingBridge.mm */,
@@ -426,6 +429,7 @@
 				C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */,
 				C0DE11112610190000000002 /* MacosWindowCommands.swift in Sources */,
 				F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */,
+				F1A47B2E96CD4D49B3A77202 /* MacosMemoryPressure.swift in Sources */,
 				A1B2C3D40102030405060708 /* ProtectedPairingBridge.mm in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,

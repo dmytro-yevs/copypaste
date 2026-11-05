@@ -14,6 +14,7 @@
 
 #include "win32_window.h"
 #include "app_update_channel.h"
+#include "memory_pressure_monitor.h"
 #include "startup_channel.h"
 
 // OS-call seam for the existing Quick Paste presentation operation.
@@ -129,6 +130,7 @@ class FlutterWindow : public Win32Window {
   void ScheduleQuickPasteRetirement();
   void BeginQuickPasteShutdown();
   void ShowMainWindow(bool open_settings);
+  void NotifyMemoryPressure();
 
   // The project to run.
   flutter::DartProject project_;
@@ -162,6 +164,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       quick_paste_channel_;
   std::unique_ptr<AppUpdateChannel> app_update_channel_;
+  std::unique_ptr<MemoryPressureMonitor> memory_pressure_monitor_;
   std::unique_ptr<FlutterWindow> protected_pairing_window_;
   std::unique_ptr<FlutterWindow> quick_paste_window_;
   std::map<uint64_t, std::unique_ptr<FlutterWindow>> retiring_quick_paste_windows_;
