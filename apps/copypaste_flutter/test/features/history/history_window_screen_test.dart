@@ -95,7 +95,7 @@ void main() {
     await tester.pumpAndSettle();
     hidden.value = true;
     await tester.pump();
-    controller.beforeWindowChange = () async => {'1'};
+    controller.window.beforeWindowChange = () async => {'1'};
     repo.clips.insertAll(0, [
       for (final id in ['new-1', 'new-2'])
         HistoryClip(
@@ -134,8 +134,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await controller.loadMore();
-    await controller.loadMore();
+    await controller.window.loadMore();
+    await controller.window.loadMore();
     await tester.pumpAndSettle();
     final list = tester.widget<CustomScrollView>(
       find.byType(CustomScrollView).first,
@@ -157,15 +157,15 @@ void main() {
       }
     }
     expect(visible, isNotNull);
-    final load = controller.loadMore();
+    final load = controller.window.loadMore();
     await tester.pumpAndSettle();
     await load;
     await tester.pumpAndSettle();
     final row = find.byKey(ValueKey('history-row-$visible'));
     expect(row, findsOneWidget);
     expect(tester.getTopLeft(row).dy, closeTo(y!, 1));
-    expect(controller.canLoadPrevious, isTrue);
-    final previous = controller.loadPrevious();
+    expect(controller.window.canLoadPrevious, isTrue);
+    final previous = controller.window.loadPrevious();
     await tester.pumpAndSettle();
     await previous;
     await tester.pumpAndSettle();
@@ -174,7 +174,7 @@ void main() {
     final next = find.byKey(ValueKey('history-row-${int.parse(visible!) + 1}'));
     expect(next, findsOneWidget);
     final nextY = tester.getTopLeft(next).dy;
-    final deletion = controller.deleteClip(visible);
+    final deletion = controller.mutations.deleteClip(visible);
     await tester.pumpAndSettle();
     expect(await deletion, isTrue);
     await tester.pumpAndSettle();

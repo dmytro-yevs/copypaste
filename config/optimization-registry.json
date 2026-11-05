@@ -52,7 +52,9 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart"
       ],
       "invariant": "Suspension releases retained payloads; late responses cannot refill released state.",
       "next_step": "Add cancellation and byte-accounted admission without weakening stale-response guards.",
@@ -644,7 +646,8 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart",
         "apps/copypaste_flutter/lib/features/history/controller/history_resource_limits.dart",
         "apps/copypaste_flutter/lib/features/history/controller/history_window_index.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_window_scroll.dart",
@@ -1172,7 +1175,9 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/controller/history_summary.dart",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+        "apps/copypaste_flutter/lib/features/history/controller/history_selection_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart"
       ],
       "invariant": "Selected detail keeps its full body, but cannot promote it into retained list rows. Spoiler cards retain the same grapheme-safe 1024-byte preview contract; the existing oversized first-grapheme exception is preserved.",
       "next_step": "Bound reloadable History page ownership without dropping access, selection, or reorder behavior. Measure large text and sustained pagination.",
@@ -1229,7 +1234,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart"
       ],
@@ -1496,7 +1501,7 @@
       "source_references": [
         "apps/copypaste_flutter/lib/main.dart",
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
         "crates/copypaste-core/src/spoiler.rs",
         "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
@@ -1813,7 +1818,7 @@
         "crates/copypaste-core/src/file_download.rs",
         "crates/copypaste-core/src/storage/file_transfers.rs",
         "crates/copypaste-p2p/src/node/files.rs",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_transfer_controller.dart",
         "crates/copypaste-core/src/history_actions.rs",
         "crates/copypaste-core/src/history_item.rs",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFocusCaptureGuard.kt"
@@ -1919,7 +1924,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
         "apps/copypaste_flutter/test/features/history/history_controller_test.dart"
       ],
       "invariant": "Repeated reads reuse one immutable canonical row list until row mutation. Previously exposed snapshots remain immutable; selection, order, pagination and watch behavior remain unchanged.",
@@ -2080,7 +2085,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_transfer_controller.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart",
         "apps/copypaste_flutter/test/features/history/history_controller_test.dart",
         "apps/copypaste_flutter/test/features/history/history_screen_test.dart"

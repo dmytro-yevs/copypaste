@@ -89,13 +89,13 @@ void main() {
       );
       await controller.initialize();
       final queries = repository.queries;
-      await controller.chooseFiles();
+      await controller.transfers.chooseFiles();
       expect(repository.imported, files.map((file) => file.name));
       expect(repository.maximumActive, 1);
       expect(files.every((file) => file.disposed), isTrue);
       expect(repository.queries, queries + 1);
-      expect(controller.isImportingFiles, isFalse);
-      expect(controller.errorMessage, isNull);
+      expect(controller.transfers.isImportingFiles, isFalse);
+      expect(controller.errors.message, isNull);
       controller.dispose();
       await repository.events.close();
     },
@@ -106,10 +106,10 @@ void main() {
     final controller = HistoryController(repository, filePicker: _Picker([]));
     await controller.initialize();
     final queries = repository.queries;
-    await controller.chooseFiles();
+    await controller.transfers.chooseFiles();
     expect(repository.imported, isEmpty);
     expect(repository.queries, queries);
-    expect(controller.errorMessage, isNull);
+    expect(controller.errors.message, isNull);
     controller.dispose();
     await repository.events.close();
   });
@@ -123,7 +123,7 @@ void main() {
       final controller = HistoryController(repository, filePicker: picker);
       await controller.initialize();
       final queries = repository.queries;
-      final selection = controller.chooseFiles();
+      final selection = controller.transfers.chooseFiles();
       expect(controller.canSuspend, isFalse);
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       picker.pending!.complete([]);
@@ -131,7 +131,7 @@ void main() {
       expect(controller.canSuspend, isTrue);
       expect(repository.queries, queries + 1);
       expect(repository.imported, isEmpty);
-      expect(controller.errorMessage, isNull);
+      expect(controller.errors.message, isNull);
       controller.dispose();
       await repository.events.close();
     },
@@ -142,11 +142,11 @@ void main() {
     final files = [_Input('a.pdf'), _Input('unreadable.pdf'), _Input('b.pdf')];
     final controller = HistoryController(repository);
     await controller.initialize();
-    await controller.importFiles(files);
+    await controller.transfers.importFiles(files);
     expect(repository.imported, ['a.pdf', 'b.pdf']);
     expect(files.every((file) => file.disposed), isTrue);
-    expect(controller.errorMessage, contains('1 of 3 files'));
-    expect(controller.errorMessage, contains('unreadable.pdf'));
+    expect(controller.errors.message, contains('1 of 3 files'));
+    expect(controller.errors.message, contains('unreadable.pdf'));
     controller.dispose();
     await repository.events.close();
   });

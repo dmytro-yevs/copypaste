@@ -16,6 +16,7 @@ import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_transfer_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_code_highlighter.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
@@ -69,7 +70,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
 
   @override
   Widget build(BuildContext context) {
-    final clip = controller.selectedClip;
+    final clip = controller.selection.selectedClip;
     if (clip?.id != _highlightClipId) {
       _highlightMemo.clear();
       _highlightClipId = clip?.id;
@@ -168,7 +169,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         style: AppTheme.actionButtonStyle(
                           const ButtonStyle.ghostIcon(),
                         ),
-                        onPressed: onClose ?? controller.clearSelection,
+                        onPressed:
+                            onClose ?? controller.selection.clearSelection,
                         child: const AppIconFrame(child: Icon(LucideIcons.x)),
                       ),
                     ),
@@ -340,7 +342,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                               : const Text('Tags'),
                         ),
                       ),
-                    if (controller.canDownloadSelected)
+                    if (controller.transfers.canDownloadSelected)
                       _DownloadButton(
                         controller: controller,
                         clip: clip,
@@ -368,9 +370,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                   : ButtonDensity.normal,
                             ),
                           ),
-                          onPressed: controller.isPinPending(clip.id)
+                          onPressed: controller.mutations.isPinPending(clip.id)
                               ? null
-                              : () => controller.togglePin(clip),
+                              : () => controller.mutations.togglePin(clip),
                           leading: iconOnly ? null : pinIcon,
                           child: iconOnly
                               ? pinIcon
@@ -394,12 +396,12 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 ? const ButtonStyle.outlineIcon()
                                 : const ButtonStyle.outline(),
                           ),
-                          onPressed: controller.isSecretPending(clip.id)
+                          onPressed:
+                              controller.mutations.isSecretPending(clip.id)
                               ? null
                               : () async {
-                                  final changed = await controller.toggleSecret(
-                                    clip,
-                                  );
+                                  final changed = await controller.mutations
+                                      .toggleSecret(clip);
                                   if (!changed && context.mounted) {
                                     AppToast.show(
                                       context,
@@ -615,7 +617,9 @@ class _HistoryInspectorState extends State<HistoryInspector> {
   }
 
   Future<void> _copy(BuildContext context, {required bool plainText}) async {
-    final copied = await controller.copySelected(plainText: plainText);
+    final copied = await controller.transfers.copySelected(
+      plainText: plainText,
+    );
     if (!copied || !context.mounted) return;
     AppToast.show(
       context,
@@ -626,7 +630,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
   }
 
   Future<void> _download(BuildContext context) async {
-    final result = await controller.downloadSelected();
+    final result = await controller.transfers.downloadSelected();
     if (result != HistoryFileDownloadResult.saved || !context.mounted) return;
     AppToast.show(
       context,
@@ -659,18 +663,18 @@ class _DownloadButtonState extends State<_DownloadButton> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller.downloadProgressChanges,
+    listenable: widget.controller.transfers.downloadProgressChanges,
     builder: (context, _) => _buildButton(context),
   );
 
   Widget _buildButton(BuildContext context) {
     final controller = widget.controller;
     final id = widget.clip.id;
-    final pending = controller.isDownloadPending(id);
-    final failed = controller.downloadFailedFor(id);
-    final cancelling = controller.isDownloadCancelling(id);
-    final progress = controller.downloadProgressFor(id);
-    final operation = controller.fileOperations?.forClip(id);
+    final pending = controller.transfers.isDownloadPending(id);
+    final failed = controller.transfers.downloadFailedFor(id);
+    final cancelling = controller.transfers.isDownloadCancelling(id);
+    final progress = controller.transfers.downloadProgressFor(id);
+    final operation = controller.transfers.fileOperations?.forClip(id);
     final saved =
         operation?.phase == 'completed' && operation?.localPath != null;
     final percentage = ((progress ?? 0) * 100).floor();
@@ -707,7 +711,7 @@ class _DownloadButtonState extends State<_DownloadButton> {
                 : pending
                 ? 'Downloading $percentage% · Click to cancel'
                 : failed
-                ? controller.downloadErrorFor(id) ??
+                ? controller.transfers.downloadErrorFor(id) ??
                       'Download failed · Click to retry'
                 : 'Download',
           ),
@@ -734,9 +738,11 @@ class _DownloadButtonState extends State<_DownloadButton> {
               onPressed: cancelling
                   ? null
                   : pending
-                  ? () => controller.cancelDownload(id)
+                  ? () => controller.transfers.cancelDownload(id)
                   : saved
-                  ? () => controller.fileOperations!.openFile(operation!)
+                  ? () => controller.transfers.fileOperations!.openFile(
+                      operation!,
+                    )
                   : widget.onDownload,
               leading: widget.iconOnly
                   ? null
@@ -918,7 +924,8 @@ class _HistoryDetailContent extends StatelessWidget {
           Expanded(
             child: HistorySelectableText(
               body,
-              onCopy: (text) => controller.copyTextFrom(clip.id, text),
+              onCopy: (text) =>
+                  controller.transfers.copyTextFrom(clip.id, text),
               style: Theme.of(context).typography.mono,
             ),
           ),
@@ -928,13 +935,13 @@ class _HistoryDetailContent extends StatelessWidget {
     if (highlighted != null) {
       return HistorySelectableText.rich(
         highlighted!.span,
-        onCopy: (text) => controller.copyTextFrom(clip.id, text),
+        onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
       );
     }
     if (clip.contentKind != HistoryClipKind.image) {
       return HistorySelectableText(
         body,
-        onCopy: (text) => controller.copyTextFrom(clip.id, text),
+        onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
         style:
             clip.contentKind == HistoryClipKind.path ||
                 clip.contentKind == HistoryClipKind.file
@@ -949,7 +956,7 @@ class _HistoryDetailContent extends StatelessWidget {
         const Gap(AppSpacing.lg),
         HistorySelectableText(
           body,
-          onCopy: (text) => controller.copyTextFrom(clip.id, text),
+          onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
         ),
       ],
     );
@@ -994,7 +1001,8 @@ class _HistoryMetadataTable extends StatelessWidget {
                   )
                 : HistorySelectableText(
                     row.value,
-                    onCopy: (text) => controller.copyTextFrom(clip.id, text),
+                    onCopy: (text) =>
+                        controller.transfers.copyTextFrom(clip.id, text),
                     style: textStyle.copyWith(
                       color: row.warning ? theme.colorScheme.destructive : null,
                     ),
@@ -1004,12 +1012,12 @@ class _HistoryMetadataTable extends StatelessWidget {
     );
     if (clip.contentKind != HistoryClipKind.file) return table;
     return ListenableBuilder(
-      listenable: controller.downloadProgressChanges,
+      listenable: controller.transfers.downloadProgressChanges,
       child: table,
       builder: (context, child) {
-        final operation = controller.fileOperations?.forClip(clip.id);
-        final error = controller.downloadErrorFor(clip.id);
-        final progress = controller.downloadProgressFor(clip.id);
+        final operation = controller.transfers.fileOperations?.forClip(clip.id);
+        final error = controller.transfers.downloadErrorFor(clip.id);
+        final progress = controller.transfers.downloadProgressFor(clip.id);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1019,7 +1027,7 @@ class _HistoryMetadataTable extends StatelessWidget {
             ] else if (error != null) ...[
               StateView.error(title: 'Download failed', message: error),
               const Gap(AppSpacing.md),
-            ] else if (controller.isDownloadPending(clip.id)) ...[
+            ] else if (controller.transfers.isDownloadPending(clip.id)) ...[
               Text(
                 progress == null
                     ? 'Downloading…'
@@ -1050,7 +1058,7 @@ Widget _historyMetadataIdentityLabel({
     'Observed app' => SourceAppLabel(
       key: const ValueKey<String>('history-detail-source-app'),
       name: row.value,
-      icon: controller.requestSourceIcon(clip.sourceAppIconId),
+      icon: controller.media.requestSourceIcon(clip.sourceAppIconId),
       style: style,
     ),
     'Device' => DeviceLabel(
@@ -1125,7 +1133,7 @@ class _DetailImagePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) => FutureBuilder<HistoryImagePreview?>(
-        future: controller.requestImagePreview(clip.id, maxEdge: 1024),
+        future: controller.media.requestImagePreview(clip.id, maxEdge: 1024),
         builder: (context, snapshot) {
           final preview = snapshot.data;
           if (preview == null) {

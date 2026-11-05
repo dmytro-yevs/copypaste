@@ -109,7 +109,7 @@ class CopyPasteApp extends StatelessWidget {
                   : () {
                       if (navigation.selectedDestination ==
                           AppDestination.history) {
-                        unawaited(historyController!.reload());
+                        unawaited(historyController!.window.reload());
                       }
                     },
               headerActions: {
@@ -121,7 +121,8 @@ class CopyPasteApp extends StatelessWidget {
                         onDrawerVisibilityChanged:
                             navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
@@ -146,7 +147,8 @@ class CopyPasteApp extends StatelessWidget {
                         onDrawerVisibilityChanged:
                             navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
@@ -175,7 +177,8 @@ class CopyPasteApp extends StatelessWidget {
                         onDrawerVisibilityChanged:
                             navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:

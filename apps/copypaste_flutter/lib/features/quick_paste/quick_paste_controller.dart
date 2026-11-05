@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../platform/desktop/quick_paste_host.dart';
 import '../history/controller/history_controller.dart';
+import '../history/controller/history_window_controller.dart';
 import '../transfers/file_operations_controller.dart';
 import '../history/controller/history_ocr_controller.dart';
 import '../history/models/history_models.dart';
@@ -94,8 +95,9 @@ class QuickPasteController extends ChangeNotifier {
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get activating => _activating;
-  double? transferProgressFor(String id) => history.downloadProgressFor(id);
-  bool transferFailedFor(String id) => history.downloadFailedFor(id);
+  double? transferProgressFor(String id) =>
+      history.transfers.downloadProgressFor(id);
+  bool transferFailedFor(String id) => history.transfers.downloadFailedFor(id);
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
   bool get inspectorOpen => _inspectorOpen;
@@ -103,8 +105,8 @@ class QuickPasteController extends ChangeNotifier {
   int? get renderablePresentationId =>
       _host is QuickPasteFrameHost &&
           _presentationId == _renderablePresentationId &&
-          history.state != HistoryLoadState.initial &&
-          history.state != HistoryLoadState.loading
+          history.window.state != HistoryLoadState.initial &&
+          history.window.state != HistoryLoadState.loading
       ? _presentationId
       : null;
 
@@ -141,15 +143,16 @@ class QuickPasteController extends ChangeNotifier {
   void _ensureDerived() {
     final platform = defaultTargetPlatform;
     if (_derivedSource != null && platform == _derivedPlatform) return;
-    final source = history.items;
-    if (!identical(_shortcutClipQuery, history.query) ||
-        history.state == HistoryLoadState.initial) {
-      _shortcutClipQuery = history.query;
+    final source = history.window.items;
+    if (!identical(_shortcutClipQuery, history.window.query) ||
+        history.window.state == HistoryLoadState.initial) {
+      _shortcutClipQuery = history.window.query;
       _shortcutClips.clear();
     }
     _shortcutClips.removeWhere(
       (id, _) =>
-          !_pinnedShortcuts.containsKey(id) || !history.isVisitedPinned(id),
+          !_pinnedShortcuts.containsKey(id) ||
+          !history.window.isVisitedPinned(id),
     );
     for (final clip in source) {
       if (clip.pinned && _pinnedShortcuts.containsKey(clip.id)) {
@@ -163,7 +166,7 @@ class QuickPasteController extends ChangeNotifier {
         );
       }
     }
-    for (final id in history.visitedPinnedIds) {
+    for (final id in history.window.visitedPinnedIds) {
       if (!_pinnedShortcuts.containsKey(id) || _shortcutClips.containsKey(id)) {
         continue;
       }
@@ -224,14 +227,14 @@ class QuickPasteController extends ChangeNotifier {
     bool inspectorVisible = false,
   }) async {
     if (_disposed || presentationId <= 0) return;
-    final query = history.query;
+    final query = history.window.query;
     // Native opens the first presentation after this watched page is ready.
     // Re-fetching it clears already rendered rows and duplicates startup I/O.
     final reuseInitialHistory =
         _initialHistoryReady &&
         _presentationGeneration == 0 &&
-        (history.state == HistoryLoadState.ready ||
-            history.state == HistoryLoadState.empty) &&
+        (history.window.state == HistoryLoadState.ready ||
+            history.window.state == HistoryLoadState.empty) &&
         !query.hasSearch &&
         query.kind == null &&
         !query.pinnedOnly &&
@@ -260,14 +263,14 @@ class QuickPasteController extends ChangeNotifier {
     if (!_isCurrent(presentationId)) return;
     _preferences = preferences;
     if (!reuseInitialHistory) {
-      await history.updateQuery(const HistoryQuery());
+      await history.window.updateQuery(const HistoryQuery());
       if (!_isCurrent(presentationId)) return;
       await _reconcilePinnedShortcuts();
       if (!_isCurrent(presentationId)) return;
     }
     await _refreshAccessibility();
     if (_inspectorOpen && _isCurrent(presentationId) && items.isNotEmpty) {
-      await history.select(items.first.id);
+      await history.selection.select(items.first.id);
     }
     if (_isCurrent(presentationId)) {
       _renderablePresentationId = presentationId;
@@ -302,7 +305,7 @@ class QuickPasteController extends ChangeNotifier {
     final sort = query.trim().isEmpty
         ? HistorySort.newest
         : HistorySort.relevance;
-    return history.updateQuery(HistoryQuery(search: query, sort: sort));
+    return history.window.updateQuery(HistoryQuery(search: query, sort: sort));
   }
 
   Future<void> loadMore() {
@@ -310,14 +313,15 @@ class QuickPasteController extends ChangeNotifier {
     final pending = _pageLoad;
     if (pending != null) return pending;
     final generation = _focusGeneration;
-    final marker = history.paginationMarker;
+    final marker = history.window.paginationMarker;
     _paginationFailed = false;
     late final Future<void> operation;
-    operation = history.loadMore().whenComplete(() {
+    operation = history.window.loadMore().whenComplete(() {
       if (identical(_pageLoad, operation)) _pageLoad = null;
       if (!_disposed && generation == _focusGeneration) {
         _paginationFailed =
-            history.paginationMarker == marker && history.canLoadMore;
+            history.window.paginationMarker == marker &&
+            history.window.canLoadMore;
         notifyListeners();
       }
     });
@@ -339,34 +343,37 @@ class QuickPasteController extends ChangeNotifier {
         continue;
       }
       var group = current.pinned
-          ? history.visitedPinnedIds
-          : history.visitedRecentIds;
+          ? history.window.visitedPinnedIds
+          : history.window.visitedRecentIds;
       var index = group.indexOf(current.id);
       if (offset > 0 &&
           !current.pinned &&
           index == group.length - 1 &&
-          history.canLoadMore) {
-        final marker = history.paginationMarker;
+          history.window.canLoadMore) {
+        final marker = history.window.paginationMarker;
         await loadMore();
         if (_disposed || generation != _focusGeneration) return;
-        if (history.paginationMarker == marker && history.canLoadMore) break;
-        group = history.visitedRecentIds;
+        if (history.window.paginationMarker == marker &&
+            history.window.canLoadMore) {
+          break;
+        }
+        group = history.window.visitedRecentIds;
         index = group.indexOf(current.id);
       } else if (offset < 0 &&
           current.pinned &&
-          history.canLoadPinnedPrevious &&
+          history.window.canLoadPinnedPrevious &&
           visible.where((clip) => clip.pinned).firstOrNull?.id == current.id) {
-        await history.loadPinnedPrevious();
+        await history.window.loadPinnedPrevious();
       } else if (offset > 0 &&
           current.pinned &&
-          history.canLoadPinnedMore &&
+          history.window.canLoadPinnedMore &&
           visible.where((clip) => clip.pinned).lastOrNull?.id == current.id) {
-        await history.loadPinnedMore();
+        await history.window.loadPinnedMore();
       } else if (offset < 0 &&
           !current.pinned &&
-          history.canLoadPrevious &&
+          history.window.canLoadPrevious &&
           visible.where((clip) => !clip.pinned).firstOrNull?.id == current.id) {
-        await history.loadPrevious();
+        await history.window.loadPrevious();
       }
       if (_disposed || generation != _focusGeneration) return;
       visible = items;
@@ -375,7 +382,7 @@ class QuickPasteController extends ChangeNotifier {
         final target = group[nextIndex];
         final next =
             visible.where((clip) => clip.id == target).firstOrNull ??
-            await history.materializeId(target);
+            await history.window.materializeId(target);
         if (next != null) {
           current = next;
           continue;
@@ -399,7 +406,7 @@ class QuickPasteController extends ChangeNotifier {
     _cancelInspectorHover();
     _autoOpenSuppressed = false;
     _focusedClip = clip;
-    if (_inspectorOpen) unawaited(history.select(clip.id));
+    if (_inspectorOpen) unawaited(history.selection.select(clip.id));
     notifyListeners();
   }
 
@@ -472,7 +479,7 @@ class QuickPasteController extends ChangeNotifier {
           if (visible) {
             _prepareInspector();
             final clip = _focusedClip ?? items.firstOrNull;
-            if (clip != null) unawaited(history.select(clip.id));
+            if (clip != null) unawaited(history.selection.select(clip.id));
           }
           if (_isCurrent(id)) notifyListeners();
         })
@@ -495,7 +502,7 @@ class QuickPasteController extends ChangeNotifier {
     if (_disposed ||
         _activating ||
         presentationId == null ||
-        history.isDownloadPending(clip.id)) {
+        history.transfers.isDownloadPending(clip.id)) {
       return;
     }
     final generation = ++_activationGeneration;
@@ -509,16 +516,16 @@ class QuickPasteController extends ChangeNotifier {
     _activeAction = actionDone.future;
     notifyListeners();
     try {
-      await history.select(clip.id);
+      await history.selection.select(clip.id);
       if (!current()) return;
-      final selected = history.selectedClip;
+      final selected = history.selection.selectedClip;
       if (selected?.contentKind == HistoryClipKind.file &&
           selected?.file != null &&
           !selected!.file!.sourceAvailable) {
         // The runtime owns file I/O; other clipboard actions remain available.
         _activating = false;
         notifyListeners();
-        final path = await history.prepareFileForCopy(selected);
+        final path = await history.transfers.prepareFileForCopy(selected);
         if (path == null ||
             !current() ||
             focusGeneration != _focusGeneration ||
@@ -526,10 +533,10 @@ class QuickPasteController extends ChangeNotifier {
           return;
         }
         _activating = true;
-        await history.select(clip.id);
+        await history.selection.select(clip.id);
         if (!current()) return;
       }
-      final copied = await history.copySelected(plainText: plainText);
+      final copied = await history.transfers.copySelected(plainText: plainText);
       if (!copied || !current()) return;
       final shouldPaste = forcePaste
           ? true
@@ -586,7 +593,9 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   Future<void> activateIndex(int index) async {
-    final visibleItems = history.items.where((clip) => !clip.pinned).toList();
+    final visibleItems = history.window.items
+        .where((clip) => !clip.pinned)
+        .toList();
     if (index < 0 || index >= visibleItems.length) return;
     await activate(visibleItems[index]);
   }
@@ -594,7 +603,7 @@ class QuickPasteController extends ChangeNotifier {
   Future<void> toggleFocusedPin() async {
     final clip = _focusedClip;
     if (clip != null) {
-      await history.togglePin(clip);
+      await history.mutations.togglePin(clip);
       await _reconcilePinnedShortcuts();
     }
   }
@@ -602,11 +611,11 @@ class QuickPasteController extends ChangeNotifier {
   Future<void> deleteFocused() async {
     final clip = _focusedClip;
     if (clip == null) return;
-    await history.select(clip.id);
-    await history.deleteSelected();
+    await history.selection.select(clip.id);
+    await history.mutations.deleteSelected();
   }
 
-  Future<bool> clearUnpinned() => history.deleteAll();
+  Future<bool> clearUnpinned() => history.mutations.deleteAll();
 
   Future<void> openMainWindow() {
     _cancelInspectorHover();
@@ -662,42 +671,46 @@ class QuickPasteController extends ChangeNotifier {
 
   void _historyChanged() {
     if (_disposed) return;
-    if (_derivedSource != null && !listEquals(_derivedSource, history.items)) {
+    if (_derivedSource != null &&
+        !listEquals(_derivedSource, history.window.items)) {
       _derivedSource = null;
     }
     final previousSelection = _inspectedClipId;
     final removedSelection =
         _inspectedClipId != null &&
-        history.selectedId == null &&
-        !history.items.any((clip) => clip.id == _inspectedClipId);
-    _inspectedClipId = history.selectedId;
+        history.selection.selectedId == null &&
+        !history.window.items.any((clip) => clip.id == _inspectedClipId);
+    _inspectedClipId = history.selection.selectedId;
     final focusedId = _focusedClip?.id;
     if (focusedId != null || removedSelection) {
-      final resident = history.items
+      final resident = history.window.items
           .where((clip) => clip.id == focusedId)
           .firstOrNull;
       if (resident != null) {
         _focusedClip = resident;
-      } else if (focusedId == null || !history.hasVisited(focusedId)) {
+      } else if (focusedId == null || !history.window.hasVisited(focusedId)) {
         _focusedClip = null;
       }
       if (_focusedClip == null) {
         _cancelInspectorHover();
         _focusedClip = items.firstOrNull;
         final next = _focusedClip;
-        if (_inspectorOpen && next != null) unawaited(history.select(next.id));
+        if (_inspectorOpen && next != null) {
+          unawaited(history.selection.select(next.id));
+        }
       }
     }
     final deletedId =
-        removedSelection && history.isDeletePending(previousSelection!)
+        removedSelection &&
+            history.mutations.isDeletePending(previousSelection!)
         ? previousSelection
         : focusedId != null &&
-              history.isDeletePending(focusedId) &&
-              !history.items.any((clip) => clip.id == focusedId)
+              history.mutations.isDeletePending(focusedId) &&
+              !history.window.items.any((clip) => clip.id == focusedId)
         ? focusedId
         : null;
     final pinState = [
-      for (final clip in history.items)
+      for (final clip in history.window.items)
         if (clip.pinned || _pinnedShortcuts.containsKey(clip.id))
           (clip.id, clip.pinned),
     ];
@@ -731,10 +744,10 @@ class QuickPasteController extends ChangeNotifier {
           next[entry.key] = entry.value;
         }
       }
-      for (final clip in history.items) {
+      for (final clip in history.window.items) {
         if (!clip.pinned) next.remove(clip.id);
       }
-      for (final id in history.visitedPinnedIds) {
+      for (final id in history.window.visitedPinnedIds) {
         if (next.containsKey(id)) continue;
         final available = _availablePinKeys.keys
             .where((key) => !next.containsValue(key))

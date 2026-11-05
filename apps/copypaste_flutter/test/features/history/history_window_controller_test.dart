@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -83,8 +84,8 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(repo.events.close);
       await controller.initialize();
-      await controller.reportPageExtent(0, 100);
-      controller.beforeWindowChange = () async => {'1'};
+      await controller.window.reportPageExtent(0, 100);
+      controller.window.beforeWindowChange = () async => {'1'};
 
       repo.clips.insertAll(0, [for (var i = 10000; i < 10008; i++) _clip(i)]);
       repo.events.add(HistoryRuntimeEvent.itemsChanged);
@@ -92,25 +93,31 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       }
 
-      expect(controller.state, HistoryLoadState.ready);
-      expect(controller.items.any((clip) => clip.id == '1'), isTrue);
+      expect(controller.window.state, HistoryLoadState.ready);
+      expect(controller.window.items.any((clip) => clip.id == '1'), isTrue);
       expect(
-        controller.windowPages.every(
+        controller.window.windowPages.every(
           (page) => page.items != null || page.hasExactExtent,
         ),
         isTrue,
         reason:
             'A rebuilt page must remain renderable until it can be measured.',
       );
-      for (var index = 0; index < controller.windowPages.length; index++) {
-        await controller.reportPageExtent(index, 100);
+      for (
+        var index = 0;
+        index < controller.window.windowPages.length;
+        index++
+      ) {
+        await controller.window.reportPageExtent(index, 100);
       }
       expect(
-        controller.windowPages.where((page) => page.items != null).length,
+        controller.window.windowPages
+            .where((page) => page.items != null)
+            .length,
         lessThanOrEqualTo(3),
         reason: 'Measured rebuilt pages still obey the resident-page limit.',
       );
-      expect(controller.items.any((clip) => clip.id == '1'), isTrue);
+      expect(controller.window.items.any((clip) => clip.id == '1'), isTrue);
     },
   );
 
@@ -121,20 +128,20 @@ void main() {
       final controller = HistoryController(repo, includeFacets: false);
       addTearDown(controller.dispose);
       await controller.initialize();
-      controller.reportPageExtent(0, 100);
-      await controller.select('0');
+      controller.window.reportPageExtent(0, 100);
+      await controller.selection.select('0');
       for (var page = 1; page < 200; page++) {
-        await controller.loadMore();
-        controller.reportPageExtent(page, 100);
-        expect(controller.items.length, lessThanOrEqualTo(150));
+        await controller.window.loadMore();
+        controller.window.reportPageExtent(page, 100);
+        expect(controller.window.items.length, lessThanOrEqualTo(150));
       }
-      expect(controller.visitedIds, hasLength(10000));
-      expect(controller.selectedId, '0');
-      expect(controller.selectedClip?.id, '0');
-      expect(controller.canLoadPrevious, isTrue);
-      await controller.loadPrevious();
+      expect(controller.window.visitedIds, hasLength(10000));
+      expect(controller.selection.selectedId, '0');
+      expect(controller.selection.selectedClip?.id, '0');
+      expect(controller.window.canLoadPrevious, isTrue);
+      await controller.window.loadPrevious();
       expect(repo.requests.last, '9800');
-      expect(controller.items.first.id, '9800');
+      expect(controller.window.items.first.id, '9800');
     },
   );
 
@@ -144,16 +151,16 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(repo.events.close);
     await controller.initialize();
-    controller.reportPageExtent(0, 100);
-    controller.beginBulkSelection('0');
+    controller.window.reportPageExtent(0, 100);
+    controller.bulk.beginBulkSelection('0');
     for (var page = 1; page < 5; page++) {
-      await controller.loadMore();
-      controller.reportPageExtent(page, 100);
+      await controller.window.loadMore();
+      controller.window.reportPageExtent(page, 100);
     }
-    controller.toggleBulkSelection('200');
-    expect(controller.items.any((item) => item.id == '0'), isFalse);
-    expect(controller.bulkSelectedIds, {'0', '200'});
-    expect(await controller.deleteBulkSelection(), isTrue);
+    controller.bulk.toggleBulkSelection('200');
+    expect(controller.window.items.any((item) => item.id == '0'), isFalse);
+    expect(controller.bulk.bulkSelectedIds, {'0', '200'});
+    expect(await controller.bulk.deleteBulkSelection(), isTrue);
     expect(repo.deleted.toSet(), {'0', '200'});
   });
   test(
@@ -164,22 +171,22 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(repo.events.close);
       await controller.initialize();
-      controller.reportPageExtent(0, 100);
-      await controller.select('0');
+      controller.window.reportPageExtent(0, 100);
+      await controller.selection.select('0');
       for (var i = 0; i < 4; i++) {
-        await controller.loadMore();
-        controller.reportPageExtent(i + 1, 100);
+        await controller.window.loadMore();
+        controller.window.reportPageExtent(i + 1, 100);
       }
-      final anchor = controller.items.first.id;
+      final anchor = controller.window.items.first.id;
       repo.clips.insert(0, _clip(10000));
       repo.events.add(HistoryRuntimeEvent.itemsChanged);
       for (var i = 0; i < 20; i++) {
         await Future<void>.delayed(Duration.zero);
       }
-      expect(controller.items.any((clip) => clip.id == anchor), isTrue);
-      expect(controller.selectedId, '0');
-      expect(controller.selectedClip?.id, '0');
-      expect(controller.items.length, lessThanOrEqualTo(150));
+      expect(controller.window.items.any((clip) => clip.id == anchor), isTrue);
+      expect(controller.selection.selectedId, '0');
+      expect(controller.selection.selectedClip?.id, '0');
+      expect(controller.window.items.length, lessThanOrEqualTo(150));
     },
   );
   test('range across evicted pages excludes collapsed date sections', () async {
@@ -211,17 +218,17 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(repo.events.close);
     await controller.initialize();
-    controller.reportPageExtent(0, 100);
-    await controller.select('0');
-    controller.toggleSection('yesterday');
+    controller.window.reportPageExtent(0, 100);
+    await controller.selection.select('0');
+    controller.window.toggleSection('yesterday');
     for (var i = 0; i < 3; i++) {
-      await controller.loadMore();
-      controller.reportPageExtent(i + 1, 100);
+      await controller.window.loadMore();
+      controller.window.reportPageExtent(i + 1, 100);
     }
-    controller.selectBulkClip('150', orderedIds: ['150'], range: true);
-    expect(controller.bulkSelectedIds, contains('0'));
-    expect(controller.bulkSelectedIds, contains('150'));
-    expect(controller.bulkSelectedIds, isNot(contains('75')));
-    expect(controller.bulkSelectedIds, contains('125'));
+    controller.bulk.selectBulkClip('150', orderedIds: ['150'], range: true);
+    expect(controller.bulk.bulkSelectedIds, contains('0'));
+    expect(controller.bulk.bulkSelectedIds, contains('150'));
+    expect(controller.bulk.bulkSelectedIds, isNot(contains('75')));
+    expect(controller.bulk.bulkSelectedIds, contains('125'));
   });
 }

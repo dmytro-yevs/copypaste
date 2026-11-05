@@ -335,9 +335,9 @@ void main() {
     expect(repository.copied, isEmpty);
     expect(controller.activating, isFalse);
     expect(controller.transferProgressFor(clip.id), isNotNull);
-    expect(controller.history.isDownloadPending(clip.id), isTrue);
+    expect(controller.history.transfers.isDownloadPending(clip.id), isTrue);
     expect(
-      controller.history.downloadProgressFor(clip.id),
+      controller.history.transfers.downloadProgressFor(clip.id),
       controller.transferProgressFor(clip.id),
     );
     await controller.activate(clip);
@@ -382,7 +382,10 @@ void main() {
       await controller.opened(1);
       await controller.activate(clip);
       expect(controller.transferFailedFor(clip.id), isTrue);
-      expect(controller.history.downloadErrorFor(clip.id), isNotEmpty);
+      expect(
+        controller.history.transfers.downloadErrorFor(clip.id),
+        isNotEmpty,
+      );
       expect(repository.copied, isEmpty);
       repository.failSave = false;
       await controller.activate(clip);
@@ -426,7 +429,7 @@ void main() {
       final pending = controller.activate(file);
       await Future<void>.delayed(Duration.zero);
       expect(controller.activating, isFalse);
-      expect(controller.history.isDownloadPending(file.id), isTrue);
+      expect(controller.history.transfers.isDownloadPending(file.id), isTrue);
       await controller.activate(text);
       expect(repository.copied, [text.id]);
       transfer.finish.complete('/downloaded/file.bin');
@@ -611,7 +614,7 @@ void main() {
       repository.imageLoadGate!.complete();
       await tester.pump();
       await tester.runAsync(() async {
-        final preview = await controller.history.requestImagePreview(
+        final preview = await controller.history.media.requestImagePreview(
           'image',
           maxEdge: 480,
         );
@@ -687,7 +690,7 @@ void main() {
     repository.imageLoadGate!.complete();
     await tester.pump();
     await tester.runAsync(() async {
-      final preview = await controller.history.requestImagePreview(
+      final preview = await controller.history.media.requestImagePreview(
         'image',
         maxEdge: 480,
       );
@@ -1018,7 +1021,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     expect(controller.inspectorOpen, isTrue);
-    expect(controller.history.selectedClip?.id, 'recent');
+    expect(controller.history.selection.selectedClip?.id, 'recent');
   });
 
   test('cold engine opening waits until its controller is ready', () async {
@@ -1103,7 +1106,7 @@ void main() {
         repository.requests.map((request) => request.limit),
         everyElement(50),
       );
-      expect(controller.history.canLoadMore, isFalse);
+      expect(controller.history.window.canLoadMore, isFalse);
       scroll().jumpTo(scroll().position.maxScrollExtent);
       await tester.pumpAndSettle();
       expect(
@@ -1146,7 +1149,7 @@ void main() {
     await tester.pumpWidget(QuickPasteApp(controller: controller));
     await tester.pumpAndSettle();
     Future<void> loadPage() async {
-      final load = controller.history.loadMore();
+      final load = controller.history.window.loadMore();
       await tester.pumpAndSettle();
       await load;
       await tester.pumpAndSettle();
@@ -1166,7 +1169,7 @@ void main() {
     expect(recent, findsOneWidget);
     expect(tester.getTopLeft(pinned).dy, closeTo(pinnedY, 1));
     expect(tester.getTopLeft(recent).dy, closeTo(recentY, 1));
-    expect(controller.history.visitedIds.length, 250);
+    expect(controller.history.window.visitedIds.length, 250);
     expect(controller.items.where((clip) => clip.pinned), hasLength(80));
     expect(
       controller.items.where((clip) => !clip.pinned).length,
@@ -1391,7 +1394,7 @@ void main() {
     expect(repository.getCalls, 1);
     await controller.moveFocus(5);
     expect(controller.focusedClip?.id, 'clip-4');
-    expect(controller.history.selectedClip?.id, 'clip-4');
+    expect(controller.history.selection.selectedClip?.id, 'clip-4');
     expect(repository.getCalls, 2);
   });
 
@@ -1675,7 +1678,7 @@ void main() {
         expect(tester.widget<Avatar>(iconFinder).provider, provider);
       }
       expect(repository.sourceIconCalls, 1);
-      await controller.history.deleteClip('icon-0');
+      await controller.history.mutations.deleteClip('icon-0');
       await tester.pump(const Duration(milliseconds: 100));
       final nextIconFinder = find.descendant(
         of: find.byKey(const ValueKey('quick-paste-icon-1')),
@@ -1734,7 +1737,7 @@ void main() {
     );
     final row = find.byKey(const ValueKey('quick-paste-image'));
     final size = tester.getSize(row);
-    await controller.history.toggleSecret(repository.clips.first);
+    await controller.history.mutations.toggleSecret(repository.clips.first);
     await tester.pump();
     await tester.pump();
     expect(tester.getSize(row), size);
@@ -1927,7 +1930,7 @@ void main() {
       expect(host.inspectorChanges, [true]);
       expect(host.inspectorPresentationIds, [1]);
       expect(controller.inspectorOpen, isTrue);
-      expect(controller.history.selectedClip?.id, 'recent');
+      expect(controller.history.selection.selectedClip?.id, 'recent');
       expect(
         find.byKey(const ValueKey('history-detail-inspector')),
         findsOneWidget,
@@ -1941,7 +1944,7 @@ void main() {
       );
       await mouse.moveTo(tester.getCenter(pinned));
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.inspectorChanges, [true]);
       await mouse.moveTo(
         tester.getCenter(
@@ -2000,7 +2003,7 @@ void main() {
     expect(controller.inspectorOpen, isFalse);
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
     expect(repository.getCalls, 1);
     expect(host.inspectorChanges, [true]);
     expect(tester.takeException(), isNull);
@@ -2070,7 +2073,7 @@ void main() {
       controller.hoverClip(repository.clips.first, hovered: true);
       await tester.pump(const Duration(milliseconds: 1500));
       expect(controller.inspectorOpen, isTrue);
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.inspectorChanges, [true, false, true]);
     },
   );
@@ -2121,7 +2124,7 @@ void main() {
         case 'shutdown':
           await controller.shutdown();
         case 'delete':
-          await controller.history.deleteClip(recent.id);
+          await controller.history.mutations.deleteClip(recent.id);
         default:
           throw StateError('Unknown cancellation action: $action');
       }
@@ -2183,7 +2186,7 @@ void main() {
     await close;
     expect(host.inspectorChanges, [true, false, true]);
     expect(controller.inspectorOpen, isTrue);
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
   });
 
   testWidgets('a reopened popup ignores completion of an old hover open', (
@@ -2353,14 +2356,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(host.inspectorChanges, [true]);
-    expect(controller.history.selectedClip?.id, 'recent');
+    expect(controller.history.selection.selectedClip?.id, 'recent');
     expect(
       find.byKey(const ValueKey('history-detail-inspector')),
       findsOneWidget,
     );
     controller.focus(repository.clips.first);
     await tester.pumpAndSettle();
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
     await tester.tap(
       find.byKey(const ValueKey('history-detail-inspector-close')),
     );
@@ -2393,10 +2396,10 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
       await tester.pump();
-      expect(controller.history.selectedClip!.secret, isTrue);
+      expect(controller.history.selection.selectedClip!.secret, isTrue);
       await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.secret, isFalse);
+      expect(controller.history.selection.selectedClip!.secret, isFalse);
 
       await tester.tap(find.byKey(const ValueKey('history-detail-copy')));
       await tester.pumpAndSettle();
@@ -2410,11 +2413,11 @@ void main() {
       expect(host.closeCalls, 0);
       expect(host.pasteCalls, 0);
 
-      controller.focus(controller.history.selectedClip!);
+      controller.focus(controller.history.selection.selectedClip!);
       final pin = find.byKey(const ValueKey('history-pin-recent'));
       await tester.tap(pin);
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.pinned, isTrue);
+      expect(controller.history.selection.selectedClip!.pinned, isTrue);
       expect(controller.focusedClip!.pinned, isTrue);
       expect(controller.shortcutFor(controller.focusedClip!), isNotNull);
       expect(
@@ -2423,7 +2426,7 @@ void main() {
       );
       await tester.tap(pin);
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.pinned, isFalse);
+      expect(controller.history.selection.selectedClip!.pinned, isFalse);
       expect(
         controller.shortcutFor(controller.focusedClip!),
         LogicalKeyboardKey.digit1,
@@ -2441,7 +2444,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.clips.map((clip) => clip.id), ['pinned']);
       expect(controller.focusedClip?.id, 'pinned');
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.closeCalls, 0);
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(seconds: 6));
@@ -2510,7 +2513,10 @@ void main() {
     expect(cancelButtonSize.width, cancelButtonSize.height);
     await tester.tap(download);
     await tester.pump();
-    expect(controller.history.isDownloadCancelling('download'), isTrue);
+    expect(
+      controller.history.transfers.isDownloadCancelling('download'),
+      isTrue,
+    );
     repository.saveGate!.complete();
     repository.saveGate = null;
     await tester.runAsync(
@@ -2518,7 +2524,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(downloader.presented, ['/tmp/report.pdf']);
-    expect(controller.history.isDownloadPending('download'), isFalse);
+    expect(controller.history.transfers.isDownloadPending('download'), isFalse);
     await mouse.removePointer();
     downloader.destination = null;
     await tester.tap(download);
@@ -2530,10 +2536,10 @@ void main() {
     await tester.tap(download);
     await tester.pumpAndSettle();
     expect(
-      controller.history.errorMessage,
+      controller.history.errors.message,
       'This file could not be downloaded.',
     );
-    expect(controller.history.downloadFailedFor('download'), isTrue);
+    expect(controller.history.transfers.downloadFailedFor('download'), isTrue);
     expect(
       find.descendant(
         of: download,
@@ -2643,7 +2649,7 @@ void main() {
       expect(identical(controller.shortcuts, shortcuts), isTrue);
       expect(() => items.clear(), throwsUnsupportedError);
       expect(() => shortcuts.clear(), throwsUnsupportedError);
-      await controller.history.select('recent');
+      await controller.history.selection.select('recent');
       expect(identical(controller.items, items), isTrue);
       expect(identical(controller.shortcuts, shortcuts), isTrue);
       repository.clips.removeWhere((clip) => clip.id == 'recent');
@@ -2670,8 +2676,8 @@ void main() {
       await controller.initialize();
       await Future<void>.delayed(Duration.zero);
       final writes = store.writes;
-      await controller.history.select('recent');
-      await controller.history.select('pinned');
+      await controller.history.selection.select('recent');
+      await controller.history.selection.select('pinned');
       await Future<void>.delayed(Duration.zero);
       expect(store.writes, writes);
     },
@@ -2917,7 +2923,7 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
 
-    final clip = controller.history.items.last;
+    final clip = controller.history.window.items.last;
     controller.focus(clip);
     await controller.activateFocused();
 
@@ -2938,7 +2944,7 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
 
-    await controller.activate(controller.history.items.last);
+    await controller.activate(controller.history.window.items.last);
 
     expect(host.permissionRequests, 1);
     expect(repository.copied, ['recent']);
@@ -2964,7 +2970,7 @@ void main() {
     await controller.opened(1);
 
     await controller.activate(
-      controller.history.items.last,
+      controller.history.window.items.last,
       invertAutoPaste: true,
     );
 
@@ -2984,7 +2990,7 @@ void main() {
     await controller.opened(1);
 
     expect(await controller.clearUnpinned(), isTrue);
-    expect(controller.history.items.map((clip) => clip.id), ['pinned']);
+    expect(controller.history.window.items.map((clip) => clip.id), ['pinned']);
     expect(repository.deleteAllCalls, 1);
   });
   test(
@@ -3001,10 +3007,12 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.copyGate = Completer<void>();
-      final oldAction = controller.activate(controller.history.items.last);
+      final oldAction = controller.activate(
+        controller.history.window.items.last,
+      );
       await repository.copyStarted.future;
       await controller.opened(2);
-      await controller.activate(controller.history.items.first);
+      await controller.activate(controller.history.window.items.first);
       expect(controller.activating, isTrue);
       expect(repository.copied, ['recent']);
       repository.copyGate!.complete();
@@ -3016,7 +3024,9 @@ void main() {
 
       repository.copyGate = Completer<void>();
       repository.copyStarted = Completer<void>();
-      final newAction = controller.activate(controller.history.items.first);
+      final newAction = controller.activate(
+        controller.history.window.items.first,
+      );
       await repository.copyStarted.future;
       expect(controller.activating, isTrue);
       repository.copyGate!.complete();
@@ -3039,12 +3049,12 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
     repository.selectGate = Completer<HistoryClip>();
-    final clip = controller.history.items.last;
+    final clip = controller.history.window.items.last;
     final action = controller.activate(clip);
     await repository.selectStarted.future;
     await controller.opened(2);
     expect(controller.activating, isTrue);
-    await controller.activate(controller.history.items.first);
+    await controller.activate(controller.history.window.items.first);
     repository.selectGate!.complete(clip);
     await action;
     expect(repository.copied, isEmpty);
@@ -3066,7 +3076,7 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.copyGate = Completer<void>();
-      final action = controller.activate(controller.history.items.last);
+      final action = controller.activate(controller.history.window.items.last);
       await repository.copyStarted.future;
       host.nativeId = 2;
       repository.copyGate!.complete();
@@ -3102,7 +3112,7 @@ void main() {
         addTearDown(controller.dispose);
         await controller.initialize();
         await controller.opened(1);
-        await controller.activate(controller.history.items.last);
+        await controller.activate(controller.history.window.items.last);
         expect(repository.copied, ['recent']);
         expect(host.pasteCalls, 1);
         expect(host.closeIds, [1]);
@@ -3125,10 +3135,10 @@ void main() {
       addTearDown(controller.dispose);
       await controller.initialize();
       await controller.opened(1);
-      final action = controller.activate(controller.history.items.last);
+      final action = controller.activate(controller.history.window.items.last);
       await host.pasteStarted.future;
       await controller.opened(2);
-      await controller.activate(controller.history.items.first);
+      await controller.activate(controller.history.window.items.first);
       expect(controller.activating, isTrue);
       host.pasteGate!.complete(false);
       await action;
@@ -3150,7 +3160,7 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
     repository.copyGate = Completer<void>();
-    final action = controller.activate(controller.history.items.last);
+    final action = controller.activate(controller.history.window.items.last);
     await repository.copyStarted.future;
     final shutdown = controller.shutdown();
     final failedAction = expectLater(action, throwsStateError);
@@ -3177,7 +3187,9 @@ void main() {
         await controller.initialize();
         await controller.opened(1);
         repository.copyGate = Completer<void>();
-        final action = controller.activate(controller.history.items.last);
+        final action = controller.activate(
+          controller.history.window.items.last,
+        );
         await repository.copyStarted.future;
         var notifications = 0;
         controller.addListener(() {
@@ -3212,7 +3224,7 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.selectGate = Completer<HistoryClip>();
-      final clip = controller.history.items.last;
+      final clip = controller.history.window.items.last;
       final action = controller.activate(clip);
       await repository.selectStarted.future;
       controller.dispose();
@@ -3240,12 +3252,15 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.opened(1);
-    await controller.activate(controller.history.items.last);
+    await controller.activate(controller.history.window.items.last);
     expect(repository.copied, ['recent']);
     expect(host.pasteIds, isEmpty);
     expect(host.closeIds, [1]);
     await controller.opened(2);
-    await controller.activate(controller.history.items.first, forcePaste: true);
+    await controller.activate(
+      controller.history.window.items.first,
+      forcePaste: true,
+    );
     expect(host.pasteIds, [2]);
   });
 }

@@ -13,6 +13,7 @@ import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
@@ -69,33 +70,33 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(controller.state, HistoryLoadState.error);
+    expect(controller.window.state, HistoryLoadState.error);
     expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
     final requests = repository.queries.length;
     repository.failAll = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(repository.queries.length, greaterThan(requests));
-    expect(controller.state, HistoryLoadState.empty);
+    expect(controller.window.state, HistoryLoadState.empty);
     repository.rejectFiltered = true;
-    await controller.updateQuery(
+    await controller.window.updateQuery(
       const HistoryQuery(kind: HistoryClipKind.image),
     );
     await tester.pumpAndSettle();
-    expect(controller.state, HistoryLoadState.error);
+    expect(controller.window.state, HistoryLoadState.error);
     expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
     repository.rejectFiltered = false;
     final filteredRequests = repository.queries.length;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(repository.queries.length, greaterThan(filteredRequests));
-    expect(controller.query.kind, HistoryClipKind.image);
-    expect(controller.state, HistoryLoadState.empty);
+    expect(controller.window.query.kind, HistoryClipKind.image);
+    expect(controller.window.state, HistoryLoadState.empty);
     expect(find.byKey(const ValueKey('history-reset-filters')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('history-reset-filters')));
     await tester.pumpAndSettle();
-    expect(controller.query.kind, isNull);
-    expect(controller.hasActiveFilters, isFalse);
+    expect(controller.window.query.kind, isNull);
+    expect(controller.window.hasActiveFilters, isFalse);
     expect(find.byKey(const ValueKey('history-reset-filters')), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -123,7 +124,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await controller.initialize();
-    await controller.select('code-fixture');
+    await controller.selection.select('code-fixture');
     Widget app() => ShadcnApp(
       theme: AppTheme.light,
       builder: AppTheme.builder,
@@ -234,12 +235,12 @@ void main() {
       );
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
-      expect(controller.bulkSelectedIds, {'bulk-secret'});
+      expect(controller.bulk.bulkSelectedIds, {'bulk-secret'});
       expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
-      expect(controller.selectedId, isNull);
+      expect(controller.selection.selectedId, isNull);
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
-      expect(controller.bulkSelectedIds, isEmpty);
+      expect(controller.bulk.bulkSelectedIds, isEmpty);
       expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
       await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
       await tester.pump();
@@ -302,7 +303,7 @@ void main() {
           await _pumpHoverActions(tester);
         }
         expect(find.text('2 selected'), findsOneWidget);
-        expect(controller.selectedId, isNull);
+        expect(controller.selection.selectedId, isNull);
         expect(
           find.byKey(const ValueKey('history-detail-drawer')),
           findsNothing,
@@ -328,22 +329,22 @@ void main() {
         expect(repository.deletedIds, isEmpty);
         await tester.tap(find.widgetWithText(Button, 'Cancel'));
         await _pumpHoverActions(tester);
-        expect(controller.bulkSelectedIds, {'bulk-one', 'bulk-two'});
+        expect(controller.bulk.bulkSelectedIds, {'bulk-one', 'bulk-two'});
         await tester.tap(find.byKey(const ValueKey('history-bulk-delete')));
         await _pumpHoverActions(tester);
         await tester.tap(find.widgetWithText(Button, 'Delete'));
         await _pumpHoverActions(tester);
         expect(repository.deletedIds.toSet(), {'bulk-one', 'bulk-two'});
-        expect(controller.items.single.id, 'bulk-keep');
-        expect(controller.isBulkSelecting, isFalse);
+        expect(controller.window.items.single.id, 'bulk-keep');
+        expect(controller.bulk.isBulkSelecting, isFalse);
         await tester.tap(find.byKey(const ValueKey('history-select-clips')));
         await _pumpHoverActions(tester);
         await tester.tap(find.byKey(const ValueKey('history-clip-bulk-keep')));
         await _pumpHoverActions(tester);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await _pumpHoverActions(tester);
-        expect(controller.isBulkSelecting, isFalse);
-        expect(controller.bulkSelectedIds, isEmpty);
+        expect(controller.bulk.isBulkSelecting, isFalse);
+        expect(controller.bulk.bulkSelectedIds, isEmpty);
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
         expect(tester.takeException(), isNull);
@@ -397,8 +398,8 @@ void main() {
           kind: kind,
         );
         await _pumpHoverActions(tester);
-        expect(controller.bulkSelectedIds, {'hold'});
-        expect(controller.selectedId, isNull);
+        expect(controller.bulk.bulkSelectedIds, {'hold'});
+        expect(controller.selection.selectedId, isNull);
         expect(find.text('1 selected'), findsOneWidget);
         final sizes = [
           for (final action in ['close', 'pin', 'unpin', 'delete'])
@@ -416,7 +417,7 @@ void main() {
         );
         await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
         await _pumpHoverActions(tester);
-        expect(controller.isBulkSelecting, isFalse);
+        expect(controller.bulk.isBulkSelecting, isFalse);
         expect(
           find.byKey(const ValueKey('history-select-clips')),
           findsOneWidget,
@@ -463,7 +464,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
-      await controller.select('secret-fixture');
+      await controller.selection.select('secret-fixture');
       await tester.pump();
       expect(find.text('Credentials'), findsWidgets);
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
@@ -518,9 +519,9 @@ void main() {
         find.text('SYNTHETIC HISTORY SECRET').hitTestable(),
         findsNWidgets(2),
       );
-      controller.clearSelection();
+      controller.selection.clearSelection();
       await tester.pump();
-      await controller.select('secret-fixture');
+      await controller.selection.select('secret-fixture');
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
       expect(
@@ -600,7 +601,7 @@ void main() {
           tester.getRect(find.text('Clearance clip 29')).bottom,
           lessThan(dockTop),
         );
-        await controller.togglePin(controller.items.last);
+        await controller.mutations.togglePin(controller.window.items.last);
         await tester.pumpAndSettle();
         position.jumpTo(position.maxScrollExtent);
         await tester.pumpAndSettle();
@@ -691,7 +692,7 @@ void main() {
       await tester.tap(pin, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       expect(repository.pinnedUpdates, [('actions', true)]);
-      expect(controller.selectedId, isNull);
+      expect(controller.selection.selectedId, isNull);
       await mouse.moveTo(tester.getCenter(clip));
       await _pumpHoverActions(tester);
       expect(find.byIcon(LucideIcons.pinOff), findsWidgets);
@@ -722,8 +723,8 @@ void main() {
       );
       await _pumpHoverActions(tester);
       expect(repository.deletedIds, ['actions']);
-      expect(controller.items, isEmpty);
-      expect(controller.selectedId, isNull);
+      expect(controller.window.items, isEmpty);
+      expect(controller.selection.selectedId, isNull);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
@@ -2008,12 +2009,12 @@ void main() {
           );
           await tester.enterText(searchField, 'Example');
           await tester.pump(const Duration(milliseconds: 300));
-          expect(controller.query.search, 'Example');
+          expect(controller.window.query.search, 'Example');
           await tester.tap(find.bySemanticsLabel('Close search'));
           await tester.pump(const Duration(milliseconds: 300));
           await tester.pumpAndSettle();
 
-          expect(controller.query.search, isEmpty);
+          expect(controller.window.query.search, isEmpty);
           expect(searchToggle, findsOneWidget);
           expect(selection, findsOneWidget);
           expect(

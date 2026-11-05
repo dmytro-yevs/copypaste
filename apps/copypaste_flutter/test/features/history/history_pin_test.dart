@@ -59,13 +59,13 @@ void main() {
           );
         }
       }
-      expect(controller.items, hasLength(4));
-      expect(controller.selectedId, isNull);
+      expect(controller.window.items, hasLength(4));
+      expect(controller.selection.selectedId, isNull);
       expect(find.text('No clips found'), findsNothing);
       expect(repository.pinnedUpdates, isEmpty);
 
       // Reloads and responsive layout changes must not reopen hidden sections.
-      await controller.reload();
+      await controller.window.reload();
       await tester.binding.setSurfaceSize(Size(mobile ? 1400 : 480, 1000));
       await tester.pumpAndSettle();
       for (final clip in sections.values) {
@@ -115,7 +115,7 @@ void main() {
       expect(find.text('Pinned clip'), findsNothing);
       expect(find.text('Today clip'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Load more'), findsNothing);
-      expect(controller.items, hasLength(2));
+      expect(controller.window.items, hasLength(2));
       expect(tester.takeException(), isNull);
     },
   );
@@ -252,7 +252,9 @@ void main() {
     ]);
     final controller = HistoryController(repository);
     addTearDown(controller.dispose);
-    await controller.updateQuery(const HistoryQuery(sort: HistorySort.oldest));
+    await controller.window.updateQuery(
+      const HistoryQuery(sort: HistorySort.oldest),
+    );
 
     await tester.pumpWidget(
       ShadcnApp(
@@ -294,7 +296,7 @@ void main() {
     ]);
     final controller = HistoryController(repository);
     addTearDown(controller.dispose);
-    await controller.updateQuery(
+    await controller.window.updateQuery(
       const HistoryQuery(search: 'result', sort: HistorySort.relevance),
     );
 
