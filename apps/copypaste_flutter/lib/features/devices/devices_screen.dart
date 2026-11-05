@@ -1359,28 +1359,31 @@ class _PairingInspectorState extends State<_PairingInspector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_pairingTitle(ceremony.state) case final title?) ...[
+        if (ceremony.state != PairingState.waitingForPeer) ...[
           Row(
             children: [
-              AppIconFrame(child: Icon(_pairingIcon(ceremony.state))),
+              AppIconFrame(
+                child: Icon(
+                  DevicePresentation.pairingStateIcon(ceremony.state),
+                ),
+              ),
               const Gap(AppSpacing.md),
               Expanded(
                 child: Text(
                   widget.controller.locallyConfirmed &&
                           ceremony.state == PairingState.awaitingConfirmation
                       ? 'Waiting for the other device'
-                      : title,
+                      : DevicePresentation.pairingStateTitle(ceremony.state),
                 ).h4(),
               ),
             ],
           ),
-          if (ceremony.failureMessage ??
-                  ceremony.peerName ??
-                  _pairingDescription(ceremony.state)
-              case final description?) ...[
-            const Gap(AppSpacing.sm),
-            Text(description).muted(),
-          ],
+          const Gap(AppSpacing.sm),
+          Text(
+            ceremony.failureMessage ??
+                ceremony.peerName ??
+                DevicePresentation.pairingStateDescription(ceremony.state),
+          ).muted(),
         ],
         if (widget.controller.invitation case final invitation?) ...[
           if (ceremony.state != PairingState.waitingForPeer)
@@ -1562,43 +1565,6 @@ class _PairingInspectorState extends State<_PairingInspector> {
     PairingEntryMode.enterCode => 'Enter pairing code',
     PairingEntryMode.nearby => 'Connect nearby device',
     null => 'Pairing',
-  };
-
-  IconData _pairingIcon(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => LucideIcons.qrCode,
-    PairingState.handshaking => LucideIcons.loaderCircle,
-    PairingState.awaitingConfirmation => LucideIcons.shieldQuestion,
-    PairingState.confirmed => LucideIcons.badgeCheck,
-    PairingState.rejected || PairingState.failed => LucideIcons.circleX,
-    PairingState.cancelled || PairingState.timedOut => LucideIcons.clockAlert,
-    PairingState.idle => LucideIcons.link,
-  };
-
-  String? _pairingTitle(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => null,
-    PairingState.handshaking => 'Verifying device',
-    PairingState.awaitingConfirmation => 'Confirm on both devices',
-    PairingState.confirmed => 'Device paired',
-    PairingState.rejected => 'Pairing rejected',
-    PairingState.cancelled => 'Pairing cancelled',
-    PairingState.timedOut => 'Pairing timed out',
-    PairingState.failed => 'Pairing failed',
-    PairingState.idle => 'Pairing',
-  };
-
-  String? _pairingDescription(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => null,
-    PairingState.handshaking =>
-      'The devices are establishing a secure channel.',
-    PairingState.awaitingConfirmation =>
-      'Compare the protected verification code, then confirm on both devices.',
-    PairingState.confirmed =>
-      'The device is connected. Your group membership will sync automatically.',
-    PairingState.rejected ||
-    PairingState.cancelled ||
-    PairingState.failed => 'No device was added.',
-    PairingState.timedOut => 'Start a new pairing attempt to continue.',
-    PairingState.idle => 'Start a pairing attempt to connect a device.',
   };
 }
 

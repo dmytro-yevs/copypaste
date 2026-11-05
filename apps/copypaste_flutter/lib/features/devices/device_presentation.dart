@@ -31,6 +31,44 @@ abstract final class DevicePresentation {
     PairingEntryMode.nearby || null => LucideIcons.link,
   };
 
+  static IconData pairingStateIcon(PairingState state) => switch (state) {
+    PairingState.waitingForPeer => LucideIcons.qrCode,
+    PairingState.handshaking => LucideIcons.loaderCircle,
+    PairingState.awaitingConfirmation => LucideIcons.shieldQuestion,
+    PairingState.confirmed => LucideIcons.badgeCheck,
+    PairingState.rejected || PairingState.failed => LucideIcons.circleX,
+    PairingState.cancelled || PairingState.timedOut => LucideIcons.clockAlert,
+    PairingState.idle => LucideIcons.link,
+  };
+
+  static String pairingStateTitle(PairingState state) => switch (state) {
+    PairingState.waitingForPeer => 'Pair a device',
+    PairingState.handshaking => 'Verifying device',
+    PairingState.awaitingConfirmation => 'Confirm on both devices',
+    PairingState.confirmed => 'Device paired',
+    PairingState.rejected => 'Pairing rejected',
+    PairingState.cancelled => 'Pairing cancelled',
+    PairingState.timedOut => 'Pairing timed out',
+    PairingState.failed => 'Pairing failed',
+    PairingState.idle => 'Pairing',
+  };
+
+  static String pairingStateDescription(PairingState state) => switch (state) {
+    PairingState.waitingForPeer =>
+      'Reveal a QR code, scan one, or enter a pairing code in this protected window.',
+    PairingState.handshaking =>
+      'The devices are establishing a secure channel.',
+    PairingState.awaitingConfirmation =>
+      'Compare the protected verification code, then confirm on both devices.',
+    PairingState.confirmed =>
+      'The device is connected. Your group membership will sync automatically.',
+    PairingState.rejected ||
+    PairingState.cancelled ||
+    PairingState.failed => 'No device was added.',
+    PairingState.timedOut => 'Start a new pairing attempt to continue.',
+    PairingState.idle => 'Start a pairing attempt to connect a device.',
+  };
+
   static IconData icon(DeviceClass? deviceClass) => switch (deviceClass) {
     DeviceClass.desktop => LucideIcons.monitor,
     DeviceClass.laptop => LucideIcons.laptop,

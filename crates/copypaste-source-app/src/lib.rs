@@ -46,6 +46,13 @@ pub fn linux_source_label(app_id: &str) -> Option<SourceAppLabel> {
     linux::source_label(app_id)
 }
 
+/// Resolves an owner-supplied Linux window class or desktop ID to the
+/// installed desktop entry ID and its display label.
+#[cfg(target_os = "linux")]
+pub fn linux_desktop_application(class: &str) -> Option<(String, SourceAppLabel)> {
+    linux::desktop_application(class)
+}
+
 /// A normalized source-application icon safe to persist and transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppIcon {

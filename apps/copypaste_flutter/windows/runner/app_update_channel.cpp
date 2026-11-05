@@ -38,14 +38,6 @@ std::wstring Utf16FromUtf8(const std::string& value) {
   return output;
 }
 
-std::optional<std::wstring> CurrentExecutable() {
-  std::vector<wchar_t> path(32768);
-  const DWORD length = ::GetModuleFileNameW(nullptr, path.data(),
-                                            static_cast<DWORD>(path.size()));
-  if (length == 0 || length >= path.size()) return std::nullopt;
-  return std::wstring(path.data(), length);
-}
-
 bool IsTrustedReleaseUrl(const std::string& value) {
   const std::string prefix =
       "https://github.com/dmytro-yevs/copypaste/releases/";
