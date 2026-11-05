@@ -43,6 +43,7 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     MacosScreenshotProtection.shared.register(window: self, view: flutterViewController.view)
+    MacosMemoryPressure.shared.register(engine: flutterViewController.engine)
     let security = FlutterMethodChannel(
       name: "com.copypaste.app/security", binaryMessenger: flutterViewController.engine.binaryMessenger)
     securityChannel = security
@@ -642,6 +643,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.contentView?.layer?.masksToBounds = true
     FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
     SharedPreferencesPlugin.register(with: controller.registrar(forPlugin: "SharedPreferencesPlugin"))
+    MacosMemoryPressure.shared.register(engine: engine)
     configureContextChannel()
   }
 
@@ -710,11 +712,17 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private func stopEngine() {
     guard !engineStopped else { return }
     engineStopped = true
+    MacosMemoryPressure.shared.unregister(engine: engine)
     window.delegate = nil
+    // AppKit's application-wide focus-ring state strongly retains the last
+    // active first responder until a responder change is processed. Without
+    // this, the retired FlutterView keeps its IOSurfaces alive.
+    _ = window.makeFirstResponder(nil)
     window.close()
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
     window.contentViewController = nil
+    controller.view.removeFromSuperview()
     engine.viewController = nil
     engine.shutDownEngine()
   }
@@ -887,6 +895,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     window.contentViewController = controller
     MacosScreenshotProtection.shared.register(window: window, view: controller.view)
     RegisterGeneratedPlugins(registry: controller)
+    MacosMemoryPressure.shared.register(engine: controller.engine)
     configureContextChannel()
   }
 
@@ -925,6 +934,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     closed = true
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
+    MacosMemoryPressure.shared.unregister(engine: controller.engine)
     DispatchQueue.global(qos: .utility).async { [contextId] in _ = CPPairingDetach(contextId) }
     onClose(contextId)
   }

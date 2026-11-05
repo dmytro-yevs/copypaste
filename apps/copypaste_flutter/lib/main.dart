@@ -307,14 +307,17 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   void _memoryStateChanged() {
     if (!mounted) return;
-    if (_uiMemory.suspended) _historyController?.suspend();
+    if (_uiMemory.suspended) {
+      _historyController?.suspend();
+    } else {
+      unawaited(AppResourcePolicy.resumePresentation());
+    }
     setState(() {});
     if (_uiMemory.suspended) {
-      // Dispose image listeners before clearing the shared decoded-image cache.
+      // Dispose image listeners before releasing the shared caches.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _uiMemory.suspended) {
-          PaintingBinding.instance.imageCache.clear();
-          PaintingBinding.instance.imageCache.clearLiveImages();
+          unawaited(AppResourcePolicy.suspendPresentation());
         }
       });
       // Hidden/paused lifecycle states disable ordinary frames. One warm-up

@@ -26,6 +26,7 @@ constexpr size_t kMaximumArtifactBytes = 16 * 1024 * 1024;
 constexpr UINT kRetireQuickPaste = WM_APP + 42;
 constexpr UINT kFinishQuickPasteRetirement = WM_APP + 43;
 constexpr UINT kFailQuickPasteOpen = WM_APP + 44;
+constexpr UINT kMemoryPressure = WM_APP + 45;
 constexpr UINT_PTR kQuickPasteShutdownTimer = 1;
 constexpr char kQuickPasteHostChannel[] =
     "com.copypaste.app/quick_paste_host";
@@ -176,6 +177,8 @@ bool FlutterWindow::OnCreate() {
         flutter_controller_->engine()->messenger(), GetHandle());
     startup_channel_ = std::make_unique<StartupChannel>(
         flutter_controller_->engine()->messenger());
+    memory_pressure_monitor_ =
+        std::make_unique<MemoryPressureMonitor>(GetHandle(), kMemoryPressure);
   }
   if (is_quick_paste_context_) {
     quick_paste_channel_ =
@@ -446,6 +449,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  memory_pressure_monitor_.reset();
   quick_paste_session_.Invalidate();
   CloseProtectedPairingContext(pairing_context_id_);
   CloseQuickPasteContext();
@@ -556,6 +560,18 @@ bool FlutterWindow::OpenQuickPasteContext(const std::optional<RECT>& tray_anchor
   const bool shown = quick_paste_window_->ShowQuickPaste(sampled_foreground, tray_anchor);
   if (!shown) quick_paste_window_->ScheduleQuickPasteRetirement();
   return shown;
+}
+
+void FlutterWindow::NotifyMemoryPressure() {
+  // The Windows embedder does not forward OS memory pressure to the framework.
+  static constexpr char kMessage[] = "{\"type\":\"memoryPressure\"}";
+  for (FlutterWindow* window : {this, quick_paste_window_.get(),
+                                protected_pairing_window_.get()}) {
+    if (!window || !window->flutter_controller_) continue;
+    window->flutter_controller_->engine()->messenger()->Send(
+        "flutter/system", reinterpret_cast<const uint8_t*>(kMessage),
+        sizeof(kMessage) - 1);
+  }
 }
 
 void FlutterWindow::CloseQuickPasteContext() {
@@ -1018,6 +1034,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       auto* context = quick_paste_window_.get();
       context->quick_paste_session_.Close(static_cast<int64_t>(lparam), context->GetHandle());
       context->ScheduleQuickPasteRetirement();
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == kMemoryPressure) {
+    if (memory_pressure_monitor_ && memory_pressure_monitor_->HandleSignal(wparam)) {
+      NotifyMemoryPressure();
     }
     return 0;
   } else if (!is_protected_pairing_context_ && message == kRetireQuickPaste) {

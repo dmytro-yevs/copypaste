@@ -5,12 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  const relief = MethodChannel('com.copypaste.app/memory');
 
   test(
     'an unavailable renderer channel does not block presentation startup',
     () async {
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       final cache = PaintingBinding.instance.imageCache;
       final oldBytes = cache.maximumSizeBytes;
       final oldCount = cache.maximumSize;
@@ -32,6 +33,53 @@ void main() {
         expect(cache.maximumSizeBytes, lessThan(100 * 1024 * 1024));
         expect(cache.maximumSize, lessThan(1000));
       }
+    },
+  );
+
+  test(
+    'suspension and OS memory pressure release renderer and allocator caches',
+    () async {
+      final events = <Object?>[];
+      messenger.setMockMethodCallHandler(SystemChannels.skia, (call) async {
+        events.add(call.arguments);
+        return true;
+      });
+      messenger.setMockMethodCallHandler(relief, (call) async {
+        events.add(call.method);
+        return null;
+      });
+      addTearDown(() async {
+        await AppResourcePolicy.resumePresentation();
+        messenger.setMockMethodCallHandler(SystemChannels.skia, null);
+        messenger.setMockMethodCallHandler(relief, null);
+      });
+      await AppResourcePolicy.configure();
+      events.clear();
+
+      // Native hosts deliver OS pressure on the framework system channel.
+      Future<void> memoryPressure() => messenger.handlePlatformMessage(
+        SystemChannels.system.name,
+        SystemChannels.system.codec.encodeMessage({'type': 'memoryPressure'}),
+        (_) {},
+      );
+
+      await memoryPressure();
+      await pumpEventQueue();
+      expect(events, [
+        0,
+        AppResourcePolicy.skiaResourceBytes,
+        'releaseFreedMemory',
+      ]);
+
+      events.clear();
+      await AppResourcePolicy.suspendPresentation();
+      await memoryPressure();
+      await pumpEventQueue();
+      expect(events, [0, 'releaseFreedMemory', 0, 'releaseFreedMemory']);
+
+      events.clear();
+      await AppResourcePolicy.resumePresentation();
+      expect(events, [AppResourcePolicy.skiaResourceBytes]);
     },
   );
 }
