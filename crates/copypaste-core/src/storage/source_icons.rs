@@ -104,6 +104,11 @@ impl Store {
                 }
             }
         }
+        // The capture-device absolute path is useless on any other device and is
+        // dropped again on receive; never send it to a peer or the cloud server.
+        if let Some(file) = metadata.file.as_mut() {
+            file.source_reference = None;
+        }
         Ok(metadata.to_json(&item.content_type))
     }
 
@@ -278,6 +283,57 @@ pub(super) mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn a_file_clip_never_syncs_its_source_reference() {
+        let store = store();
+        let metadata = PayloadMetadata {
+            credentials: false,
+            secret_override: None,
+            privacy: Default::default(),
+            file: Some(
+                crate::FileMetadata::with_source_reference(
+                    "report.pdf",
+                    "application/pdf",
+                    "/Users/person/Documents/report.pdf",
+                )
+                .unwrap(),
+            ),
+            source_app_icon: None,
+        }
+        .to_json(copypaste_ipc::content_type::FILE)
+        .unwrap();
+        let incoming = super::super::IncomingItem {
+            id: "file-clip",
+            content_ciphertext: Some(b"ciphertext"),
+            nonce: Some(&[0; 24]),
+            content_type: copypaste_ipc::content_type::FILE,
+            content_hash: "file-clip",
+            created_at: T0,
+            deleted: false,
+            origin_device_id: "peer",
+            app_bundle_id: None,
+            app_name: None,
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
+            search_text: None,
+            payload_metadata: Some(&metadata),
+        };
+        assert!(store.upsert(&incoming).unwrap());
+        let stored = store.get("file-clip").unwrap().unwrap();
+        let synced = store
+            .payload_metadata_for_sync(&stored)
+            .unwrap()
+            .and_then(|json| PayloadMetadata::from_json(&json, copypaste_ipc::content_type::FILE))
+            .unwrap();
+        let file = synced.file.expect("file metadata survives sync");
+        assert_eq!(file.filename, "report.pdf");
+        assert!(
+            file.source_reference.is_none(),
+            "the capture-device path must never reach a peer or the server"
         );
     }
 
