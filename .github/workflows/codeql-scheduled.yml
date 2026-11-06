@@ -64,27 +64,18 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter build macos --release --config-only --no-pub
+      # Dart AOT, the Rust bridge and the runtime daemon contain no Swift.
+      # Build them before tracing starts; the traced build below shares the
+      # products directory, so Flutter and Cargo reuse these outputs while
+      # its fresh derived data recompiles every Swift target under tracing.
+      - name: Build Dart and Rust outputs before CodeQL tracing
+        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/macos-prebuild" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: swift
           build-mode: manual
       - name: Build Swift sources for CodeQL
-        working-directory: apps/copypaste_flutter
-        run: |
-          xcodebuild build \
-            -workspace macos/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -destination 'generic/platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/codeql-macos" \
-            -clonedSourcePackagesDirPath "$PWD/build/macos/SourcePackages" \
-            "OBJROOT=$RUNNER_TEMP/codeql-macos/Build/Intermediates.noindex" \
-            "SYMROOT=$RUNNER_TEMP/codeql-macos/Build/Products" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            COMPILATION_CACHE_ENABLE_CACHING=NO \
-            SWIFT_ENABLE_COMPILE_CACHE=NO \
-            SWIFT_USE_INTEGRATED_DRIVER=NO
+        run: scripts/ci/xcodebuild-macos-release.sh "$RUNNER_TEMP/codeql-macos" "$RUNNER_TEMP/macos-products"
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:swift
