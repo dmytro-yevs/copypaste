@@ -507,6 +507,10 @@ pub struct Node {
     reachability: RwLock<HashMap<String, AuthenticatedReachability>>,
     reachability_recorded: tokio::sync::Notify,
     probe_flights: Mutex<HashSet<String>>,
+    /// Earliest renewal for a peer whose last probe authenticated but was not
+    /// acknowledged. Its presence stays unmeasured, which is otherwise due at
+    /// once, so this bounds the renewal of a peer failing above transport.
+    probe_retry_at: Mutex<HashMap<String, i64>>,
     probes: Arc<Semaphore>,
     discovery_candidate_cooldowns: Mutex<DiscoveryCandidateCooldowns>,
 }
@@ -564,6 +568,7 @@ impl Node {
             reachability: RwLock::new(HashMap::new()),
             reachability_recorded: tokio::sync::Notify::new(),
             probe_flights: Mutex::new(HashSet::new()),
+            probe_retry_at: Mutex::new(HashMap::new()),
             probes: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
             discovery_candidate_cooldowns: Mutex::new(DiscoveryCandidateCooldowns::default()),
         };
@@ -1234,6 +1239,10 @@ impl Node {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(pairing_id);
         self.probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pairing_id);
+        self.probe_retry_at
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(pairing_id);
