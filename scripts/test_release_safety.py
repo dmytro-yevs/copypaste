@@ -159,7 +159,7 @@ class ReleaseSafetyTest(unittest.TestCase):
     def test_optimized_capture_contract_requires_both_ingest_methods(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
         callback = ".method public abstract run(J)V"
-        text = ".method public static final native ingestText(JLjava/lang/String;)Z"
+        text = ".method public static final native ingestText(JLjava/lang/String;)I"
         binary = ".method public static final native ingestBinary(J[BILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z"
         verify(callback, text + "\n" + binary)
         with self.assertRaisesRegex(ValueError, "ingestBinary"):
@@ -174,12 +174,19 @@ class ReleaseSafetyTest(unittest.TestCase):
     def test_optimized_capture_descriptor_matches_the_production_kotlin_api(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
         source = (ROOT / "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/NativeRuntimeCapture.kt").read_text()
-        declaration = re.search(r"external fun ingestBinary\((.*?)\): Boolean", source, re.DOTALL)[1]
-        descriptors = {"Long": "J", "ByteArray": "[B", "Int": "I", "String": "Ljava/lang/String;"}
-        parameters = re.findall(r"\w+:\s*(\w+)", declaration)
-        self.assertEqual(parameters[:3], ["Long", "ByteArray", "Int"])
-        binary = ".method public static final native ingestBinary(" + "".join(descriptors[kind] for kind in parameters) + ")Z"
-        verify(".method public abstract run(J)V", ".method public static final native ingestText(JLjava/lang/String;)Z\n" + binary)
+        descriptors = {"Long": "J", "ByteArray": "[B", "Int": "I", "String": "Ljava/lang/String;", "Boolean": "Z"}
+
+        def native(name):
+            parameters, result = re.search(
+                rf"external fun {name}\((.*?)\): (\w+)", source, re.DOTALL,
+            ).groups()
+            kinds = re.findall(r"\w+:\s*(\w+)", parameters)
+            descriptor = "".join(descriptors[kind] for kind in kinds)
+            return kinds, f".method public static final native {name}({descriptor}){descriptors[result]}"
+
+        binary_kinds, binary = native("ingestBinary")
+        self.assertEqual(binary_kinds[:3], ["Long", "ByteArray", "Int"])
+        verify(".method public abstract run(J)V", native("ingestText")[1] + "\n" + binary)
 
     def qualification(self):
         return (

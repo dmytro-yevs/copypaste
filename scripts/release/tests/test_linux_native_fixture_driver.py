@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import subprocess
 import signal
+import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -125,6 +126,17 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             driver.wait_for_pairing_state(Path("socket"), "awaiting_confirmation", "ceremony")
         ipc.assert_called_once_with(Path("socket"), "pair_progress")
 
+    def test_gui_socket_is_found_in_the_session_runtime_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertEqual(driver.runtime_socket_dir({"XDG_RUNTIME_DIR": str(root)}), root)
+            with self.assertRaisesRegex(RuntimeError, "XDG_RUNTIME_DIR"):
+                driver.runtime_socket_dir({})
+            listener = socket.socket(socket.AF_UNIX)
+            self.addCleanup(listener.close)
+            listener.bind(str(root / "cp-1.sock"))
+            self.assertEqual(driver.wait_for_gui_socket(root, set()), root / "cp-1.sock")
+
     def test_upgrade_seed_releases_the_gui_on_early_return_and_failure(self):
         for error in (None, RuntimeError("seed failed")):
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
@@ -140,6 +152,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                     "--previous-artifacts", str(root), "--previous-version", "1.0.25",
                 ]
                 with mock.patch.object(driver.sys, "argv", arguments), \
+                     mock.patch.dict(driver.os.environ, {"XDG_RUNTIME_DIR": str(root)}), \
                      mock.patch.object(driver, "runtime_prefix", return_value=root), \
                      mock.patch.object(driver, "runtime_gui_entrypoint", return_value=root / "gui"), \
                      mock.patch.object(driver, "start_gui_runtime", return_value=(app, root / "socket")), \
