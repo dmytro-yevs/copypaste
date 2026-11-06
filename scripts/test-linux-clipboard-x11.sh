@@ -31,8 +31,13 @@ export COPYPASTE_X11_FIXTURE=1
 python3 scripts/release/linux-clipboard-provider.py --build-helper "$fixture_root/linux-clipboard-provider"
 export COPYPASTE_GTK_CLIPBOARD_PROVIDER="$fixture_root/linux-clipboard-provider"
 # GTK initializes accessibility over D-Bus before publishing clipboard readiness.
-# Keep that service on an owned bus instead of inheriting the runner's session.
-dbus-run-session -- cargo test --locked -p copypaste-daemon live_x11_fixture -- --test-threads=1 --nocapture | tee "$fixture_root/test.log"
+# Keep that service on an owned bus instead of inheriting the runner's session,
+# and activate it before the first fixture so its cold start is not charged to
+# that fixture's provider readiness deadline.
+dbus-run-session -- bash -c '
+  dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress >/dev/null 2>&1 || true
+  exec cargo test --locked -p copypaste-daemon live_x11_fixture -- --test-threads=1 --nocapture
+' | tee "$fixture_root/test.log"
 grep -q 'test result: ok. 6 passed' "$fixture_root/test.log"
 
 kill "$xvfb_pid" 2>/dev/null || true
