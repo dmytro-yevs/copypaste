@@ -114,6 +114,29 @@ void main() {
   );
 
   test(
+    'saved setup progress survives an unreadable state until it is read',
+    () async {
+      final setup = _FakeAndroidCaptureSetupGateway()
+        ..stateError = StateError('unavailable');
+      final controller = _controller(
+        store: MemoryAndroidOnboardingStore(captureStarted: true),
+        setup: setup,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(setup.events.close);
+      await controller.initialize();
+      expect(controller.step, OnboardingStep.setup);
+      expect(controller.errorMessage, contains('could not read'));
+
+      controller.android.setMonitoring(true);
+      await Future<void>.delayed(Duration.zero);
+      setup.events.add(_state());
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.errorMessage, isNull);
+    },
+  );
+
+  test(
     'a queued older clipboard save cannot verify a new capture attempt',
     () async {
       final setup = _FakeAndroidCaptureSetupGateway(
@@ -491,6 +514,7 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
   final events = StreamController<AndroidCaptureSetupState>.broadcast();
   int applyCalls = 0;
   bool foregroundEnabled = true;
+  Object? stateError;
 
   @override
   Stream<AndroidCaptureSetupState> get changes => events.stream;
@@ -531,7 +555,11 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
   }
 
   @override
-  Future<AndroidCaptureSetupState> state() async => current;
+  Future<AndroidCaptureSetupState> state() async {
+    final error = stateError;
+    if (error != null) throw error;
+    return current;
+  }
 
   @override
   Future<AndroidCaptureSetupState> stopCapture() async => current;
