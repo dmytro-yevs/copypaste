@@ -109,7 +109,7 @@ impl PackageVerifier {
             }
             let path = destination.join(&inventory.path);
             fs::create_dir_all(path.parent().ok_or_else(invalid_archive)?)?;
-            let mut target = File::options().write(true).create_new(true).open(&path)?;
+            let mut target = copypaste_fs::create_private(&path)?;
             let mut hash = Sha256::new();
             let mut total = 0u64;
             let mut buffer = [0u8; 64 * 1024];
@@ -135,10 +135,11 @@ impl PackageVerifier {
             target.sync_all()?;
         }
         for (name, content) in [(MANIFEST, bytes), (SIGNATURE, signature)] {
-            let mut target = File::create(destination.join(name))?;
-            target.write_all(&content)?;
-            // Windows requires a writable handle for FlushFileBuffers.
-            target.sync_all()?;
+            copypaste_fs::write_atomically(
+                &destination.join(name),
+                &content,
+                copypaste_fs::Visibility::OwnerOnly,
+            )?;
         }
         Ok(manifest)
     }
