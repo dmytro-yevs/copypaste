@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use copypaste_ipc::{
-    HistoryTag, HistoryTagMutation, HistoryTags, MAX_HISTORY_TAGS, MAX_TAG_CLIPS,
+    HistoryTag, HistoryTagMutation, HistoryTags, MAX_HISTORY_TAGS, MAX_ITEM_TAG_IDS, MAX_TAG_CLIPS,
     MAX_TAG_NAME_CHARS,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -245,17 +245,17 @@ impl Store {
         }
         let conn = self.conn()?;
         let tags = catalogue(&conn)?;
-        let mut assignments = BTreeMap::new();
-        let mut statement = conn.prepare("SELECT ct.tag_id FROM history_clip_tags ct JOIN history_tags t ON t.id=ct.tag_id WHERE ct.clip_id=?1 AND ct.assigned=1 AND t.deleted=0 ORDER BY t.name COLLATE NOCASE,t.id")?;
-        for id in clip_ids {
-            assignments.insert(
-                id.clone(),
-                statement
-                    .query_map([id], |r| r.get(0))?
-                    .collect::<rusqlite::Result<Vec<String>>>()?,
-            );
-        }
+        let assignments = assignments(&conn, clip_ids, None)?;
         Ok(HistoryTags { tags, assignments })
+    }
+
+    /// Name-ordered tag ids of each clip, bounded per clip for History pages.
+    pub fn item_tag_ids(
+        &self,
+        clip_ids: &[String],
+    ) -> Result<BTreeMap<String, Vec<String>>, StoreError> {
+        let conn = self.conn()?;
+        assignments(&conn, clip_ids, Some(MAX_ITEM_TAG_IDS))
     }
 
     pub fn mutate_history_tags(
@@ -359,6 +359,25 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn assignments(
+    conn: &Connection,
+    clip_ids: &[String],
+    limit: Option<usize>,
+) -> Result<BTreeMap<String, Vec<String>>, StoreError> {
+    let limit = limit.map_or(-1, |limit| i64::try_from(limit).unwrap_or(i64::MAX));
+    let mut statement = conn.prepare("SELECT ct.tag_id FROM history_clip_tags ct JOIN history_tags t ON t.id=ct.tag_id WHERE ct.clip_id=?1 AND ct.assigned=1 AND t.deleted=0 ORDER BY t.name COLLATE NOCASE,t.id LIMIT ?2")?;
+    let mut assignments = BTreeMap::new();
+    for id in clip_ids {
+        assignments.insert(
+            id.clone(),
+            statement
+                .query_map(params![id, limit], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?,
+        );
+    }
+    Ok(assignments)
 }
 
 pub(super) fn catalogue(conn: &Connection) -> Result<Vec<HistoryTag>, StoreError> {

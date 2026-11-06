@@ -467,6 +467,7 @@ class Clip {
   final int? colorRgba;
   final PlatformInt64 createdAtMs;
   final bool pinned;
+  final List<String> tagIds;
   final String? originDeviceName;
   final DeviceClass originDeviceClass;
   final String? sourceAppName;
@@ -487,6 +488,7 @@ class Clip {
     this.colorRgba,
     required this.createdAtMs,
     required this.pinned,
+    required this.tagIds,
     this.originDeviceName,
     required this.originDeviceClass,
     this.sourceAppName,
@@ -509,6 +511,7 @@ class Clip {
       colorRgba.hashCode ^
       createdAtMs.hashCode ^
       pinned.hashCode ^
+      tagIds.hashCode ^
       originDeviceName.hashCode ^
       originDeviceClass.hashCode ^
       sourceAppName.hashCode ^
@@ -533,6 +536,7 @@ class Clip {
           colorRgba == other.colorRgba &&
           createdAtMs == other.createdAtMs &&
           pinned == other.pinned &&
+          tagIds == other.tagIds &&
           originDeviceName == other.originDeviceName &&
           originDeviceClass == other.originDeviceClass &&
           sourceAppName == other.sourceAppName &&

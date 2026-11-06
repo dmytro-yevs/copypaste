@@ -120,6 +120,7 @@ pub(crate) fn from_payload(
             .and_then(|classification| classification.color_rgba),
         created_at: row.created_at,
         pinned: row.pinned,
+        tag_ids: Vec::new(),
         file_details: if preview && privacy.secret {
             None
         } else {
@@ -206,6 +207,7 @@ impl StaticHistoryPreview {
             color_rgba: self.color_rgba,
             created_at: row.created_at,
             pinned: row.pinned,
+            tag_ids: Vec::new(),
             file_details,
             image_details: None,
             origin_device_id: origin.device_id.clone(),
