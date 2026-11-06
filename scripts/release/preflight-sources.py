@@ -18,7 +18,7 @@ def require_secrets(environment, *, build, publish):
                      "WINDOWS_SIGNING_CERTIFICATE_BASE64", "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
                      "WINDOWS_TIMESTAMP_URL"]
     if publish:
-        required += ["HOMEBREW_TAP_TOKEN", "WINGET_TOKEN"]
+        required.append("HOMEBREW_TAP_TOKEN")
     missing = [name for name in required if not environment.get(name)]
     if missing:
         raise ValueError("Missing release signing/publication configuration: " + ", ".join(missing))

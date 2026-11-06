@@ -254,7 +254,6 @@ jobs:
           WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: python3 scripts/release/preflight-sources.py
       - id: platform
         run: echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier stable --purpose build)" >> "$GITHUB_OUTPUT"
@@ -1043,14 +1042,6 @@ jobs:
             git commit -m "Release CopyPaste $VERSION"
             git push origin HEAD:main
           fi
-      - name: Update WinGet package
-        env:
-          GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          set -euo pipefail
-          installer="dist/CopyPaste-v${VERSION}-windows-x86_64-setup.exe"
-          scripts/release/submit-winget.sh "$VERSION" "$(sha256sum "$installer" | cut -d' ' -f1)"
 
   release-required:
     name: Release qualification required
