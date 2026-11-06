@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-05",
+  "date": "2026-11-06",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -461,7 +461,7 @@
         "crates/copypaste-runtime/src/p2p.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -4462,6 +4462,37 @@
       ],
       "invariant": "Each upsert chunk is serialized once into an exactly sized JSON body without an intermediate JSON tree and shared by every retry; headers, rows and server schema are unchanged.",
       "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-101",
+      "title": "Defer background dials and probes to a version-incompatible peer",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/activity.rs",
+        "crates/copypaste-p2p/src/node/dial.rs",
+        "crates/copypaste-p2p/src/node/group.rs",
+        "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-runtime/src/peer_sync.rs"
+      ],
+      "invariant": "An authenticated peer that proves to speak another protocol version, by declaring it or by closing without replying to the first message while its advertisement or last authenticated profile names another version, is shown as a version mismatch and left alone by scheduled sessions and reachability probes for five minutes, each new mismatch restarting the wait. Compatibility evidence ends the wait at once, explicit sync still dials, and no protocol check is relaxed. Previously such a peer was dialled every scheduler round (10 s) and probed about once per second.",
+      "next_step": "Measure native daemon connections, wakeups and CPU with a paired peer on an older protocol version, before and after, on supported platforms. Network and wakeup budgets remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",

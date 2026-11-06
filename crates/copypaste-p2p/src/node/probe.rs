@@ -182,6 +182,7 @@ impl Node {
             .list()
             .iter()
             .filter(|peer| !in_flight.contains(&peer.pairing_id))
+            .filter(|peer| !self.sync_activity.version_retry_deferred(&peer.pairing_id))
             .filter(|peer| !self.dial_candidates(peer).is_empty())
             .map(|peer| {
                 self.authenticated_reachability(&peer.pairing_id)
@@ -258,9 +259,12 @@ impl Node {
     }
 
     fn claim_probe(&self, pairing_id: &str, now_ms: i64) -> bool {
-        if self
-            .authenticated_reachability(pairing_id)
-            .is_some_and(|observation| !observation.should_refresh_at(now_ms))
+        // An incompatible peer can authenticate but never acknowledge, so it
+        // never gains a measured observation that would end the renewal.
+        if self.sync_activity.version_retry_deferred(pairing_id)
+            || self
+                .authenticated_reachability(pairing_id)
+                .is_some_and(|observation| !observation.should_refresh_at(now_ms))
         {
             return false;
         }
@@ -381,7 +385,11 @@ async fn probe_session(
             })
             .await
             .map_err(super::dial::session_error)?;
-        match channel.recv().await.map_err(super::dial::session_error)? {
+        match channel
+            .recv()
+            .await
+            .map_err(|error| node.first_reply_error(&current.pairing_id, error))?
+        {
             SyncMessage::ProbeAck {
                 protocol_version,
                 nonce: received,
@@ -524,11 +532,16 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(client.sync_deferred(&trusted.pairing_id));
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "an incompatible peer must not be re-probed by the monitor"
+        )));
         client.sync_activity.failure(
             &trusted.pairing_id,
             NodeError::Diagnostic(Code::StorageFull),
         );
         client.probe_one(&trusted).await.unwrap();
+        assert!(!client.sync_deferred(&trusted.pairing_id));
         let after = client.sync_status(true);
         assert!(!after.peers[0]
             .issues
