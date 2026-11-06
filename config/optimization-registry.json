@@ -3777,8 +3777,8 @@
         "crates/copypaste-p2p/src/node/probe.rs",
         "crates/copypaste-p2p/src/node/mod.rs"
       ],
-      "invariant": "The reachability monitor sleeps until the earliest renewal is due, a new observation is recorded, or a bounded recheck elapses for peers without dial candidates. Probe freshness, renewal lead and offline retry cadence are unchanged, and renewal batches never start closer than one second apart.",
-      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline and absent, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
+      "invariant": "The reachability monitor sleeps until the earliest renewal is due, a new observation is recorded, or a bounded recheck elapses for peers without dial candidates. Probe freshness, renewal lead and offline retry cadence are unchanged, and renewal batches never start closer than one second apart. Unmeasured presence is measured as soon as the monitor wakes, except for a peer whose last probe authenticated but was not acknowledged: it stays Online and is renewed no sooner than the 10-second failure freshness, whatever presence arrives meanwhile, until any other probe outcome. Previously such a peer was re-probed at the one-second batch floor.",
+      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline, absent and failing after authentication, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
