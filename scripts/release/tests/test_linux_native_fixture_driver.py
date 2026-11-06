@@ -126,16 +126,19 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             driver.wait_for_pairing_state(Path("socket"), "awaiting_confirmation", "ceremony")
         ipc.assert_called_once_with(Path("socket"), "pair_progress")
 
-    def test_gui_socket_is_found_in_the_session_runtime_directory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.assertEqual(driver.runtime_socket_dir({"XDG_RUNTIME_DIR": str(root)}), root)
+    def test_gui_socket_is_found_in_current_and_previous_release_directories(self):
+        with tempfile.TemporaryDirectory() as runtime, tempfile.TemporaryDirectory() as temporary:
+            current, previous = Path(runtime), Path(temporary)
+            dirs = driver.runtime_socket_dirs({"XDG_RUNTIME_DIR": str(current), "TMPDIR": str(previous)})
+            self.assertEqual(dirs, (current, previous))
             with self.assertRaisesRegex(RuntimeError, "XDG_RUNTIME_DIR"):
-                driver.runtime_socket_dir({})
-            listener = socket.socket(socket.AF_UNIX)
-            self.addCleanup(listener.close)
-            listener.bind(str(root / "cp-1.sock"))
-            self.assertEqual(driver.wait_for_gui_socket(root, set()), root / "cp-1.sock")
+                driver.runtime_socket_dirs({"TMPDIR": str(previous)})
+            for directory in dirs:
+                listener = socket.socket(socket.AF_UNIX)
+                self.addCleanup(listener.close)
+                listener.bind(str(directory / "cp-1.sock"))
+                others = driver.runtime_sockets(dirs) - {directory / "cp-1.sock"}
+                self.assertEqual(driver.wait_for_gui_socket(dirs, others), directory / "cp-1.sock")
 
     def test_upgrade_seed_releases_the_gui_on_early_return_and_failure(self):
         for error in (None, RuntimeError("seed failed")):
