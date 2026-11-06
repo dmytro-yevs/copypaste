@@ -92,6 +92,19 @@ pub fn merge_decision_by_summary(local: &ItemSummary, remote: &ItemSummary) -> M
     )
 }
 
+/// Whether planning should request `remote`: its content wins, or it carries
+/// pin state that apply will store.
+///
+/// Apply stores pin state only from a live version onto a live row: a remote
+/// tombstone is written unpinned with no pin stamp, and a pin-only update skips
+/// a local tombstone. A tombstone's leftover `pin_updated_at` (a local delete
+/// keeps it) must therefore not make a version a winner here, or the peer sends
+/// it every session and apply declines it every time.
+pub(super) fn remote_version_wins(local: &ItemSummary, remote: &ItemSummary) -> bool {
+    merge_decision_by_summary(local, remote) == MergeDecision::TakeRemote
+        || (!local.deleted && !remote.deleted && pin_state_wins(local, remote))
+}
+
 /// Whether a P2P-only pin version should replace the local state. This is a
 /// separate total order because cloud does not carry pin fields and must never
 /// be asked to resolve them through the content version stamp.
