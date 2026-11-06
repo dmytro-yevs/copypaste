@@ -209,6 +209,7 @@ class HistoryClip {
     required this.preview,
     required this.createdAt,
     required this.pinned,
+    this.tagIds = const [],
     this.kind,
     this.origin,
     this.originDeviceClass = DeviceClass.unknown,
@@ -229,6 +230,9 @@ class HistoryClip {
   final String preview;
   final DateTime createdAt;
   final bool pinned;
+
+  /// Name-ordered tags of a pinned clip, bounded per page item by Rust.
+  final List<String> tagIds;
   final HistoryClipKind? kind;
   final String? origin;
   final DeviceClass originDeviceClass;
@@ -262,6 +266,7 @@ class HistoryClip {
     preview: preview ?? this.preview,
     createdAt: createdAt,
     pinned: pinned ?? this.pinned,
+    tagIds: pinned == false ? const [] : tagIds,
     kind: kind,
     origin: origin,
     originDeviceClass: originDeviceClass,

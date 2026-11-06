@@ -2965,8 +2965,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Clip dco_decode_clip(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 19)
+      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
     return Clip(
       secret: dco_decode_bool(arr[0]),
       transient: dco_decode_bool(arr[1]),
@@ -2978,14 +2978,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       colorRgba: dco_decode_opt_box_autoadd_u_32(arr[7]),
       createdAtMs: dco_decode_i_64(arr[8]),
       pinned: dco_decode_bool(arr[9]),
-      originDeviceName: dco_decode_opt_String(arr[10]),
-      originDeviceClass: dco_decode_device_class(arr[11]),
-      sourceAppName: dco_decode_opt_String(arr[12]),
-      sourceAppIconId: dco_decode_opt_String(arr[13]),
-      truncated: dco_decode_bool(arr[14]),
-      tooLargeToSync: dco_decode_bool(arr[15]),
-      fileDetails: dco_decode_opt_box_autoadd_clip_file_details(arr[16]),
-      imageDetails: dco_decode_opt_box_autoadd_clip_image_details(arr[17]),
+      tagIds: dco_decode_list_String(arr[10]),
+      originDeviceName: dco_decode_opt_String(arr[11]),
+      originDeviceClass: dco_decode_device_class(arr[12]),
+      sourceAppName: dco_decode_opt_String(arr[13]),
+      sourceAppIconId: dco_decode_opt_String(arr[14]),
+      truncated: dco_decode_bool(arr[15]),
+      tooLargeToSync: dco_decode_bool(arr[16]),
+      fileDetails: dco_decode_opt_box_autoadd_clip_file_details(arr[17]),
+      imageDetails: dco_decode_opt_box_autoadd_clip_image_details(arr[18]),
     );
   }
 
@@ -4154,6 +4155,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_colorRgba = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_createdAtMs = sse_decode_i_64(deserializer);
     var var_pinned = sse_decode_bool(deserializer);
+    var var_tagIds = sse_decode_list_String(deserializer);
     var var_originDeviceName = sse_decode_opt_String(deserializer);
     var var_originDeviceClass = sse_decode_device_class(deserializer);
     var var_sourceAppName = sse_decode_opt_String(deserializer);
@@ -4177,6 +4179,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       colorRgba: var_colorRgba,
       createdAtMs: var_createdAtMs,
       pinned: var_pinned,
+      tagIds: var_tagIds,
       originDeviceName: var_originDeviceName,
       originDeviceClass: var_originDeviceClass,
       sourceAppName: var_sourceAppName,
@@ -5708,6 +5711,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_32(self.colorRgba, serializer);
     sse_encode_i_64(self.createdAtMs, serializer);
     sse_encode_bool(self.pinned, serializer);
+    sse_encode_list_String(self.tagIds, serializer);
     sse_encode_opt_String(self.originDeviceName, serializer);
     sse_encode_device_class(self.originDeviceClass, serializer);
     sse_encode_opt_String(self.sourceAppName, serializer);

@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 pub const MAX_HISTORY_TAGS: usize = 500;
 pub const MAX_TAG_NAME_CHARS: usize = 64;
 pub const MAX_TAG_CLIPS: usize = 500;
+/// Tag ids one History page item may carry; `HistoryTags` returns the full set.
+pub const MAX_ITEM_TAG_IDS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryTag {

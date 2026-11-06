@@ -29,7 +29,8 @@ pub const MAX_CLOUD_METADATA_BYTES: usize = MAX_SYNC_METADATA_BYTES;
 /// U+0020 with no short escape encodes as `\u00XX`.
 const JSON_ESCAPE_WORST_CASE: usize = 6;
 
-/// Room for the envelope around one item — ids, timestamps, flags, field names.
+/// Room for the envelope around one item — ids, timestamps, flags, field names
+/// and up to [`crate::MAX_ITEM_TAG_IDS`] tag ids.
 const ITEM_ENVELOPE_BYTES: usize = 4 * 1024;
 
 /// Frames larger than this are rejected before allocation.
@@ -220,6 +221,8 @@ mod tests {
             color_rgba: None,
             created_at: 1_767_225_600_000,
             pinned: false,
+            // The longest replicated record id the store accepts.
+            tag_ids: vec!["t".repeat(128); crate::MAX_ITEM_TAG_IDS],
             file_details: None,
             image_details: None,
             origin_device_id: "3c6e0b8a-9c15-424f-b8b8-1a2b3c4d5e6f".into(),

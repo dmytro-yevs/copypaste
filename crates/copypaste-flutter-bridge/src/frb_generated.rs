@@ -3033,6 +3033,7 @@ impl SseDecode for crate::api::Clip {
         let mut var_colorRgba = <Option<u32>>::sse_decode(deserializer);
         let mut var_createdAtMs = <i64>::sse_decode(deserializer);
         let mut var_pinned = <bool>::sse_decode(deserializer);
+        let mut var_tagIds = <Vec<String>>::sse_decode(deserializer);
         let mut var_originDeviceName = <Option<String>>::sse_decode(deserializer);
         let mut var_originDeviceClass = <crate::api::DeviceClass>::sse_decode(deserializer);
         let mut var_sourceAppName = <Option<String>>::sse_decode(deserializer);
@@ -3052,6 +3053,7 @@ impl SseDecode for crate::api::Clip {
             color_rgba: var_colorRgba,
             created_at_ms: var_createdAtMs,
             pinned: var_pinned,
+            tag_ids: var_tagIds,
             origin_device_name: var_originDeviceName,
             origin_device_class: var_originDeviceClass,
             source_app_name: var_sourceAppName,
@@ -4540,6 +4542,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::Clip {
             self.color_rgba.into_into_dart().into_dart(),
             self.created_at_ms.into_into_dart().into_dart(),
             self.pinned.into_into_dart().into_dart(),
+            self.tag_ids.into_into_dart().into_dart(),
             self.origin_device_name.into_into_dart().into_dart(),
             self.origin_device_class.into_into_dart().into_dart(),
             self.source_app_name.into_into_dart().into_dart(),
@@ -5615,6 +5618,7 @@ impl SseEncode for crate::api::Clip {
         <Option<u32>>::sse_encode(self.color_rgba, serializer);
         <i64>::sse_encode(self.created_at_ms, serializer);
         <bool>::sse_encode(self.pinned, serializer);
+        <Vec<String>>::sse_encode(self.tag_ids, serializer);
         <Option<String>>::sse_encode(self.origin_device_name, serializer);
         <crate::api::DeviceClass>::sse_encode(self.origin_device_class, serializer);
         <Option<String>>::sse_encode(self.source_app_name, serializer);

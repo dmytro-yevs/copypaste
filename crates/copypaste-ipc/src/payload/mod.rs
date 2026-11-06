@@ -578,6 +578,10 @@ pub struct Item {
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
     pub pinned: bool,
+    /// Tags of a pinned clip in a History page, ordered by name and bounded by
+    /// [`crate::MAX_ITEM_TAG_IDS`]. Search and single-item responses omit them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tag_ids: Vec<String>,
     /// Present only for authenticated file payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_details: Option<FileDetails>,

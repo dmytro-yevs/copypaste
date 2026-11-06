@@ -2170,6 +2170,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(799, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _ScreenRepository()
+      ..availableFacets = const HistoryFacets(
+        tags: [HistoryTag(id: 'tag-work', name: 'Work')],
+      )
       ..page = HistoryClipPage(
         items: [
           HistoryClip(
@@ -2178,6 +2181,7 @@ void main() {
             preview: 'Content stays at its normal size',
             createdAt: DateTime.utc(2026),
             pinned: true,
+            tagIds: const ['tag-work', 'tag-removed'],
             kind: HistoryClipKind.text,
             sourceApp: 'Editor',
             sourceAppIconId: 'app:editor',
@@ -2205,6 +2209,11 @@ void main() {
     );
     final meta = tester.widget<Text>(metaFinder);
     expect(meta.textSpan?.toPlainText(), isNot(contains('Text')));
+    expect(meta.textSpan?.toPlainText(), endsWith(' Work'));
+    expect(
+      find.descendant(of: metaFinder, matching: find.byIcon(LucideIcons.tag)),
+      findsOneWidget,
+    );
     final kindIcon = find.descendant(
       of: metaFinder,
       matching: find.byIcon(LucideIcons.type),

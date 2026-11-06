@@ -21,6 +21,7 @@ fn item() -> Item {
         color_rgba: None,
         created_at: 1,
         pinned: false,
+        tag_ids: vec!["tag-1".into()],
         file_details: Some(FileDetails {
             filename: Some("report.pdf".into()),
             mime_type: Some("application/pdf".into()),

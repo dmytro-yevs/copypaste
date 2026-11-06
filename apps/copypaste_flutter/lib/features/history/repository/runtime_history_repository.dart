@@ -456,6 +456,7 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
       isUtc: true,
     ),
     pinned: clip.pinned,
+    tagIds: clip.tagIds,
     kind: _fromRuntimeKind(clip.contentClass, clip.semanticKind),
     origin: clip.originDeviceName,
     originDeviceClass: mapRuntimeDeviceClass(clip.originDeviceClass),

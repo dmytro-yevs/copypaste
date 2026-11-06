@@ -1,4 +1,5 @@
 import '../../../app/theme/app_filter_indicator.dart';
+
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
@@ -2014,14 +2015,12 @@ class _ClipMeta extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = AppTheme.historyMetadataTextStyle(context);
     final strutStyle = AppTheme.historyMetadataStrutStyle(context);
-    final kindIcon = AppIconFrame(
+    Widget icon(IconData data) => AppIconFrame(
       size: AppIconSize.xs,
-      child: Icon(
-        HistoryClipPresentation.icon(clip.contentKind),
-        size: AppIconSize.xs,
-        color: style.color,
-      ),
+      child: Icon(data, size: AppIconSize.xs, color: style.color),
     );
+    final kindIcon = icon(HistoryClipPresentation.icon(clip.contentKind));
+    final tags = controller.tags.names(clip.tagIds);
     return Text.rich(
       TextSpan(
         children: [
@@ -2062,6 +2061,14 @@ class _ClipMeta extends StatelessWidget {
             ),
           ],
           TextSpan(text: ' • ${formatSystemDateTime(context, clip.createdAt)}'),
+          if (tags.isNotEmpty) ...[
+            const TextSpan(text: ' • '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Semantics(label: 'Tags', child: icon(LucideIcons.tag)),
+            ),
+            TextSpan(text: ' ${tags.join(', ')}'),
+          ],
         ],
       ),
       key: ValueKey<String>('history-clip-meta-${clip.id}'),

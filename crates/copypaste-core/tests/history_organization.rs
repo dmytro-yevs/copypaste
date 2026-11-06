@@ -140,6 +140,38 @@ fn dates_filter_before_paging_and_bind_the_cursor() {
 }
 
 #[test]
+fn page_item_tags_are_name_ordered_and_bounded() {
+    let (store, key) = store(41);
+    let id = clip(&store, &key, "tagged", 100);
+    store.set_pinned_synced(&id, true, &key.item_key()).unwrap();
+    let mut names: Vec<String> = (0..=copypaste_ipc::MAX_ITEM_TAG_IDS)
+        .map(|index| format!("tag {index:02}"))
+        .collect();
+    let ids: Vec<String> = names
+        .iter()
+        .rev()
+        .map(|name| tag(&store, &key, name))
+        .collect();
+    for tag_id in &ids {
+        assign(&store, &key, &id, tag_id, true);
+    }
+    let catalogue = store.history_tags(&[]).unwrap().tags;
+    let shown: Vec<String> = store.item_tag_ids(std::slice::from_ref(&id)).unwrap()[&id]
+        .iter()
+        .map(|tag_id| {
+            catalogue
+                .iter()
+                .find(|tag| &tag.id == tag_id)
+                .unwrap()
+                .name
+                .clone()
+        })
+        .collect();
+    names.truncate(copypaste_ipc::MAX_ITEM_TAG_IDS);
+    assert_eq!(shown, names);
+}
+
+#[test]
 fn tags_survive_unpin_and_deletion_removes_them_from_filters() {
     let (store, key) = store(42);
     let id = clip(&store, &key, "saved command", 100);

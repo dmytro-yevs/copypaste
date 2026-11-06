@@ -23,7 +23,14 @@ class HistoryTagsController extends ChangeNotifier {
   }
 
   final HistoryTagsRepository? _repository;
-  HistoryTags _data = const HistoryTags();
+  HistoryTags _tagData = const HistoryTags();
+  Map<String, String>? _names;
+  HistoryTags get _data => _tagData;
+  set _data(HistoryTags value) {
+    _tagData = value;
+    _names = null;
+  }
+
   bool _disposed = false;
   int _generation = 0;
   bool loading = false;
@@ -34,6 +41,14 @@ class HistoryTagsController extends ChangeNotifier {
   bool get available => _repository != null;
   List<HistoryTag> get tags => _data.tags;
   List<String> get clipIds => _clipIds;
+
+  /// Catalogue names of [ids]; tags missing from the catalogue are skipped.
+  List<String> names(List<String> ids) {
+    if (ids.isEmpty) return const [];
+    final names = _names ??= {for (final tag in _data.tags) tag.id: tag.name};
+    return [for (final id in ids) ?names[id]];
+  }
+
   int assignedCount(String tagId) => _clipIds
       .where((id) => _data.assignments[id]?.contains(tagId) ?? false)
       .length;

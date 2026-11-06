@@ -1320,13 +1320,27 @@ impl Runtime {
             skipped_undecryptable: 0,
             next_cursor,
         };
+        let pinned: Vec<String> = rows
+            .iter()
+            .filter(|row| row.pinned)
+            .map(|row| row.id.clone())
+            .collect();
+        let mut tags = if pinned.is_empty() {
+            Default::default()
+        } else {
+            self.store.item_tag_ids(&pinned).unwrap_or_else(|error| {
+                tracing::warn!(?error, "showing a history page without tags");
+                Default::default()
+            })
+        };
         for (row, preview) in rows.into_iter().zip(previews) {
             match preview {
-                Some(preview) => page.items.push(preview.into_item(
-                    &row,
-                    &origins[&row.id],
-                    self.meta.device_id(),
-                )),
+                Some(preview) => {
+                    let mut item =
+                        preview.into_item(&row, &origins[&row.id], self.meta.device_id());
+                    item.tag_ids = tags.remove(&row.id).unwrap_or_default();
+                    page.items.push(item);
+                }
                 None => page.skipped_undecryptable += 1,
             }
         }

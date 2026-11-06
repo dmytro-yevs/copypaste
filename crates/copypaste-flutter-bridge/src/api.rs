@@ -207,6 +207,7 @@ pub struct Clip {
     pub color_rgba: Option<u32>,
     pub created_at_ms: i64,
     pub pinned: bool,
+    pub tag_ids: Vec<String>,
     pub origin_device_name: Option<String>,
     pub origin_device_class: DeviceClass,
     pub source_app_name: Option<String>,
@@ -1622,6 +1623,7 @@ fn clip(item: copypaste_ipc::Item) -> Clip {
         color_rgba: item.color_rgba,
         created_at_ms: item.created_at,
         pinned: item.pinned,
+        tag_ids: item.tag_ids,
         origin_device_name: item.origin_device_name,
         origin_device_class: device_class(item.origin_device_class),
         source_app_name: item.source_app_name,
@@ -1914,7 +1916,8 @@ mod tests {
             semantic_kind: None,
             color_rgba: None,
             created_at: 1,
-            pinned: false,
+            pinned: true,
+            tag_ids: vec!["work".into()],
             file_details: None,
             image_details: Some(copypaste_ipc::ImageDetails {
                 width: 1_920,
@@ -1936,6 +1939,7 @@ mod tests {
         assert_eq!(metadata.size_bytes, 4_096);
         assert!(mapped.too_large_to_sync);
         assert_eq!(mapped.origin_device_class, DeviceClass::Phone);
+        assert_eq!(mapped.tag_ids, ["work"]);
     }
 }
 
