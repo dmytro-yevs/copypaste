@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
 use super::{DialCandidateSource, Node, NodeError, SyncCycle};
 use crate::peers::Peer;
-use crate::protocol::ProtocolError;
+use crate::protocol::{ProtocolError, PROTOCOL_VERSION};
 use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
 use crate::transport::Session;
 
@@ -28,6 +28,14 @@ impl Node {
     ) -> Result<SyncOutcome, NodeError> {
         self.sync_one_in_cycle(peer, source, &SyncCycle::new())
             .await
+    }
+
+    /// Whether scheduled sync should leave this peer alone for now because it
+    /// recently proved to speak another protocol version. An explicit sync
+    /// still dials, so an update on the other device is confirmed at once.
+    #[must_use]
+    pub fn sync_deferred(&self, pairing_id: &str) -> bool {
+        self.sync_activity.version_retry_deferred(pairing_id)
     }
 
     pub async fn sync_one_in_cycle<S: SyncSource>(
@@ -179,13 +187,43 @@ impl Node {
             return Err(NodeError::Cancelled);
         };
 
-        match outcome {
-            Ok(Ok(outcome)) => Ok(outcome),
-            Ok(Err(e)) => {
-                warn!(error = %e, "sync session failed");
-                Err(e)
-            }
-            Err(_) => Err(NodeError::Timeout),
+        let result = outcome.unwrap_or(Err(NodeError::Timeout));
+        if let Err(error) = &result {
+            // The runtime log keeps only the message, so the reason goes into
+            // it. Every `NodeError` sentence is fixed and carries no content.
+            warn!(pairing_id = %active.pairing_id, "sync session failed: {error}");
+        }
+        result
+    }
+
+    /// Maps a failure to receive the reply to the first message of an
+    /// authenticated session.
+    ///
+    /// A peer on another protocol version rejects that message when decoding
+    /// it and closes without a reply, so it never says which version it
+    /// speaks. A close at this point from a peer whose current advertisement
+    /// or last authenticated profile names another version is therefore that
+    /// version mismatch, not a lost connection to retry.
+    pub(super) fn first_reply_error(&self, pairing_id: &str, error: SyncError) -> NodeError {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let error = session_error(error);
+        if !matches!(
+            error,
+            NodeError::ConnectionLost | NodeError::Diagnostic(Code::ConnectionLost)
+        ) {
+            return error;
+        }
+        let advertised = self
+            .find(pairing_id)
+            .and_then(|found| found.profile?.protocol_version)
+            .or_else(|| {
+                self.authenticated_profile(pairing_id)?
+                    .profile
+                    .protocol_version
+            });
+        match advertised {
+            Some(version) if version != PROTOCOL_VERSION => NodeError::PeerVersion,
+            _ => error,
         }
     }
 }
@@ -269,6 +307,73 @@ mod tests {
         let err = node.sync_one(&peer, &source).await.expect_err("no address");
         assert_eq!(err, NodeError::NoAddress);
         assert!(!err.is_client_error(), "this is not the caller's mistake");
+    }
+
+    /// A peer on an older protocol version answers a newer first message by
+    /// closing the authenticated channel without a reply. With the peer's own
+    /// word for that version, the close is a version mismatch shown once, and
+    /// the background scheduler and probes stop dialling until something
+    /// changes.
+    #[tokio::test]
+    async fn an_older_peer_closing_without_a_reply_is_a_deferred_version_mismatch() {
+        use copypaste_ipc::sync_issue::SyncIssueCode as Code;
+        let dir = tempfile::tempdir().unwrap();
+        let client = Arc::new(node(&dir));
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            device_id: None,
+            name: "older".into(),
+            psk: token.psk(),
+            last_addr: Some(listener.local_addr().unwrap()),
+            last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        client.peers().upsert(peer.clone()).unwrap();
+        let psk = token.psk();
+        let older_peer = tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut session = Session::accept(socket, &psk).await.unwrap();
+                let _rejected = session.recv_bytes().await;
+                session.close().await.unwrap();
+            }
+        });
+        let source = TestSource::new("me", Vec::new());
+
+        assert_eq!(
+            client.sync_one(&peer, &source).await,
+            Err(NodeError::Diagnostic(Code::ConnectionLost)),
+            "without a version to go on, a close is only a lost connection"
+        );
+        assert!(!client.sync_deferred(&pairing_id));
+
+        client.record_authenticated_profile(
+            &pairing_id,
+            Some(&crate::DeviceProfile {
+                protocol_version: Some(PROTOCOL_VERSION - 1),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            client.sync_one(&peer, &source).await,
+            Err(NodeError::PeerVersion)
+        );
+        let status = client.sync_status(true);
+        assert_eq!(status.peers[0].phase, copypaste_ipc::SyncPhase::Failed);
+        assert!(status.peers[0]
+            .issues
+            .iter()
+            .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(client.sync_deferred(&pairing_id));
+        assert!(
+            !client.refresh_reachability([peer], |_| panic!("an incompatible peer was probed")),
+            "the reachability monitor must not re-dial an incompatible peer"
+        );
+        older_peer.abort();
     }
 
     #[tokio::test]

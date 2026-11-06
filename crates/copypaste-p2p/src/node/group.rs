@@ -211,8 +211,10 @@ impl Node {
             })
             .await
             .map_err(super::dial::session_error)?;
-        let SyncMessage::Group { snapshot, .. } =
-            channel.recv().await.map_err(super::dial::session_error)?
+        let SyncMessage::Group { snapshot, .. } = channel
+            .recv()
+            .await
+            .map_err(|error| self.first_reply_error(pairing_id, error))?
         else {
             return Err(NodeError::InvalidData);
         };

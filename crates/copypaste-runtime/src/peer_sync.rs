@@ -14,7 +14,8 @@ impl PeerSyncHost for RuntimePeerHost {
         self.0.p2p.peers().list()
     }
     fn can_dial(&self, peer: &Peer) -> bool {
-        !self.0.p2p.node().dial_candidates(peer).is_empty()
+        let node = self.0.p2p.node();
+        !node.sync_deferred(&peer.pairing_id) && !node.dial_candidates(peer).is_empty()
     }
     fn reconcile_discovery(&self) {
         self.0.p2p.node().reconcile_discovery();
