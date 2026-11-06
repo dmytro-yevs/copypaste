@@ -1054,6 +1054,69 @@
       "functional_validation": "not_recorded"
     },
     {
+      "id": "CI-003",
+      "title": "Build CodeQL Swift Dart and Rust outputs outside tracing",
+      "domain": "ci",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "CodeQL workflow",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        ".github/workflows/codeql-scheduled.yml",
+        "scripts/ci/xcodebuild-macos-release.sh",
+        "scripts/ci/tests/test_codeql_swift_build.py"
+      ],
+      "invariant": "The traced build compiles every Swift target of the universal Release app in fresh derived data; Dart AOT, the Rust bridge and the daemon are built before CodeQL init and reused through the shared products directory.",
+      "next_step": "Under tracing, the cnativeapi Objective-C++ compile (about 8 minutes) and the Swift extraction remain on the critical path; removing non-Swift work from the traced build needs a product build-script change.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "analyze-swift job wall clock seconds (scripts/ci/metrics.py)",
+        "baseline_p50": 3277,
+        "candidate_p50": 2834,
+        "baseline_runs": [
+          42124847085,
+          42205161689,
+          42222126997
+        ],
+        "candidate_runs": [
+          42283233466,
+          42283310085,
+          42283846287
+        ],
+        "build_steps_p50_before": 2916,
+        "build_steps_p50_after": 2594,
+        "cache_cohort": "unknown per metrics.py; neither variant restores build-output caches, only the Flutter SDK",
+        "attribution": "Baseline runs are main pushes; candidate runs are branch workflow_dispatch and pull_request runs with the same Swift, Xcode and hook inputs.",
+        "qualification": false
+      },
+      "evidence_refs": [
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42222126997",
+          "source_state": "main_d9e5ccc4_baseline_swift_database_54_sources",
+          "release_qualification": false
+        },
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283233466",
+          "source_state": "candidate_with_post_analysis_source_listing_54_identical_sources",
+          "release_qualification": false
+        },
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283846287",
+          "source_state": "candidate_a95d4e3a_on_release_1_2_1",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "The Swift database source list is identical to main (54 of 54 paths, including 12 Runner files, GeneratedPluginRegistrant.swift and 3 hotkey_manager_macos files). Traced Flutter Assemble finished in 5 seconds and the daemon Cargo build was fresh. CI workflow lint, zizmor and 51 CI tests passed."
+    },
+    {
       "id": "DEV-001",
       "title": "Build-cache cleanup at commit/push",
       "domain": "developer_resources",
