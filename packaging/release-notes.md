@@ -3,3 +3,4 @@
 - Stop exchanging the same tags and pins with paired devices on every sync: copies of them stored as ordinary clips by earlier versions are repaired once.
 - Stop requesting a deleted pinned clip from paired devices again on every sync.
 - Show each clip's tags in its History row.
+- On Android, keep completed setup when the system refuses clipboard access later instead of starting setup again.
