@@ -15,6 +15,11 @@ class AndroidOnboardingSetup extends OnboardingSetup {
        _setup = setup,
        _clipboard = clipboard;
 
+  static const _stateReadFailure =
+      'CopyPaste could not read Android setup state.';
+  static const _stateRefreshFailure =
+      'Android capture state could not be refreshed.';
+
   final AndroidOnboardingStore _store;
   final AndroidCaptureSetupGateway _setup;
   final ClipboardWriter _clipboard;
@@ -90,10 +95,17 @@ class AndroidOnboardingSetup extends OnboardingSetup {
   Future<OnboardingResume> restore() async {
     busy = true;
     notifyIfActive();
+    // Saved progress decides the resume step; a later failure must not reset it.
+    var resume = OnboardingResume.welcome;
     try {
       final progress = await _store.read();
       _method = progress.method;
       _current = !progress.complete && progress.captureStarted;
+      resume = progress.complete
+          ? OnboardingResume.complete
+          : _current
+          ? OnboardingResume.setup
+          : OnboardingResume.welcome;
       _verificationBaseline = progress.verificationBaseline;
       _verifying = _verificationBaseline != null;
       _acceptState(await _setup.state());
@@ -106,18 +118,13 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       } else {
         errorMessage = null;
       }
-      return progress.complete
-          ? OnboardingResume.complete
-          : _current
-          ? OnboardingResume.setup
-          : OnboardingResume.welcome;
     } catch (_) {
-      errorMessage = 'CopyPaste could not read Android setup state.';
-      return OnboardingResume.welcome;
+      errorMessage = _stateReadFailure;
     } finally {
       busy = false;
       notifyIfActive();
     }
+    return resume;
   }
 
   @override
@@ -165,7 +172,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       notifyIfActive();
       _applyAuthorizedSetup();
     } catch (_) {
-      errorMessage = 'Android capture state could not be refreshed.';
+      errorMessage = _stateRefreshFailure;
       notifyIfActive();
     }
   }
@@ -233,6 +240,10 @@ class AndroidOnboardingSetup extends OnboardingSetup {
   void _acceptState(AndroidCaptureSetupState state) {
     if (disposed) return;
     _setupState = state;
+    if (errorMessage == _stateReadFailure ||
+        errorMessage == _stateRefreshFailure) {
+      errorMessage = null;
+    }
     if (state.privilegedGrants && _grantError) {
       _grantError = false;
       errorMessage = null;
@@ -350,7 +361,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     try {
       _acceptState(await action());
     } catch (_) {
-      errorMessage = 'Android capture state could not be refreshed.';
+      errorMessage = _stateRefreshFailure;
     } finally {
       busy = false;
       notifyIfActive();
