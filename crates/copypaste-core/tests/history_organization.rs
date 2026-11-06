@@ -397,6 +397,66 @@ fn p2p_fetch_and_batch_apply_keep_organization_out_of_clipboard_notifications() 
 }
 
 #[test]
+fn a_legacy_record_copy_in_history_leaves_one_synced_version_per_id() {
+    use copypaste_p2p::sync::SyncSource;
+    let (store, key) = store(50);
+    let id = clip(&store, &key, "pinned", 1_000);
+    store.set_pinned_synced(&id, true, &key.item_key()).unwrap();
+    let record = store
+        .summaries(10)
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id != id)
+        .unwrap()
+        .id;
+    // A build without organization records stored a peer's older copy of the
+    // same record as an ordinary binary clip.
+    let text = format!(r#"{{"kind":"pin","clip_id":"{id}","pinned":true,"order":1.0}}"#);
+    store
+        .insert(copypaste_core::NewItem {
+            id: record.clone(),
+            content_ciphertext: copypaste_core::binary::seal(
+                text.as_bytes(),
+                &key.item_key(),
+                &record,
+            )
+            .unwrap(),
+            nonce: Vec::new(),
+            content_type: "application/vnd.copypaste.organization+json".into(),
+            content_hash: copypaste_core::compute_content_hash(text.as_bytes()),
+            search_text: None,
+            created_at: 500,
+            app_bundle_id: None,
+            app_name: None,
+            payload_metadata: None,
+        })
+        .unwrap();
+
+    let source = copypaste_core::StoreSource::new(
+        store,
+        std::sync::Arc::new(key),
+        "device".into(),
+        "Device".into(),
+        ConfigData::default(),
+    );
+    let advertised = source.summaries(0).unwrap();
+    let ids = advertised
+        .iter()
+        .map(|summary| summary.item_id.clone())
+        .collect::<Vec<_>>();
+    let served = source
+        .fetch(&ids)
+        .unwrap()
+        .into_iter()
+        .map(|item| (item.item_id.clone(), item.summary()))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(served.len(), advertised.len(), "one id has two versions");
+    for summary in advertised {
+        assert_eq!(served.get(&summary.item_id), Some(&summary));
+    }
+}
+
+#[test]
 fn encrypted_backup_restores_tag_catalogue_assignments_and_pins() {
     let (store, key) = store(49);
     let id = clip(&store, &key, "retained", 100);

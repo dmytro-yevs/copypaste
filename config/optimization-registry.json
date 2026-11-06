@@ -4502,6 +4502,34 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-102",
+      "title": "One synchronized version per organization record id",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/organization.rs",
+        "crates/copypaste-core/tests/history_organization.rs"
+      ],
+      "invariant": "An organization record id lives only in organization_records. Record copies that builds without organization records stored as ordinary clips are adopted (when no record holds the id) and removed from the clipboard history before pins are seeded, found by one primary-key range seek. Previously a seeded or received record left the id in both tables, so a peer advertised two versions of it and served whichever row the read returned first: the receiver dropped every such item as not matching its summary, re-requested it every round (about 9 items per session on the reporting Mac), and its receive cursor never advanced past them.",
+      "next_step": "Measure native daemon sync bytes, CPU and wakeups per session with a paired peer that holds legacy record copies, before and after, on supported platforms. Network and CPU budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

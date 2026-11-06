@@ -222,14 +222,98 @@ pub(super) fn write_pin(tx: &Connection, key: &crate::ItemKey, id: &str) -> Resu
     Ok(())
 }
 
+/// The first id after every [`PREFIX`] id in byte order (`;` follows `:`), so
+/// legacy copies are found by one primary-key range seek.
+const PREFIX_END: &str = "org:v1;";
+
+/// Moves organization records out of the clipboard history.
+///
+/// Builds without organization records stored a peer's record as an ordinary
+/// binary clip under the record's own id, sealed exactly as
+/// `organization_records` seals it. Once this build writes a record for that
+/// id, the id lives in both tables: a peer session advertises both versions
+/// and serves whichever row the read returns first, so the receiver drops it
+/// as not matching the summary it planned from, every round. A copy is
+/// adopted only when no record holds its id; an existing record was written
+/// after the copy and is the version peers already planned against.
+fn adopt_legacy_records(tx: &Connection, key: &crate::ItemKey) -> Result<(), StoreError> {
+    type Legacy = (String, Option<Vec<u8>>, String, String, i64, bool, String);
+    let legacy = tx
+        .prepare(
+            "SELECT id, content_ciphertext, content_type, content_hash, created_at, deleted, \
+             origin_device_id FROM clipboard_items WHERE id >= ?1 AND id < ?2",
+        )?
+        .query_map([PREFIX, PREFIX_END], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<Legacy>>>()?;
+    for (id, sealed, content_type, hash, created_at, deleted, origin) in legacy {
+        super::search::delete_fts_row_in_tx(tx, &id)?;
+        tx.execute("DELETE FROM clipboard_items WHERE id=?1", [&id])?;
+        let held: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM organization_records WHERE id=?1)",
+            [&id],
+            |r| r.get(0),
+        )?;
+        let Some(sealed) = sealed.filter(|_| !held && !deleted && content_type == CONTENT_TYPE)
+        else {
+            continue;
+        };
+        let Ok(text) = crate::binary::open(&sealed, key, &id) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&text) else {
+            continue;
+        };
+        upsert_in_tx(
+            tx,
+            &IncomingItem {
+                id: &id,
+                content_ciphertext: Some(&sealed),
+                nonce: Some(&[]),
+                content_type: CONTENT_TYPE,
+                content_hash: &hash,
+                created_at,
+                deleted: false,
+                origin_device_id: &origin,
+                app_bundle_id: None,
+                app_name: None,
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+                search_text: Some(text),
+                payload_metadata: None,
+            },
+        )?;
+    }
+    Ok(())
+}
+
 impl Store {
+    /// Prepares organization records for synchronization: legacy record
+    /// copies leave the clipboard history first, then pins that predate
+    /// organization records get one. The order matters, because a seeded pin
+    /// record takes the id a legacy copy of a peer's pin record already holds.
     pub fn seed_pin_organization(&self, key: &crate::ItemKey) -> Result<(), StoreError> {
+        let mut adopt = true;
         loop {
             let mut conn = self.conn()?;
             let tx = write_tx(&mut conn)?;
+            if std::mem::take(&mut adopt) {
+                adopt_legacy_records(&tx, key)?;
+            }
             let ids = tx.prepare("SELECT id FROM clipboard_items WHERE deleted=0 AND (pinned=1 OR pin_updated_at>0) AND NOT EXISTS (SELECT 1 FROM history_pin_state WHERE clip_id=clipboard_items.id) LIMIT 100")?
                 .query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
             if ids.is_empty() {
+                tx.commit()?;
                 return Ok(());
             }
             for id in ids {
