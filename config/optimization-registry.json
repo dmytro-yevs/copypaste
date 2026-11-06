@@ -4530,6 +4530,35 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-103",
+      "title": "No per-session resend of tombstones for leftover pin stamps",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/sync/merge.rs",
+        "crates/copypaste-p2p/src/sync/workspace.rs",
+        "crates/copypaste-p2p/src/sync/plan.rs"
+      ],
+      "invariant": "P2P planning requests a version for its pin state only when both the local and remote versions are live, matching apply, which never stores pin state on or from a tombstone. A deleted pinned item's tombstone keeps its pin stamp on the deleting device, but it is transferred once and then no longer re-sent and declined every session.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

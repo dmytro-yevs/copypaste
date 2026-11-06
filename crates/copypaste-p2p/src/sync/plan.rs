@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(test)]
-use super::{merge_decision_by_summary, pin_state_wins, MergeDecision};
+use super::{merge_decision_by_summary, MergeDecision};
 use super::{SummaryWorkspace, SyncError, SyncStats};
 use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 
@@ -113,9 +113,7 @@ pub(super) fn plan(
 
         let take = match local.get(&r.item_id) {
             None => true,
-            Some(l) => {
-                merge_decision_by_summary(l, r) == MergeDecision::TakeRemote || pin_state_wins(l, r)
-            }
+            Some(l) => super::merge::remote_version_wins(l, r),
         };
 
         if !take {
