@@ -4,3 +4,6 @@
 - Stop requesting a deleted pinned clip from paired devices again on every sync.
 - Show each clip's tags in its History row.
 - On Android, keep completed setup when the system refuses clipboard access later instead of starting setup again.
+- Stop sending a copied file's original location on the capturing device to paired devices and the cloud.
+- Ignore pin times set far in the future by a paired device, so they can no longer override newer changes or stall sync.
+- Install module files readable only by your user account.
