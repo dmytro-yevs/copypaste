@@ -613,7 +613,6 @@ abstract final class AppTheme {
     padding: settingsRowPadding,
   );
 
-  /// The shared ChatGPT application light palette.
   static const _lightColors = ColorScheme(
     brightness: Brightness.light,
     background: Color(0xFFFFFFFF),
@@ -641,7 +640,6 @@ abstract final class AppTheme {
     chart5: navigationAccent,
   );
 
-  /// The shared ChatGPT application dark palette.
   static const _darkColors = ColorScheme(
     brightness: Brightness.dark,
     background: Color(0xFF181818),

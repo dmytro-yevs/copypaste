@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../controller/android_onboarding_setup.dart';
 import '../controller/linux_onboarding_setup.dart';
 import '../controller/macos_onboarding_setup.dart';
@@ -70,9 +71,12 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         onBack: controller.canGoBack ? controller.showPreviousStep : null,
         action: Button.primary(
           onPressed: controller.canContinue ? _next : null,
-          child: Text(
-            step == OnboardingStep.ready ? 'Get started' : 'Continue',
-          ),
+          child: Text(switch (step) {
+            OnboardingStep.ready => context.l10n.onboardingGetStarted,
+            OnboardingStep.setup =>
+              setup.continueLabel ?? context.l10n.commonContinue,
+            OnboardingStep.welcome => context.l10n.commonContinue,
+          }),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -85,14 +89,14 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             if (controller.noticeMessage case final message?) ...[
               const Gap(AppSpacing.lg),
               Alert(
-                title: const Text('Optional setup needs attention'),
+                title: Text(context.l10n.onboardingOptionalSetupTitle),
                 content: Text(message),
                 trailing:
                     step == OnboardingStep.setup &&
                         setup.noticeOpensSystemSettings
                     ? Button.secondary(
                         onPressed: setup.openSystemSettings,
-                        child: const Text('Open Settings'),
+                        child: Text(context.l10n.onboardingOpenSystemSettings),
                       )
                     : null,
               ),

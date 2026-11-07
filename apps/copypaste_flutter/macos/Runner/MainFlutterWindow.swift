@@ -20,6 +20,7 @@ class MainFlutterWindow: NSWindow {
   private var quickPasteHostMethodChannel: FlutterMethodChannel?
   private var macosSetupChannel: MacosSetupChannel?
   private var securityChannel: FlutterMethodChannel?
+  private var appLanguageChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
   private var applicationLifecycle: MacosApplicationLifecycle?
   private var trayMenuChannel: MacosTrayMenuChannel?
@@ -55,6 +56,28 @@ class MainFlutterWindow: NSWindow {
           result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
         }
         result(MacosScreenshotProtection.shared.setBlocked(enabled))
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    // Menus and system panels read AppleLanguages at launch; Flutter switches live.
+    let appLanguage = FlutterMethodChannel(
+      name: "com.copypaste.app/app_language", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    appLanguageChannel = appLanguage
+    appLanguage.setMethodCallHandler { call, result in
+      let key = "AppleLanguages"
+      switch call.method {
+      case "getApplicationLocale":
+        let domain = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")
+        var state: [String: Any] = ["supported": true, "live": false]
+        if let tag = (domain?[key] as? [String])?.first { state["tag"] = tag }
+        result(state)
+      case "setApplicationLocale":
+        if let tag = (call.arguments as? [String: Any])?["tag"] as? String {
+          UserDefaults.standard.set([tag], forKey: key)
+        } else {
+          UserDefaults.standard.removeObject(forKey: key)
+        }
+        result(["supported": true, "live": false])
       default: result(FlutterMethodNotImplemented)
       }
     }

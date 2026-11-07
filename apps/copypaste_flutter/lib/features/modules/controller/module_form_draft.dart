@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../l10n/l10n.dart';
 import '../models/module_models.dart';
 import '../repository/modules_repository.dart';
 
@@ -66,7 +67,9 @@ class ModuleFormDraft extends ChangeNotifier {
     try {
       final picker = _picker;
       if (picker == null) {
-        throw const ModulesException('File selection is unavailable.');
+        throw ModulesException(
+          AppStrings.current.modulesFileSelectionUnavailable,
+        );
       }
       final file = await picker.chooseInput(field);
       if (file == null) return;
@@ -82,7 +85,7 @@ class ModuleFormDraft extends ChangeNotifier {
       if (!_closed) {
         _error = error is ModulesException
             ? error.message
-            : 'The file could not be selected.';
+            : AppStrings.current.modulesFileSelectFailed;
       }
     } finally {
       if (!_closed) {

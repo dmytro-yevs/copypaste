@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
@@ -212,7 +213,7 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
     }
     final result = await _channel.invokeMapMethod<String, Object?>('register', {
       'id': _shortcutId,
-      'description': 'Open Quick Paste',
+      'description': AppStrings.current.platformGlobalShortcutDescription,
       'preferredTrigger': shortcut.linuxPreferredTrigger,
       'usage': shortcut.key.usbHidUsage,
       'modifiers': shortcut.modifiers.map((modifier) => modifier.name).toList(),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../transfers/file_operations_controller.dart';
@@ -116,11 +117,16 @@ class HistoryTransferController {
     if (clip == null) {
       return false;
     }
+    return copyClip(clip.id, plainText: plainText);
+  }
+
+  Future<bool> copyClip(String id, {bool plainText = false}) async {
+    if (_scope.disposed) return false;
     try {
       if (plainText) {
-        await _scope.repository.copyPlainText(clip.id);
+        await _scope.repository.copyPlainText(id);
       } else {
-        await _scope.repository.copy(clip.id);
+        await _scope.repository.copy(id);
       }
       return true;
     } catch (error) {
@@ -128,8 +134,8 @@ class HistoryTransferController {
         _fileFailure(
           error,
           plainText
-              ? 'Plain text could not be copied.'
-              : 'This clip could not be copied.',
+              ? AppStrings.current.historyErrorCopyPlainText
+              : AppStrings.current.historyErrorCopyClip,
         ),
         action: HistoryAction.copy,
       );
@@ -145,7 +151,7 @@ class HistoryTransferController {
       return true;
     } catch (_) {
       _errors.reportOperation(
-        'This text could not be copied.',
+        AppStrings.current.historyErrorCopyText,
         action: HistoryAction.copy,
       );
       if (!_scope.disposed) _scope.notify();
@@ -176,7 +182,7 @@ class HistoryTransferController {
           ..clear()
           ..[clip.id] = _fileFailure(
             error,
-            'This file could not be downloaded. Check the source device and try again.',
+            AppStrings.current.historyErrorPrepareFile,
           );
       }
       return null;
@@ -230,14 +236,17 @@ class HistoryTransferController {
         return HistoryFileDownloadResult.cancelled;
       }
       _errors.reportOperation(
-        _fileFailure(error, 'This file could not be downloaded.'),
+        _fileFailure(error, AppStrings.current.historyErrorDownloadFile),
         action: HistoryAction.download,
       );
       _failedDownloads.clear();
       _failedDownloads.add(clip.id);
       _downloadErrors
         ..clear()
-        ..[clip.id] = _fileFailure(error, 'This file could not be downloaded.');
+        ..[clip.id] = _fileFailure(
+          error,
+          AppStrings.current.historyErrorDownloadFile,
+        );
       _scope.notify();
       return HistoryFileDownloadResult.failed;
     } finally {
@@ -257,7 +266,7 @@ class HistoryTransferController {
     try {
       failure = await _importFiles(await picker.chooseFiles());
     } catch (error) {
-      failure = _fileFailure(error, 'Files could not be selected. Try again.');
+      failure = _fileFailure(error, AppStrings.current.historyErrorSelectFiles);
     } finally {
       await _finishFileImport(failure);
     }
@@ -297,7 +306,7 @@ class HistoryTransferController {
         failedName ??= file.name;
         firstReason ??= _fileFailure(
           error,
-          'The selected file could not be read. Check access and available storage.',
+          AppStrings.current.historyErrorReadSelectedFile,
         );
       } finally {
         await _releaseImportFile(file);
@@ -305,7 +314,12 @@ class HistoryTransferController {
     }
     return failed == 0
         ? null
-        : '$failed of ${files.length} files could not be imported. First: $failedName. $firstReason';
+        : AppStrings.current.historyErrorImportFiles(
+            files.length,
+            failed,
+            failedName ?? '',
+            firstReason ?? '',
+          );
   }
 
   Future<void> _releaseImportFile(HistoryImportFile file) async {

@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../platform/startup/launch_at_login.dart';
 import '../../../shared/setup_setting_row.dart';
 import '../controller/macos_onboarding_setup.dart';
@@ -14,15 +15,18 @@ class MacosSetupStep extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      Text('Set up your Mac', style: Theme.of(context).typography.h1),
+      Text(
+        context.l10n.onboardingMacosTitle,
+        style: Theme.of(context).typography.h1,
+      ),
       const Gap(AppSpacing.xxl),
       Card(
         child: SetupSettingRow(
           icon: LucideIcons.keyboard,
-          title: 'Accessibility',
+          title: context.l10n.onboardingAccessibility,
           description: setup.accessibilityGranted
-              ? 'Auto-paste enabled'
-              : 'Optional for auto-paste',
+              ? context.l10n.onboardingAutoPasteEnabled
+              : context.l10n.onboardingAutoPasteOptional,
           statusIcon: setup.accessibilityGranted
               ? LucideIcons.circleCheck
               : null,
@@ -30,7 +34,7 @@ class MacosSetupStep extends StatelessWidget {
               ? null
               : Button.ghost(
                   onPressed: setup.busy ? null : setup.requestAccessibility,
-                  child: const Text('Enable'),
+                  child: Text(context.l10n.commonEnable),
                 ),
         ),
       ),
@@ -38,12 +42,12 @@ class MacosSetupStep extends StatelessWidget {
       Card(
         child: SetupSettingRow(
           icon: LucideIcons.power,
-          title: 'Start at login',
+          title: context.l10n.onboardingStartAtLogin,
           description: setup.launchAtLoginAvailable
-              ? 'Open CopyPaste when you sign in'
-              : 'Available in the installed CopyPaste app.',
+              ? context.l10n.onboardingStartAtLoginDescription
+              : context.l10n.onboardingMacosStartAtLoginUnavailable,
           action: Semantics(
-            label: 'Start CopyPaste at login',
+            label: context.l10n.onboardingStartAtLoginSemantics,
             toggled: setup.launchAtLogin,
             child: Switch(
               value: setup.launchAtLogin,
@@ -57,13 +61,11 @@ class MacosSetupStep extends StatelessWidget {
       if (setup.startupStatus == LaunchAtLoginStatus.requiresApproval) ...[
         const Gap(AppSpacing.md),
         Alert(
-          title: const Text('Login Item approval is required'),
-          content: const Text(
-            'Allow CopyPaste in System Settings, then return.',
-          ),
+          title: Text(context.l10n.onboardingLoginItemApprovalTitle),
+          content: Text(context.l10n.onboardingLoginItemApprovalMessage),
           trailing: Button.secondary(
             onPressed: setup.openSystemSettings,
-            child: const Text('Open Settings'),
+            child: Text(context.l10n.onboardingOpenSystemSettings),
           ),
         ),
       ],

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../dialog_action_controller.dart';
+import '../../l10n/l10n.dart';
 import '../../shared/adaptive_breakpoints.dart';
 
 import 'app_motion.dart';
@@ -244,7 +245,7 @@ abstract final class AppOverlays {
                                 leading: const AppIconFrame(
                                   child: Icon(LucideIcons.circleAlert),
                                 ),
-                                title: const Text('Action failed'),
+                                title: Text(context.l10n.appActionFailed),
                                 content: Text(message),
                               ),
                             ],
@@ -257,7 +258,7 @@ abstract final class AppOverlays {
                         const ButtonStyle.ghost(),
                       ),
                       onPressed: submitting ? null : cancel,
-                      child: const Text('Cancel'),
+                      child: Text(context.l10n.commonCancel),
                     ),
                     Button(
                       alignment: Alignment.center,

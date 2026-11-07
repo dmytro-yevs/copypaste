@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/widgets.dart' show IconData, Offset, Rect, Size;
 import 'package:flutter/services.dart'
     show MissingPluginException, PlatformException;
@@ -175,16 +176,23 @@ class FlutterDesktopWindowHost
     final image = ImageAsset.fromAsset(_trayIconAsset);
     final icon = TrayIcon.create();
     final menu = Menu.create();
-    final open = MenuItem.createWithLabelAndType('Open', MenuItemType.normal);
+    final strings = AppStrings.current;
+    final open = MenuItem.createWithLabelAndType(
+      strings.platformTrayOpen,
+      MenuItemType.normal,
+    );
     final capture = MenuItem.createWithLabelAndType(
-      'Pause capture',
+      strings.platformCaptureActionPause,
       MenuItemType.normal,
     );
     final settings = MenuItem.createWithLabelAndType(
-      'Settings',
+      strings.platformTraySettings,
       MenuItemType.normal,
     );
-    final quit = MenuItem.createWithLabelAndType('Quit', MenuItemType.normal);
+    final quit = MenuItem.createWithLabelAndType(
+      strings.platformTrayQuit,
+      MenuItemType.normal,
+    );
 
     if (image == null ||
         icon == null ||

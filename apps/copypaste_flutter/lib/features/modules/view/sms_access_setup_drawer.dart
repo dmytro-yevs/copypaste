@@ -8,6 +8,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/android_access_setup.dart';
 import '../../../shared/setup_setting_row.dart';
 import '../../../shared/state_view.dart';
@@ -64,9 +65,9 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
             child: Scaffold(
               headers: [
                 AppBar(
-                  title: const Text(
-                    'SMS access',
-                    key: ValueKey('sms-access-setup-title'),
+                  title: Text(
+                    context.l10n.modulesSmsAccessTitle,
+                    key: const ValueKey('sms-access-setup-title'),
                   ),
                   leading: const [
                     AppIconFrame(
@@ -78,11 +79,11 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                   ],
                   trailing: [
                     Tooltip(
-                      tooltip: (context) => const TooltipContainer(
-                        child: Text('Close SMS access'),
+                      tooltip: (context) => TooltipContainer(
+                        child: Text(context.l10n.modulesCloseSmsAccess),
                       ),
                       child: Semantics(
-                        label: 'Close SMS access',
+                        label: context.l10n.modulesCloseSmsAccess,
                         button: true,
                         child: Button.ghost(
                           key: const ValueKey('sms-access-setup-close'),
@@ -113,7 +114,7 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                     onPressed: controller.busy
                         ? null
                         : () => closeDrawer(context),
-                    child: const Text('Done'),
+                    child: Text(context.l10n.commonDone),
                   ),
                 ),
               ],
@@ -124,19 +125,22 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (controller.loading)
-                      const StateView.loading(message: 'Checking SMS access.')
+                      StateView.loading(
+                        message: context.l10n.modulesSmsChecking,
+                      )
                     else if (state != null) ...[
                       Text(
                         state.granted
-                            ? 'Access is ready. Enable SMS Codes to start copying new codes.'
-                            : 'Allow access to copy codes from new SMS messages.',
+                            ? context.l10n.modulesSmsReady
+                            : context.l10n.modulesSmsAllowAccess,
                       ),
                       const Gap(AppSpacing.lg),
                       Card(
                         child: SetupSettingRow(
                           icon: LucideIcons.bell,
-                          title: 'SMS notification',
-                          description: 'Required while SMS Codes runs',
+                          title: context.l10n.modulesSmsNotification,
+                          description:
+                              context.l10n.modulesSmsNotificationDescription,
                           statusIcon: state.notificationGranted
                               ? LucideIcons.circleCheck
                               : null,
@@ -149,7 +153,7 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                                   onPressed: controller.busy
                                       ? null
                                       : controller.requestNotifications,
-                                  child: const Text('Allow'),
+                                  child: Text(context.l10n.sharedAllow),
                                 ),
                         ),
                       ),
@@ -161,8 +165,9 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                         granted: state.smsGranted,
                         busy: controller.busy,
                         adbCommands: state.adbCommands,
-                        applyAccessLabel: 'Apply SMS access',
-                        applyAccessDescription: 'Apply one-time SMS access.',
+                        applyAccessLabel: context.l10n.modulesSmsApplyAccess,
+                        applyAccessDescription:
+                            context.l10n.modulesSmsApplyAccessDescription,
                         onOpenShizuku: controller.openShizuku,
                         onApplyAccess: controller.applyAccess,
                         onCopyCommands: controller.copyAdbCommands,
@@ -171,9 +176,11 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                     if (controller.errorMessage case final error?) ...[
                       const Gap(AppSpacing.md),
                       StateView.error(
-                        title: 'SMS setup failed',
+                        title: context.l10n.modulesSmsSetupFailed,
                         message: error,
-                        actionLabel: state == null ? 'Try again' : null,
+                        actionLabel: state == null
+                            ? context.l10n.commonTryAgain
+                            : null,
                         onAction: state == null ? controller.refresh : null,
                       ),
                     ],

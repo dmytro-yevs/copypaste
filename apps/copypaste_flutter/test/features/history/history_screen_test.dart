@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
@@ -412,7 +413,7 @@ void main() {
           findsNothing,
         );
         expect(
-          find.byKey(const ValueKey('history-row-delete-hold')),
+          find.byKey(const ValueKey('history-row-more-hold')),
           findsNothing,
         );
         await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
@@ -631,7 +632,7 @@ void main() {
   );
 
   testWidgets(
-    'overlays compact pin and delete actions on mouse hover',
+    'overlays compact copy, pin and more actions on mouse hover',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1400, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -659,30 +660,41 @@ void main() {
       );
       await _pumpHoverActions(tester);
       final clip = find.byKey(const ValueKey<String>('history-clip-actions'));
+      final copy = find.byKey(
+        const ValueKey<String>('history-row-copy-actions'),
+      );
       final pin = find.byKey(const ValueKey<String>('history-row-pin-actions'));
+      final more = find.byKey(
+        const ValueKey<String>('history-row-more-actions'),
+      );
       final delete = find.byKey(
-        const ValueKey<String>('history-row-delete-actions'),
+        const ValueKey<String>('history-menu-delete-actions'),
       );
       final rect = tester.getRect(clip);
+      expect(copy, findsNothing);
       expect(pin, findsNothing);
-      expect(delete, findsNothing);
+      expect(more, findsNothing);
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
       addTearDown(mouse.removePointer);
       await mouse.moveTo(rect.center);
       await _pumpHoverActions(tester);
+      expect(copy, findsOneWidget);
       expect(pin, findsOneWidget);
-      expect(delete, findsOneWidget);
-      expect(tester.getSize(pin), const Size.square(24));
-      expect(tester.getSize(delete), const Size.square(24));
+      expect(more, findsOneWidget);
+      for (final action in [copy, pin, more]) {
+        expect(tester.getSize(action), const Size.square(24));
+      }
+      expect(tester.getCenter(copy).dx, lessThan(tester.getCenter(pin).dx));
+      expect(tester.getCenter(pin).dx, lessThan(tester.getCenter(more).dx));
       expect(tester.getRect(clip), rect);
-      expect(rect.contains(tester.getCenter(delete)), isTrue);
+      expect(rect.contains(tester.getCenter(more)), isTrue);
 
       await mouse.moveTo(Offset.zero);
       await _pumpHoverActions(tester);
       expect(pin, findsNothing);
-      expect(delete, findsNothing);
+      expect(more, findsNothing);
       await mouse.moveTo(rect.center);
       await _pumpHoverActions(tester);
 
@@ -702,6 +714,8 @@ void main() {
 
       await mouse.moveTo(tester.getCenter(clip));
       await _pumpHoverActions(tester);
+      await tester.tap(more, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
       await tester.tap(delete, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       expect(find.text('Delete this clip?'), findsOneWidget);
@@ -714,6 +728,8 @@ void main() {
       expect(repository.deletedIds, isEmpty);
 
       await mouse.moveTo(tester.getCenter(clip));
+      await _pumpHoverActions(tester);
+      await tester.tap(more, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       await tester.tap(delete, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
@@ -768,7 +784,7 @@ void main() {
         findsNothing,
       );
       expect(
-        find.byKey(const ValueKey<String>('history-row-delete-touch')),
+        find.byKey(const ValueKey<String>('history-row-more-touch')),
         findsNothing,
       );
       expect(tester.takeException(), isNull);
@@ -777,6 +793,150 @@ void main() {
       TargetPlatform.macOS,
       TargetPlatform.windows,
       TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'double-click, Enter and the copy shortcut copy a row with a toast',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'double',
+              contentType: 'text',
+              preview: 'Double-click clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey<String>('history-clip-double'));
+      final point = tester.getTopLeft(row) + const Offset(40, 16);
+
+      await tester.tapAt(point, kind: PointerDeviceKind.mouse);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(repository.copiedIds, isEmpty);
+      await tester.tapAt(point, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(controller.selection.selectedId, 'double');
+      expect(repository.copiedIds, ['double']);
+      expect(find.text('Copied'), findsOneWidget);
+
+      final copyKey = defaultTargetPlatform == TargetPlatform.macOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(copyKey);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await tester.sendKeyUpEvent(copyKey);
+      await tester.pump();
+      expect(repository.copiedIds, ['double', 'double']);
+
+      tester.widget<Button>(row).focusNode!.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(repository.copiedIds, ['double', 'double', 'double']);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'context menu offers Copy first and Delete last',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'menu',
+              contentType: 'text',
+              preview: 'Context menu clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey<String>('history-clip-menu'));
+      final copy = find.byKey(const ValueKey('history-menu-copy-menu'));
+      final delete = find.byKey(const ValueKey('history-menu-delete-menu'));
+
+      await tester.tap(
+        row,
+        buttons: kSecondaryButton,
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(copy, findsOneWidget);
+      expect(delete, findsOneWidget);
+      expect(tester.getCenter(copy).dy, lessThan(tester.getCenter(delete).dy));
+      await tester.tap(copy, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(repository.copiedIds, ['menu']);
+      expect(find.text('Copied'), findsOneWidget);
+      expect(controller.selection.selectedId, isNull);
+
+      // macOS reserves Control-click for the menu instead of selection.
+      if (defaultTargetPlatform == TargetPlatform.macOS) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.tap(row, kind: PointerDeviceKind.mouse);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      } else {
+        await tester.tap(
+          row,
+          buttons: kSecondaryButton,
+          kind: PointerDeviceKind.mouse,
+        );
+      }
+      await _pumpHoverActions(tester);
+      expect(controller.bulk.isBulkSelecting, isFalse);
+      await tester.tap(delete, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(find.text('Delete this clip?'), findsOneWidget);
+      expect(repository.deletedIds, isEmpty);
+      await tester.tap(
+        find.widgetWithText(Button, 'Delete'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(repository.deletedIds, ['menu']);
+      expect(controller.window.items, isEmpty);
+      await tester.pump(const Duration(seconds: 6));
+      await _pumpHoverActions(tester);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
     }),
   );
 

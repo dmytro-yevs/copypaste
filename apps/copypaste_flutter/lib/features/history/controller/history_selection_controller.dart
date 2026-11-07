@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 import '../models/history_models.dart';
 import 'history_controller.dart';
 import 'history_errors.dart';
@@ -161,7 +163,7 @@ class HistorySelectionController {
           _selectedDetailEpoch != detailEpoch) {
         return;
       }
-      _errors.message = 'This clip could not be opened.';
+      _errors.message = AppStrings.current.historyErrorOpenClip;
       _scope.notify();
     }
   }

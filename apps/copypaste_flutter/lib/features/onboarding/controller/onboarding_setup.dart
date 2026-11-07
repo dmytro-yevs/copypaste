@@ -23,6 +23,9 @@ abstract class OnboardingSetup extends ChangeNotifier {
   /// Whether the notice can be resolved from system settings.
   bool get noticeOpensSystemSettings => false;
 
+  /// Setup step action label when continuing skips optional features.
+  String? get continueLabel => null;
+
   bool get canContinue => !busy;
   bool get monitorsChanges => false;
 

@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -51,10 +52,9 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
         final controller = widget.controller;
         if (!controller.isProtectedHostActive) {
           return StateView.error(
-            title: 'Protected pairing is unavailable',
-            message:
-                'This pairing session must open in a dedicated protected window.',
-            actionLabel: 'Close',
+            title: context.l10n.pairingProtectedUnavailableTitle,
+            message: context.l10n.pairingProtectedUnavailableMessage,
+            actionLabel: context.l10n.commonClose,
             onAction: _close,
           );
         }
@@ -110,7 +110,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
           const Gap(AppSpacing.lg),
           Alert.destructive(
             leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: const Text('Pairing action failed'),
+            title: Text(context.l10n.pairingActionFailed),
             content: Text(controller.errorMessage!),
           ),
         ],
@@ -134,13 +134,16 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
           ),
         if (awaitingConfirmation) _confirmationActions(controller),
         if (terminal)
-          Button.primary(onPressed: _close, child: const Text('Done'))
+          Button.primary(
+            onPressed: _close,
+            child: Text(context.l10n.commonDone),
+          )
         else if (!awaitingConfirmation)
           Align(
             alignment: Alignment.centerRight,
             child: Button.ghost(
               onPressed: controller.decisionInFlight ? null : _close,
-              child: const Text('Cancel pairing'),
+              child: Text(context.l10n.pairingCancel),
             ),
           ),
       ],
@@ -161,16 +164,16 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
             Button.secondary(
               onPressed: controller.openCameraScanner,
               leading: const AppIconFrame(child: Icon(LucideIcons.scanLine)),
-              child: const Text('Scan QR code'),
+              child: Text(context.l10n.pairingScanQrCode),
             ),
           ],
         ),
         const Gap(AppSpacing.xl),
-        const Text('Or enter a pairing code').semiBold(),
+        Text(context.l10n.pairingOrEnterCode).semiBold(),
         const Gap(AppSpacing.sm),
         TextField(
           controller: _manualCodeController,
-          placeholder: const Text('Pairing code'),
+          placeholder: Text(context.l10n.pairingCode),
           obscureText: true,
           autocorrect: false,
           enableSuggestions: false,
@@ -184,7 +187,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
             onPressed: () =>
                 controller.submitManualJoinCode(_manualCodeController.text),
             leading: const AppIconFrame(child: Icon(LucideIcons.arrowRight)),
-            child: const Text('Join securely'),
+            child: Text(context.l10n.pairingJoinSecurely),
           ),
         ),
       ],
@@ -201,13 +204,13 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
           onPressed: controller.decisionInFlight || !controller.canConfirm
               ? null
               : () => controller.confirm(accept: false),
-          child: const Text('Reject'),
+          child: Text(context.l10n.pairingReject),
         ),
         Button.primary(
           onPressed: controller.decisionInFlight || !controller.canConfirm
               ? null
               : () => controller.confirm(accept: true),
-          child: const Text('Accept'),
+          child: Text(context.l10n.pairingAccept),
         ),
       ],
     );
@@ -219,5 +222,5 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
   }
 
   String _expiryLabel(Duration remaining) =>
-      'Expires in ${remaining.inSeconds.clamp(0, 9999)}s';
+      context.l10n.pairingExpiresInSeconds(remaining.inSeconds.clamp(0, 9999));
 }

@@ -1,3 +1,5 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 import '../models/history_models.dart';
 import 'history_controller.dart';
 import 'history_errors.dart';
@@ -59,7 +61,7 @@ class HistoryMutationController {
       return true;
     } catch (_) {
       if (!_scope.disposed) {
-        _errors.message = 'The clip secrecy could not be updated.';
+        _errors.message = AppStrings.current.historyErrorSecrecyUpdate;
       }
       return false;
     } finally {
@@ -92,7 +94,7 @@ class HistoryMutationController {
       window.replace(clip);
       _history.selection.setPinned(clip.id, clip.pinned);
       _errors.reportOperation(
-        'The pin could not be updated.',
+        AppStrings.current.historyErrorPinUpdate,
         action: HistoryAction.pin,
       );
       _scope.notify();
@@ -136,7 +138,7 @@ class HistoryMutationController {
       return true;
     } catch (_) {
       _errors.reportOperation(
-        'This clip could not be deleted.',
+        AppStrings.current.historyErrorDeleteClip,
         action: HistoryAction.delete,
       );
       _scope.notify();
@@ -173,7 +175,7 @@ class HistoryMutationController {
       _scope.notify();
       return true;
     } catch (_) {
-      _errors.message = 'History could not be deleted.';
+      _errors.message = AppStrings.current.historyErrorDeleteAll;
       _scope.notify();
       return false;
     } finally {

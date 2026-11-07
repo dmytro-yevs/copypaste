@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import 'history_controller.dart';
@@ -240,8 +241,8 @@ class HistoryBulkController {
           _isBulkMutating = false;
           if (failed > 0) {
             _errors.message = action == _HistoryBulkMutation.delete
-                ? 'Some selected clips could not be deleted. Try again.'
-                : 'Some selected pins could not be updated. Try again.';
+                ? AppStrings.current.historyErrorBulkDelete
+                : AppStrings.current.historyErrorBulkPin;
           }
           if (!_scope.disposed) _scope.notify();
         }

@@ -19,6 +19,7 @@ dependencies:
   flutter_rust_bridge_hooks: 2.13.0-beta.5
   hotkey_manager: 0.2.3
   image: 4.10.1
+  intl: 0.20.3
   re_highlight: 0.0.3
   shadcn_flutter: 0.0.55
   screen_retriever: 0.2.2
@@ -44,6 +45,7 @@ dependency_overrides:
     path: third_party/hotkey_manager_macos
 
 flutter:
+  generate: true
   assets:
     - assets/brand/copypaste.png
 

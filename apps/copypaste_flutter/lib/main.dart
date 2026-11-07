@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'app/localization/app_language.dart';
+import 'l10n/l10n.dart';
+
 import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
@@ -74,9 +77,11 @@ Future<void> main([List<String> arguments = const []]) async {
   AppMotion.configureLibrary();
   await RustLib.init();
   final desktopWindow = await initializeDesktopWindow();
+  final language = await _initializeLanguage();
   runApp(
     CopyPasteRoot(
       desktopWindow: desktopWindow,
+      language: language,
       appUpdateController: AppUpdateController(
         repository: GitHubAppUpdateRepository(
           temporaryDirectory: getTemporaryDirectory,
@@ -137,7 +142,17 @@ Future<void> quickPasteMain() async {
     );
   }
 
-  runApp(QuickPasteApp(controller: createController()));
+  final language = await _initializeLanguage();
+  runApp(QuickPasteApp(controller: createController(), language: language));
+}
+
+Future<AppLanguageController> _initializeLanguage() async {
+  final language = AppLanguageController(
+    store: SharedPreferencesAppLanguageStore(),
+    platform: const MethodChannelAppLanguagePlatform(),
+  );
+  await language.initialize();
+  return language;
 }
 
 const _pairingLinksChannel = MethodChannel('com.copypaste.app/pairing_links');
@@ -176,9 +191,11 @@ class CopyPasteRoot extends StatefulWidget {
     this.onboardingController,
     this.appUpdateController,
     this.runtimeEnabled = true,
+    this.language,
   });
 
   final DesktopWindowController? desktopWindow;
+  final AppLanguageController? language;
   final OnboardingController? onboardingController;
   final AppUpdateController? appUpdateController;
   final bool runtimeEnabled;
@@ -217,6 +234,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   @override
   void initState() {
     super.initState();
+    widget.language?.addListener(_languageChanged);
     unawaited(_launchAtLogin.refresh());
     if (widget.runtimeEnabled) unawaited(_temporaryArtifacts.run());
     _visibility = ApplicationVisibility(
@@ -268,6 +286,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   @override
   void dispose() {
+    widget.language?.removeListener(_languageChanged);
     _uiMemory.removeListener(_memoryStateChanged);
     _uiMemory.dispose();
     _visibility.removeListener(_settingsVisibilityChanged);
@@ -303,6 +322,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (widget.runtimeEnabled && _visibility.value) {
       unawaited(_temporaryArtifacts.run());
     }
+  }
+
+  void _languageChanged() {
+    if (mounted) setState(() {});
   }
 
   void _memoryStateChanged() {
@@ -431,7 +454,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         _runtimeState = _RuntimeState.failed;
         _runtimeFailureMessage = error is runtime.RuntimeError
             ? error.message
-            : 'CopyPaste could not start its runtime.';
+            : AppStrings.current.appRuntimeStartFailed;
       });
     }
   }
@@ -660,32 +683,48 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,
         builder: AppTheme.builder,
-        home: Scaffold(
-          headers: unifiedTitleBar
-              ? const [MacosWindowHeader(title: Text('CopyPaste'))]
-              : const [AppBar(title: Text('CopyPaste')), Divider()],
-          child: const StateView.loading(message: 'Preparing CopyPaste.'),
+        locale: widget.language?.locale,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        localeListResolutionCallback: AppLocalization.resolve,
+        home: AppStringsLocale(
+          child: Scaffold(
+            headers: unifiedTitleBar
+                ? const [MacosWindowHeader(title: Text('CopyPaste'))]
+                : const [AppBar(title: Text('CopyPaste')), Divider()],
+            child: Builder(
+              builder: (context) =>
+                  StateView.loading(message: context.l10n.appPreparing),
+            ),
+          ),
         ),
       );
     }
     final onboarding = _onboarding;
     if (onboarding != null && !onboarding.complete) {
       return ShadcnApp(
-        title: 'Set up CopyPaste',
+        onGenerateTitle: (context) => context.l10n.onboardingTitle,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,
         builder: AppTheme.builder,
-        home: OnboardingScreen(
-          controller: onboarding,
-          onFinished: _finishOnboarding,
-          unifiedTitleBar: unifiedTitleBar,
+        locale: widget.language?.locale,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        localeListResolutionCallback: AppLocalization.resolve,
+        home: AppStringsLocale(
+          child: OnboardingScreen(
+            controller: onboarding,
+            onFinished: _finishOnboarding,
+            unifiedTitleBar: unifiedTitleBar,
+          ),
         ),
       );
     }
     return CopyPasteApp(
       navigatorKey: _rootNavigatorKey,
       navigation: _navigation,
+      language: widget.language,
       historyController: _historyController,
       devicesController: _devicesController,
       notifications: _notifications,
@@ -696,8 +735,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting =>
-          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.starting => AppStrings.current.appRuntimeWaiting,
         _RuntimeState.failed => _runtimeFailureMessage,
         _RuntimeState.idle || _RuntimeState.ready => null,
       },

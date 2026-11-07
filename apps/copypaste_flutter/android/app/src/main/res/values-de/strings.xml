@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Zwischenablage gespeichert</string>
+    <string name="capture_channel_description">Bestätigt, dass CopyPaste eine Änderung der Zwischenablage gespeichert hat.</string>
+    <string name="capture_title">Zwischenablage gespeichert</string>
+    <string name="capture_body_default">Ein neuer Eintrag wurde zu CopyPaste hinzugefügt.</string>
+    <string name="capture_image">Bild</string>
+    <string name="capture_image_size">Bild · %1$d × %2$d</string>
+    <string name="background_channel_name">Hintergrundaktivität</string>
+    <string name="background_channel_description">Hält aktivierte CopyPaste-Funktionen im Hintergrund aktiv.</string>
+    <string name="background_title">CopyPaste ist aktiv</string>
+    <string name="background_text">Aktivierte Funktionen laufen im Hintergrund.</string>
+    <string name="share_saved">In CopyPaste gespeichert</string>
+    <string name="share_failed">CopyPaste konnte diesen Eintrag nicht speichern</string>
+    <string name="chooser_open_file">CopyPaste-Datei öffnen</string>
+    <string name="chooser_save_file">CopyPaste-Datei speichern</string>
+    <string name="pairing_invalid_qr">Einen QR-Code zur CopyPaste-Kopplung scannen.</string>
+    <string name="pairing_scanner_unavailable">Der Google-Scanner konnte nicht geöffnet werden. Stattdessen den Kopplungscode eingeben.</string>
+    <string name="files_read_failed">Die ausgewählte Datei konnte nicht gelesen werden. Dateizugriff und freien Speicherplatz prüfen.</string>
+    <string name="files_picker_closed">Die Dateiauswahl wurde geschlossen.</string>
+</resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Zapisano schowek</string>
+    <string name="capture_channel_description">Potwierdza zapisanie zmiany schowka przez CopyPaste.</string>
+    <string name="capture_title">Zapisano schowek</string>
+    <string name="capture_body_default">Do CopyPaste dodano nowy element.</string>
+    <string name="capture_image">Obraz</string>
+    <string name="capture_image_size">Obraz · %1$d × %2$d</string>
+    <string name="background_channel_name">Aktywność w tle</string>
+    <string name="background_channel_description">Utrzymuje włączone funkcje CopyPaste aktywne w tle.</string>
+    <string name="background_title">CopyPaste działa</string>
+    <string name="background_text">Włączone funkcje działają w tle.</string>
+    <string name="share_saved">Zapisano w CopyPaste</string>
+    <string name="share_failed">Nie można zapisać tego elementu w CopyPaste</string>
+    <string name="chooser_open_file">Otwórz plik CopyPaste</string>
+    <string name="chooser_save_file">Zapisz plik CopyPaste</string>
+    <string name="pairing_invalid_qr">Zeskanuj kod QR parowania CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">Nie można otworzyć skanera Google. Zamiast tego wpisz kod parowania.</string>
+    <string name="files_read_failed">Nie można odczytać wybranego pliku. Sprawdź dostęp do pliku i ilość wolnego miejsca na dysku.</string>
+    <string name="files_picker_closed">Okno wyboru plików zostało zamknięte.</string>
+</resources>

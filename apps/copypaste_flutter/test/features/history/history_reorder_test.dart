@@ -243,19 +243,25 @@ void main() {
             tester.getSize(handle),
             const Size.square(AppControlSize.touch),
           );
+          final copy = find.byKey(const ValueKey<String>('history-row-copy-a'));
+          expect(tester.getSize(copy), const Size.square(AppControlSize.touch));
           expect(
-            find.byKey(const ValueKey<String>('history-row-delete-a')),
+            tester.getCenter(copy).dx,
+            lessThan(tester.getCenter(handle).dx),
+          );
+          expect(
+            find.byKey(const ValueKey<String>('history-row-more-a')),
             findsNothing,
           );
         } else {
           final pin = tester.getCenter(
             find.byKey(const ValueKey<String>('history-row-pin-a')),
           );
-          final delete = tester.getCenter(
-            find.byKey(const ValueKey<String>('history-row-delete-a')),
+          final more = tester.getCenter(
+            find.byKey(const ValueKey<String>('history-row-more-a')),
           );
-          expect(pin.dx, lessThan(delete.dx));
-          expect(delete.dx, lessThan(tester.getCenter(handle).dx));
+          expect(pin.dx, lessThan(more.dx));
+          expect(more.dx, lessThan(tester.getCenter(handle).dx));
         }
 
         final kind = platform == TargetPlatform.android

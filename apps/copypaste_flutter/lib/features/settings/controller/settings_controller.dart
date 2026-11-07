@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/capture/capture_service_control.dart';
@@ -80,8 +81,8 @@ class SettingsController extends ChangeNotifier {
   Future<void> _notificationQueue = Future<void>.value();
   Future<void>? _settingsRefresh;
   bool _settingsConfirmed = false;
-  static const _settingsRefreshError =
-      'Settings could not be refreshed. Try again.';
+  static String get _settingsRefreshError =>
+      AppStrings.current.settingsRuntimeRefreshFailed;
   bool _settingsRefreshRequested = false;
   int _settingsMutationEpoch = 0;
 
@@ -177,7 +178,10 @@ class SettingsController extends ChangeNotifier {
       );
     } catch (error) {
       _loadState = SettingsLoadState.error;
-      _errorMessage = _message(error, 'Settings could not be loaded.');
+      _errorMessage = _message(
+        error,
+        AppStrings.current.settingsRuntimeLoadFailed,
+      );
     }
     _notify();
   }
@@ -242,7 +246,7 @@ class SettingsController extends ChangeNotifier {
     final settings = _settings;
     if (settings == null || value.isEmpty) return false;
     if (settings.excludedAppIds.contains(value)) {
-      _errorMessage = 'That application is already excluded.';
+      _errorMessage = AppStrings.current.settingsRuntimeAppAlreadyExcluded;
       _notify();
       return false;
     }
@@ -396,7 +400,7 @@ class SettingsController extends ChangeNotifier {
     } catch (error) {
       final message = _message(
         error,
-        'The requested change could not be completed.',
+        AppStrings.current.settingsRuntimeChangeFailed,
       );
       _errorMessage = message;
       return false;
@@ -781,18 +785,18 @@ class SettingsController extends ChangeNotifier {
       error is runtime.RuntimeError
       ? _runtimeMessage(error) ?? error.message
       : error is CaptureServiceUnavailable
-      ? 'Clipboard capture permissions must be completed before capture can resume.'
+      ? AppStrings.current.settingsRuntimeCapturePermissionsIncomplete
       : error is CaptureServiceStopFailed
-      ? 'Clipboard capture is paused. The Android capture service did not confirm that it stopped.'
+      ? AppStrings.current.settingsRuntimeCaptureStopUnconfirmed
       : error is NotificationPermissionDenied
-      ? 'Notification permission is required to enable capture notifications.'
+      ? AppStrings.current.settingsRuntimeNotificationPermissionRequired
       : fallback;
 
   String? _settingsHealthMessage(RuntimeSettingsHealth? health) {
     if (health == null || !health.degraded) return null;
     return health.recordUnreadable
-        ? 'CopyPaste could not read saved settings. Protective values are active; review and save your preferences to repair them.'
-        : 'CopyPaste recovered unreadable settings with protective values. Review and save your preferences to repair them.';
+        ? AppStrings.current.settingsRuntimeSavedSettingsUnreadable
+        : AppStrings.current.settingsRuntimeSettingsRecovered;
   }
 
   String? _runtimeMessage(runtime.RuntimeError error) {
@@ -800,9 +804,9 @@ class SettingsController extends ChangeNotifier {
 
     return switch (error.message) {
       'excluded_app_bundle_ids contains an entry that is empty or too long' =>
-        'Application identifiers must be non-empty and 256 bytes or fewer.',
+        AppStrings.current.settingsRuntimeExcludedAppIdInvalid,
       'excluded_app_bundle_ids has too many entries; at most 256 are allowed' =>
-        'You can exclude up to 256 applications.',
+        AppStrings.current.settingsRuntimeExcludedAppsLimit,
       _ => null,
     };
   }

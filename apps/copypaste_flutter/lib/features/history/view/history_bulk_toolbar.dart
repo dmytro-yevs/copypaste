@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -30,7 +31,7 @@ class HistoryBulkToolbar extends StatelessWidget {
       children: [
         Tooltip(
           tooltip: (_) =>
-              const TooltipContainer(child: Text('Tag selected pinned clips')),
+              TooltipContainer(child: Text(context.l10n.historyBulkTagTooltip)),
           child: Button.secondary(
             key: const ValueKey('history-bulk-tags'),
             style: AppTheme.historyToolbarIconStyle,
@@ -48,9 +49,10 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Exit selection')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkExit)),
           child: Semantics(
-            label: 'Exit selection',
+            label: context.l10n.historyBulkExit,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-close'),
@@ -64,9 +66,10 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Pin selected')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkPin)),
           child: Semantics(
-            label: 'Pin selected',
+            label: context.l10n.historyBulkPin,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-pin'),
@@ -82,9 +85,10 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Unpin selected')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkUnpin)),
           child: Semantics(
-            label: 'Unpin selected',
+            label: context.l10n.historyBulkUnpin,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-unpin'),
@@ -101,9 +105,9 @@ class HistoryBulkToolbar extends StatelessWidget {
         ),
         Tooltip(
           tooltip: (_) =>
-              const TooltipContainer(child: Text('Delete selected')),
+              TooltipContainer(child: Text(context.l10n.historyBulkDelete)),
           child: Semantics(
-            label: 'Delete selected',
+            label: context.l10n.historyBulkDelete,
             button: true,
             child: Button.destructive(
               key: const ValueKey('history-bulk-delete'),
@@ -128,7 +132,9 @@ class HistoryBulkToolbar extends StatelessWidget {
         ),
       ],
     );
-    final label = '${controller.bulk.bulkSelectedIds.length} selected';
+    final label = context.l10n.historyBulkSelectedCount(
+      controller.bulk.bulkSelectedIds.length,
+    );
     final count = Semantics(liveRegion: true, child: Text(label));
     return LayoutBuilder(
       builder: (context, constraints) {

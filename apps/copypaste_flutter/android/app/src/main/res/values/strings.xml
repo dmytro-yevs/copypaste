@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Clipboard saved</string>
+    <string name="capture_channel_description">Confirms that CopyPaste saved a clipboard change.</string>
+    <string name="capture_title">Clipboard saved</string>
+    <string name="capture_body_default">A new item was added to CopyPaste.</string>
+    <string name="capture_image">Image</string>
+    <string name="capture_image_size">Image · %1$d × %2$d</string>
+    <string name="background_channel_name">Background activity</string>
+    <string name="background_channel_description">Keeps enabled CopyPaste features active in the background.</string>
+    <string name="background_title">CopyPaste is active</string>
+    <string name="background_text">Enabled features are running in the background.</string>
+    <string name="share_saved">Saved to CopyPaste</string>
+    <string name="share_failed">CopyPaste could not save this item</string>
+    <string name="chooser_open_file">Open CopyPaste file</string>
+    <string name="chooser_save_file">Save CopyPaste file</string>
+    <string name="pairing_invalid_qr">Scan a CopyPaste pairing QR code.</string>
+    <string name="pairing_scanner_unavailable">Google scanner could not open. Enter the pairing code instead.</string>
+    <string name="files_read_failed">The selected file could not be read. Check file access and available disk space.</string>
+    <string name="files_picker_closed">The file picker was closed.</string>
+</resources>

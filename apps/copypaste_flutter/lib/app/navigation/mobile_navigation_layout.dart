@@ -4,7 +4,6 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/app_tokens.dart';
 
-/// Allocates the Android Telegram main-tab geometry to the app's labels.
 class MobileNavigationLayout {
   const MobileNavigationLayout._({
     required this.widths,

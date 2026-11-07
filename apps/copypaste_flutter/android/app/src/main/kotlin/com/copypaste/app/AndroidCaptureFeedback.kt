@@ -12,7 +12,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.io.ByteArrayOutputStream
 
-internal data class CaptureFeedbackPreview(val text: String, val imagePng: ByteArray? = null)
+internal data class CaptureFeedbackPreview(
+    val text: String,
+    val imagePng: ByteArray? = null,
+    val image: Boolean = false,
+    val imageWidth: Int? = null,
+    val imageHeight: Int? = null,
+)
 
 internal object AndroidCaptureFeedback {
     private const val channelId = "clipboard-capture-events-silent"
@@ -33,9 +39,9 @@ internal object AndroidCaptureFeedback {
         width: Int = image.width,
         height: Int = image.height,
     ): CaptureFeedbackPreview {
-        val text = "Image · $width × $height"
+        val size = CaptureFeedbackPreview("", image = true, imageWidth = width, imageHeight = height)
         if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
-            return CaptureFeedbackPreview(text)
+            return size
         }
         val scale = minOf(1.0, thumbnailEdge.toDouble() / maxOf(width, height))
         val thumbnail = Bitmap.createScaledBitmap(
@@ -47,8 +53,8 @@ internal object AndroidCaptureFeedback {
         return try {
             val output = ByteArrayOutputStream()
             if (thumbnail.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                CaptureFeedbackPreview(text, output.toByteArray())
-            } else CaptureFeedbackPreview(text)
+                size.copy(imagePng = output.toByteArray())
+            } else size
         } finally {
             if (thumbnail !== image) thumbnail.recycle()
         }
@@ -58,7 +64,7 @@ internal object AndroidCaptureFeedback {
         if (!mimeType.startsWith("image/")) return CaptureFeedbackPreview(textPreview(filename))
         // Avoid decoding received image content unless its preview is enabled.
         if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
-            return CaptureFeedbackPreview("Image")
+            return CaptureFeedbackPreview("", image = true)
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -67,11 +73,11 @@ internal object AndroidCaptureFeedback {
         if (width <= 0 || height <= 0 ||
             width.toLong() > AndroidClipboardReader.maximumDecodedImageBytes / 4 / height.toLong()
         ) {
-            return CaptureFeedbackPreview("Image")
+            return CaptureFeedbackPreview("", image = true)
         }
         val options = BitmapFactory.Options().apply { inSampleSize = thumbnailSampleSize(width, height) }
         val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            ?: return CaptureFeedbackPreview("Image")
+            ?: return CaptureFeedbackPreview("", image = true)
         return try {
             imagePreview(image, width, height)
         } finally {
@@ -106,18 +112,24 @@ internal object AndroidCaptureFeedback {
             manager.createNotificationChannel(
                 NotificationChannel(
                     channelId,
-                    "Clipboard saved",
+                    context.getString(R.string.capture_channel_name),
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = "Confirms that CopyPaste saved a clipboard change."
+                    description = context.getString(R.string.capture_channel_description)
                     setSound(null, null)
                 },
             )
         }
-        val body = preview?.text ?: "A new item was added to CopyPaste."
+        val body = when {
+            preview == null -> context.getString(R.string.capture_body_default)
+            preview.image && preview.imageWidth != null && preview.imageHeight != null ->
+                context.getString(R.string.capture_image_size, preview.imageWidth, preview.imageHeight)
+            preview.image -> context.getString(R.string.capture_image)
+            else -> preview.text
+        }
         val builder = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle("Clipboard saved")
+                .setContentTitle(context.getString(R.string.capture_title))
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setSilent(true)

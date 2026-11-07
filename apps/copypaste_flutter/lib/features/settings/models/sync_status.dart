@@ -1,3 +1,5 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 import '../../devices/devices_gateway.dart';
 
 enum SyncPhase { unavailable, disabled, waiting, syncing, synced, failed }
@@ -5,14 +7,17 @@ enum SyncPhase { unavailable, disabled, waiting, syncing, synced, failed }
 enum SyncTone { muted, info, success, warning, error }
 
 extension SyncPhaseLabel on SyncPhase {
-  String get label => switch (this) {
-    SyncPhase.unavailable => 'Sync state unavailable',
-    SyncPhase.disabled => 'Sync off',
-    SyncPhase.waiting => 'Waiting for sync',
-    SyncPhase.syncing => 'Syncing',
-    SyncPhase.synced => 'Up to date',
-    SyncPhase.failed => 'Synchronization interrupted',
-  };
+  String get label {
+    final strings = AppStrings.current;
+    return switch (this) {
+      SyncPhase.unavailable => strings.syncStatusUnavailable,
+      SyncPhase.disabled => strings.syncStatusOff,
+      SyncPhase.waiting => strings.syncStatusWaitingForSync,
+      SyncPhase.syncing => strings.syncStatusSyncing,
+      SyncPhase.synced => strings.syncStatusUpToDate,
+      SyncPhase.failed => strings.syncStatusInterrupted,
+    };
+  }
 }
 
 /// The backend owns classification and recovery. UI never parses error text.
@@ -120,27 +125,37 @@ class PeerSyncStatus {
       issues.isEmpty &&
       skippedTooLarge == 0 &&
       error == null;
-  String get connectionLabel => switch (connection) {
-    DeviceConnectionState.online => 'Online',
-    DeviceConnectionState.offline => 'Offline',
-    _ => checking ? 'Checking connection' : 'Connection unknown',
-  };
+  String get connectionLabel {
+    final strings = AppStrings.current;
+    return switch (connection) {
+      DeviceConnectionState.online => strings.devicesConnectionOnline,
+      DeviceConnectionState.offline => strings.devicesConnectionOffline,
+      _ =>
+        checking
+            ? strings.syncConnectionChecking
+            : strings.syncConnectionUnknown,
+    };
+  }
+
   String get label {
+    final strings = AppStrings.current;
     if (blocker case final issue?) return issue.title;
     if (phase == SyncPhase.unavailable || phase == SyncPhase.disabled) {
       return phase.label;
     }
-    if (offline) return 'Offline';
-    if (phase == SyncPhase.syncing) return 'Syncing';
+    if (offline) return strings.devicesConnectionOffline;
+    if (phase == SyncPhase.syncing) return strings.syncStatusSyncing;
     if (hasWarning || (phase == SyncPhase.synced && legacyProblem)) {
-      return 'Partially synchronized';
+      return strings.syncStatusPartiallySynchronized;
     }
-    if (retrying || phase == SyncPhase.failed) return 'Retrying';
-    if (hasPending) return 'Waiting to sync';
-    if (upToDate) return 'Up to date';
-    if (!addressKnown) return 'Waiting for device';
+    if (retrying || phase == SyncPhase.failed) {
+      return strings.syncStatusRetrying;
+    }
+    if (hasPending) return strings.syncStatusWaitingToSync;
+    if (upToDate) return strings.syncStatusUpToDate;
+    if (!addressKnown) return strings.syncStatusWaitingForDevice;
     if (connection != DeviceConnectionState.online) return connectionLabel;
-    return 'Waiting for sync';
+    return strings.syncStatusWaitingForSync;
   }
 
   SyncTone get tone {
@@ -214,16 +229,18 @@ class SyncLogEntry {
     issueTitle,
     issueSeverity,
   );
-  String get message => switch (kind) {
-    'offline' => 'Device went offline.',
-    'online' => 'Connection restored.',
-    'problem_detected' => issueTitle ?? 'Synchronization problem detected.',
-    'problem_resolved' => error ?? 'Synchronization problem resolved.',
-    'failed' => error ?? 'Synchronization failed.',
-    'recovered' => 'Synchronization restored.',
-    _ =>
-      'Sent $sent clip${sent == 1 ? '' : 's'} · Received $received clip${received == 1 ? '' : 's'}',
-  };
+  String get message {
+    final strings = AppStrings.current;
+    return switch (kind) {
+      'offline' => strings.syncLogDeviceOffline,
+      'online' => strings.syncLogConnectionRestored,
+      'problem_detected' => issueTitle ?? strings.syncLogProblemDetected,
+      'problem_resolved' => error ?? strings.syncLogProblemResolved,
+      'failed' => error ?? strings.syncLogFailed,
+      'recovered' => strings.syncLogRecovered,
+      _ => strings.syncLogClipsTransferred(sent, received),
+    };
+  }
 }
 
 class SyncStatus {
@@ -245,33 +262,35 @@ class SyncStatus {
         (peer.phase == SyncPhase.synced && peer.legacyProblem),
   );
   int get _blocked => peers.where((peer) => peer.blocker != null).length;
-  String get label =>
-      diagnosticsAvailable ? _label : '$_label · activity log unavailable';
+  String get label => diagnosticsAvailable
+      ? _label
+      : AppStrings.current.syncStatusWithActivityLogUnavailable(_label);
   String get _label {
+    final strings = AppStrings.current;
     if (phase == SyncPhase.unavailable) return phase.label;
     if (phase == SyncPhase.disabled) {
       return _blocked > 0
-          ? 'Sync off · $_blocked ${_blocked == 1 ? 'issue' : 'issues'}'
-          : 'Sync off';
+          ? strings.syncStatusOffWithIssues(_blocked)
+          : strings.syncStatusOff;
     }
-    if (peers.isEmpty) return 'No paired devices';
+    if (peers.isEmpty) return strings.syncStatusNoPairedDevices;
     final offline = peers.where((peer) => peer.offline).length;
-    final suffix = offline > 0 && offline != peers.length
-        ? ' · $offline offline'
-        : '';
+    String withOffline(String status) => offline > 0 && offline != peers.length
+        ? strings.syncStatusWithOfflineDevices(status, offline)
+        : status;
     if (_blocked > 0) {
-      return '$_blocked ${_blocked == 1 ? 'device needs' : 'devices need'} attention$suffix';
+      return withOffline(strings.syncStatusDevicesNeedAttention(_blocked));
     }
     if (peers.every((peer) => peer.offline)) {
       final warnings = peers
           .where((peer) => peer.tone == SyncTone.warning)
           .length;
       return warnings > 0
-          ? 'Devices offline · $warnings ${warnings == 1 ? 'issue' : 'issues'}'
-          : 'Devices offline';
+          ? strings.syncStatusDevicesOfflineWithIssues(warnings)
+          : strings.syncStatusDevicesOffline;
     }
     if (peers.any((peer) => peer.phase == SyncPhase.syncing && !peer.offline)) {
-      return 'Syncing$suffix';
+      return withOffline(strings.syncStatusSyncing);
     }
     if (peers.any(
       (peer) =>
@@ -279,18 +298,18 @@ class SyncStatus {
           (peer.hasWarning ||
               (peer.phase == SyncPhase.synced && peer.legacyProblem)),
     )) {
-      return 'Partially synchronized$suffix';
+      return withOffline(strings.syncStatusPartiallySynchronized);
     }
     if (peers.any(
       (peer) =>
           peer.retrying || (!peer.offline && peer.phase == SyncPhase.failed),
     )) {
-      return 'Retrying$suffix';
+      return withOffline(strings.syncStatusRetrying);
     }
     if (peers.every((peer) => peer.upToDate || peer.offline)) {
-      return 'Up to date$suffix';
+      return withOffline(strings.syncStatusUpToDate);
     }
-    return 'Waiting for sync$suffix';
+    return withOffline(strings.syncStatusWaitingForSync);
   }
 
   SyncTone get tone {

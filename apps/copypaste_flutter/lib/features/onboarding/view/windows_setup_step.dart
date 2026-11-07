@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/setup_setting_row.dart';
 import '../controller/windows_onboarding_setup.dart';
 
@@ -13,17 +14,20 @@ class WindowsSetupStep extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      Text('Set up your PC', style: Theme.of(context).typography.h1),
+      Text(
+        context.l10n.onboardingWindowsTitle,
+        style: Theme.of(context).typography.h1,
+      ),
       const Gap(AppSpacing.xxl),
       Card(
         child: SetupSettingRow(
           icon: LucideIcons.power,
-          title: 'Start at login',
+          title: context.l10n.onboardingStartAtLogin,
           description: setup.launchAtLoginAvailable
-              ? 'Open CopyPaste when you sign in'
-              : 'Unavailable in this installation. You can continue without it.',
+              ? context.l10n.onboardingStartAtLoginDescription
+              : context.l10n.onboardingWindowsStartAtLoginUnavailable,
           action: Semantics(
-            label: 'Start CopyPaste at login',
+            label: context.l10n.onboardingStartAtLoginSemantics,
             toggled: setup.launchAtLogin,
             child: Switch(
               value: setup.launchAtLogin,
@@ -37,13 +41,11 @@ class WindowsSetupStep extends StatelessWidget {
       if (setup.disabledInTaskManager && setup.launchAtLogin) ...[
         const Gap(AppSpacing.md),
         Alert(
-          title: const Text('Disabled in Task Manager'),
-          content: const Text(
-            'Enable CopyPaste in Windows startup apps, then return.',
-          ),
+          title: Text(context.l10n.onboardingTaskManagerDisabledTitle),
+          content: Text(context.l10n.onboardingTaskManagerDisabledMessage),
           trailing: Button.secondary(
             onPressed: setup.openSystemSettings,
-            child: const Text('Open Settings'),
+            child: Text(context.l10n.onboardingOpenSystemSettings),
           ),
         ),
       ],

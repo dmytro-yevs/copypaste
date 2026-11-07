@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -32,13 +33,16 @@ class DevicesHeaderActions extends StatelessWidget {
         return Row(
           mainAxisSize: MainAxisSize.min,
           spacing: AppSpacing.sm,
-          children: showLabels ? _labeledActions() : _compactActions(context),
+          children: showLabels
+              ? _labeledActions(context)
+              : _compactActions(context),
         );
       },
     );
   }
 
-  List<Widget> _labeledActions() {
+  List<Widget> _labeledActions(BuildContext context) {
+    final l10n = context.l10n;
     return [
       Button.primary(
         key: const ValueKey<String>('pair-device'),
@@ -46,7 +50,7 @@ class DevicesHeaderActions extends StatelessWidget {
             ? controller.openInvitation
             : null,
         leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
-        child: const Text('Add device'),
+        child: Text(l10n.devicesAddDevice),
       ),
       Button.secondary(
         key: const ValueKey<String>('scan-pairing-qr'),
@@ -58,7 +62,7 @@ class DevicesHeaderActions extends StatelessWidget {
             DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
           ),
         ),
-        child: const Text('Scan QR'),
+        child: Text(l10n.devicesScanQr),
       ),
       Button.secondary(
         key: const ValueKey<String>('enter-pairing-code'),
@@ -70,17 +74,18 @@ class DevicesHeaderActions extends StatelessWidget {
             DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
           ),
         ),
-        child: const Text('Enter code'),
+        child: Text(l10n.devicesEnterCode),
       ),
     ];
   }
 
   List<Widget> _compactActions(BuildContext context) {
+    final l10n = context.l10n;
     return [
       _compactAction(
         context: context,
         key: const ValueKey<String>('pair-device'),
-        label: 'Add device',
+        label: l10n.devicesAddDevice,
         icon: LucideIcons.plus,
         primary: true,
         onPressed: controller.canChangePairingMode
@@ -90,7 +95,7 @@ class DevicesHeaderActions extends StatelessWidget {
       _compactAction(
         context: context,
         key: const ValueKey<String>('scan-pairing-qr'),
-        label: 'Scan QR',
+        label: l10n.devicesScanQr,
         icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
         onPressed: controller.canChangePairingMode
             ? controller.openQrScanner
@@ -99,7 +104,7 @@ class DevicesHeaderActions extends StatelessWidget {
       _compactAction(
         context: context,
         key: const ValueKey<String>('enter-pairing-code'),
-        label: 'Enter code',
+        label: l10n.devicesEnterCode,
         icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
         onPressed: controller.canChangePairingMode
             ? controller.openCodeEntry

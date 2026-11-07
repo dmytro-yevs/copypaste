@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../l10n/l10n.dart';
 import 'onboarding_setup.dart';
 
 enum OnboardingStep { welcome, setup, ready }
@@ -47,8 +48,9 @@ class OnboardingController extends ChangeNotifier {
           ? OnboardingStep.setup
           : OnboardingStep.welcome;
     } catch (_) {
-      _errorMessage =
-          'CopyPaste could not read the ${_setup.platformLabel} setup state.';
+      _errorMessage = AppStrings.current.onboardingStateReadFailed(
+        _setup.platformLabel,
+      );
     } finally {
       _initialized = true;
       _busy = false;
@@ -109,7 +111,7 @@ class OnboardingController extends ChangeNotifier {
       return true;
     } catch (_) {
       if (!_disposed) {
-        _errorMessage = 'CopyPaste could not save onboarding progress.';
+        _errorMessage = AppStrings.current.onboardingSaveProgressFailed;
       }
       return false;
     } finally {

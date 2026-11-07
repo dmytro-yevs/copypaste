@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -56,8 +57,8 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
     final imagePath = _previewFile?.path;
     await _plugin.show(
       id: 2208,
-      title: 'Clipboard saved',
-      body: preview?.text ?? 'A new item was added to CopyPaste.',
+      title: AppStrings.current.platformCaptureNotificationTitle,
+      body: preview?.text ?? AppStrings.current.platformCaptureNotificationBody,
       notificationDetails: NotificationDetails(
         macOS: DarwinNotificationDetails(
           presentSound: false,

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">클립보드 저장됨</string>
+    <string name="capture_channel_description">CopyPaste가 클립보드 변경 사항을 저장했음을 알립니다.</string>
+    <string name="capture_title">클립보드 저장됨</string>
+    <string name="capture_body_default">CopyPaste에 새 항목이 추가되었습니다.</string>
+    <string name="capture_image">이미지</string>
+    <string name="capture_image_size">이미지 · %1$d × %2$d</string>
+    <string name="background_channel_name">백그라운드 활동</string>
+    <string name="background_channel_description">켜져 있는 CopyPaste 기능이 백그라운드에서 계속 작동하도록 합니다.</string>
+    <string name="background_title">CopyPaste 실행 중</string>
+    <string name="background_text">켜져 있는 기능이 백그라운드에서 실행 중입니다.</string>
+    <string name="share_saved">CopyPaste에 저장됨</string>
+    <string name="share_failed">CopyPaste가 이 항목을 저장할 수 없습니다</string>
+    <string name="chooser_open_file">CopyPaste 파일 열기</string>
+    <string name="chooser_save_file">CopyPaste 파일 저장</string>
+    <string name="pairing_invalid_qr">CopyPaste 페어링 QR 코드를 스캔하십시오.</string>
+    <string name="pairing_scanner_unavailable">Google 스캐너를 열 수 없습니다. 대신 페어링 코드를 입력하십시오.</string>
+    <string name="files_read_failed">선택한 파일을 읽을 수 없습니다. 파일 접근 권한과 사용 가능한 디스크 공간을 확인하십시오.</string>
+    <string name="files_picker_closed">파일 선택기가 닫혔습니다.</string>
+</resources>

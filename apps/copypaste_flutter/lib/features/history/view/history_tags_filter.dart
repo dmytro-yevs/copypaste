@@ -1,6 +1,7 @@
 import '../../../app/theme/app_filter_indicator.dart';
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
@@ -21,12 +22,15 @@ class HistoryTagsFilter extends StatelessWidget {
 
   static String selectionLabel(HistoryController controller) {
     final query = controller.window.query;
-    if (query.tagIds.isEmpty) return 'All tags';
-    if (query.tagIds.length > 1) return '${query.tagIds.length} tags';
+    final strings = AppStrings.current;
+    if (query.tagIds.isEmpty) return strings.historyTagsFilterAll;
+    if (query.tagIds.length > 1) {
+      return strings.historyTagsFilterCount(query.tagIds.length);
+    }
     for (final tag in controller.tags.tags) {
       if (tag.id == query.tagIds.single) return tag.name;
     }
-    return 'Tags';
+    return strings.historyTags;
   }
 
   static const _all = ':all';
@@ -43,7 +47,7 @@ class HistoryTagsFilter extends StatelessWidget {
     );
     return AppFilterIndicator(
       active: query.hasTagFilter,
-      tooltip: 'Filter by tags: $label',
+      tooltip: context.l10n.historyTagsFilterTooltip(label),
       child: OverlayAnchor(
         anchor: ('history-tags-filter', controller),
         child: ComponentTheme<SelectTheme>(
@@ -58,8 +62,8 @@ class HistoryTagsFilter extends StatelessWidget {
             ), registry: OverlayAnchorRegistry.of(context)),
             labels: [
               label,
-              'All tags',
-              'Manage tags',
+              context.l10n.historyTagsFilterAll,
+              context.l10n.historyManageTags,
               ...tags.map((tag) => tag.name),
             ],
           ),
@@ -75,7 +79,7 @@ class HistoryTagsFilter extends StatelessWidget {
             canUnselect: true,
             expandIcon: compact ? null : const SelectExpandIcon(),
             itemBuilder: (context, _) => Semantics(
-              label: 'Filter pinned clips by tags',
+              label: context.l10n.historyTagsFilterSemantics,
               child: compact
                   ? const AppIconFrame(
                       size: AppIconSize.md,
@@ -116,9 +120,9 @@ class HistoryTagsFilter extends StatelessWidget {
               shrinkWrap: true,
               items: SelectItemList(
                 children: [
-                  const SelectItemButton<String>(
+                  SelectItemButton<String>(
                     value: _all,
-                    child: Text('All tags'),
+                    child: Text(context.l10n.historyTagsFilterAll),
                   ),
                   if (tags.isNotEmpty) const Divider(),
                   for (final tag in tags)
@@ -141,7 +145,7 @@ class HistoryTagsFilter extends StatelessWidget {
                           );
                         }
                       },
-                      child: const Text('Manage tags'),
+                      child: Text(context.l10n.historyManageTags),
                     ),
                   ),
                 ],

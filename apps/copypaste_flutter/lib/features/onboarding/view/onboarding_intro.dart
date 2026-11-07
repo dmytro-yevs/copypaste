@@ -2,6 +2,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_brand_logo.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 
 /// Brand and concise introductory content shared by the first and final steps.
 class OnboardingIntro extends StatelessWidget {
@@ -17,12 +18,14 @@ class OnboardingIntro extends StatelessWidget {
       const AppBrandLogo(size: AppIconSize.hero),
       const Gap(AppSpacing.xxl),
       Text(
-        ready ? 'CopyPaste is ready' : 'Welcome to CopyPaste',
+        ready
+            ? context.l10n.onboardingReadyTitle
+            : context.l10n.onboardingWelcomeTitle,
         style: Theme.of(context).typography.h1,
       ),
       if (!ready) ...[
         const Gap(AppSpacing.sm),
-        const Text('Your clipboard, ready when you are.').muted(),
+        Text(context.l10n.onboardingWelcomeSubtitle).muted(),
       ],
     ],
   );

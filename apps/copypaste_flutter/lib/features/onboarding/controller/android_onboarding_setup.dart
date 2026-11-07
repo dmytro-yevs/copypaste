@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../../../platform/android/android_capture_setup_gateway.dart';
 import '../../../platform/clipboard/clipboard_writer.dart';
+import '../../../l10n/l10n.dart';
 import '../repository/android_onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -15,10 +16,10 @@ class AndroidOnboardingSetup extends OnboardingSetup {
        _setup = setup,
        _clipboard = clipboard;
 
-  static const _stateReadFailure =
-      'CopyPaste could not read Android setup state.';
-  static const _stateRefreshFailure =
-      'Android capture state could not be refreshed.';
+  static String get _stateReadFailure =>
+      AppStrings.current.onboardingAndroidStateReadFailed;
+  static String get _stateRefreshFailure =>
+      AppStrings.current.onboardingAndroidStateRefreshFailed;
 
   final AndroidOnboardingStore _store;
   final AndroidCaptureSetupGateway _setup;
@@ -57,7 +58,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       await _clipboard.writeText(adbCommandText);
       return true;
     } catch (_) {
-      errorMessage = 'Setup commands could not be copied.';
+      errorMessage = AppStrings.current.sharedSetupCommandsCopyFailed;
       notifyIfActive();
       return false;
     }
@@ -84,7 +85,8 @@ class AndroidOnboardingSetup extends OnboardingSetup {
         _applyAuthorizedSetup();
       },
       onError: (Object error) {
-        errorMessage = 'Android setup monitoring is unavailable.';
+        errorMessage =
+            AppStrings.current.onboardingAndroidMonitoringUnavailable;
         notifyIfActive();
       },
     );
@@ -114,7 +116,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
           : progress.mode;
       if (progress.complete &&
           !await _setup.setForegroundCaptureEnabled(true)) {
-        errorMessage = 'Clipboard intake could not be enabled.';
+        errorMessage = AppStrings.current.onboardingAndroidIntakeFailed;
       } else {
         errorMessage = null;
       }
@@ -143,7 +145,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
         (_setupState?.captureEnabled ?? false)) {
       await _runStateAction(_setup.stopCapture);
       if (_setupState?.captureEnabled ?? true) {
-        errorMessage = 'Background capture could not be stopped.';
+        errorMessage = AppStrings.current.onboardingAndroidStopCaptureFailed;
         notifyIfActive();
         return;
       }
@@ -184,11 +186,12 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     if (busy) return;
     try {
       if (!await _setup.requestBatteryExemption()) {
-        errorMessage = 'Battery settings could not be opened.';
+        errorMessage =
+            AppStrings.current.onboardingAndroidBatterySettingsFailed;
         notifyIfActive();
       }
     } catch (_) {
-      errorMessage = 'Battery settings could not be opened.';
+      errorMessage = AppStrings.current.onboardingAndroidBatterySettingsFailed;
       notifyIfActive();
     }
   }
@@ -197,11 +200,11 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     if (busy) return;
     try {
       if (!await _setup.openShizuku()) {
-        errorMessage = 'Shizuku could not be opened.';
+        errorMessage = AppStrings.current.sharedShizukuOpenFailed;
         notifyIfActive();
       }
     } catch (_) {
-      errorMessage = 'Shizuku could not be opened.';
+      errorMessage = AppStrings.current.sharedShizukuOpenFailed;
       notifyIfActive();
     }
   }
@@ -214,8 +217,8 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     if (_setupState?.privilegedGrants != true && errorMessage == null) {
       _grantError = true;
       errorMessage = _setupState?.shizuku.permission == true
-          ? 'CopyPaste is allowed in Shizuku, but Android capture grants could not be applied.'
-          : 'Allow CopyPaste in Shizuku to apply capture grants.';
+          ? AppStrings.current.onboardingAndroidGrantsFailed
+          : AppStrings.current.onboardingAndroidAllowInShizuku;
       notifyIfActive();
     }
   }
@@ -274,12 +277,12 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     try {
       final before = await _setup.state();
       if (!before.privilegedGrants) {
-        errorMessage = 'Grant background clipboard access first.';
+        errorMessage = AppStrings.current.onboardingAndroidGrantAccessFirst;
         return;
       }
       if (!before.notificationGranted) {
         errorMessage =
-            'Allow notifications before starting background capture.';
+            AppStrings.current.onboardingAndroidAllowNotificationsFirst;
         return;
       }
       _verificationBaseline = before.observedAtMs > before.lastCaptureAtMs
@@ -290,11 +293,11 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       );
       _acceptState(await _setup.startCapture());
       if (!_setupState!.captureEnabled) {
-        errorMessage = 'Background capture could not be started.';
+        errorMessage = AppStrings.current.onboardingAndroidStartCaptureFailed;
         return;
       }
     } catch (_) {
-      errorMessage = 'Background capture could not be started.';
+      errorMessage = AppStrings.current.onboardingAndroidStartCaptureFailed;
     } finally {
       busy = false;
       notifyIfActive();
@@ -309,7 +312,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     notifyIfActive();
     try {
       if (!await _setup.setForegroundCaptureEnabled(true)) {
-        errorMessage = 'Clipboard intake could not be enabled.';
+        errorMessage = AppStrings.current.onboardingAndroidIntakeFailed;
         return false;
       }
       // Capture setup is complete before the optional pairing screen. A process
@@ -317,7 +320,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       await _store.markComplete(mode: _selectedMode, method: _method);
       return true;
     } catch (_) {
-      errorMessage = 'CopyPaste could not save onboarding progress.';
+      errorMessage = AppStrings.current.onboardingSaveProgressFailed;
       return false;
     } finally {
       busy = false;
@@ -343,7 +346,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
       _automaticGrantsAttempted = false;
       return true;
     } catch (_) {
-      errorMessage = 'Android capture setup could not be opened.';
+      errorMessage = AppStrings.current.onboardingAndroidSetupOpenFailed;
       return false;
     } finally {
       busy = false;
@@ -372,7 +375,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     try {
       await _store.writeChoice(mode: _selectedMode, method: _method);
     } catch (_) {
-      errorMessage = 'Android setup choice could not be saved.';
+      errorMessage = AppStrings.current.onboardingAndroidChoiceSaveFailed;
       notifyIfActive();
     }
   }
@@ -381,7 +384,7 @@ class AndroidOnboardingSetup extends OnboardingSetup {
     try {
       await _store.writeCaptureProgress();
     } catch (_) {
-      errorMessage = 'CopyPaste could not save onboarding progress.';
+      errorMessage = AppStrings.current.onboardingSaveProgressFailed;
       notifyIfActive();
     }
   }

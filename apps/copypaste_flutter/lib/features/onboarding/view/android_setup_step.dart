@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../controller/android_onboarding_setup.dart';
 import '../repository/android_onboarding_store.dart';
 import '../../../shared/setup_setting_row.dart';
@@ -14,14 +15,15 @@ class AndroidSetupStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final state = setup.setupState;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           setup.mode == AndroidCaptureMode.full
-              ? 'Full capture'
-              : 'Background capture',
+              ? l10n.onboardingAndroidFullCapture
+              : l10n.onboardingAndroidBackgroundCapture,
           style: Theme.of(context).typography.h1,
         ),
         const Gap(AppSpacing.lg),
@@ -31,19 +33,19 @@ class AndroidSetupStep extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const RadioCard<AndroidCaptureMode>(
+              RadioCard<AndroidCaptureMode>(
                 value: AndroidCaptureMode.full,
                 child: _Choice(
-                  title: 'Full capture',
-                  description: 'Set up once, then verify a real copy.',
+                  title: l10n.onboardingAndroidFullCapture,
+                  description: l10n.onboardingAndroidFullCaptureDescription,
                 ),
               ),
               const Gap(AppSpacing.sm),
-              const RadioCard<AndroidCaptureMode>(
+              RadioCard<AndroidCaptureMode>(
                 value: AndroidCaptureMode.limited,
                 child: _Choice(
-                  title: 'Limited capture',
-                  description: 'Share to CopyPaste or return after copying.',
+                  title: l10n.onboardingAndroidLimitedCapture,
+                  description: l10n.onboardingAndroidLimitedCaptureDescription,
                 ),
               ),
             ],
@@ -56,8 +58,8 @@ class AndroidSetupStep extends StatelessWidget {
               children: [
                 SetupSettingRow(
                   icon: LucideIcons.bell,
-                  title: 'Capture notification',
-                  description: 'Required while capture runs',
+                  title: l10n.onboardingAndroidNotification,
+                  description: l10n.onboardingAndroidNotificationDescription,
                   statusIcon: state?.notificationGranted == true
                       ? LucideIcons.circleCheck
                       : null,
@@ -67,14 +69,15 @@ class AndroidSetupStep extends StatelessWidget {
                           onPressed: setup.busy
                               ? null
                               : setup.requestNotifications,
-                          child: const Text('Allow'),
+                          child: Text(l10n.sharedAllow),
                         ),
                 ),
                 const Gap(AppSpacing.md),
                 SetupSettingRow(
                   icon: LucideIcons.batteryCharging,
-                  title: 'Background activity',
-                  description: 'Recommended to reduce capture loss',
+                  title: l10n.onboardingAndroidBackgroundActivity,
+                  description:
+                      l10n.onboardingAndroidBackgroundActivityDescription,
                   statusIcon: state?.batteryExempt == true
                       ? LucideIcons.circleCheck
                       : null,
@@ -84,7 +87,7 @@ class AndroidSetupStep extends StatelessWidget {
                           onPressed: setup.busy
                               ? null
                               : setup.requestBatteryExemption,
-                          child: const Text('Open'),
+                          child: Text(l10n.onboardingAndroidOpen),
                         ),
                 ),
               ],
@@ -101,8 +104,9 @@ class AndroidSetupStep extends StatelessWidget {
               granted: state.privilegedGrants,
               busy: setup.busy,
               adbCommands: setup.adbCommandText,
-              applyAccessLabel: 'Apply capture access',
-              applyAccessDescription: 'Apply one-time capture access.',
+              applyAccessLabel: l10n.onboardingAndroidApplyAccess,
+              applyAccessDescription:
+                  l10n.onboardingAndroidApplyAccessDescription,
               onOpenShizuku: setup.openShizuku,
               onApplyAccess: setup.applyShizukuGrants,
               onCopyCommands: setup.copyAdbCommands,
@@ -111,7 +115,7 @@ class AndroidSetupStep extends StatelessWidget {
           _Verification(setup: setup),
         ] else ...[
           const Gap(AppSpacing.lg),
-          const Text('You can set up Full capture later.').muted().textSmall(),
+          Text(l10n.onboardingAndroidFullCaptureLater).muted().textSmall(),
         ],
       ],
     );
@@ -148,11 +152,11 @@ class _Verification extends StatelessWidget {
           SetupSettingRow(
             icon: setup.verified ? LucideIcons.circleCheck : LucideIcons.circle,
             title: setup.verified
-                ? 'Background capture is working'
-                : 'Verify a real copy',
+                ? context.l10n.onboardingAndroidCaptureWorking
+                : context.l10n.onboardingAndroidVerifyCopy,
             description: setup.verified
-                ? 'A new copy reached your local History.'
-                : 'Copy in another app, then return here.',
+                ? context.l10n.onboardingAndroidCopyReached
+                : context.l10n.onboardingAndroidCopyInstruction,
           ),
           if (!setup.verified && !setup.verifying) ...[
             const Gap(AppSpacing.md),
@@ -165,7 +169,7 @@ class _Verification extends StatelessWidget {
                         state?.notificationGranted == true
                     ? setup.beginVerification
                     : null,
-                child: const Text('Start capture'),
+                child: Text(context.l10n.onboardingAndroidStartCapture),
               ),
             ),
           ],

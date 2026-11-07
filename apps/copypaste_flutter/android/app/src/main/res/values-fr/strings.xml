@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Presse-papiers enregistré</string>
+    <string name="capture_channel_description">Confirme que CopyPaste a enregistré une modification du presse-papiers.</string>
+    <string name="capture_title">Presse-papiers enregistré</string>
+    <string name="capture_body_default">Un nouvel élément a été ajouté à CopyPaste.</string>
+    <string name="capture_image">Image</string>
+    <string name="capture_image_size">Image · %1$d × %2$d</string>
+    <string name="background_channel_name">Activité en arrière-plan</string>
+    <string name="background_channel_description">Maintient en arrière-plan les fonctionnalités activées de CopyPaste.</string>
+    <string name="background_title">CopyPaste est actif</string>
+    <string name="background_text">Les fonctionnalités activées s’exécutent en arrière-plan.</string>
+    <string name="share_saved">Enregistré dans CopyPaste</string>
+    <string name="share_failed">CopyPaste n’a pas pu enregistrer cet élément</string>
+    <string name="chooser_open_file">Ouvrir un fichier CopyPaste</string>
+    <string name="chooser_save_file">Enregistrer un fichier CopyPaste</string>
+    <string name="pairing_invalid_qr">Scannez un code QR d’association CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">Impossible d’ouvrir le scanner Google. Saisissez plutôt le code d’association.</string>
+    <string name="files_read_failed">Impossible de lire le fichier sélectionné. Vérifiez l’accès au fichier et l’espace disque disponible.</string>
+    <string name="files_picker_closed">Le sélecteur de fichiers a été fermé.</string>
+</resources>

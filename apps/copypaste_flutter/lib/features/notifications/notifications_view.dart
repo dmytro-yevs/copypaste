@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_overlays.dart';
@@ -34,7 +35,9 @@ class _NotificationsHeaderActionState extends State<NotificationsHeaderAction> {
     listenable: widget.controller,
     builder: (context, _) => Tooltip(
       tooltip: (_) => TooltipContainer(
-        child: Text('Notifications · ${widget.controller.unread} unread'),
+        child: Text(
+          context.l10n.notificationsTooltip(widget.controller.unread),
+        ),
       ),
       child: Button.secondary(
         key: const ValueKey('notifications-open'),
@@ -80,7 +83,7 @@ class _NotificationsDrawer extends StatelessWidget {
     builder: (context, _) => Scaffold(
       headers: [
         AppBar(
-          title: const Text('Notifications'),
+          title: Text(context.l10n.notificationsTitle),
           trailing: [
             Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
@@ -100,16 +103,16 @@ class _NotificationsDrawer extends StatelessWidget {
                 controller.items.any((item) => item.read && !item.actionable)
                 ? controller.clearRead
                 : null,
-            child: const Text('Clear read notifications'),
+            child: Text(context.l10n.notificationsClearRead),
           ),
         ),
       ],
       child: controller.items.isEmpty
           ? StateView.empty(
-              title: 'No notifications',
+              title: context.l10n.notificationsEmptyTitle,
               message:
                   controller.deliveryError ??
-                  'Device connection requests and their results appear here.',
+                  context.l10n.notificationsEmptyMessage,
               icon: LucideIcons.bell,
             )
           : ListView(
@@ -117,7 +120,7 @@ class _NotificationsDrawer extends StatelessWidget {
               children: [
                 if (controller.deliveryError case final error?) ...[
                   Alert(
-                    title: const Text('System notifications'),
+                    title: Text(context.l10n.notificationsSystemAlertTitle),
                     content: Text(error),
                   ),
                   const Gap(AppSpacing.lg),
@@ -139,7 +142,7 @@ class _NotificationsDrawer extends StatelessWidget {
                               closeDrawer(context);
                               controller.open(item.id);
                             },
-                            child: const Text('Review'),
+                            child: Text(context.l10n.notificationsReview),
                           )
                         : null,
                   ),

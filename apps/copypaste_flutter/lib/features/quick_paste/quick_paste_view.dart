@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 import '../history/presentation/secret_spoiler.dart';
 
 import '../../app/theme/app_brand_logo.dart';
@@ -181,7 +183,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           if (mounted && controller.presentationGeneration == presentation) {
             AppToast.show(
               context,
-              title: 'Action failed',
+              title: context.l10n.quickPasteActionFailedTitle,
               message: message,
               tone: AppToastTone.error,
             );
@@ -375,10 +377,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             key: const ValueKey('quick-paste-home'),
             style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             onPressed: controller.openMainWindow,
-            child: const AppBrandLogo(
-              key: ValueKey('quick-paste-logo'),
+            child: AppBrandLogo(
+              key: const ValueKey('quick-paste-logo'),
               size: AppIconSize.sm,
-              semanticLabel: 'Open CopyPaste',
+              semanticLabel: context.l10n.quickPasteOpenAppSemantics,
             ),
           ),
           const Gap(AppSpacing.xs),
@@ -396,7 +398,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   autofocus: true,
                   style: AppTheme.clipboardMenuTextStyle(context),
                   placeholder: Text(
-                    'Type to search…',
+                    context.l10n.quickPasteSearchPlaceholder,
                     style: AppTheme.clipboardMenuTextStyle(context),
                   ),
                   features: const [
@@ -506,11 +508,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     final history = controller.history;
     if (history.window.state == HistoryLoadState.loading &&
         controller.items.isEmpty) {
-      return const StateView.loading(message: 'Loading clipboard history.');
+      return StateView.loading(message: context.l10n.quickPasteLoadingHistory);
     }
     if (history.window.state == HistoryLoadState.error) {
       return StateView.error(
-        title: 'History is unavailable',
+        title: context.l10n.quickPasteHistoryUnavailable,
         message: history.errors.message,
       );
     }
@@ -518,7 +520,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     final recentIds = history.window.visitedRecentIds;
     final pinnedIds = history.window.visitedPinnedIds;
     if (recentIds.isEmpty && pinnedIds.isEmpty) {
-      return const StateView.empty(title: 'No clips found');
+      return StateView.empty(title: context.l10n.quickPasteNoClipsFound);
     }
     final retainedIds = {...recentIds, ...pinnedIds};
     _rowKeys.removeWhere((id, _) => !retainedIds.contains(id));
@@ -608,7 +610,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             style: AppTheme.clipboardMenuButtonStyle(),
             onPressed: controller.loadMore,
             child: Text(
-              controller.paginationFailed ? 'Try again' : 'Load more',
+              controller.paginationFailed
+                  ? context.l10n.commonTryAgain
+                  : context.l10n.quickPasteLoadMore,
             ),
           );
         }
@@ -729,9 +733,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
       ),
       const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () =>
           unawaited(controller.toggleFocusedPin()),
-      const SingleActivator(LogicalKeyboardKey.backspace, alt: true): () =>
+      // Word and line deletion stay with the search field; Shift deletes a clip.
+      desktopShortcut(LogicalKeyboardKey.backspace, shift: true): () =>
           unawaited(controller.deleteFocused()),
-      const SingleActivator(LogicalKeyboardKey.delete, alt: true): () =>
+      desktopShortcut(LogicalKeyboardKey.delete, shift: true): () =>
           unawaited(controller.deleteFocused()),
       desktopShortcut(LogicalKeyboardKey.comma): () =>
           unawaited(controller.openSettings()),
@@ -831,13 +836,17 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                                   ),
                                 ),
                                 const Gap(AppSpacing.xs),
-                                Text('${(progress * 100).floor()}%'),
+                                Text(
+                                  context.l10n.transfersProgressPercent(
+                                    (progress * 100).floor(),
+                                  ),
+                                ),
                               ],
                             ),
                           )
                         : controller.transferFailedFor(clip.id)
                         ? Text(
-                            'Failed',
+                            context.l10n.quickPasteTransferFailed,
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.destructive,
                             ),
@@ -940,7 +949,7 @@ class _ClipContent extends StatelessWidget {
               'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
             ),
             child: snapshot.hasError
-                ? const StateView.error(title: 'Clip unavailable')
+                ? StateView.error(title: context.l10n.quickPasteClipUnavailable)
                 : _ClipContent(
                     clip: snapshot.data ?? clip,
                     controller: controller,
@@ -970,14 +979,16 @@ class _ClipContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            filename.isEmpty ? 'File' : filename,
+            filename.isEmpty
+                ? context.l10n.quickPasteFileFallbackName
+                : filename,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           LayoutBuilder(
             builder: (context, constraints) => Text(
               path.isEmpty
-                  ? 'Path unavailable'
+                  ? context.l10n.quickPastePathUnavailable
                   : middleEllipsis(
                       path,
                       maxWidth: constraints.maxWidth,
@@ -1057,7 +1068,7 @@ class _Footer extends StatelessWidget {
           style: style,
           alignment: Alignment.centerLeft,
           onPressed: () => confirmClear(context, controller),
-          child: const Text('Clear'),
+          child: Text(context.l10n.commonClear),
         ),
         Button.ghost(
           style: style,
@@ -1065,7 +1076,7 @@ class _Footer extends StatelessWidget {
           onPressed: controller.openSettings,
           child: Row(
             children: [
-              const Expanded(child: Text('Preferences…')),
+              Expanded(child: Text(context.l10n.quickPastePreferences)),
               MenuShortcut(
                 activator: desktopShortcut(LogicalKeyboardKey.comma),
                 combiner: const SizedBox.shrink(),
@@ -1077,7 +1088,7 @@ class _Footer extends StatelessWidget {
           style: style,
           alignment: Alignment.centerLeft,
           onPressed: () => showAbout(context),
-          child: const Text('About'),
+          child: Text(context.l10n.quickPasteAbout),
         ),
         Button.ghost(
           style: style,
@@ -1085,7 +1096,7 @@ class _Footer extends StatelessWidget {
           onPressed: controller.quit,
           child: Row(
             children: [
-              const Expanded(child: Text('Quit')),
+              Expanded(child: Text(context.l10n.quickPasteQuit)),
               MenuShortcut(
                 activator: desktopShortcut(LogicalKeyboardKey.keyQ),
                 combiner: const SizedBox.shrink(),
@@ -1104,12 +1115,13 @@ class _Footer extends StatelessWidget {
     await AppOverlays.showActionDialog(
       context,
       icon: LucideIcons.trash2,
-      title: const Text('Clear history?'),
-      content: const Text('Pinned clips will stay in your history.'),
-      actionLabel: 'Clear',
+      title: Text(context.l10n.quickPasteClearHistoryTitle),
+      content: Text(context.l10n.quickPasteClearHistoryMessage),
+      actionLabel: context.l10n.commonClear,
       onConfirm: controller.clearUnpinned,
       failureMessage: () =>
-          controller.history.errors.message ?? 'History could not be deleted.',
+          controller.history.errors.message ??
+          AppStrings.current.quickPasteClearHistoryFailed,
     );
   }
 
@@ -1119,14 +1131,12 @@ class _Footer extends StatelessWidget {
       builder: (dialogContext) => AppOverlays.alertDialog(
         icon: LucideIcons.info,
         title: const Text('CopyPaste'),
-        content: const Text(
-          'Private clipboard history across macOS, Android, Windows, and Linux.',
-        ),
+        content: Text(dialogContext.l10n.quickPasteAboutDescription),
         actions: [
           Button.primary(
             style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Done'),
+            child: Text(dialogContext.l10n.commonDone),
           ),
         ],
       ),

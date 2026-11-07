@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -45,19 +46,22 @@ class AppNotificationService {
   Future<void> _initialize() async {
     try {
       final initialized = await plugin.initialize(
-        settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-          macOS: DarwinInitializationSettings(
+        settings: InitializationSettings(
+          android: const AndroidInitializationSettings('@mipmap/ic_launcher'),
+          macOS: const DarwinInitializationSettings(
             requestAlertPermission: false,
             requestBadgePermission: false,
             requestSoundPermission: false,
           ),
-          windows: WindowsInitializationSettings(
+          windows: const WindowsInitializationSettings(
             appName: 'CopyPaste',
             appUserModelId: 'com.copypaste.app',
             guid: 'f112c130-c009-4a8c-b95a-16608410ce76',
           ),
-          linux: LinuxInitializationSettings(defaultActionName: 'Open'),
+          linux: LinuxInitializationSettings(
+            defaultActionName:
+                AppStrings.current.platformNotificationDefaultAction,
+          ),
         ),
         onDidReceiveNotificationResponse: (response) {
           final payload = response.payload;

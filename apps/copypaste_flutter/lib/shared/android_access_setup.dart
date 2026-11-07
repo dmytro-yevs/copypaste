@@ -3,6 +3,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_tokens.dart';
+import '../l10n/l10n.dart';
 import '../platform/android/android_shizuku_state.dart';
 import 'setup_setting_row.dart';
 
@@ -104,34 +105,35 @@ class _ShizukuSetup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shizuku = setup.shizuku;
+    final l10n = context.l10n;
     if (!shizuku.supported && !setup.granted) {
-      return const Card(
+      return Card(
         child: SetupSettingRow(
           icon: LucideIcons.info,
-          title: 'Android 11 or newer is required',
-          description: 'Use the ADB tab on this device.',
+          title: l10n.sharedAndroidVersionRequired,
+          description: l10n.sharedUseAdbTab,
         ),
       );
     }
     final ready = setup.granted;
     final title = ready
-        ? 'One-time access applied'
+        ? l10n.sharedOneTimeAccessApplied
         : !shizuku.installed
-        ? 'Install Shizuku'
+        ? l10n.sharedInstallShizuku
         : !shizuku.running
-        ? 'Pair and start Shizuku'
+        ? l10n.sharedPairAndStartShizuku
         : shizuku.permission
         ? setup.applyAccessLabel
-        : 'Allow CopyPaste';
+        : l10n.sharedAllowCopyPaste;
     final description = ready
-        ? 'Shizuku is no longer needed.'
+        ? l10n.sharedShizukuNoLongerNeeded
         : !shizuku.installed
-        ? 'Get Shizuku to apply one-time access.'
+        ? l10n.sharedGetShizukuDescription
         : !shizuku.running
-        ? 'Use Wireless debugging in Shizuku, then return.'
+        ? l10n.sharedShizukuWirelessDebugging
         : shizuku.permission
         ? setup.applyAccessDescription
-        : 'Approve CopyPaste once in Shizuku.';
+        : l10n.sharedApproveInShizuku;
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -151,12 +153,12 @@ class _ShizukuSetup extends StatelessWidget {
                     : setup.onApplyAccess,
                 child: Text(
                   !shizuku.installed
-                      ? 'Get Shizuku'
+                      ? l10n.sharedGetShizuku
                       : !shizuku.running
-                      ? 'Open Shizuku'
+                      ? l10n.sharedOpenShizuku
                       : shizuku.permission
                       ? setup.applyAccessLabel
-                      : 'Allow CopyPaste',
+                      : l10n.sharedAllowCopyPaste,
                 ),
               ),
             ),
@@ -185,10 +187,10 @@ class _AdbSetupState extends State<_AdbSetup> {
       children: [
         Row(
           children: [
-            const Expanded(child: Text('Run on your computer')),
+            Expanded(child: Text(context.l10n.sharedRunOnComputer)),
             const Gap(AppSpacing.sm),
             Tooltip(
-              tooltip: (context) => const Text('Copy all commands'),
+              tooltip: (context) => Text(context.l10n.sharedCopyAllCommands),
               child: Button.ghost(
                 style: AppTheme.controlButtonStyle(
                   const ButtonStyle.ghostIcon(),
@@ -211,7 +213,7 @@ class _AdbSetupState extends State<_AdbSetup> {
         ),
         const Gap(AppSpacing.sm),
         Text(
-          'Enable USB debugging and connect this phone.',
+          context.l10n.sharedEnableUsbDebugging,
           style: Theme.of(context).typography.xSmall,
         ).muted(),
         const Gap(AppSpacing.md),

@@ -1,15 +1,17 @@
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../app/localization/app_language.dart';
 import '../../app/theme/app_theme.dart';
+import '../../l10n/l10n.dart';
 import '../../platform/desktop/desktop_shortcuts.dart';
 import 'quick_paste_controller.dart';
 import 'quick_paste_view.dart';
 
 class QuickPasteApp extends StatefulWidget {
-  const QuickPasteApp({super.key, required this.controller});
+  const QuickPasteApp({super.key, required this.controller, this.language});
 
   final QuickPasteController controller;
+  final AppLanguageController? language;
 
   @override
   State<QuickPasteApp> createState() => _QuickPasteAppState();
@@ -42,9 +44,13 @@ class _QuickPasteAppState extends State<QuickPasteApp> {
           child: child ?? const SizedBox.shrink(),
         ),
       ),
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      supportedLocales: ShadcnLocalizations.supportedLocales,
-      home: QuickPasteView(controller: widget.controller),
+      locale: widget.language?.locale,
+      localizationsDelegates: AppLocalization.delegates,
+      supportedLocales: AppLocalization.supportedLocales,
+      localeListResolutionCallback: AppLocalization.resolve,
+      home: AppStringsLocale(
+        child: QuickPasteView(controller: widget.controller),
+      ),
     );
   }
 }

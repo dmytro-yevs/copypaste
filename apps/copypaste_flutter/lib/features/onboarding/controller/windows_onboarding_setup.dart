@@ -1,4 +1,5 @@
 import '../../../platform/startup/launch_at_login.dart';
+import '../../../l10n/l10n.dart';
 import '../repository/onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -10,8 +11,8 @@ class WindowsOnboardingSetup extends OnboardingSetup {
   }) : _store = store,
        _startup = startup;
 
-  static const _disabledInTaskManager =
-      'Start at login is disabled in Task Manager. You can enable it in Windows Settings later.';
+  static String get _disabledInTaskManager =>
+      AppStrings.current.onboardingWindowsTaskManagerDisabled;
 
   final OnboardingStore _store;
   final LaunchAtLoginGateway _startup;
@@ -50,11 +51,11 @@ class WindowsOnboardingSetup extends OnboardingSetup {
         _defaultPending = !_registered;
       } catch (_) {
         _noticeMessage =
-            'Start at login is unavailable. You can continue without it.';
+            AppStrings.current.onboardingWindowsStartAtLoginUnavailableNotice;
       }
       return OnboardingResume.welcome;
     } catch (_) {
-      errorMessage = 'CopyPaste could not read Windows setup state.';
+      errorMessage = AppStrings.current.onboardingWindowsStateReadFailed;
       return OnboardingResume.welcome;
     } finally {
       busy = false;
@@ -124,7 +125,7 @@ class WindowsOnboardingSetup extends OnboardingSetup {
     try {
       await _startup.openSystemSettings();
     } catch (_) {
-      errorMessage = 'Windows startup settings could not be opened.';
+      errorMessage = AppStrings.current.onboardingWindowsStartupSettingsFailed;
       notifyIfActive();
     }
   }
@@ -146,14 +147,13 @@ class WindowsOnboardingSetup extends OnboardingSetup {
       _launchAtLogin = _registered;
       if (_registered != enabled) {
         _noticeMessage =
-            'Start at login could not be updated. You can change it later in Settings.';
+            AppStrings.current.onboardingWindowsStartAtLoginChangeLater;
       } else if (enabled && disabledInTaskManager) {
         _noticeMessage = _disabledInTaskManager;
       }
     } catch (_) {
       _launchAtLogin = _registered;
-      _noticeMessage =
-          'Start at login could not be updated. You can continue without it.';
+      _noticeMessage = AppStrings.current.onboardingStartAtLoginUpdateFailed;
     }
   }
 }

@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_overlays.dart';
@@ -28,8 +29,15 @@ class FileOperationStatus extends StatelessWidget {
       else
         Text(
           operation.kind == FileOperationKind.import
-              ? '${operation.label} · ${formatBytes(operation.total)}'
-              : '${operation.label} · ${formatBytes(operation.written)} / ${formatBytes(operation.total)}',
+              ? context.l10n.transfersStatusSize(
+                  operation.label,
+                  formatBytes(operation.total),
+                )
+              : context.l10n.transfersStatusProgress(
+                  operation.label,
+                  formatBytes(operation.written),
+                  formatBytes(operation.total),
+                ),
         ),
       if (operation.active) ...[
         const Gap(AppSpacing.sm),
@@ -84,8 +92,12 @@ class _FileOperationsHeaderActionState
         tooltip: (_) => TooltipContainer(
           child: Text(
             active.isEmpty
-                ? 'Downloads and transfers'
-                : '${active.length} active transfers · ${formatBytes(written)} / ${formatBytes(total)}',
+                ? context.l10n.transfersTitle
+                : context.l10n.transfersActiveTooltip(
+                    active.length,
+                    formatBytes(written),
+                    formatBytes(total),
+                  ),
           ),
         ),
         child: active.isEmpty
@@ -134,8 +146,10 @@ class _FileOperationsDrawer extends StatelessWidget {
     builder: (context, _) => Scaffold(
       headers: [
         AppBar(
-          title: const Text('Downloads and transfers'),
-          subtitle: Text('${controller.active.length} active'),
+          title: Text(context.l10n.transfersTitle),
+          subtitle: Text(
+            context.l10n.transfersActiveCount(controller.active.length),
+          ),
           trailing: [
             Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
@@ -157,19 +171,19 @@ class _FileOperationsDrawer extends StatelessWidget {
               if (controller.showingEarlier)
                 Button.secondary(
                   onPressed: controller.showLatest,
-                  child: const Text('Latest'),
+                  child: Text(context.l10n.transfersShowLatest),
                 ),
               if (controller.hasEarlier)
                 Button.secondary(
                   onPressed: controller.loadEarlier,
-                  child: const Text('Earlier'),
+                  child: Text(context.l10n.transfersShowEarlier),
                 ),
               Button.outline(
                 onPressed: controller.items.any((item) => !item.active)
                     ? controller.clearHistory
                     : null,
                 leading: const AppIconFrame(child: Icon(LucideIcons.trash2)),
-                child: const Text('Clear completed history'),
+                child: Text(context.l10n.transfersClearCompletedHistory),
               ),
             ],
           ),
@@ -177,16 +191,15 @@ class _FileOperationsDrawer extends StatelessWidget {
       ],
       child: controller.error != null
           ? StateView.error(
-              title: 'Transfers',
+              title: context.l10n.transfersErrorTitle,
               message: controller.error,
-              actionLabel: 'Try again',
+              actionLabel: context.l10n.commonTryAgain,
               onAction: controller.refresh,
             )
           : controller.items.isEmpty
-          ? const StateView.empty(
-              title: 'No transfers',
-              message:
-                  'File imports, downloads and outgoing transfers appear here.',
+          ? StateView.empty(
+              title: context.l10n.transfersEmptyTitle,
+              message: context.l10n.transfersEmptyMessage,
             )
           : ListView.separated(
               padding: const EdgeInsets.all(AppSpacing.lg),
@@ -214,7 +227,7 @@ class _FileOperationsDrawer extends StatelessWidget {
                   ),
                   speedLabel: speed == null
                       ? null
-                      : '${formatBytes(speed.round())}/s',
+                      : context.l10n.transfersSpeed(formatBytes(speed.round())),
                   onCancel:
                       item.active && item.kind == FileOperationKind.receive
                       ? () => controller.cancel(item)
