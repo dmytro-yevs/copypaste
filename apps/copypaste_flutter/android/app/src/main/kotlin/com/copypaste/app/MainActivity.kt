@@ -1,6 +1,8 @@
 package com.copypaste.app
 
 import android.Manifest
+import android.app.LocaleManager
+import android.os.LocaleList
 import android.net.Uri
 import android.content.ComponentCallbacks2
 import android.content.Context
@@ -203,6 +205,29 @@ class MainActivity : FlutterActivity() {
                 }
             }
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/app_language")
+            .setMethodCallHandler { call, result ->
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    result.success(mapOf("supported" to false))
+                    return@setMethodCallHandler
+                }
+                val locales = getSystemService(LocaleManager::class.java)
+                when (call.method) {
+                    "getApplicationLocale" -> result.success(
+                        mapOf(
+                            "supported" to true,
+                            "tag" to locales.applicationLocales.toLanguageTags().ifEmpty { null },
+                        ),
+                    )
+                    "setApplicationLocale" -> {
+                        val tag = call.argument<String>("tag")
+                        locales.applicationLocales =
+                            if (tag == null) LocaleList.getEmptyLocaleList() else LocaleList.forLanguageTags(tag)
+                        result.success(mapOf("supported" to true))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
             .setMethodCallHandler { call, result ->
                 if (call.method == "restart") {
@@ -332,7 +357,9 @@ class MainActivity : FlutterActivity() {
                                 putExtra(Intent.EXTRA_STREAM, uri)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             },
-                            if (call.method == "openFile") "Open CopyPaste file" else "Save CopyPaste file",
+                            getString(
+                                if (call.method == "openFile") R.string.chooser_open_file else R.string.chooser_save_file,
+                            ),
                         ),
                     )
                 }.onSuccess {
@@ -461,12 +488,12 @@ class MainActivity : FlutterActivity() {
                 explicitCaptureHosts.remove(host)
                 if (!isDestroyed) Toast.makeText(
                     this,
-                    if (captured) "Saved to CopyPaste" else "CopyPaste could not save this item",
+                    getString(if (captured) R.string.share_saved else R.string.share_failed),
                     Toast.LENGTH_SHORT,
                 ).show()
             }
         } else {
-            Toast.makeText(this, "CopyPaste could not save this item", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.share_failed, Toast.LENGTH_SHORT).show()
         }
         setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         return true

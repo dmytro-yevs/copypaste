@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -100,8 +101,8 @@ class _ErroredFileOperation extends StatelessWidget {
               if (onRemove != null) ...[
                 const Gap(AppSpacing.sm),
                 Tooltip(
-                  tooltip: (_) => const TooltipContainer(
-                    child: Text('Remove from history'),
+                  tooltip: (_) => TooltipContainer(
+                    child: Text(context.l10n.transfersRemoveFromHistory),
                   ),
                   child: Button.ghost(
                     style: AppTheme.controlButtonStyle(
@@ -123,7 +124,7 @@ class _ErroredFileOperation extends StatelessWidget {
           StateView.error(
             title: operation.label,
             message: error,
-            actionLabel: onRetry == null ? null : 'Retry',
+            actionLabel: onRetry == null ? null : context.l10n.commonRetry,
             onAction: onRetry,
           ),
         ],
@@ -204,7 +205,10 @@ class _ActiveFileOperation extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        '${formatBytes(operation.written)} / ${formatBytes(operation.total)}',
+                        context.l10n.transfersBytesProgress(
+                          formatBytes(operation.written),
+                          formatBytes(operation.total),
+                        ),
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).typography.xSmall.copyWith(
                           color: colors.mutedForeground,
@@ -213,7 +217,7 @@ class _ActiveFileOperation extends StatelessWidget {
                     ),
                     const Gap(AppSpacing.sm),
                     Text(
-                      _percentage(operation.progress),
+                      _percentage(context, operation.progress),
                       style: Theme.of(context).typography.xSmall.copyWith(
                         color: colors.mutedForeground,
                       ),
@@ -227,8 +231,9 @@ class _ActiveFileOperation extends StatelessWidget {
                 top: -AppSpacing.sm,
                 end: -AppSpacing.sm,
                 child: Tooltip(
-                  tooltip: (_) =>
-                      const TooltipContainer(child: Text('Cancel download')),
+                  tooltip: (_) => TooltipContainer(
+                    child: Text(context.l10n.transfersCancelDownload),
+                  ),
                   child: Button.ghost(
                     style: AppTheme.controlButtonStyle(
                       const ButtonStyle.ghostIcon(),
@@ -307,14 +312,14 @@ class _CompletedFileOperation extends StatelessWidget {
                     leading: const AppIconFrame(
                       child: Icon(LucideIcons.folderOpen),
                     ),
-                    child: const Text('Show file'),
+                    child: Text(context.l10n.transfersShowFile),
                   ),
                 if (onOpenFile != null && onRemove != null)
                   const Gap(AppSpacing.sm),
                 if (onRemove != null)
                   Tooltip(
-                    tooltip: (_) => const TooltipContainer(
-                      child: Text('Remove from history'),
+                    tooltip: (_) => TooltipContainer(
+                      child: Text(context.l10n.transfersRemoveFromHistory),
                     ),
                     child: Button.ghost(
                       style: AppTheme.controlButtonStyle(
@@ -378,14 +383,15 @@ class _TerminalFileOperation extends StatelessWidget {
             Button.secondary(
               onPressed: onRetry,
               leading: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
-              child: const Text('Retry'),
+              child: Text(context.l10n.commonRetry),
             ),
           ],
           if (onRemove != null) ...[
             const Gap(AppSpacing.sm),
             Tooltip(
-              tooltip: (_) =>
-                  const TooltipContainer(child: Text('Remove from history')),
+              tooltip: (_) => TooltipContainer(
+                child: Text(context.l10n.transfersRemoveFromHistory),
+              ),
               child: Button.ghost(
                 style: AppTheme.controlButtonStyle(
                   const ButtonStyle.ghostIcon(),
@@ -480,7 +486,7 @@ class _RouteLine extends StatelessWidget {
   }
 }
 
-String _percentage(double? progress) {
+String _percentage(BuildContext context, double? progress) {
   if (progress == null) return '—';
-  return '${(progress * 100).round()}%';
+  return context.l10n.transfersProgressPercent((progress * 100).round());
 }

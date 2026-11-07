@@ -17,8 +17,12 @@ internal object BackgroundActivityNotification {
     fun start(service: Service) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             service.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(channelId, "Background activity", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Keeps enabled CopyPaste features active in the background."
+                NotificationChannel(
+                    channelId,
+                    service.getString(R.string.background_channel_name),
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = service.getString(R.string.background_channel_description)
                     setSound(null, null)
                     enableVibration(false)
                 },
@@ -26,8 +30,8 @@ internal object BackgroundActivityNotification {
         }
         val notification = NotificationCompat.Builder(service, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("CopyPaste is active")
-            .setContentText("Enabled features are running in the background.")
+            .setContentTitle(service.getString(R.string.background_title))
+            .setContentText(service.getString(R.string.background_text))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)

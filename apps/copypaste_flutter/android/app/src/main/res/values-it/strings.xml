@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Appunti salvati</string>
+    <string name="capture_channel_description">Conferma che CopyPaste ha salvato una modifica agli appunti.</string>
+    <string name="capture_title">Appunti salvati</string>
+    <string name="capture_body_default">Un nuovo elemento è stato aggiunto a CopyPaste.</string>
+    <string name="capture_image">Immagine</string>
+    <string name="capture_image_size">Immagine · %1$d × %2$d</string>
+    <string name="background_channel_name">Attività in background</string>
+    <string name="background_channel_description">Mantiene attive in background le funzioni di CopyPaste attivate.</string>
+    <string name="background_title">CopyPaste è attivo</string>
+    <string name="background_text">Le funzioni attivate sono in esecuzione in background.</string>
+    <string name="share_saved">Salvato in CopyPaste</string>
+    <string name="share_failed">CopyPaste non è riuscito a salvare questo elemento</string>
+    <string name="chooser_open_file">Apri file di CopyPaste</string>
+    <string name="chooser_save_file">Salva file di CopyPaste</string>
+    <string name="pairing_invalid_qr">Scansiona un codice QR di abbinamento di CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">Impossibile aprire lo scanner di Google. Inserisci invece il codice di abbinamento.</string>
+    <string name="files_read_failed">Impossibile leggere il file selezionato. Controlla l\'accesso ai file e lo spazio disponibile su disco.</string>
+    <string name="files_picker_closed">Il selettore di file è stato chiuso.</string>
+</resources>

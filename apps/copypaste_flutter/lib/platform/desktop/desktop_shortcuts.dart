@@ -11,12 +11,14 @@ bool get usesDesktopShortcuts => switch (defaultTargetPlatform) {
   _ => false,
 };
 
-SingleActivator desktopShortcut(LogicalKeyboardKey key) => SingleActivator(
-  key,
-  meta: defaultTargetPlatform == TargetPlatform.macOS,
-  control: defaultTargetPlatform != TargetPlatform.macOS,
-  includeRepeats: false,
-);
+SingleActivator desktopShortcut(LogicalKeyboardKey key, {bool shift = false}) =>
+    SingleActivator(
+      key,
+      meta: defaultTargetPlatform == TargetPlatform.macOS,
+      control: defaultTargetPlatform != TargetPlatform.macOS,
+      shift: shift,
+      includeRepeats: false,
+    );
 
 Map<ShortcutActivator, VoidCallback> desktopWindowBindings({
   Future<void> Function()? onClose,

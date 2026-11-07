@@ -54,9 +54,13 @@ void main() {
       await tester.tap(_clip(0), kind: PointerDeviceKind.mouse);
       await _frames(tester);
       expect(controller.selection.selectedId, 'clip-0');
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      // macOS reserves Control-click for the context menu.
+      final additive = defaultTargetPlatform == TargetPlatform.macOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(additive);
       await tester.tap(_clip(2), kind: PointerDeviceKind.mouse);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyUpEvent(additive);
       await _frames(tester);
       expect(controller.bulk.bulkSelectedIds, {'clip-0', 'clip-2'});
       expect(controller.selection.selectedId, isNull);

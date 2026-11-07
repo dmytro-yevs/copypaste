@@ -24,6 +24,7 @@
     <application
         android:label="CopyPaste"
         android:name="${applicationName}"
+        android:localeConfig="@xml/locales_config"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
         <service android:name=".InferenceWorkerService" android:exported="false"

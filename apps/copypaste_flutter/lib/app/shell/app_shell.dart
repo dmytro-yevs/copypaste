@@ -8,6 +8,7 @@ import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../l10n/l10n.dart';
 import '../theme/app_brand_logo.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_overlays.dart';
@@ -152,8 +153,8 @@ class _AppShellState extends State<AppShell> {
                     tooltip: (context) => TooltipContainer(
                       child: Text(
                         railExpanded
-                            ? 'Collapse navigation'
-                            : 'Expand navigation',
+                            ? context.l10n.appCollapseNavigation
+                            : context.l10n.appExpandNavigation,
                       ),
                     ),
                     child: Button.ghost(
@@ -187,10 +188,12 @@ class _AppShellState extends State<AppShell> {
                             Button.ghost(
                               style: AppTheme.brandButtonStyle,
                               onPressed: _openHistory,
-                              child: const AppBrandLogo(
-                                key: ValueKey<String>('header-brand-logo'),
+                              child: AppBrandLogo(
+                                key: const ValueKey<String>(
+                                  'header-brand-logo',
+                                ),
                                 size: AppIconSize.md,
-                                semanticLabel: 'Open History',
+                                semanticLabel: context.l10n.appOpenHistory,
                               ),
                             ),
                         ],
@@ -421,10 +424,10 @@ class _AppShellState extends State<AppShell> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const AppBrandLogo(
-                key: ValueKey<String>('copypaste-brand-logo'),
+              AppBrandLogo(
+                key: const ValueKey<String>('copypaste-brand-logo'),
                 size: AppIconSize.xl,
-                semanticLabel: 'Open History',
+                semanticLabel: context.l10n.appOpenHistory,
               ),
               if (expanded) ...[
                 const Gap(AppSpacing.sm),

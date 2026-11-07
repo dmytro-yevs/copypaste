@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
@@ -114,7 +115,7 @@ class _SecretSpoilerState extends State<SecretSpoiler>
         if (!_revealed)
           Positioned.fill(
             child: Semantics(
-              label: 'Confidential content. Reveal spoiler',
+              label: context.l10n.historySpoilerRevealSemantics,
               child: Listener(
                 onPointerDown: (event) => _origin = event.localPosition,
                 child: Button.ghost(

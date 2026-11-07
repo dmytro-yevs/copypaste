@@ -1,9 +1,11 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 enum HistoryAction { copy, download, importFiles, pin, delete }
 
 /// The History status message and the latest failed user operation.
 class HistoryErrors {
-  static const watchUnavailable =
-      'History updates are temporarily unavailable.';
+  static String get watchUnavailable =>
+      AppStrings.current.historyErrorUpdatesUnavailable;
 
   String? message;
   String? _operationError;

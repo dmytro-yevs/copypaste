@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:re_highlight/languages/bash.dart';
 import 'package:re_highlight/languages/c.dart';
 import 'package:re_highlight/languages/cpp.dart';
@@ -259,7 +260,7 @@ abstract final class HistoryCodeHighlighter {
   }
 
   static String _languageLabel(String? language) => switch (language) {
-    null => 'Code',
+    null => AppStrings.current.historyKindCode,
     'bash' => 'Bash',
     'cpp' => 'C++',
     'csharp' => 'C#',

@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'history_selectable_text.dart';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
@@ -28,18 +29,20 @@ Future<void> showHistoryOcrDialog(
       builder: (context, _) {
         final text = controller.text;
         final content = controller.busy
-            ? const StateView.loading(message: 'Recognizing image text.')
+            ? StateView.loading(message: context.l10n.historyOcrRecognizing)
             : controller.errorMessage != null
             ? StateView.error(
-                title: 'OCR failed',
+                title: context.l10n.historyOcrFailedTitle,
                 message: controller.errorMessage,
-                actionLabel: controller.canRun ? 'Try again' : null,
+                actionLabel: controller.canRun
+                    ? context.l10n.commonTryAgain
+                    : null,
                 onAction: controller.canRun
                     ? () => unawaited(controller.recognize(clip))
                     : null,
               )
             : text == null || text.trim().isEmpty
-            ? const StateView.empty(title: 'No text found')
+            ? StateView.empty(title: context.l10n.historyOcrNoText)
             : SingleChildScrollView(
                 child: HistorySelectableText(
                   text,
@@ -48,7 +51,7 @@ Future<void> showHistoryOcrDialog(
               );
         return AppOverlays.alertDialog(
           icon: LucideIcons.scanText,
-          title: const Text('Image text'),
+          title: Text(context.l10n.historyOcrTitle),
           content: SizedBox(
             key: const ValueKey('history-ocr-content'),
             width: AppOverlaySize.dialogMaxWidth,
@@ -61,7 +64,7 @@ Future<void> showHistoryOcrDialog(
             Button.secondary(
               style: AppTheme.dialogButtonStyle(const ButtonStyle.secondary()),
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Close'),
+              child: Text(context.l10n.commonClose),
             ),
             Button.primary(
               style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
@@ -73,17 +76,19 @@ Future<void> showHistoryOcrDialog(
                       if (!context.mounted) return;
                       AppToast.show(
                         context,
-                        title: copied ? 'Copied' : 'Copy failed',
+                        title: copied
+                            ? context.l10n.historyCopiedTitle
+                            : context.l10n.historyCopyFailedTitle,
                         message: copied
-                            ? 'Recognized text copied.'
-                            : 'Text could not be copied. Try again.',
+                            ? context.l10n.historyOcrTextCopied
+                            : context.l10n.historyOcrCopyError,
                         tone: copied
                             ? AppToastTone.success
                             : AppToastTone.error,
                       );
                     },
               leading: const AppIconFrame(child: Icon(LucideIcons.copy)),
-              child: const Text('Copy'),
+              child: Text(context.l10n.commonCopy),
             ),
           ],
         );

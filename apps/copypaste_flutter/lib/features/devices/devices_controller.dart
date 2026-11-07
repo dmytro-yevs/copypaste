@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -122,10 +123,10 @@ class DevicesController extends ChangeNotifier {
       const [];
   String? get errorMessage => _systemScanError ?? _errorMessage;
   String get errorTitle => _systemScanError != null
-      ? 'Scanner unavailable'
+      ? AppStrings.current.devicesScannerUnavailableTitle
       : _lastErrorWasAction
-      ? 'Action failed'
-      : 'Device refresh failed';
+      ? AppStrings.current.devicesActionFailedTitle
+      : AppStrings.current.devicesRefreshFailedTitle;
   PairingCeremony? get pairing => _pairingCeremony;
   PairingEntryMode? get pairingEntryMode => _pairingEntryMode;
   DeviceDetailsTarget? get deviceDetailsTarget => _deviceDetailsTarget;
@@ -152,13 +153,16 @@ class DevicesController extends ChangeNotifier {
   DeviceConnectionState peerConnectionState(DevicePeer peer) =>
       _connectionState(peer.details?.presence, fallbackOnline: peer.online);
 
-  String peerStateLabel(DevicePeer peer) => switch (peerConnectionState(peer)) {
-    DeviceConnectionState.online => 'Available',
-    DeviceConnectionState.offline => 'Offline',
-    DeviceConnectionState.visible => 'Visible now',
-    DeviceConnectionState.notSeen => 'Not seen',
-    DeviceConnectionState.unknown => 'Status unknown',
-  };
+  String peerStateLabel(DevicePeer peer) {
+    final strings = AppStrings.current;
+    return switch (peerConnectionState(peer)) {
+      DeviceConnectionState.online => strings.devicesPeerAvailable,
+      DeviceConnectionState.offline => strings.devicesConnectionOffline,
+      DeviceConnectionState.visible => strings.devicesPeerVisibleNow,
+      DeviceConnectionState.notSeen => strings.devicesConnectionNotSeen,
+      DeviceConnectionState.unknown => strings.devicesPeerStatusUnknown,
+    };
+  }
 
   /// Display-safe RTT. A missing or expired observation is never rendered.
   String peerLatencyLabel(DevicePeer peer) => _latencyLabel(peer.details);
@@ -244,10 +248,13 @@ class DevicesController extends ChangeNotifier {
       presence.trust == DeviceObservationTrust.authenticated;
 
   String _latencyLabel(DeviceDetails? details) {
+    final strings = AppStrings.current;
     final latency = details?.latency;
-    if (!isLatencyFresh(latency)) return '— ms';
+    if (!isLatencyFresh(latency)) return strings.devicesPingUnavailable;
     final milliseconds = latency!.roundTripLatency.inMilliseconds;
-    return milliseconds == 0 ? '<1 ms' : '$milliseconds ms';
+    return milliseconds == 0
+        ? strings.devicesPingUnderOneMillisecond
+        : strings.devicesPingMilliseconds(milliseconds);
   }
 
   bool _isFresh(DateTime? freshUntil) {
@@ -365,7 +372,7 @@ class DevicesController extends ChangeNotifier {
     if (gateway is! NearbyPairingGateway) {
       _setError(
         StateError(
-          'Nearby pairing is unavailable. Use Add device to show a pairing code.',
+          AppStrings.current.devicesNearbyPairingUnavailableUseAddDevice,
         ),
       );
       return;
@@ -414,13 +421,12 @@ class DevicesController extends ChangeNotifier {
     } on PlatformException catch (error) {
       if (!_disposed && epoch == _pairingEpoch) {
         scanError = error.code == 'invalid_pairing_qr'
-            ? 'Scan a CopyPaste pairing QR code.'
-            : 'Google scanner is unavailable. Enter the pairing code instead.';
+            ? AppStrings.current.pairingInvalidQr
+            : AppStrings.current.pairingGoogleScannerUnavailable;
       }
     } catch (_) {
       if (!_disposed && epoch == _pairingEpoch) {
-        scanError =
-            'The scanner could not open. Enter the pairing code instead.';
+        scanError = AppStrings.current.pairingScannerCouldNotOpen;
       }
     } finally {
       _systemScanInFlight = false;
@@ -476,7 +482,7 @@ class DevicesController extends ChangeNotifier {
       }
       if (!_captureProtectionActive) {
         _pendingAddress = null;
-        _errorMessage = 'Secure pairing presentation is unavailable.';
+        _errorMessage = AppStrings.current.pairingSecurePresentationUnavailable;
         _notify();
         return false;
       }

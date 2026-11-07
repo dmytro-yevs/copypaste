@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/services.dart';
 import 'package:pub_semver/pub_semver.dart';
 
@@ -72,8 +73,6 @@ class ModuleMarketplacePlatform {
     Abi.androidIA32 => ('android', 'x86'),
     Abi.linuxX64 => ('linux', 'x86_64'),
     Abi.linuxArm64 => ('linux', 'aarch64'),
-    _ => throw const ModulesException(
-      'Modules are unavailable on this device.',
-    ),
+    _ => throw ModulesException(AppStrings.current.platformModulesUnavailable),
   };
 }

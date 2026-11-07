@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import '../../devices/flutter_rust_devices_gateway.dart';
@@ -258,7 +259,7 @@ class RuntimeHistoryRepository
             finished.completeError(
               HistoryFileOperationException(
                 record['error'] as String? ??
-                    'The file download was cancelled.',
+                    AppStrings.current.historyDownloadErrorCancelled,
               ),
             );
           }
@@ -287,13 +288,13 @@ class RuntimeHistoryRepository
     try {
       try {
         if (!await service.ready.timeout(const Duration(seconds: 5))) {
-          throw const HistoryFileOperationException(
-            'The download service is unavailable. Reopen CopyPaste and try again.',
+          throw HistoryFileOperationException(
+            AppStrings.current.historyDownloadErrorServiceUnavailable,
           );
         }
       } on TimeoutException {
-        throw const HistoryFileOperationException(
-          'The download service did not connect. Try again.',
+        throw HistoryFileOperationException(
+          AppStrings.current.historyDownloadErrorServiceTimeout,
         );
       }
       await _fileOperation(
@@ -324,7 +325,7 @@ class RuntimeHistoryRepository
       throw HistoryFileOperationException(error.message);
     } on PlatformException catch (error) {
       throw HistoryFileOperationException(
-        error.message ?? 'The selected file could not be accessed.',
+        error.message ?? AppStrings.current.historyFileErrorAccess,
       );
     }
   }

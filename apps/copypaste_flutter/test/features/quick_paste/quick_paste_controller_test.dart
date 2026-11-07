@@ -237,6 +237,57 @@ void main() {
       variant: TargetPlatformVariant({platform}),
     );
   }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testWidgets(
+      'word deletion edits the search while Shift deletes a clip on $platform',
+      (tester) async {
+        final repository = _Repository();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: _ContextHost(),
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        await controller.opened(1);
+        await tester.pumpAndSettle();
+        final clips = repository.clips.length;
+        final search = find.byType(EditableText).first;
+        await tester.enterText(search, 'two words');
+        await tester.pumpAndSettle();
+        final wordModifier = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.altLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(wordModifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.sendKeyUpEvent(wordModifier);
+        await tester.pumpAndSettle();
+        final editable = tester.widget<EditableText>(search);
+        expect(editable.controller.text, 'two ');
+        expect(repository.clips, hasLength(clips));
+
+        await tester.enterText(search, '');
+        await tester.pumpAndSettle();
+        controller.focus(controller.items.first);
+        final primary = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(primary);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(primary);
+        await tester.pumpAndSettle();
+        expect(controller.items, hasLength(clips - 1));
+        expect(repository.clips, hasLength(clips - 1));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
   test(
     'file transfer reuses a copy, retries failure, and honors cancellation',
     () async {

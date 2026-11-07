@@ -28,7 +28,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.showSetup();
-    expect(controller.linux.integrationReady, isTrue);
+    expect(controller.linux.captureReady, isTrue);
 
     integration.failStatus = true;
     await controller.continueFromSetup();
@@ -42,97 +42,88 @@ void main() {
     expect(controller.errorMessage, isNull);
   });
 
-  test(
-    'Wayland setup requires the verified clipboard bridge and input consent',
-    () async {
-      final integration = _Integration(
-        const LinuxIntegrationStatus(
-          session: LinuxDesktopSession.wayland,
-          globalShortcuts: true,
-          remoteDesktop: LinuxRemoteDesktopState.consentRequired,
-          companion: LinuxCompanionState.unavailable,
-          clipboard: false,
-          quickPaste: false,
-          screenshotProtection: false,
-          startAtLogin: false,
-          uriRegistered: false,
-        ),
-      );
-      final controller = linuxOnboarding(
-        store: MemoryOnboardingStore(),
-        integration: integration,
-      );
-      addTearDown(controller.dispose);
-
-      await controller.initialize();
-      await controller.showSetup();
-      await controller.continueFromSetup();
-      expect(controller.step, OnboardingStep.setup);
-      expect(
-        controller.errorMessage,
-        contains('signed GNOME or KDE companion'),
-      );
-
-      integration.statusValue = const LinuxIntegrationStatus(
+  test('Wayland setup requires clipboard access from the companion', () async {
+    final integration = _Integration(
+      const LinuxIntegrationStatus(
         session: LinuxDesktopSession.wayland,
         globalShortcuts: true,
-        remoteDesktop: LinuxRemoteDesktopState.active,
-        companion: LinuxCompanionState.active,
-        clipboard: true,
-        quickPaste: true,
+        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+        companion: LinuxCompanionState.unavailable,
+        clipboard: false,
+        quickPaste: false,
         screenshotProtection: false,
         startAtLogin: false,
         uriRegistered: false,
-      );
-      await controller.continueFromSetup();
-      expect(controller.step, OnboardingStep.ready);
-    },
-  );
+      ),
+    );
+    final controller = linuxOnboarding(
+      store: MemoryOnboardingStore(),
+      integration: integration,
+    );
+    addTearDown(controller.dispose);
 
-  test(
-    'X11 setup requires clipboard availability before Quick Paste',
-    () async {
-      final integration = _Integration(
-        const LinuxIntegrationStatus(
-          session: LinuxDesktopSession.x11,
-          globalShortcuts: true,
-          remoteDesktop: LinuxRemoteDesktopState.unsupported,
-          companion: LinuxCompanionState.unavailable,
-          clipboard: false,
-          quickPaste: true,
-          screenshotProtection: false,
-        ),
-      );
-      final controller = linuxOnboarding(
-        store: MemoryOnboardingStore(),
-        integration: integration,
-      );
-      addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.showSetup();
+    await controller.continueFromSetup();
+    expect(controller.step, OnboardingStep.setup);
+    expect(controller.errorMessage, contains('signed GNOME or KDE companion'));
 
-      await controller.initialize();
-      await controller.showSetup();
-      await controller.continueFromSetup();
+    integration.statusValue = const LinuxIntegrationStatus(
+      session: LinuxDesktopSession.wayland,
+      globalShortcuts: true,
+      remoteDesktop: LinuxRemoteDesktopState.active,
+      companion: LinuxCompanionState.active,
+      clipboard: true,
+      quickPaste: true,
+      screenshotProtection: false,
+      startAtLogin: false,
+      uriRegistered: false,
+    );
+    await controller.continueFromSetup();
+    expect(controller.step, OnboardingStep.ready);
+  });
 
-      expect(controller.step, OnboardingStep.setup);
-      expect(
-        controller.errorMessage,
-        contains('Clipboard access is unavailable'),
-      );
-
-      integration.statusValue = const LinuxIntegrationStatus(
+  test('X11 setup requires clipboard availability', () async {
+    final integration = _Integration(
+      const LinuxIntegrationStatus(
         session: LinuxDesktopSession.x11,
         globalShortcuts: true,
         remoteDesktop: LinuxRemoteDesktopState.unsupported,
         companion: LinuxCompanionState.unavailable,
-        clipboard: true,
+        clipboard: false,
         quickPaste: true,
         screenshotProtection: false,
-      );
-      await controller.continueFromSetup();
+      ),
+    );
+    final controller = linuxOnboarding(
+      store: MemoryOnboardingStore(),
+      integration: integration,
+    );
+    addTearDown(controller.dispose);
 
-      expect(controller.step, OnboardingStep.ready);
-    },
-  );
+    await controller.initialize();
+    await controller.showSetup();
+    await controller.continueFromSetup();
+
+    expect(controller.step, OnboardingStep.setup);
+    expect(
+      controller.errorMessage,
+      contains('Clipboard access is unavailable'),
+    );
+
+    integration.statusValue = const LinuxIntegrationStatus(
+      session: LinuxDesktopSession.x11,
+      globalShortcuts: true,
+      remoteDesktop: LinuxRemoteDesktopState.unsupported,
+      companion: LinuxCompanionState.unavailable,
+      clipboard: true,
+      quickPaste: true,
+      screenshotProtection: false,
+    );
+    await controller.continueFromSetup();
+
+    expect(controller.step, OnboardingStep.ready);
+  });
 
   test(
     'Wayland setup keeps clipboard and Quick Paste readiness separate',
@@ -155,7 +146,8 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      expect(controller.linux.integrationReady, isFalse);
+      expect(controller.linux.captureReady, isTrue);
+      expect(controller.linux.quickPasteReady, isFalse);
 
       integration.statusValue = const LinuxIntegrationStatus(
         session: LinuxDesktopSession.wayland,
@@ -168,7 +160,8 @@ void main() {
       );
       await controller.linux.refresh();
 
-      expect(controller.linux.integrationReady, isFalse);
+      expect(controller.linux.captureReady, isFalse);
+      expect(controller.linux.quickPasteReady, isFalse);
     },
   );
 
@@ -199,7 +192,7 @@ void main() {
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      expect(controller.linux.integrationReady, isFalse);
+      expect(controller.linux.captureReady, isFalse);
     },
   );
 
@@ -222,7 +215,7 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.initialize();
-    expect(controller.linux.integrationReady, isFalse);
+    expect(controller.linux.captureReady, isFalse);
 
     integration.statusValue = const LinuxIntegrationStatus(
       session: LinuxDesktopSession.wayland,
@@ -236,7 +229,7 @@ void main() {
     await controller.showSetup();
 
     expect(controller.step, OnboardingStep.setup);
-    expect(controller.linux.integrationReady, isTrue);
+    expect(controller.linux.captureReady, isTrue);
   });
 
   testWidgets('Linux setup states the screenshot protection exception', (
@@ -278,49 +271,73 @@ void main() {
     expect(find.widgetWithText(Button, 'Register links'), findsOneWidget);
   });
 
-  testWidgets('Wayland data control shows the source policy limitation', (
-    tester,
-  ) async {
-    final controller = linuxOnboarding(
-      store: MemoryOnboardingStore(),
-      integration: _Integration(
-        const LinuxIntegrationStatus(
-          session: LinuxDesktopSession.wayland,
-          globalShortcuts: false,
-          remoteDesktop: LinuxRemoteDesktopState.unsupported,
-          companion: LinuxCompanionState.unavailable,
-          clipboard: true,
-          quickPaste: false,
-          screenshotProtection: false,
-          capabilities: {
-            LinuxCapabilityKind.sourceAttribution: LinuxCapabilityStatus(
-              state: LinuxCapabilityState.unsupported,
-              backend: 'daemonClipboard',
-              guarantee: LinuxCapabilityGuarantee.none,
-            ),
-          },
-        ),
+  testWidgets('missing companion continues with basic capture', (tester) async {
+    final store = MemoryOnboardingStore();
+    final integration = _Integration(
+      const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: false,
+        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+        companion: LinuxCompanionState.unavailable,
+        clipboard: true,
+        quickPaste: false,
+        screenshotProtection: false,
+        capabilities: {
+          LinuxCapabilityKind.clipboardCapture: LinuxCapabilityStatus(
+            state: LinuxCapabilityState.available,
+            backend: 'linux-wayland-data-control',
+            guarantee: LinuxCapabilityGuarantee.bestEffort,
+          ),
+          LinuxCapabilityKind.sourceAttribution: LinuxCapabilityStatus(
+            state: LinuxCapabilityState.unsupported,
+            backend: 'daemonClipboard',
+            guarantee: LinuxCapabilityGuarantee.none,
+          ),
+        },
       ),
     );
+    final controller = linuxOnboarding(store: store, integration: integration);
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.showSetup();
 
+    var finished = false;
     await tester.pumpWidget(
       ShadcnApp(
-        home: OnboardingScreen(controller: controller, onFinished: () async {}),
+        home: OnboardingScreen(
+          controller: controller,
+          onFinished: () async => finished = controller.complete,
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining('Basic clipboard access is ready.'),
+      find.text('Optional. Needed for Quick Paste and source app exclusions.'),
       findsOneWidget,
     );
+    expect(find.widgetWithText(Button, 'Open setup'), findsOneWidget);
     expect(
-      find.textContaining('Source app exclusions and Quick Paste'),
+      find.widgetWithText(Button, 'Allow keyboard control'),
       findsOneWidget,
     );
+    final continueButton = find.widgetWithText(
+      Button,
+      'Continue with basic capture',
+    );
+    expect(tester.widget<Button>(continueButton).onPressed, isNotNull);
+
+    await tester.tap(continueButton);
+    await tester.pumpAndSettle();
+    expect(controller.step, OnboardingStep.ready);
+    await tester.tap(find.widgetWithText(Button, 'Get started'));
+    await tester.pumpAndSettle();
+    expect(finished, isTrue);
+
+    final resumed = linuxOnboarding(store: store, integration: integration);
+    addTearDown(resumed.dispose);
+    await resumed.initialize();
+    expect(resumed.complete, isTrue);
   });
 
   test(

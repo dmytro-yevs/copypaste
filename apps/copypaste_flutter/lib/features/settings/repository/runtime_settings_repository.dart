@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import '../../../platform/notifications/capture_notification_preview.dart';
 import '../../../shared/runtime_event_service.dart';
@@ -68,15 +69,20 @@ class RuntimeSettingsRepository
         final details = clip.imageDetails;
         return CaptureNotificationPreview(
           text: details == null
-              ? 'Image'
-              : 'Image · ${details.width} × ${details.height}',
+              ? AppStrings.current.settingsRuntimeNotificationImage
+              : AppStrings.current.settingsRuntimeNotificationImageSize(
+                  details.width,
+                  details.height,
+                ),
           imagePng: image.pngBytes,
         );
       case runtime.ClipContentClass.file:
         final details = clip.fileDetails;
         return CaptureNotificationPreview(
           text: CaptureNotificationPreview.textPreview(
-            details?.filename ?? details?.sourceReference ?? 'File',
+            details?.filename ??
+                details?.sourceReference ??
+                AppStrings.current.settingsRuntimeNotificationFile,
           ),
         );
       case runtime.ClipContentClass.text:

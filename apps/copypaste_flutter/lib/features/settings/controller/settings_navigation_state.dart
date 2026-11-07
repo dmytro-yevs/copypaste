@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart' show IconData, LucideIcons;
 
 /// Lightweight settings navigation retained while presentation is unloaded.
@@ -22,70 +23,49 @@ class SettingsNavigationState {
 }
 
 enum SettingsSectionId {
-  general(
-    label: 'General',
-    slug: 'general',
-    description: 'Application visibility.',
-    icon: LucideIcons.settings,
-  ),
-  clipboard(
-    label: 'Clipboard',
-    slug: 'clipboard',
-    description: 'Capture and history limits.',
-    icon: LucideIcons.clipboard,
-  ),
-  privacy(
-    label: 'Privacy',
-    slug: 'privacy',
-    description: 'Application exclusions and screen protection.',
-    icon: LucideIcons.shield,
-  ),
-  quickPaste(
-    label: 'Quick Paste',
-    slug: 'quick-paste',
-    description: 'Shortcut and automatic paste behavior.',
-    icon: LucideIcons.keyboard,
-  ),
-  sync(
-    label: 'Sync',
-    slug: 'sync',
-    description: 'Synchronization and nearby-device discovery.',
-    icon: LucideIcons.refreshCw,
-  ),
-  notifications(
-    label: 'Notifications',
-    slug: 'notifications',
-    description: 'Capture notifications and sounds.',
-    icon: LucideIcons.bell,
-  ),
-  data(
-    label: 'Data',
-    slug: 'data',
-    description: 'Export, backup, and restore.',
-    icon: LucideIcons.database,
-  ),
-  modules(
-    label: 'Modules',
-    slug: 'modules',
-    description: 'Install and manage optional modules.',
-    icon: LucideIcons.puzzle,
-  ),
-  about(
-    label: 'About',
-    slug: 'about',
-    description: 'Version and application updates.',
-    icon: LucideIcons.info,
-  );
+  general(slug: 'general', icon: LucideIcons.settings),
+  clipboard(slug: 'clipboard', icon: LucideIcons.clipboard),
+  privacy(slug: 'privacy', icon: LucideIcons.shield),
+  quickPaste(slug: 'quick-paste', icon: LucideIcons.keyboard),
+  sync(slug: 'sync', icon: LucideIcons.refreshCw),
+  notifications(slug: 'notifications', icon: LucideIcons.bell),
+  data(slug: 'data', icon: LucideIcons.database),
+  modules(slug: 'modules', icon: LucideIcons.puzzle),
+  about(slug: 'about', icon: LucideIcons.info);
 
-  const SettingsSectionId({
-    required this.label,
-    required this.slug,
-    required this.description,
-    required this.icon,
-  });
+  const SettingsSectionId({required this.slug, required this.icon});
 
-  final String label;
   final String slug;
-  final String description;
   final IconData icon;
+
+  String get label {
+    final strings = AppStrings.current;
+    return switch (this) {
+      SettingsSectionId.general => strings.settingsSectionGeneral,
+      SettingsSectionId.clipboard => strings.settingsSectionClipboard,
+      SettingsSectionId.privacy => strings.settingsSectionPrivacy,
+      SettingsSectionId.quickPaste => 'Quick Paste',
+      SettingsSectionId.sync => strings.settingsSectionSync,
+      SettingsSectionId.notifications => strings.settingsSectionNotifications,
+      SettingsSectionId.data => strings.settingsSectionData,
+      SettingsSectionId.modules => strings.settingsSectionModules,
+      SettingsSectionId.about => strings.settingsSectionAbout,
+    };
+  }
+
+  String get description {
+    final strings = AppStrings.current;
+    return switch (this) {
+      SettingsSectionId.general => strings.settingsSectionGeneralSummary,
+      SettingsSectionId.clipboard => strings.settingsSectionClipboardSummary,
+      SettingsSectionId.privacy => strings.settingsSectionPrivacySummary,
+      SettingsSectionId.quickPaste => strings.settingsSectionQuickPasteSummary,
+      SettingsSectionId.sync => strings.settingsSectionSyncSummary,
+      SettingsSectionId.notifications =>
+        strings.settingsSectionNotificationsSummary,
+      SettingsSectionId.data => strings.settingsSectionDataSummary,
+      SettingsSectionId.modules => strings.settingsSectionModulesSummary,
+      SettingsSectionId.about => strings.settingsSectionAboutSummary,
+    };
+  }
 }

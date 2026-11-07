@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/history_models.dart';
@@ -67,7 +68,7 @@ class HistoryTagsController extends ChangeNotifier {
       _data = data;
     } catch (_) {
       if (!_disposed && generation == _generation) {
-        error = 'Tags could not be loaded. Try again.';
+        error = AppStrings.current.historyTagsErrorLoad;
       }
     } finally {
       if (!_disposed && generation == _generation) {
@@ -96,8 +97,7 @@ class HistoryTagsController extends ChangeNotifier {
       return error == null;
     } catch (_) {
       if (!_disposed) {
-        error =
-            'The tag change could not be saved. Use a unique name of up to 64 characters and select pinned clips.';
+        error = AppStrings.current.historyTagsErrorSave;
       }
       return false;
     } finally {

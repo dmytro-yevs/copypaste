@@ -10,6 +10,7 @@ import '../../../app/theme/app_theme.dart';
 
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/equal_height_grid.dart';
 import '../controller/modules_controller.dart';
@@ -60,9 +61,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 index: controller.section.index,
                 onChanged: (index) =>
                     controller.selectSection(ModulesSection.values[index]),
-                children: const [
-                  TabItem(child: Text('Marketplace')),
-                  TabItem(child: Text('Installed')),
+                children: [
+                  TabItem(child: Text(context.l10n.modulesMarketplaceTab)),
+                  TabItem(child: Text(context.l10n.modulesInstalledTab)),
                 ],
               ),
             ),
@@ -77,14 +78,14 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 size: AppIconSize.sm,
                 child: Icon(LucideIcons.refreshCw, size: AppIconSize.sm),
               ),
-              child: const Text('Refresh'),
+              child: Text(context.l10n.modulesRefresh),
             ),
           ],
         ),
         const Gap(AppSpacing.lg),
         TextField(
           initialValue: controller.query,
-          placeholder: const Text('Search modules'),
+          placeholder: Text(context.l10n.modulesSearchPlaceholder),
           onChanged: controller.search,
           features: const [
             InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
@@ -95,19 +96,21 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         if (controller.errorMessage != null &&
             controller.state == ModulesLoadState.ready) ...[
           StateView.error(
-            title: 'Module operation failed',
+            title: context.l10n.modulesOperationFailed,
             message: controller.errorMessage!,
           ),
           const Gap(AppSpacing.lg),
         ],
         switch (controller.state) {
-          ModulesLoadState.loading => const StateView.loading(
-            message: 'Loading modules.',
+          ModulesLoadState.loading => StateView.loading(
+            message: context.l10n.modulesLoading,
           ),
           ModulesLoadState.error => StateView.error(
-            title: 'Modules are unavailable',
-            message: controller.errorMessage ?? 'Try loading modules again.',
-            actionLabel: 'Try again',
+            title: context.l10n.modulesUnavailableTitle,
+            message:
+                controller.errorMessage ??
+                context.l10n.modulesUnavailableMessage,
+            actionLabel: context.l10n.commonTryAgain,
             onAction: controller.initialize,
           ),
           ModulesLoadState.ready =>
@@ -116,11 +119,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 : controller.filteredModules.isEmpty
                 ? StateView.empty(
                     title: controller.modules.isEmpty
-                        ? 'No modules installed'
-                        : 'No matching modules',
+                        ? context.l10n.modulesNoneInstalled
+                        : context.l10n.modulesNoMatches,
                     message: controller.modules.isEmpty
-                        ? 'Choose a module from the marketplace.'
-                        : 'Try a different search.',
+                        ? context.l10n.modulesChooseFromMarketplace
+                        : context.l10n.modulesTryDifferentSearch,
                   )
                 : _cards([
                     for (final module in controller.filteredModules)
@@ -137,25 +140,26 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
 
   Widget _marketplace(BuildContext context) =>
       switch (controller.catalogState) {
-        ModulesLoadState.loading => const StateView.loading(
-          message: 'Loading marketplace.',
+        ModulesLoadState.loading => StateView.loading(
+          message: context.l10n.modulesMarketplaceLoading,
         ),
         ModulesLoadState.error => StateView.error(
-          title: 'Marketplace is unavailable',
+          title: context.l10n.modulesMarketplaceUnavailableTitle,
           message:
-              controller.catalogError ?? 'Try loading the marketplace again.',
-          actionLabel: 'Try again',
+              controller.catalogError ??
+              context.l10n.modulesMarketplaceUnavailableMessage,
+          actionLabel: context.l10n.commonTryAgain,
           onAction: controller.loadMarketplace,
         ),
         ModulesLoadState.ready =>
           controller.catalog.isEmpty
               ? StateView.empty(
                   title: controller.query.trim().isEmpty
-                      ? 'No modules available'
-                      : 'No matching modules',
+                      ? context.l10n.modulesNoneAvailable
+                      : context.l10n.modulesNoMatches,
                   message: controller.query.trim().isEmpty
-                      ? 'Modules will appear here when they are published.'
-                      : 'Try a different search.',
+                      ? context.l10n.modulesNoneAvailableMessage
+                      : context.l10n.modulesTryDifferentSearch,
                 )
               : _cards([
                   for (final module in controller.catalog)
@@ -208,7 +212,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                   ),
                   if (installed != null)
                     Semantics(
-                      label: 'Enable ${installed.title}',
+                      label: context.l10n.modulesEnableModule(installed.title),
                       child: Switch(
                         key: ValueKey('module-enabled-$id'),
                         value: installed.enabled,
@@ -276,7 +280,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                       onPressed: controller.busy || !marketplace!.canInstall
                           ? null
                           : () => controller.install(marketplace),
-                      child: Text(active ? _installationLabel() : 'Install'),
+                      child: Text(
+                        active
+                            ? _installationLabel(context)
+                            : context.l10n.modulesInstall,
+                      ),
                     )
                   else
                     Row(
@@ -285,10 +293,16 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                         if (update != null) ...[
                           Tooltip(
                             tooltip: (_) => TooltipContainer(
-                              child: Text('Update to ${update.version}'),
+                              child: Text(
+                                context.l10n.modulesUpdateTo(
+                                  update.version.toString(),
+                                ),
+                              ),
                             ),
                             child: Semantics(
-                              label: 'Update to ${update.version}',
+                              label: context.l10n.modulesUpdateTo(
+                                update.version.toString(),
+                              ),
                               button: true,
                               child: Button.secondary(
                                 key: ValueKey('module-update-$id'),
@@ -308,11 +322,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                           const Gap(AppSpacing.sm),
                         ],
                         Tooltip(
-                          tooltip: (_) => const TooltipContainer(
-                            child: Text('Remove module'),
+                          tooltip: (_) => TooltipContainer(
+                            child: Text(context.l10n.modulesRemoveModule),
                           ),
                           child: Semantics(
-                            label: 'Remove module',
+                            label: context.l10n.modulesRemoveModule,
                             button: true,
                             child: Button.ghost(
                               key: ValueKey('module-remove-$id'),
@@ -331,11 +345,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                         ),
                         const Gap(AppSpacing.sm),
                         Tooltip(
-                          tooltip: (_) => const TooltipContainer(
-                            child: Text('Module settings'),
+                          tooltip: (_) => TooltipContainer(
+                            child: Text(context.l10n.modulesModuleSettings),
                           ),
                           child: Semantics(
-                            label: 'Module settings',
+                            label: context.l10n.modulesModuleSettings,
                             button: true,
                             child: Button.secondary(
                               key: ValueKey('module-settings-$id'),
@@ -361,11 +375,13 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     );
   }
 
-  String _installationLabel() => controller.configuringModel
-      ? 'Downloading language model…'
+  String _installationLabel(BuildContext context) => controller.configuringModel
+      ? context.l10n.modulesDownloadingModel
       : controller.installing
-      ? 'Installing…'
-      : 'Downloading ${((controller.downloadProgress ?? 0) * 100).floor()}%';
+      ? context.l10n.modulesInstalling
+      : context.l10n.modulesDownloadingProgress(
+          ((controller.downloadProgress ?? 0) * 100).floor(),
+        );
 
   Future<void> _settings(BuildContext context, String id) => showOverlay<void>(
     context,
@@ -405,7 +421,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
             title: command.title,
             fields: command.arguments,
             values: const {},
-            action: 'Run',
+            action: context.l10n.modulesRun,
           );
     if (draft == null) return;
     ModuleResult? result;
@@ -425,7 +441,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           Button.primary(
             style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Done'),
+            child: Text(dialogContext.l10n.commonDone),
           ),
         ],
       ),
@@ -436,14 +452,14 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     await AppOverlays.showActionDialog(
       context,
       icon: LucideIcons.trash2,
-      title: Text('Remove ${module.title}?'),
-      content: const Text('The module and its local settings will be removed.'),
-      actionLabel: 'Remove',
+      title: Text(context.l10n.modulesRemoveTitle(module.title)),
+      content: Text(context.l10n.modulesRemoveMessage),
+      actionLabel: context.l10n.modulesRemove,
       changes: controller,
       canConfirm: () => !controller.busy,
       onConfirm: () => controller.remove(module.id),
       failureMessage: () =>
-          controller.errorMessage ?? 'The module could not be removed.',
+          controller.errorMessage ?? AppStrings.current.modulesRemoveFailed,
     );
   }
 }
@@ -487,7 +503,7 @@ class _ModuleFieldsDialog extends StatelessWidget {
         Button.ghost(
           style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.commonCancel),
         ),
         Button.primary(
           style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/history_models.dart';
@@ -430,7 +431,7 @@ class HistoryWindowController {
     } catch (_) {
       if (!isCurrent(epoch)) return;
       _state = HistoryLoadState.error;
-      _errors.message = 'History could not be loaded. Try again.';
+      _errors.message = AppStrings.current.historyErrorLoad;
     }
     if (isCurrent(epoch)) {
       _media.trimSourceIcons();
@@ -480,7 +481,7 @@ class HistoryWindowController {
       _publishWindow();
     } catch (_) {
       if (isCurrent(epoch)) {
-        _errors.message = 'More history could not be loaded.';
+        _errors.message = AppStrings.current.historyErrorLoadMore;
       }
     } finally {
       if (isCurrent(epoch)) {
@@ -557,7 +558,7 @@ class HistoryWindowController {
       _publishWindow();
     } catch (_) {
       if (isCurrent(epoch)) {
-        _errors.message = 'Earlier history could not be loaded.';
+        _errors.message = AppStrings.current.historyErrorLoadEarlier;
       }
     } finally {
       if (isCurrent(epoch)) {
@@ -583,7 +584,7 @@ class HistoryWindowController {
           refreshed = true;
         } catch (_) {
           if (isCurrent(epoch)) {
-            _errors.message = 'History could not be refreshed. Try again.';
+            _errors.message = AppStrings.current.historyErrorRefresh;
           }
         }
         if (isCurrent(epoch)) _scope.notify();

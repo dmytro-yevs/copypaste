@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
@@ -98,6 +99,7 @@ class _TagsEditorState extends State<_TagsEditor> {
     animation: _changes,
     builder: (context, _) {
       final tags = _tags;
+      final strings = context.l10n;
       return CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.escape): () =>
@@ -113,7 +115,7 @@ class _TagsEditorState extends State<_TagsEditor> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Tags').semiBold(),
+                Text(strings.historyTags).semiBold(),
                 const Gap(AppSpacing.md),
                 Flexible(
                   child: SingleChildScrollView(
@@ -124,12 +126,12 @@ class _TagsEditorState extends State<_TagsEditor> {
                           const StateView.loading()
                         else if (tags.error != null)
                           StateView.error(
-                            title: 'Could not update tags',
+                            title: strings.historyTagsUpdateErrorTitle,
                             message: tags.error,
                           )
                         else if (tags.tags.isEmpty)
-                          const StateView.empty(
-                            title: 'No tags yet',
+                          StateView.empty(
+                            title: strings.historyTagsEmpty,
                             compact: true,
                           ),
                         for (final tag in tags.tags)
@@ -149,7 +151,7 @@ class _TagsEditorState extends State<_TagsEditor> {
                                           : () => setState(
                                               () => _deletingId = null,
                                             ),
-                                      child: const Text('Cancel'),
+                                      child: Text(strings.commonCancel),
                                     ),
                                     Button.destructive(
                                       onPressed: tags.busy
@@ -162,7 +164,7 @@ class _TagsEditorState extends State<_TagsEditor> {
                                                 );
                                               }
                                             },
-                                      child: const Text('Delete'),
+                                      child: Text(strings.commonDelete),
                                     ),
                                   ],
                                 ),
@@ -205,7 +207,10 @@ class _TagsEditorState extends State<_TagsEditor> {
                                     data: AppTheme.selectTheme(
                                       context,
                                       variant: AppSelectVariant.inlineAction,
-                                      labels: const ['Rename', 'Delete'],
+                                      labels: [
+                                        strings.historyTagRename,
+                                        strings.commonDelete,
+                                      ],
                                       anchor: LinkedAnchor(
                                         ('history-tag-actions', _tags, tag.id),
                                         registry: OverlayAnchorRegistry.of(
@@ -214,8 +219,8 @@ class _TagsEditorState extends State<_TagsEditor> {
                                       ),
                                     ),
                                     child: Tooltip(
-                                      tooltip: (_) => const TooltipContainer(
-                                        child: Text('Tag actions'),
+                                      tooltip: (_) => TooltipContainer(
+                                        child: Text(strings.historyTagActions),
                                       ),
                                       child: Select<_TagAction>(
                                         key: ValueKey(
@@ -260,16 +265,18 @@ class _TagsEditorState extends State<_TagsEditor> {
                                                 child: Row(
                                                   mainAxisSize:
                                                       MainAxisSize.min,
-                                                  children: const [
-                                                    AppIconFrame(
+                                                  children: [
+                                                    const AppIconFrame(
                                                       size: AppIconSize.sm,
                                                       child: Icon(
                                                         LucideIcons.pencil,
                                                         size: AppIconSize.sm,
                                                       ),
                                                     ),
-                                                    Gap(AppSpacing.sm),
-                                                    Text('Rename'),
+                                                    const Gap(AppSpacing.sm),
+                                                    Text(
+                                                      strings.historyTagRename,
+                                                    ),
                                                   ],
                                                 ),
                                               ),
@@ -278,16 +285,16 @@ class _TagsEditorState extends State<_TagsEditor> {
                                                 child: Row(
                                                   mainAxisSize:
                                                       MainAxisSize.min,
-                                                  children: const [
-                                                    AppIconFrame(
+                                                  children: [
+                                                    const AppIconFrame(
                                                       size: AppIconSize.sm,
                                                       child: Icon(
                                                         LucideIcons.trash2,
                                                         size: AppIconSize.sm,
                                                       ),
                                                     ),
-                                                    Gap(AppSpacing.sm),
-                                                    Text('Delete'),
+                                                    const Gap(AppSpacing.sm),
+                                                    Text(strings.commonDelete),
                                                   ],
                                                 ),
                                               ),
@@ -312,13 +319,15 @@ class _TagsEditorState extends State<_TagsEditor> {
                   autofocus: widget.clipIds.isEmpty,
                   enabled: !tags.busy && !tags.loading,
                   maxLength: 64,
-                  placeholder: const Text('Tag name'),
+                  placeholder: Text(strings.historyTagNamePlaceholder),
                   decoration: AppOverlays.dialogFieldDecoration(context),
                   onSubmitted: (_) => _save(),
                   features: [
                     InputFeature.trailing(
                       Semantics(
-                        label: _editingId == null ? 'Create tag' : 'Save tag',
+                        label: _editingId == null
+                            ? strings.historyCreateTag
+                            : strings.historySaveTag,
                         button: true,
                         child: Button.ghost(
                           key: const ValueKey('history-tag-submit'),

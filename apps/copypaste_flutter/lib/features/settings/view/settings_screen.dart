@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../../app/localization/app_language.dart';
 import '../../../app/navigation/app_page_route.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
@@ -20,6 +21,7 @@ import '../../../platform/desktop/global_shortcut.dart';
 import '../../../platform/desktop/desktop_visibility_controller.dart';
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/adaptive_breakpoints.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
@@ -40,6 +42,7 @@ class SettingsScreen extends StatefulWidget {
     this.appUpdate,
     this.modules,
     this.onOpenAndroidCaptureSetup,
+    this.language,
   });
 
   final SettingsController controller;
@@ -49,6 +52,7 @@ class SettingsScreen extends StatefulWidget {
   final AppUpdateController? appUpdate;
   final ModulesController? modules;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
+  final AppLanguageController? language;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -57,8 +61,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   String get _screenshotProtectionDescription =>
       widget.controller.blockScreenshotsSupported
-      ? 'Prevent screenshots and screen recording of CopyPaste.'
-      : 'Screenshot blocking is unavailable on this platform.';
+      ? context.l10n.settingsBlockScreenshotsDescription
+      : context.l10n.settingsBlockScreenshotsUnsupported;
   static const _retentionOptions = <int>[0, 7, 30, 90, 365];
   static const _quotaOptions = <int>[
     1024 * 1024 * 1024,
@@ -69,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   final _generalSectionKey = GlobalKey();
+  final _languageKey = GlobalKey();
   final _launchAtLoginKey = GlobalKey();
   final _taskbarVisibilityKey = GlobalKey();
   final _trayVisibilityKey = GlobalKey();
@@ -146,13 +151,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _loadedContent(Widget Function() ready) =>
       switch (widget.controller.loadState) {
-        SettingsLoadState.loading => const StateView.loading(
-          message: 'Loading settings.',
+        SettingsLoadState.loading => StateView.loading(
+          message: context.l10n.settingsLoadingMessage,
         ),
         SettingsLoadState.error => StateView.error(
-          title: 'Settings are unavailable',
+          title: context.l10n.settingsUnavailableTitle,
           message: widget.controller.errorMessage,
-          actionLabel: 'Try again',
+          actionLabel: context.l10n.commonTryAgain,
           onAction: widget.controller.retry,
         ),
         SettingsLoadState.ready => ready(),
@@ -172,9 +177,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final content = _compactRouteOpen
             ? const SizedBox.shrink()
             : noSearchResults
-            ? const StateView.empty(
-                title: 'No settings found',
-                message: 'Try a different search.',
+            ? StateView.empty(
+                title: context.l10n.settingsNoResultsTitle,
+                message: context.l10n.settingsNoResultsMessage,
               )
             : _sectionContent(context, settings, selectedSection);
 
@@ -291,7 +296,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   leading: const AppIconFrame(
                     child: Icon(LucideIcons.circleAlert),
                   ),
-                  title: const Text('Settings need attention'),
+                  title: Text(context.l10n.settingsAttentionTitle),
                   content: Text(message),
                 ),
                 const Gap(AppSpacing.xxxl),
@@ -302,10 +307,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 SettingsSectionId.modules => _SettingsSection(
                   key: _modulesSectionKey,
-                  title: 'Modules',
+                  title: context.l10n.settingsSectionModules,
                   showHeading: showHeading,
                   groupContent: false,
-                  description: 'Optional features for CopyPaste.',
+                  description: context.l10n.settingsModulesDescription,
                   children: [ModulesSettingsView(controller: widget.modules!)],
                 ),
                 SettingsSectionId.clipboard => _clipboardSection(
@@ -358,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       key: const ValueKey<String>('settings-search'),
       controller: _searchController,
       focusNode: _searchFocus,
-      placeholder: const Text('Search settings'),
+      placeholder: Text(context.l10n.settingsSearchPlaceholder),
       onChanged: _updateSearch,
       features: const [
         InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
@@ -431,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             AppBar(
               leading: [
                 Semantics(
-                  label: 'Back to Settings',
+                  label: context.l10n.settingsBackToSettings,
                   child: Button.ghost(
                     key: const ValueKey<String>('settings-back'),
                     style: AppTheme.navigationIconButtonStyle,
@@ -483,8 +488,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   SettingsSectionId get _effectiveSelectedSection {
     if ((_selectedSection == SettingsSectionId.general &&
-            widget.desktopVisibility == null &&
-            widget.launchAtLogin == null) ||
+            !_hasGeneralSection) ||
         (_selectedSection == SettingsSectionId.quickPaste &&
             widget.quickPaste == null) ||
         (_selectedSection == SettingsSectionId.modules &&
@@ -504,9 +508,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<_SettingsNavigationTarget> _sectionTargets() {
     return [
       for (final section in SettingsSectionId.values)
-        if ((section != SettingsSectionId.general ||
-                widget.desktopVisibility != null ||
-                widget.launchAtLogin != null) &&
+        if ((section != SettingsSectionId.general || _hasGeneralSection) &&
             (section != SettingsSectionId.quickPaste ||
                 widget.quickPaste != null) &&
             (section != SettingsSectionId.modules || widget.modules != null))
@@ -520,15 +522,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ];
   }
 
+  bool get _hasGeneralSection =>
+      widget.language != null ||
+      widget.desktopVisibility != null ||
+      widget.launchAtLogin != null;
+
   List<_SettingsNavigationTarget> _searchTargets() {
     return [
+      if (widget.language != null)
+        _SettingsNavigationTarget(
+          id: _SettingsTargetId.language,
+          section: SettingsSectionId.general,
+          label: context.l10n.settingsLanguageTitle,
+          description: context.l10n.settingsLanguageDescription,
+          keywords: context.l10n.settingsLanguageKeywords,
+          targetKey: _languageKey,
+        ),
       if (widget.launchAtLogin != null)
         _SettingsNavigationTarget(
           id: 'result-start-at-login',
           section: SettingsSectionId.general,
           label: _startupLabel,
-          description: 'Start CopyPaste automatically.',
-          keywords: 'startup login boot launch automatically autostart',
+          description: context.l10n.settingsStartupSearchDescription,
+          keywords: context.l10n.settingsStartupKeywords,
           targetKey: _launchAtLoginKey,
         ),
       if (widget.desktopVisibility != null) ...[
@@ -536,16 +552,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           id: 'result-taskbar-visibility',
           section: SettingsSectionId.general,
           label: _taskbarVisibilityLabel,
-          description: 'Show the application icon for switching windows.',
-          keywords: 'dock taskbar application icon visibility',
+          description: context.l10n.settingsTaskbarVisibilityDescription,
+          keywords: context.l10n.settingsTaskbarVisibilityKeywords,
           targetKey: _taskbarVisibilityKey,
         ),
         _SettingsNavigationTarget(
           id: 'result-tray-visibility',
           section: SettingsSectionId.general,
           label: _trayVisibilityLabel,
-          description: 'Show quick access to CopyPaste and capture controls.',
-          keywords: 'tray menu bar menubar status icon visibility',
+          description: context.l10n.settingsTrayVisibilityDescription,
+          keywords: context.l10n.settingsTrayVisibilityKeywords,
           targetKey: _trayVisibilityKey,
         ),
       ],
@@ -553,168 +569,168 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingsNavigationTarget(
           id: 'result-modules',
           section: SettingsSectionId.modules,
-          label: 'Modules',
-          description: 'Install, update, and remove optional modules.',
-          keywords: 'features commands extensions',
+          label: context.l10n.settingsSectionModules,
+          description: context.l10n.settingsModulesSearchDescription,
+          keywords: context.l10n.settingsModulesKeywords,
           targetKey: _modulesSectionKey,
         ),
       if (widget.onOpenAndroidCaptureSetup != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.androidBackgroundCapture,
           section: SettingsSectionId.clipboard,
-          label: 'Android background capture',
-          description: 'Full or Limited mode with Shizuku or ADB setup.',
-          keywords: 'background permissions setup',
+          label: context.l10n.settingsAndroidCaptureTitle,
+          description: context.l10n.settingsAndroidCaptureSearchDescription,
+          keywords: context.l10n.settingsAndroidCaptureKeywords,
           targetKey: _androidCaptureKey,
         ),
       if (widget.controller.screenshotCaptureSupported)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.screenshotCapture,
           section: SettingsSectionId.clipboard,
-          label: 'Save screenshots',
-          description: 'Automatically save new Android screenshots to History.',
-          keywords: 'images photos capture permissions',
+          label: context.l10n.settingsSaveScreenshotsTitle,
+          description: context.l10n.settingsSaveScreenshotsSearchDescription,
+          keywords: context.l10n.settingsSaveScreenshotsKeywords,
           targetKey: _screenshotCaptureKey,
         ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.clipboardCapture,
         section: SettingsSectionId.clipboard,
-        label: 'Clipboard capture',
-        description: 'Pause or resume clipboard capture.',
+        label: context.l10n.settingsClipboardCaptureTitle,
+        description: context.l10n.settingsClipboardCaptureSearchDescription,
         targetKey: _clipboardCaptureKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.excludedApplications,
         section: SettingsSectionId.privacy,
-        label: 'Excluded applications',
-        description: 'Skip automatic capture from excluded applications.',
-        keywords: 'privacy app identifiers',
+        label: context.l10n.settingsExcludedAppsTitle,
+        description: context.l10n.settingsExcludedAppsSearchDescription,
+        keywords: context.l10n.settingsExcludedAppsKeywords,
         targetKey: _excludedApplicationsKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.retention,
         section: SettingsSectionId.clipboard,
-        label: 'Retention',
-        description: 'Automatically remove old unpinned clipboard items.',
+        label: context.l10n.settingsRetentionTitle,
+        description: context.l10n.settingsRetentionDescription,
         targetKey: _retentionKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.storageQuota,
         section: SettingsSectionId.clipboard,
-        label: 'Storage quota',
-        description: 'Maximum local storage used by unpinned history.',
-        keywords: 'disk space limit',
+        label: context.l10n.settingsStorageQuotaTitle,
+        description: context.l10n.settingsStorageQuotaDescription,
+        keywords: context.l10n.settingsStorageQuotaKeywords,
         targetKey: _storageQuotaKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.historyFiles,
         section: SettingsSectionId.data,
-        label: 'History files',
-        description: 'Export history, create backups, or restore a backup.',
-        keywords: 'text encrypted backup data',
+        label: context.l10n.settingsHistoryFilesTitle,
+        description: context.l10n.settingsHistoryFilesSearchDescription,
+        keywords: context.l10n.settingsHistoryFilesKeywords,
         targetKey: _historyFilesKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.maxFileSize,
         section: SettingsSectionId.clipboard,
-        label: 'Maximum file size',
-        description: 'Limit for adding and downloading files.',
-        keywords: 'import download transfer size limit',
+        label: context.l10n.settingsMaxFileSizeTitle,
+        description: context.l10n.settingsMaxFileSizeSearchDescription,
+        keywords: context.l10n.settingsMaxFileSizeKeywords,
         targetKey: _maxFileSizeKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.sync,
         section: SettingsSectionId.sync,
-        label: 'Sync',
-        description: 'Paired-device synchronization.',
+        label: context.l10n.settingsSyncSwitchTitle,
+        description: context.l10n.settingsSyncSearchDescription,
         targetKey: _syncEnabledKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.instantClipboard,
         section: SettingsSectionId.sync,
-        label: 'Instant clipboard',
-        description: 'Automatically copy new clips from other devices.',
-        keywords: 'automatic copy paste sync received',
+        label: context.l10n.settingsInstantClipboardTitle,
+        description: context.l10n.settingsInstantClipboardSearchDescription,
+        keywords: context.l10n.settingsInstantClipboardKeywords,
         targetKey: _instantClipboardKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.lanVisibility,
         section: SettingsSectionId.sync,
-        label: 'LAN visibility',
-        description: 'Allow nearby devices to discover this device.',
-        keywords: 'local network discovery',
+        label: context.l10n.settingsLanVisibilityTitle,
+        description: context.l10n.settingsLanVisibilityDescription,
+        keywords: context.l10n.settingsLanVisibilityKeywords,
         targetKey: _lanVisibilityKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationOnCopy,
         section: SettingsSectionId.notifications,
-        label: 'Notification on copy',
-        description: 'Show a notification after a background capture.',
+        label: context.l10n.settingsNotifyOnCopyTitle,
+        description: context.l10n.settingsNotifyOnCopyDescription,
         targetKey: _notificationOnCopyKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationPreview,
         section: SettingsSectionId.notifications,
-        label: 'Show clipboard content',
-        description: 'Include a clip preview in copy notifications.',
-        keywords: 'notification preview text image privacy',
+        label: context.l10n.settingsNotificationPreviewTitle,
+        description: context.l10n.settingsNotificationPreviewDescription,
+        keywords: context.l10n.settingsNotificationPreviewKeywords,
         targetKey: _notificationPreviewKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.skipSecret,
         section: SettingsSectionId.privacy,
-        label: 'Skip confidential clipboard',
-        description: 'Keep producer-marked secrets out of History.',
-        keywords: 'secret password sensitive concealed spoiler',
+        label: context.l10n.settingsSkipSecretTitle,
+        description: context.l10n.settingsSkipSecretDescription,
+        keywords: context.l10n.settingsSkipSecretKeywords,
         targetKey: _skipSecretKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.skipTransient,
         section: SettingsSectionId.privacy,
-        label: 'Skip temporary clipboard',
-        description: 'Keep producer-marked temporary copies out of History.',
-        keywords: 'transient temporary privacy',
+        label: context.l10n.settingsSkipTransientTitle,
+        description: context.l10n.settingsSkipTransientDescription,
+        keywords: context.l10n.settingsSkipTransientKeywords,
         targetKey: _skipTransientKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.blockScreenshots,
         section: SettingsSectionId.privacy,
-        label: 'Block screenshots',
+        label: context.l10n.settingsBlockScreenshotsTitle,
         description: _screenshotProtectionDescription,
-        keywords: 'privacy screen capture protection pairing qr security code',
+        keywords: context.l10n.settingsBlockScreenshotsKeywords,
         targetKey: _blockScreenshotsKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.soundOnCopy,
         section: SettingsSectionId.notifications,
-        label: 'Sound on copy',
-        description: 'Play platform feedback after a successful capture.',
+        label: context.l10n.settingsSoundOnCopyTitle,
+        description: context.l10n.settingsSoundOnCopyDescription,
         targetKey: _soundOnCopyKey,
       ),
       if (widget.appUpdate != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.applicationUpdates,
           section: SettingsSectionId.about,
-          label: 'Application updates',
-          description: 'Check for and install CopyPaste updates.',
-          keywords: 'version github release',
+          label: context.l10n.settingsUpdatesTitle,
+          description: context.l10n.settingsUpdatesSearchDescription,
+          keywords: context.l10n.settingsUpdatesKeywords,
           targetKey: _applicationUpdatesKey,
         ),
       if (widget.quickPaste != null) ...[
         _SettingsNavigationTarget(
           id: _SettingsTargetId.quickPasteShortcut,
           section: SettingsSectionId.quickPaste,
-          label: 'Open Quick Paste',
-          description: 'Configure the global Quick Paste shortcut.',
-          keywords: 'keyboard hotkey',
+          label: context.l10n.settingsQuickPasteShortcutTitle,
+          description: context.l10n.settingsQuickPasteShortcutSearchDescription,
+          keywords: context.l10n.settingsQuickPasteShortcutKeywords,
           targetKey: _quickPasteShortcutKey,
         ),
         _SettingsNavigationTarget(
           id: _SettingsTargetId.quickPasteAutoPaste,
           section: SettingsSectionId.quickPaste,
-          label: 'Paste automatically',
-          description: 'Paste the selected clip into the previous app.',
-          keywords: 'accessibility automatic',
+          label: context.l10n.settingsAutoPasteTitle,
+          description: context.l10n.settingsAutoPasteSearchDescription,
+          keywords: context.l10n.settingsAutoPasteKeywords,
           targetKey: _quickPasteAutoPasteKey,
         ),
       ],
@@ -804,22 +820,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool get _isMacOS => defaultTargetPlatform == TargetPlatform.macOS;
   String get _startupLabel => defaultTargetPlatform == TargetPlatform.android
-      ? 'Start on device boot'
-      : 'Start at login';
-  String get _taskbarVisibilityLabel =>
-      _isMacOS ? 'Show in Dock' : 'Show in taskbar';
-  String get _trayVisibilityLabel =>
-      _isMacOS ? 'Show in menu bar' : 'Show in system tray';
+      ? context.l10n.settingsStartOnBootTitle
+      : context.l10n.settingsStartAtLoginTitle;
+  String get _taskbarVisibilityLabel => _isMacOS
+      ? context.l10n.settingsShowInDock
+      : context.l10n.settingsShowInTaskbar;
+  String get _trayVisibilityLabel => _isMacOS
+      ? context.l10n.settingsShowInMenuBar
+      : context.l10n.settingsShowInSystemTray;
+
+  String _languageLabel(BuildContext context, AppLanguage language) =>
+      language == AppLanguage.system
+      ? context.l10n.settingsLanguageSystem
+      : language.nativeName;
 
   Widget _generalSection({required bool showHeading}) {
     final controller = widget.desktopVisibility;
     final preferences = controller?.preferences;
     return _SettingsSection(
       key: _generalSectionKey,
-      title: 'General',
+      title: context.l10n.settingsSectionGeneral,
       showHeading: showHeading,
-      description: 'Manage automatic startup and application visibility.',
+      description: context.l10n.settingsGeneralDescription,
       children: [
+        if (widget.language case final language?)
+          ListenableBuilder(
+            listenable: language,
+            builder: (context, _) => _SettingRow(
+              key: _languageKey,
+              highlighted: _isHighlighted(_SettingsTargetId.language),
+              title: context.l10n.settingsLanguageTitle,
+              description: context.l10n.settingsLanguageDescription,
+              trailing: Select<AppLanguage>(
+                key: const ValueKey('settings-language'),
+                value: language.language,
+                onChanged: (next) {
+                  if (next != null) unawaited(language.select(next));
+                },
+                popup: SelectPopup<AppLanguage>(
+                  items: SelectItemList(
+                    children: [
+                      for (final option in AppLanguage.values)
+                        SelectItemButton<AppLanguage>(
+                          value: option,
+                          child: Text(_languageLabel(context, option)),
+                        ),
+                    ],
+                  ),
+                ).call,
+                itemBuilder: (context, selected) =>
+                    Text(_languageLabel(context, selected)),
+              ),
+            ),
+          ),
         if (widget.launchAtLogin case final startup?)
           _SettingRow(
             key: _launchAtLoginKey,
@@ -830,14 +883,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 switch (startup.status) {
                   LaunchAtLoginStatus.requiresApproval =>
                     defaultTargetPlatform == TargetPlatform.windows
-                        ? 'Disabled in Task Manager. Enable CopyPaste in Settings → Apps → Startup.'
-                        : 'Allow CopyPaste in System Settings → General → Login Items.',
+                        ? context.l10n.settingsStartupWindowsApproval
+                        : context.l10n.settingsStartupMacApproval,
                   LaunchAtLoginStatus.unavailable =>
-                    'Automatic startup is unavailable in this installation.',
+                    context.l10n.settingsStartupUnavailable,
                   _ =>
                     defaultTargetPlatform == TargetPlatform.android
-                        ? 'Resume enabled background services after restarting the device.'
-                        : 'Open CopyPaste automatically when you sign in.',
+                        ? context.l10n.settingsStartupAndroidDescription
+                        : context.l10n.settingsStartupDesktopDescription,
                 },
             trailing: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -846,7 +899,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (startup.status == LaunchAtLoginStatus.requiresApproval)
                   Button.secondary(
                     onPressed: startup.openSystemSettings,
-                    child: const Text('Open settings'),
+                    child: Text(context.l10n.commonOpenSettings),
                   ),
                 Switch(
                   key: const ValueKey('settings-start-at-login'),
@@ -863,7 +916,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (controller?.error case final message?)
           Alert.destructive(
             leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: const Text('Visibility could not be changed'),
+            title: Text(context.l10n.settingsVisibilityErrorTitle),
             content: Text(message),
           ),
         if (controller != null && preferences != null) ...[
@@ -871,7 +924,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: _taskbarVisibilityKey,
             highlighted: _isHighlighted('result-taskbar-visibility'),
             title: _taskbarVisibilityLabel,
-            description: 'Show the application icon for switching windows.',
+            description: context.l10n.settingsTaskbarVisibilityDescription,
             trailing: Switch(
               key: const ValueKey('settings-show-in-taskbar'),
               value: preferences.showInTaskbar,
@@ -884,7 +937,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: _trayVisibilityKey,
             highlighted: _isHighlighted('result-tray-visibility'),
             title: _trayVisibilityLabel,
-            description: 'Show quick access to CopyPaste and capture controls.',
+            description: context.l10n.settingsTrayVisibilityDescription,
             trailing: Switch(
               key: const ValueKey('settings-show-in-tray'),
               value: preferences.showInTray,
@@ -906,8 +959,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _clipboardSectionKey,
-      title: 'Clipboard',
-      description: 'Capture clipboard changes and manage history limits.',
+      title: context.l10n.settingsSectionClipboard,
+      description: context.l10n.settingsClipboardDescription,
       children: [
         if (widget.onOpenAndroidCaptureSetup != null) ...[
           _SettingRow(
@@ -915,16 +968,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             highlighted: _isHighlighted(
               _SettingsTargetId.androidBackgroundCapture,
             ),
-            title: 'Android background capture',
-            description:
-                'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.',
+            title: context.l10n.settingsAndroidCaptureTitle,
+            description: context.l10n.settingsAndroidCaptureDescription,
             trailing: Button.secondary(
               style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
               onPressed: widget.controller.busy
                   ? null
                   : widget.onOpenAndroidCaptureSetup,
               leading: const AppIconFrame(child: Icon(LucideIcons.shieldCheck)),
-              child: const Text('Open setup'),
+              child: Text(context.l10n.settingsOpenSetup),
             ),
           ),
         ],
@@ -932,8 +984,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _SettingRow(
             key: _screenshotCaptureKey,
             highlighted: _isHighlighted(_SettingsTargetId.screenshotCapture),
-            title: 'Save screenshots',
-            description: 'Automatically add new screenshots to History.',
+            title: context.l10n.settingsSaveScreenshotsTitle,
+            description: context.l10n.settingsSaveScreenshotsDescription,
             trailing: Switch(
               key: const ValueKey<String>('save-screenshots-switch'),
               value: widget.controller.screenshotCapture.enabled,
@@ -945,9 +997,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (widget.controller.screenshotCapture.enabled &&
               widget.controller.screenshotCapture.needsPermission)
             _SettingRow(
-              title: 'Screenshot access',
-              description:
-                  'Allow access to all photos and notifications to save new screenshots in the background.',
+              title: context.l10n.settingsScreenshotAccessTitle,
+              description: context.l10n.settingsScreenshotAccessDescription,
               trailing: Button.secondary(
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.secondary(),
@@ -956,17 +1007,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onPressed: widget.controller.busy
                     ? null
                     : widget.controller.requestScreenshotCapturePermission,
-                child: const Text('Allow access'),
+                child: Text(context.l10n.settingsAllowAccess),
               ),
             ),
           if (widget.controller.screenshotCapture.enabled &&
               !widget.controller.screenshotCapture.needsPermission &&
               !widget.controller.screenshotCapture.running)
             StateView.error(
-              title: 'Screenshot capture is not running',
-              message:
-                  'New screenshots are not being saved. Resume capture to start the service again.',
-              actionLabel: widget.controller.busy ? null : 'Resume capture',
+              title: context.l10n.settingsScreenshotCaptureStoppedTitle,
+              message: context.l10n.settingsScreenshotCaptureStoppedMessage,
+              actionLabel: widget.controller.busy
+                  ? null
+                  : context.l10n.settingsResumeCapture,
               onAction: widget.controller.busy
                   ? null
                   : () => widget.controller.setScreenshotCaptureEnabled(true),
@@ -975,8 +1027,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _clipboardCaptureKey,
           highlighted: _isHighlighted(_SettingsTargetId.clipboardCapture),
-          title: 'Clipboard capture',
-          description: capture?.label ?? 'State unavailable',
+          title: context.l10n.settingsClipboardCaptureTitle,
+          description:
+              capture?.label ?? context.l10n.settingsCaptureStateUnavailable,
           trailing: Switch(
             value: !(capture?.paused ?? true),
             onChanged: widget.controller.busy || capture == null
@@ -985,31 +1038,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         if (capture != null && !capture.running && !capture.paused) ...[
-          const Alert(
-            leading: AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: Text('Capture is not running'),
-            content: Text(
-              'CopyPaste is not currently receiving clipboard changes on this device.',
-            ),
+          Alert(
+            leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
+            title: Text(context.l10n.settingsCaptureStoppedTitle),
+            content: Text(context.l10n.settingsCaptureStoppedMessage),
           ),
         ],
         _SettingRow(
           key: _retentionKey,
           highlighted: _isHighlighted(_SettingsTargetId.retention),
-          title: 'Retention',
-          description: 'Automatically remove old unpinned clipboard items.',
+          title: context.l10n.settingsRetentionTitle,
+          description: context.l10n.settingsRetentionDescription,
           trailing: _valueSelect<int>(
             value: settings.retentionDays,
             values: _retentionOptions,
-            label: (value) => value == 0 ? 'Keep forever' : '$value days',
+            label: (value) => value == 0
+                ? context.l10n.settingsRetentionForever
+                : context.l10n.settingsRetentionDays(value),
             onChanged: widget.controller.setRetentionDays,
           ),
         ),
         _SettingRow(
           key: _storageQuotaKey,
           highlighted: _isHighlighted(_SettingsTargetId.storageQuota),
-          title: 'Storage quota',
-          description: 'Maximum local storage used by unpinned history.',
+          title: context.l10n.settingsStorageQuotaTitle,
+          description: context.l10n.settingsStorageQuotaDescription,
           trailing: _valueSelect<int>(
             value: settings.storageQuotaBytes,
             values: _quotaOptions,
@@ -1020,9 +1073,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _maxFileSizeKey,
           highlighted: _isHighlighted(_SettingsTargetId.maxFileSize),
-          title: 'Maximum file size',
-          description:
-              'Limit for adding and downloading files. File contents transfer only when you choose Download.',
+          title: context.l10n.settingsMaxFileSizeTitle,
+          description: context.l10n.settingsMaxFileSizeDescription,
           trailing: _valueSelect<int>(
             value: settings.maxFileSizeBytes,
             values: const [
@@ -1036,8 +1088,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               21474836480,
             ],
             label: (bytes) => bytes >= 1073741824
-                ? '${bytes ~/ 1073741824} GiB'
-                : '${bytes ~/ 1048576} MiB',
+                ? context.l10n.settingsFileSizeGibibytes(bytes ~/ 1073741824)
+                : context.l10n.settingsFileSizeMebibytes(bytes ~/ 1048576),
             onChanged: widget.controller.setMaxFileSizeBytes,
           ),
         ),
@@ -1049,8 +1101,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _dataSectionKey,
-      title: 'Data',
-      description: 'Export, back up, and restore clipboard history.',
+      title: context.l10n.settingsSectionData,
+      description: context.l10n.settingsDataDescription,
       children: [
         Column(
           key: _historyFilesKey,
@@ -1058,8 +1110,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             _SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
-              title: 'Export text history',
-              description: 'Save text clips in a portable file.',
+              title: context.l10n.settingsExportTextTitle,
+              description: context.l10n.settingsExportTextDescription,
               trailing: Button.secondary(
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.secondary(),
@@ -1068,14 +1120,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const AppIconFrame(
                   child: Icon(LucideIcons.fileOutput),
                 ),
-                child: const Text('Export'),
+                child: Text(context.l10n.settingsExportAction),
               ),
             ),
             const Divider(),
             _SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
-              title: 'Encrypted backup',
-              description: 'Save the complete local history for this device.',
+              title: context.l10n.settingsBackupTitle,
+              description: context.l10n.settingsBackupDescription,
               trailing: Button.secondary(
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.secondary(),
@@ -1084,14 +1136,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? null
                     : widget.controller.createBackup,
                 leading: const AppIconFrame(child: Icon(LucideIcons.archive)),
-                child: const Text('Create backup'),
+                child: Text(context.l10n.settingsCreateBackupAction),
               ),
             ),
             const Divider(),
             _SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
-              title: 'Restore backup',
-              description: 'Replace local history with an encrypted backup.',
+              title: context.l10n.settingsRestoreTitle,
+              description: context.l10n.settingsRestoreDescription,
               trailing: Button.destructive(
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.destructive(),
@@ -1100,7 +1152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const AppIconFrame(
                   child: Icon(LucideIcons.clipboardList),
                 ),
-                child: const Text('Restore'),
+                child: Text(context.l10n.settingsRestoreAction),
               ),
             ),
           ],
@@ -1113,14 +1165,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _syncSectionKey,
-      title: 'Sync',
-      description: 'Control synchronization with paired devices.',
+      title: context.l10n.settingsSectionSync,
+      description: context.l10n.settingsSyncDescription,
       children: [
         _SettingRow(
           key: _syncEnabledKey,
           highlighted: _isHighlighted(_SettingsTargetId.sync),
-          title: 'Sync',
-          description: 'Master switch for paired-device synchronization.',
+          title: context.l10n.settingsSyncSwitchTitle,
+          description: context.l10n.settingsSyncSwitchDescription,
           trailing: Switch(
             value: settings.syncEnabled,
             onChanged: widget.controller.busy
@@ -1131,9 +1183,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _instantClipboardKey,
           highlighted: _isHighlighted(_SettingsTargetId.instantClipboard),
-          title: 'Instant clipboard',
-          description:
-              'Automatically copy newer clips from other devices to this clipboard.',
+          title: context.l10n.settingsInstantClipboardTitle,
+          description: context.l10n.settingsInstantClipboardDescription,
           trailing: Switch(
             key: const ValueKey('instant-clipboard-switch'),
             value: settings.instantClipboard,
@@ -1145,8 +1196,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _lanVisibilityKey,
           highlighted: _isHighlighted(_SettingsTargetId.lanVisibility),
-          title: 'LAN visibility',
-          description: 'Allow nearby devices to discover this device.',
+          title: context.l10n.settingsLanVisibilityTitle,
+          description: context.l10n.settingsLanVisibilityDescription,
           trailing: Switch(
             value: settings.lanVisibility,
             onChanged: widget.controller.busy
@@ -1165,9 +1216,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _privacySectionKey,
-      title: 'Privacy',
-      description:
-          'Control which apps are captured and protect clipboard content.',
+      title: context.l10n.settingsSectionPrivacy,
+      description: context.l10n.settingsPrivacyDescription,
       children: [
         OutlinedContainer(
           key: _excludedApplicationsKey,
@@ -1186,17 +1236,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Excluded applications').medium(),
+                        Text(context.l10n.settingsExcludedAppsTitle).medium(),
                         const Gap(AppSpacing.xs),
                         Text(switch (defaultTargetPlatform) {
                           TargetPlatform.macOS =>
-                            'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+                            context.l10n.settingsExcludedAppsMacDescription,
                           TargetPlatform.windows || TargetPlatform.linux =>
-                            'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+                            context.l10n.settingsExcludedAppsDesktopDescription,
                           TargetPlatform.android =>
-                            'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+                            context.l10n.settingsExcludedAppsAndroidDescription,
                           TargetPlatform.iOS || TargetPlatform.fuchsia =>
-                            'Application exclusions are supported on macOS, Windows, Android, and Linux.',
+                            context
+                                .l10n
+                                .settingsExcludedAppsUnsupportedDescription,
                         }).muted().textSmall(),
                       ],
                     ),
@@ -1207,13 +1259,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ? null
                         : _addExcludedApplication,
                     leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
-                    child: const Text('Add'),
+                    child: Text(context.l10n.settingsExcludedAppsAdd),
                   ),
                 ],
               ),
               if (settings.excludedAppIds.isEmpty) ...[
                 const Gap(AppSpacing.lg),
-                const Text('No applications are excluded.').muted().textSmall(),
+                Text(
+                  context.l10n.settingsExcludedAppsEmpty,
+                ).muted().textSmall(),
               ] else ...[
                 const Gap(AppSpacing.md),
                 for (final appId in settings.excludedAppIds)
@@ -1240,8 +1294,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             context,
                             AppMotion.standard,
                           ),
-                          tooltip: (context) =>
-                              TooltipContainer(child: Text('Remove $appId')),
+                          tooltip: (context) => TooltipContainer(
+                            child: Text(
+                              context.l10n.settingsExcludedAppsRemove(appId),
+                            ),
+                          ),
                           child: Button.ghost(
                             style: AppTheme.controlButtonStyle(
                               const ButtonStyle.ghostIcon(),
@@ -1266,8 +1323,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _skipSecretKey,
           highlighted: _isHighlighted(_SettingsTargetId.skipSecret),
-          title: 'Skip confidential clipboard',
-          description: 'Keep producer-marked secrets out of History.',
+          title: context.l10n.settingsSkipSecretTitle,
+          description: context.l10n.settingsSkipSecretDescription,
           trailing: Switch(
             key: const ValueKey('skip-secret-switch'),
             value: settings.skipSecret,
@@ -1280,8 +1337,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _skipTransientKey,
           highlighted: _isHighlighted(_SettingsTargetId.skipTransient),
-          title: 'Skip temporary clipboard',
-          description: 'Keep producer-marked temporary copies out of History.',
+          title: context.l10n.settingsSkipTransientTitle,
+          description: context.l10n.settingsSkipTransientDescription,
           trailing: Switch(
             key: const ValueKey('skip-transient-switch'),
             value: settings.skipTransient,
@@ -1294,7 +1351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _blockScreenshotsKey,
           highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
-          title: 'Block screenshots',
+          title: context.l10n.settingsBlockScreenshotsTitle,
           description: _screenshotProtectionDescription,
           trailing: Switch(
             key: const ValueKey('block-screenshots-switch'),
@@ -1320,14 +1377,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _notificationsSectionKey,
-      title: 'Notifications',
-      description: 'Choose notifications and sounds for captured clips.',
+      title: context.l10n.settingsSectionNotifications,
+      description: context.l10n.settingsNotificationsDescription,
       children: [
         _SettingRow(
           key: _notificationOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationOnCopy),
-          title: 'Notification on copy',
-          description: 'Show a notification after a background capture.',
+          title: context.l10n.settingsNotifyOnCopyTitle,
+          description: context.l10n.settingsNotifyOnCopyDescription,
           trailing: Switch(
             value: settings.notifyOnCopy,
             onChanged: widget.controller.busy
@@ -1338,8 +1395,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _notificationPreviewKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationPreview),
-          title: 'Show clipboard content',
-          description: 'Include a clip preview in copy notifications.',
+          title: context.l10n.settingsNotificationPreviewTitle,
+          description: context.l10n.settingsNotificationPreviewDescription,
           trailing: Switch(
             value: settings.notificationPreview,
             enabled: settings.notifyOnCopy && !widget.controller.busy,
@@ -1351,8 +1408,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _soundOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.soundOnCopy),
-          title: 'Sound on copy',
-          description: 'Play platform feedback after a successful capture.',
+          title: context.l10n.settingsSoundOnCopyTitle,
+          description: context.l10n.settingsSoundOnCopyDescription,
           trailing: Switch(
             value: settings.soundOnCopy,
             onChanged: widget.controller.busy
@@ -1368,14 +1425,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       showHeading: showHeading,
       key: _aboutSectionKey,
-      title: 'About',
-      description: 'CopyPaste version and application updates.',
+      title: context.l10n.settingsSectionAbout,
+      description: context.l10n.settingsAboutDescription,
       children: [
         _SettingRow(
-          title: 'Version',
-          description: 'Installed CopyPaste version.',
+          title: context.l10n.settingsVersionTitle,
+          description: context.l10n.settingsVersionDescription,
           trailing: Text(
-            widget.appUpdate?.currentVersion?.toString() ?? 'Unavailable',
+            widget.appUpdate?.currentVersion?.toString() ??
+                context.l10n.settingsVersionUnavailable,
           ),
         ),
         if (widget.appUpdate case final controller?) ...[
@@ -1385,7 +1443,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             builder: (context, _) => _SettingRow(
               key: _applicationUpdatesKey,
               highlighted: _isHighlighted(_SettingsTargetId.applicationUpdates),
-              title: 'Application updates',
+              title: context.l10n.settingsUpdatesTitle,
               description: _updateDescription(controller),
               trailing: _updateAction(controller),
             ),
@@ -1398,25 +1456,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _updateDescription(AppUpdateController controller) {
     final current = controller.currentVersion?.toString();
     final available = controller.release?.version.toString();
+    final l10n = context.l10n;
     return switch (controller.phase) {
-      AppUpdatePhase.idle => 'Check for a newer CopyPaste version.',
-      AppUpdatePhase.checking => 'Checking for updates.',
+      AppUpdatePhase.idle => l10n.settingsUpdateIdle,
+      AppUpdatePhase.checking => l10n.settingsUpdateChecking,
       AppUpdatePhase.upToDate =>
         current == null
-            ? 'CopyPaste is up to date.'
-            : 'Version $current is up to date.',
-      AppUpdatePhase.available =>
-        'Version $available is available. This device has version $current.',
-      AppUpdatePhase.downloading =>
-        'Downloading version $available · ${(controller.downloadProgress * 100).round()}%.',
-      AppUpdatePhase.preparingModules => 'Preparing installed module updates.',
+            ? l10n.settingsUpdateUpToDate
+            : l10n.settingsUpdateVersionUpToDate(current),
+      AppUpdatePhase.available => l10n.settingsUpdateAvailable(
+        '$available',
+        '$current',
+      ),
+      AppUpdatePhase.downloading => l10n.settingsUpdateDownloading(
+        '$available',
+        (controller.downloadProgress * 100).round(),
+      ),
+      AppUpdatePhase.preparingModules => l10n.settingsUpdatePreparingModules,
       AppUpdatePhase.installing =>
-        controller.message ?? 'Installing version $available.',
+        controller.message ?? l10n.settingsUpdateInstalling('$available'),
       AppUpdatePhase.permissionRequired ||
       AppUpdatePhase.restartRequired ||
       AppUpdatePhase.unavailable ||
       AppUpdatePhase.error =>
-        controller.message ?? 'Application updates need attention.',
+        controller.message ?? l10n.settingsUpdateNeedsAttention,
     };
   }
 
@@ -1426,35 +1489,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
         key: const ValueKey<String>('install-app-update'),
         onPressed: controller.install,
         leading: const AppIconFrame(child: Icon(LucideIcons.download)),
-        child: const Text('Update now'),
+        child: Text(context.l10n.settingsUpdateNowAction),
       ),
       AppUpdatePhase.permissionRequired => Button.primary(
         key: const ValueKey<String>('continue-app-update'),
         onPressed: controller.install,
         leading: const AppIconFrame(child: Icon(LucideIcons.settings)),
-        child: const Text('Continue'),
+        child: Text(context.l10n.commonContinue),
       ),
       AppUpdatePhase.unavailable => Button.secondary(
         key: const ValueKey<String>('open-update-release'),
         onPressed: controller.openReleasePage,
         leading: const AppIconFrame(child: Icon(LucideIcons.externalLink)),
-        child: const Text('Open release'),
+        child: Text(context.l10n.settingsUpdateOpenReleaseAction),
       ),
-      AppUpdatePhase.checking => const Button.secondary(
+      AppUpdatePhase.checking => Button.secondary(
         onPressed: null,
-        leading: AppIconFrame(child: Icon(LucideIcons.refreshCw)),
-        child: Text('Checking'),
+        leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
+        child: Text(context.l10n.settingsUpdateCheckingAction),
       ),
-      AppUpdatePhase.downloading => const Button.secondary(
+      AppUpdatePhase.downloading => Button.secondary(
         onPressed: null,
-        leading: AppIconFrame(child: Icon(LucideIcons.download)),
-        child: Text('Downloading'),
+        leading: const AppIconFrame(child: Icon(LucideIcons.download)),
+        child: Text(context.l10n.settingsUpdateDownloadingAction),
       ),
       AppUpdatePhase.preparingModules ||
-      AppUpdatePhase.installing => const Button.secondary(
+      AppUpdatePhase.installing => Button.secondary(
         onPressed: null,
-        leading: AppIconFrame(child: Icon(LucideIcons.loaderCircle)),
-        child: Text('Installing'),
+        leading: const AppIconFrame(child: Icon(LucideIcons.loaderCircle)),
+        child: Text(context.l10n.settingsUpdateInstallingAction),
       ),
       AppUpdatePhase.restartRequired => Button.primary(
         key: const ValueKey<String>('restart-after-app-update'),
@@ -1462,7 +1525,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ? null
             : controller.restartApplication,
         leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
-        child: const Text('Restart CopyPaste'),
+        child: Text(context.l10n.settingsUpdateRestartAction),
       ),
       AppUpdatePhase.idle ||
       AppUpdatePhase.upToDate ||
@@ -1470,7 +1533,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         key: const ValueKey<String>('check-app-update'),
         onPressed: () => _checkForUpdates(controller),
         leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
-        child: const Text('Check again'),
+        child: Text(context.l10n.settingsUpdateCheckAgainAction),
       ),
     };
   }
@@ -1479,15 +1542,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await controller.check();
     if (!mounted) return;
 
+    final l10n = context.l10n;
     switch (controller.phase) {
       case AppUpdatePhase.upToDate:
         final version = controller.currentVersion?.toString();
         AppToast.show(
           context,
-          title: 'No updates available',
+          title: l10n.settingsUpdateNoneTitle,
           message: version == null
-              ? 'CopyPaste is the latest version.'
-              : 'CopyPaste $version is the latest version.',
+              ? l10n.settingsUpdateLatest
+              : l10n.settingsUpdateVersionLatest(version),
           tone: AppToastTone.success,
         );
         break;
@@ -1495,28 +1559,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final version = controller.release?.version.toString();
         AppToast.show(
           context,
-          title: 'Update available',
+          title: l10n.settingsUpdateAvailableTitle,
           message: version == null
-              ? 'A newer CopyPaste version is ready to install.'
-              : 'CopyPaste $version is ready to install.',
+              ? l10n.settingsUpdateReady
+              : l10n.settingsUpdateVersionReady(version),
         );
         break;
       case AppUpdatePhase.unavailable:
         AppToast.show(
           context,
-          title: 'Update unavailable',
-          message:
-              controller.message ??
-              'This installation cannot update automatically.',
+          title: l10n.settingsUpdateUnavailableTitle,
+          message: controller.message ?? l10n.settingsUpdateUnavailableMessage,
           tone: AppToastTone.error,
         );
         break;
       case AppUpdatePhase.error:
         AppToast.show(
           context,
-          title: 'Update check failed',
-          message:
-              controller.message ?? 'CopyPaste could not check for updates.',
+          title: l10n.settingsUpdateCheckFailedTitle,
+          message: controller.message ?? l10n.settingsUpdateCheckFailedMessage,
           tone: AppToastTone.error,
         );
         break;
@@ -1569,13 +1630,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addExcludedApplication() async {
+    final l10n = context.l10n;
     final input = TextEditingController();
     try {
       await AppOverlays.showActionDialog(
         context,
         icon: LucideIcons.shieldPlus,
-        title: const Text('Exclude application'),
-        actionLabel: 'Exclude',
+        title: Text(l10n.settingsExcludeDialogTitle),
+        actionLabel: l10n.settingsExcludeDialogAction,
         destructive: false,
         changes: input,
         canConfirm: () =>
@@ -1583,13 +1645,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: TextField(
           controller: input,
           autofocus: true,
-          placeholder: const Text('Application identifier'),
+          placeholder: Text(l10n.settingsExcludeDialogPlaceholder),
           decoration: AppOverlays.dialogFieldDecoration(context),
         ),
         onConfirm: () => widget.controller.addExcludedApp(input.text),
         failureMessage: () =>
-            widget.controller.errorMessage ??
-            'The application could not be excluded.',
+            widget.controller.errorMessage ?? l10n.settingsExcludeFailed,
       );
     } finally {
       input.dispose();
@@ -1597,19 +1658,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _confirmRestore() async {
+    final l10n = context.l10n;
     await AppOverlays.showActionDialog(
       context,
       icon: LucideIcons.clipboardList,
-      title: const Text('Replace local history?'),
-      content: const Text(
-        'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.',
-      ),
-      actionLabel: 'Restore',
+      title: Text(l10n.settingsRestoreDialogTitle),
+      content: Text(l10n.settingsRestoreDialogMessage),
+      actionLabel: l10n.settingsRestoreAction,
       changes: widget.controller,
       canConfirm: () => !widget.controller.busy,
       onConfirm: widget.controller.restoreBackup,
       failureMessage: () =>
-          widget.controller.errorMessage ?? 'The backup could not be restored.',
+          widget.controller.errorMessage ?? l10n.settingsRestoreFailed,
     );
   }
 
@@ -1619,23 +1679,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (result.skippedUndecryptable == 0) {
       return;
     }
+    final l10n = context.l10n;
     final omissions = <String>[
       if (result.skippedNonText > 0)
-        '${result.skippedNonText} non-text ${result.skippedNonText == 1 ? 'clip was' : 'clips were'} excluded',
+        l10n.settingsExportSkippedNonText(result.skippedNonText),
       if (result.skippedUndecryptable > 0)
-        '${result.skippedUndecryptable} text ${result.skippedUndecryptable == 1 ? 'clip' : 'clips'} could not be read',
+        l10n.settingsExportSkippedUnreadable(result.skippedUndecryptable),
     ];
     AppToast.show(
       context,
-      title: 'Text export is incomplete',
-      message:
-          '${result.exported} text ${result.exported == 1 ? 'clip was' : 'clips were'} saved; ${omissions.join(' and ')}.',
+      title: l10n.settingsExportIncompleteTitle,
+      message: l10n.settingsExportIncompleteMessage(
+        l10n.settingsExportSavedClips(result.exported),
+        omissions.reduce(l10n.settingsExportOmissionsJoin),
+      ),
     );
   }
 
   String _formatQuota(int bytes) {
     final gib = bytes / (1024 * 1024 * 1024);
-    return '${gib.toStringAsFixed(gib == gib.roundToDouble() ? 0 : 1)} GB';
+    return context.l10n.settingsStorageQuotaGigabytes(
+      gib.toStringAsFixed(gib == gib.roundToDouble() ? 0 : 1),
+    );
   }
 }
 
@@ -1772,8 +1837,7 @@ class _QuickPasteSection extends StatelessWidget {
         return _SettingsSection(
           showHeading: showHeading,
           title: 'Quick Paste',
-          description:
-              'Open clipboard history from anywhere without switching windows.',
+          description: context.l10n.settingsQuickPasteDescription,
           children: [
             if (controller.linuxIntegration case final integration?)
               if (integration.session == LinuxDesktopSession.wayland &&
@@ -1782,13 +1846,11 @@ class _QuickPasteSection extends StatelessWidget {
                   leading: const AppIconFrame(
                     child: Icon(LucideIcons.keyboard),
                   ),
-                  title: const Text('Set up Quick Paste'),
+                  title: Text(context.l10n.settingsQuickPasteSetupTitle),
                   content: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Enable the signed GNOME or KDE companion and allow keyboard control to return to the previous app.',
-                      ),
+                      Text(context.l10n.settingsQuickPasteSetupMessage),
                       const Gap(AppSpacing.sm),
                       Wrap(
                         spacing: AppSpacing.sm,
@@ -1801,7 +1863,11 @@ class _QuickPasteSection extends StatelessWidget {
                               onPressed: controller.busy
                                   ? null
                                   : controller.openLinuxCompanionSetup,
-                              child: const Text('Desktop integration'),
+                              child: Text(
+                                context
+                                    .l10n
+                                    .settingsQuickPasteDesktopIntegration,
+                              ),
                             ),
                           if (integration.remoteDesktop ==
                               LinuxRemoteDesktopState.consentRequired)
@@ -1810,14 +1876,18 @@ class _QuickPasteSection extends StatelessWidget {
                               onPressed: controller.busy
                                   ? null
                                   : controller.requestLinuxRemoteDesktop,
-                              child: const Text('Allow keyboard control'),
+                              child: Text(
+                                context.l10n.settingsQuickPasteAllowKeyboard,
+                              ),
                             ),
                           Button.ghost(
                             key: const ValueKey('linux-integration-refresh'),
                             onPressed: controller.busy
                                 ? null
                                 : controller.refreshLinuxIntegration,
-                            child: const Text('Check again'),
+                            child: Text(
+                              context.l10n.settingsQuickPasteCheckAgain,
+                            ),
                           ),
                         ],
                       ),
@@ -1825,31 +1895,34 @@ class _QuickPasteSection extends StatelessWidget {
                   ),
                 ),
             if (!controller.initialized && controller.busy)
-              const StateView.loading(message: 'Loading Quick Paste settings.')
+              StateView.loading(message: context.l10n.settingsQuickPasteLoading)
             else if (!controller.supported)
-              const Alert(
-                leading: AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-                title: Text('Quick Paste is unavailable'),
+              Alert(
+                leading: const AppIconFrame(
+                  child: Icon(LucideIcons.circleAlert),
+                ),
+                title: Text(context.l10n.settingsQuickPasteUnavailableTitle),
                 content: Text(
-                  'This device does not provide the Quick Paste window.',
+                  context.l10n.settingsQuickPasteUnavailableMessage,
                 ),
               )
             else ...[
               _SettingRow(
                 key: shortcutKey,
                 highlighted: shortcutHighlighted,
-                title: 'Open Quick Paste',
-                description: controller.registeredShortcutDescription == null
-                    ? 'The shortcut works while CopyPaste is running in the background.'
-                    : 'Registered shortcut: ${controller.registeredShortcutDescription}',
+                title: context.l10n.settingsQuickPasteShortcutTitle,
+                description: switch (controller.registeredShortcutDescription) {
+                  final shortcut? =>
+                    context.l10n.settingsQuickPasteRegisteredShortcut(shortcut),
+                  null => context.l10n.settingsQuickPasteShortcutDescription,
+                },
                 trailing: _ShortcutRecorder(controller: controller),
               ),
               _SettingRow(
                 key: autoPasteKey,
                 highlighted: autoPasteHighlighted,
-                title: 'Paste automatically',
-                description:
-                    'Selecting a clip returns to the previous app and pastes it.',
+                title: context.l10n.settingsAutoPasteTitle,
+                description: context.l10n.settingsAutoPasteDescription,
                 trailing: Switch(
                   value: controller.autoPaste,
                   onChanged: controller.busy ? null : controller.setAutoPaste,
@@ -1862,13 +1935,11 @@ class _QuickPasteSection extends StatelessWidget {
                   leading: const AppIconFrame(
                     child: Icon(LucideIcons.accessibility),
                   ),
-                  title: const Text('Accessibility is required'),
+                  title: Text(context.l10n.settingsAccessibilityRequiredTitle),
                   content: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Until permission is granted, selecting a clip copies it without pasting.',
-                      ),
+                      Text(context.l10n.settingsAccessibilityRequiredMessage),
                       const Gap(AppSpacing.sm),
                       Align(
                         alignment: Alignment.centerRight,
@@ -1876,7 +1947,7 @@ class _QuickPasteSection extends StatelessWidget {
                           onPressed: controller.busy
                               ? null
                               : controller.requestAccessibility,
-                          child: const Text('Enable'),
+                          child: Text(context.l10n.commonEnable),
                         ),
                       ),
                     ],
@@ -1888,7 +1959,7 @@ class _QuickPasteSection extends StatelessWidget {
                   leading: const AppIconFrame(
                     child: Icon(LucideIcons.circleAlert),
                   ),
-                  title: const Text('Quick Paste needs attention'),
+                  title: Text(context.l10n.settingsQuickPasteAttentionTitle),
                   content: Text(message),
                 ),
               ],
@@ -1970,14 +2041,15 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
                 ? _cancelRecording
                 : _startRecording,
             child: _recording
-                ? const Text('Press shortcut…')
+                ? Text(context.l10n.settingsShortcutRecording)
                 : KeyboardDisplay(keys: widget.controller.shortcut.displayKeys),
           ),
           const Gap(AppSpacing.sm),
           Tooltip(
             showDuration: AppMotion.resolve(context, AppMotion.standard),
-            tooltip: (context) =>
-                const TooltipContainer(child: Text('Reset shortcut')),
+            tooltip: (context) => TooltipContainer(
+              child: Text(context.l10n.settingsShortcutReset),
+            ),
             child: Button.ghost(
               style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: widget.controller.busy || _recording
@@ -2027,6 +2099,7 @@ class _SettingsNavigationTarget {
 }
 
 abstract final class _SettingsTargetId {
+  static const String language = 'result-language';
   static const String maxFileSize = 'result-max-file-size';
   static const String skipSecret = 'result-skip-secret';
   static const String skipTransient = 'result-skip-transient';

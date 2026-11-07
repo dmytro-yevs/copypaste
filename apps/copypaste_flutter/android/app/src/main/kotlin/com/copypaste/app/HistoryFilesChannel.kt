@@ -82,7 +82,7 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
                         } catch (error: Exception) {
                             leases.remove(token)?.close()
                             staged.remove(token)?.let { activeImports.remove(it.absolutePath); it.delete() }
-                            val message = if (error is IllegalArgumentException && error.message?.startsWith("The file is ")==true) error.message else "The selected file could not be read. Check file access and available disk space."
+                            val message = if (error is IllegalArgumentException && error.message?.startsWith("The file is ")==true) error.message else activity.getString(R.string.files_read_failed)
                             reply { result.error("file_import_failed", message, null) }
                         }
                     }
@@ -144,7 +144,7 @@ internal class HistoryFilesChannel(private val activity: MainActivity, messenger
     fun dispose() {
         disposed = true
         channel.setMethodCallHandler(null)
-        pending?.error("picker_closed", "The file picker was closed.", null)
+        pending?.error("picker_closed", activity.getString(R.string.files_picker_closed), null)
         pending = null
         worker.execute {
             leases.values.forEach { it.close() }

@@ -15,7 +15,7 @@ const _platforms = TargetPlatformVariant({
 });
 
 void main() {
-  testWidgets('keeps Telegram geometry independent of mobile theme scaling', (
+  testWidgets('keeps tab geometry independent of mobile theme scaling', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 720));

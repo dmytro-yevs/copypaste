@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">クリップボードの保存</string>
+    <string name="capture_channel_description">CopyPaste がクリップボードの変更を保存したことを通知します。</string>
+    <string name="capture_title">クリップボードを保存しました</string>
+    <string name="capture_body_default">新しい項目が CopyPaste に追加されました。</string>
+    <string name="capture_image">画像</string>
+    <string name="capture_image_size">画像 · %1$d × %2$d</string>
+    <string name="background_channel_name">バックグラウンドでの動作</string>
+    <string name="background_channel_description">有効にした CopyPaste の機能をバックグラウンドで動作させ続けます。</string>
+    <string name="background_title">CopyPaste は動作中です</string>
+    <string name="background_text">有効にした機能がバックグラウンドで実行されています。</string>
+    <string name="share_saved">CopyPaste に保存しました</string>
+    <string name="share_failed">CopyPaste はこの項目を保存できませんでした</string>
+    <string name="chooser_open_file">CopyPaste ファイルを開く</string>
+    <string name="chooser_save_file">CopyPaste ファイルを保存</string>
+    <string name="pairing_invalid_qr">CopyPaste のペアリング用 QR コードをスキャンしてください。</string>
+    <string name="pairing_scanner_unavailable">Google スキャナを開けませんでした。代わりにペアリングコードを入力してください。</string>
+    <string name="files_read_failed">選択したファイルを読み取れませんでした。ファイルへのアクセス権とディスクの空き容量を確認してください。</string>
+    <string name="files_picker_closed">ファイル選択画面が閉じられました。</string>
+</resources>

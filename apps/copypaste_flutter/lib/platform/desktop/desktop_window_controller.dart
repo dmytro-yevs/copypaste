@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../capture/capture_control_state.dart';
@@ -21,11 +22,11 @@ enum DesktopWindowSetupIssue {
 extension DesktopWindowSetupIssueMessage on DesktopWindowSetupIssue {
   String get message => switch (this) {
     DesktopWindowSetupIssue.windowUnavailable =>
-      'Desktop window controls are unavailable. CopyPaste will stay visible.',
+      AppStrings.current.platformWindowControlsUnavailable,
     DesktopWindowSetupIssue.trayUnavailable =>
-      'The system tray is unavailable. Keep CopyPaste open, then retry or quit.',
+      AppStrings.current.platformTrayUnavailable,
     DesktopWindowSetupIssue.quitUnavailable =>
-      'CopyPaste could not quit. Please try again.',
+      AppStrings.current.platformQuitFailed,
   };
 }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_filter_indicator.dart';
@@ -24,7 +25,7 @@ class HistoryDateFilter extends StatelessWidget {
         ? null
         : DateTime(before.year, before.month, before.day - 1);
     final label = from == null || end == null
-        ? 'Filter by date'
+        ? context.l10n.historyDateFilter
         : formatSystemDateRange(context, from, end);
     return AppFilterIndicator(
       active: query.hasDateFilter,
@@ -97,23 +98,27 @@ class _DateEditorState extends State<_DateEditor> {
   Widget build(BuildContext context) {
     final compact =
         OverlayConfiguration.maybeOf(context) is DrawerConfiguration;
+    final strings = context.l10n;
     final presets = [
-      Button.outline(onPressed: () => _preset(1), child: const Text('Today')),
+      Button.outline(
+        onPressed: () => _preset(1),
+        child: Text(strings.historyDatePresetToday),
+      ),
       Button.outline(
         onPressed: () => _preset(1, yesterday: true),
-        child: const Text('Yesterday'),
+        child: Text(strings.historyDatePresetYesterday),
       ),
       Button.outline(
         onPressed: () => _preset(7),
-        child: const Text('Last 7 days'),
+        child: Text(strings.historyDatePresetLastDays(7)),
       ),
       Button.outline(
         onPressed: () => _preset(30),
-        child: const Text('Last 30 days'),
+        child: Text(strings.historyDatePresetLastDays(30)),
       ),
       Button.outline(
         onPressed: () => _preset(null),
-        child: const Text('All time'),
+        child: Text(strings.historyDatePresetAllTime),
       ),
     ];
     final calendar = Theme(
@@ -175,7 +180,7 @@ class _DateEditorState extends State<_DateEditor> {
           children: [
             Button.outline(
               onPressed: () => closeOverlay(context),
-              child: const Text('Cancel'),
+              child: Text(strings.commonCancel),
             ),
             Button.primary(
               onPressed: _value == null
@@ -189,7 +194,7 @@ class _DateEditorState extends State<_DateEditor> {
                       await closeOverlay(context);
                       await pending;
                     },
-              child: const Text('Apply'),
+              child: Text(strings.commonApply),
             ),
           ],
         ),

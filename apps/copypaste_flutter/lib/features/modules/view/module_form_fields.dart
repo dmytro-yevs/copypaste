@@ -4,6 +4,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../controller/module_form_draft.dart';
 import '../models/module_models.dart';
@@ -24,7 +25,7 @@ class ModuleFormFields extends StatelessWidget {
       children: [
         if (draft.errorMessage != null) ...[
           StateView.error(
-            title: 'File selection failed',
+            title: context.l10n.modulesFileSelectionFailed,
             message: draft.errorMessage!,
           ),
           const Gap(AppSpacing.md),
@@ -46,7 +47,7 @@ class ModuleFormFields extends StatelessWidget {
                 key: ValueKey('module-choices-${field.id}'),
                 enabled: enabled,
                 value: (draft.values[field.id] as List).cast<String>(),
-                placeholder: const Text('Choose languages'),
+                placeholder: Text(context.l10n.modulesChooseLanguages),
                 onChanged: (values) => draft.setValue(
                   field.id,
                   (values ?? const <String>[]).toList(),
@@ -84,7 +85,9 @@ class ModuleFormFields extends StatelessWidget {
                   size: AppIconSize.sm,
                   child: Icon(LucideIcons.file, size: AppIconSize.sm),
                 ),
-                child: Text(draft.fileName(field.id) ?? 'Choose file'),
+                child: Text(
+                  draft.fileName(field.id) ?? context.l10n.modulesChooseFile,
+                ),
               )
             else if (field.secret)
               TextField(
@@ -115,8 +118,11 @@ class ModuleFormFields extends StatelessWidget {
         if (draft.selectedModel case final model?)
           Text(
             model.available
-                ? '${model.title} model is ready'
-                : '${model.title} model · ${(model.sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MiB download',
+                ? context.l10n.modulesModelReady(model.title)
+                : context.l10n.modulesModelDownload(
+                    model.title,
+                    (model.sizeBytes / (1024 * 1024)).toStringAsFixed(1),
+                  ),
           ).small().muted(),
       ],
     ),

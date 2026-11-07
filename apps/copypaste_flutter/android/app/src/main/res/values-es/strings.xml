@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Portapapeles guardado</string>
+    <string name="capture_channel_description">Confirma que CopyPaste guardó un cambio del portapapeles.</string>
+    <string name="capture_title">Portapapeles guardado</string>
+    <string name="capture_body_default">Se añadió un nuevo elemento a CopyPaste.</string>
+    <string name="capture_image">Imagen</string>
+    <string name="capture_image_size">Imagen · %1$d × %2$d</string>
+    <string name="background_channel_name">Actividad en segundo plano</string>
+    <string name="background_channel_description">Mantiene activas en segundo plano las funciones activadas de CopyPaste.</string>
+    <string name="background_title">CopyPaste está activo</string>
+    <string name="background_text">Las funciones activadas se están ejecutando en segundo plano.</string>
+    <string name="share_saved">Guardado en CopyPaste</string>
+    <string name="share_failed">CopyPaste no pudo guardar este elemento</string>
+    <string name="chooser_open_file">Abrir archivo de CopyPaste</string>
+    <string name="chooser_save_file">Guardar archivo de CopyPaste</string>
+    <string name="pairing_invalid_qr">Escanea un código QR de vinculación de CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">No se pudo abrir el escáner de Google. Introduce el código de vinculación.</string>
+    <string name="files_read_failed">No se pudo leer el archivo seleccionado. Comprueba el acceso al archivo y el espacio de almacenamiento disponible.</string>
+    <string name="files_picker_closed">Se cerró el selector de archivos.</string>
+</resources>

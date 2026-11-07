@@ -1,5 +1,6 @@
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../platform/startup/launch_at_login.dart';
+import '../../../l10n/l10n.dart';
 import '../repository/onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -23,21 +24,26 @@ class LinuxOnboardingSetup extends OnboardingSetup {
   String get platformLabel => 'Linux';
   LinuxIntegrationStatus? get status => _status;
 
-  bool get integrationReady {
+  /// Whether clipboard capture works, which is all onboarding requires.
+  bool get captureReady {
     final status = _status;
-    if (status == null) return false;
-    final captureReady =
-        status.capabilities.isEmpty ||
+    if (status == null ||
+        status.session == LinuxDesktopSession.unsupported ||
+        !status.clipboard) {
+      return false;
+    }
+    return status.capabilities.isEmpty ||
         status.capability(LinuxCapabilityKind.clipboardCapture).state ==
             LinuxCapabilityState.available;
-    return switch (status.session) {
-      LinuxDesktopSession.x11 =>
-        status.clipboard && captureReady && status.quickPaste,
-      LinuxDesktopSession.wayland =>
-        status.clipboard && captureReady && status.quickPaste,
-      LinuxDesktopSession.unsupported => false,
-    };
   }
+
+  /// Whether optional Quick Paste input is also ready.
+  bool get quickPasteReady => captureReady && _status!.quickPaste;
+
+  @override
+  String? get continueLabel => captureReady && !quickPasteReady
+      ? AppStrings.current.onboardingLinuxContinueBasic
+      : null;
 
   @override
   Future<OnboardingResume> restore() async {
@@ -49,7 +55,7 @@ class LinuxOnboardingSetup extends OnboardingSetup {
         await _refresh();
         errorMessage = null;
       } catch (_) {
-        errorMessage = 'CopyPaste could not read Linux integration status.';
+        errorMessage = AppStrings.current.onboardingLinuxStatusReadFailed;
       }
       return complete ? OnboardingResume.complete : OnboardingResume.welcome;
     } finally {
@@ -66,14 +72,14 @@ class LinuxOnboardingSetup extends OnboardingSetup {
 
   Future<void> openCompanionSetup() => _run(() async {
     if (!await _integration.openCompanionSetup()) {
-      errorMessage = 'Desktop integration setup could not be opened.';
+      errorMessage = AppStrings.current.onboardingLinuxSetupOpenFailed;
     }
     await _refresh();
   });
 
   Future<void> requestRemoteDesktop() => _run(() async {
     if (!await _integration.requestRemoteDesktop()) {
-      errorMessage = 'Keyboard control permission was not granted.';
+      errorMessage = AppStrings.current.onboardingLinuxKeyboardDenied;
     }
     await _refresh();
   });
@@ -82,14 +88,14 @@ class LinuxOnboardingSetup extends OnboardingSetup {
     try {
       await _startup.setEnabled(enabled);
     } catch (_) {
-      errorMessage = 'Start at login could not be updated.';
+      errorMessage = AppStrings.current.onboardingLinuxStartAtLoginFailed;
     }
     await _refresh();
   });
 
   Future<void> registerCopypasteUri() => _run(() async {
     if (!await _integration.registerCopypasteUri()) {
-      errorMessage = 'CopyPaste links could not be registered.';
+      errorMessage = AppStrings.current.onboardingLinuxLinksFailed;
     }
     await _refresh();
   });
@@ -105,8 +111,8 @@ class LinuxOnboardingSetup extends OnboardingSetup {
     // A failed probe must not turn a previously ready snapshot into current
     // permission to advance. Preserve the refresh error and allow a retry.
     if (!refreshed || disposed || busy) return false;
-    if (integrationReady) return true;
-    errorMessage = _integrationRequirement();
+    if (captureReady) return true;
+    errorMessage = _captureRequirement();
     notifyIfActive();
     return false;
   }
@@ -122,7 +128,7 @@ class LinuxOnboardingSetup extends OnboardingSetup {
     try {
       await action();
     } catch (_) {
-      errorMessage = 'Linux integration status could not be refreshed.';
+      errorMessage = AppStrings.current.onboardingLinuxStatusRefreshFailed;
     } finally {
       busy = false;
       notifyIfActive();
@@ -133,14 +139,20 @@ class LinuxOnboardingSetup extends OnboardingSetup {
     _status = await _integration.status();
   }
 
-  String _integrationRequirement() => switch (_status?.session) {
-    LinuxDesktopSession.x11 when _status?.clipboard != true =>
-      'Clipboard access is unavailable in this X11 session.',
-    LinuxDesktopSession.x11 =>
-      'Quick Paste input is unavailable in this X11 session.',
-    LinuxDesktopSession.wayland =>
-      'Enable the signed GNOME or KDE companion and allow keyboard control.',
-    LinuxDesktopSession.unsupported ||
-    null => 'CopyPaste requires an X11 or Wayland desktop session.',
-  };
+  String _captureRequirement() {
+    final status = _status;
+    final strings = AppStrings.current;
+    return switch (status?.session) {
+      LinuxDesktopSession.unsupported ||
+      null => strings.onboardingLinuxSessionRequired,
+      _
+          when status!.clipboard &&
+              status.capability(LinuxCapabilityKind.clipboardCapture).state ==
+                  LinuxCapabilityState.needsCompanion =>
+        strings.onboardingLinuxCompanionCapturePaused,
+      LinuxDesktopSession.x11 => strings.onboardingLinuxX11ClipboardUnavailable,
+      LinuxDesktopSession.wayland =>
+        strings.onboardingLinuxWaylandClipboardUnavailable,
+    };
+  }
 }

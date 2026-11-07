@@ -1,0 +1,3234 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Chinese (`zh`).
+class AppLocalizationsZh extends AppLocalizations {
+  AppLocalizationsZh([String locale = 'zh']) : super(locale);
+
+  @override
+  String get commonCancel => '取消';
+
+  @override
+  String get commonClose => '关闭';
+
+  @override
+  String get commonDone => '完成';
+
+  @override
+  String get commonRetry => '重试';
+
+  @override
+  String get commonTryAgain => '再试一次';
+
+  @override
+  String get commonCopy => '复制';
+
+  @override
+  String get commonDelete => '删除';
+
+  @override
+  String get commonSave => '保存';
+
+  @override
+  String get commonContinue => '继续';
+
+  @override
+  String get commonBack => '返回';
+
+  @override
+  String get commonOpenSettings => '打开设置';
+
+  @override
+  String get commonLoading => '正在加载';
+
+  @override
+  String get commonApply => '应用';
+
+  @override
+  String get commonClear => '清除';
+
+  @override
+  String get commonPin => '置顶';
+
+  @override
+  String get commonEnable => '启用';
+
+  @override
+  String get settingsLanguageTitle => '语言';
+
+  @override
+  String get settingsLanguageDescription => '选择 CopyPaste 界面的语言。';
+
+  @override
+  String get settingsLanguageSystem => '系统默认';
+
+  @override
+  String get settingsLanguageKeywords =>
+      '语言 区域 翻译 界面 language locale translation interface';
+
+  @override
+  String get settingsRuntimeLaunchAtLoginUpdateFailed => '无法更新“登录时启动”设置。请重试。';
+
+  @override
+  String get settingsRuntimeStartupSettingsOpenFailed => '无法打开系统启动设置。';
+
+  @override
+  String get settingsRuntimeRefreshFailed => '无法刷新设置。请重试。';
+
+  @override
+  String get settingsRuntimeLoadFailed => '无法加载设置。';
+
+  @override
+  String get settingsRuntimeAppAlreadyExcluded => '该应用已被排除。';
+
+  @override
+  String get settingsRuntimeChangeFailed => '无法完成所请求的更改。';
+
+  @override
+  String get settingsRuntimeCapturePermissionsIncomplete =>
+      '需先完成剪贴板捕获权限设置，才能恢复捕获。';
+
+  @override
+  String get settingsRuntimeCaptureStopUnconfirmed =>
+      '剪贴板捕获已暂停。Android 捕获服务未确认已停止。';
+
+  @override
+  String get settingsRuntimeNotificationPermissionRequired => '需要通知权限才能启用捕获通知。';
+
+  @override
+  String get settingsRuntimeSavedSettingsUnreadable =>
+      'CopyPaste 无法读取已保存的设置。已启用保护性默认值；请检查并保存偏好设置以进行修复。';
+
+  @override
+  String get settingsRuntimeSettingsRecovered =>
+      'CopyPaste 已使用保护性默认值恢复无法读取的设置。请检查并保存偏好设置以进行修复。';
+
+  @override
+  String get settingsRuntimeExcludedAppIdInvalid => '应用标识符不能为空，且不得超过 256 字节。';
+
+  @override
+  String get settingsRuntimeExcludedAppsLimit => '最多可排除 256 个应用。';
+
+  @override
+  String get settingsRuntimeQuickPastePrepareFailed => '无法准备 Quick Paste。';
+
+  @override
+  String get settingsRuntimeAutoPasteUpdateFailed => '无法更新自动粘贴设置。';
+
+  @override
+  String get settingsRuntimeShortcutRegisterFailed => '无法注册该快捷键。';
+
+  @override
+  String get settingsRuntimeShortcutPauseFailed => '无法暂停当前快捷键。';
+
+  @override
+  String get settingsRuntimeShortcutRestoreFailed => '无法恢复快捷键。';
+
+  @override
+  String get settingsRuntimeQuickPasteOpenFailed => '无法打开 Quick Paste。';
+
+  @override
+  String get settingsRuntimeAccessibilityRequestFailed => '无法请求辅助功能权限。';
+
+  @override
+  String get settingsRuntimeLinuxIntegrationRefreshFailed => '无法刷新 Linux 集成状态。';
+
+  @override
+  String get settingsRuntimeClipboardInputNotGranted => '未授予剪贴板输入权限。';
+
+  @override
+  String get settingsRuntimeClipboardInputRequestFailed => '无法请求剪贴板输入权限。';
+
+  @override
+  String get settingsRuntimeDesktopIntegrationSetupOpenFailed => '无法打开桌面集成设置。';
+
+  @override
+  String get settingsRuntimeTextHistoryFileType => 'CopyPaste 文本历史记录';
+
+  @override
+  String get settingsRuntimeEncryptedBackupFileType => 'CopyPaste 加密备份';
+
+  @override
+  String get settingsRuntimeNotificationImage => '图片';
+
+  @override
+  String settingsRuntimeNotificationImageSize(int width, int height) {
+    return '图片 · $width × $height';
+  }
+
+  @override
+  String get settingsRuntimeNotificationFile => '文件';
+
+  @override
+  String get updateRestoreInstallationFailed => 'CopyPaste 无法恢复更新安装。';
+
+  @override
+  String get updateLinuxAutomaticUnsupported => '此 Linux 安装无法自动更新。';
+
+  @override
+  String get updateMacosPackageMissing => '此版本没有已签名的 macOS 更新包。';
+
+  @override
+  String get updateInstalledVersionInvalid => '已安装的 CopyPaste 版本无效。';
+
+  @override
+  String get updateCheckUnreachable => 'CopyPaste 无法连接 GitHub 以检查更新。';
+
+  @override
+  String get updateCheckTimedOut => '检查更新超时。';
+
+  @override
+  String get updateCheckDeviceFailed => 'CopyPaste 无法在此设备上检查更新。';
+
+  @override
+  String get updateCheckFailed => 'CopyPaste 无法检查更新。';
+
+  @override
+  String get updateDownloadFailed => 'CopyPaste 无法下载更新。';
+
+  @override
+  String get updateDownloadTimedOut => '下载更新超时。';
+
+  @override
+  String get updateInstallFailed => 'CopyPaste 无法安装更新。';
+
+  @override
+  String get updateContinueInAndroidInstaller => '请在 Android 系统安装程序中继续。';
+
+  @override
+  String get updateContinueInPackageManager => '请在系统软件包管理器中继续。';
+
+  @override
+  String get updateInstallerStarting => '正在启动安装程序。';
+
+  @override
+  String get updatePermissionRequiredAndroid =>
+      '请在 Android 设置中允许 CopyPaste 安装应用，然后继续。';
+
+  @override
+  String get updatePermissionRequiredLinux => '请在系统软件包管理器中进行身份验证以安装此更新。';
+
+  @override
+  String get updatePermissionRequired => '请允许 CopyPaste 安装此更新，然后继续。';
+
+  @override
+  String get updateRestartRequired => '更新已安装。请重新启动 CopyPaste 以使用新版本。';
+
+  @override
+  String get updateRestarting => '正在重新启动 CopyPaste。';
+
+  @override
+  String get updateRestartFailed => 'CopyPaste 无法重新启动。请重试。';
+
+  @override
+  String get updateReleasePageOpenFailed => 'CopyPaste 无法打开发布页面。';
+
+  @override
+  String get updatePackageInvalid => '下载的更新不是有效的 CopyPaste 软件包。';
+
+  @override
+  String get updateSignatureInvalid => '下载的更新签名无效。';
+
+  @override
+  String get updateDowngradeRefused => '下载的软件包版本不高于当前版本。';
+
+  @override
+  String get updateHomebrewRequired => '请使用 Homebrew 安装 CopyPaste，才能在此处更新。';
+
+  @override
+  String get updateInstallationCancelled => '更新安装已取消。';
+
+  @override
+  String get updateInstallationBlocked => 'Android 阻止了更新安装。';
+
+  @override
+  String get updateInstallationConflict => '更新与已安装的应用冲突。';
+
+  @override
+  String get updateInstallationIncompatible => '更新与此设备不兼容。';
+
+  @override
+  String get updateInstallationStorage => '请释放存储空间以安装更新。';
+
+  @override
+  String get updateInstallationInterrupted => '更新安装已中断。请重试。';
+
+  @override
+  String get updateInstallationBusy => '已有更新正在安装。';
+
+  @override
+  String get updatePackageDetailsInvalid => '更新包信息无效。';
+
+  @override
+  String get updateIntegrityCheckFailed => '下载的更新未通过完整性检查。';
+
+  @override
+  String get updateInstallerLaunchFailed => 'CopyPaste 无法启动系统安装程序。';
+
+  @override
+  String get updateInstallLocationTranslocated =>
+      '请将 CopyPaste 移到“应用程序”文件夹，然后从该位置打开以进行更新。';
+
+  @override
+  String get updateInstallLocationUnwritable =>
+      'CopyPaste 无法在当前文件夹中替换自身。请通过发布页面进行更新。';
+
+  @override
+  String get updateReplacementBlocked =>
+      'macOS 阻止了替换 CopyPaste。请在“App 管理”设置中允许，或使用发布页面。';
+
+  @override
+  String get updatePackageNotDownloadable => '此平台不使用可下载的更新包。';
+
+  @override
+  String get updatePackageSizeInvalid => '更新包大小无效。';
+
+  @override
+  String get updateUpdaterSignatureInvalid => '下载的更新未通过更新程序签名验证。';
+
+  @override
+  String get updatePackageUrlUntrusted => '更新包 URL 不受信任。';
+
+  @override
+  String get updateDownloadLeftGitHub => '更新下载被重定向到了 GitHub 之外。';
+
+  @override
+  String get updateDownloadTooManyRedirects => '更新下载的重定向次数过多。';
+
+  @override
+  String get updatePackageTooLarge => '更新包过大。';
+
+  @override
+  String get updateSignatureSizeInvalid => '更新程序签名大小无效。';
+
+  @override
+  String get updateMetadataInvalid => 'GitHub 返回了无效的更新元数据。';
+
+  @override
+  String get updateMetadataTooLarge => '更新元数据过大。';
+
+  @override
+  String get quickPasteActionFailedTitle => '操作失败';
+
+  @override
+  String get quickPasteOpenAppSemantics => '打开 CopyPaste';
+
+  @override
+  String get quickPasteSearchPlaceholder => '输入以搜索…';
+
+  @override
+  String get quickPasteLoadingHistory => '正在加载剪贴板历史记录。';
+
+  @override
+  String get quickPasteHistoryUnavailable => '历史记录不可用';
+
+  @override
+  String get quickPasteNoClipsFound => '未找到剪贴项';
+
+  @override
+  String get quickPasteLoadMore => '加载更多';
+
+  @override
+  String get quickPasteTransferFailed => '失败';
+
+  @override
+  String get quickPasteClipUnavailable => '剪贴项不可用';
+
+  @override
+  String get quickPasteFileFallbackName => '文件';
+
+  @override
+  String get quickPastePathUnavailable => '路径不可用';
+
+  @override
+  String get quickPastePreferences => '偏好设置…';
+
+  @override
+  String get quickPasteAbout => '关于';
+
+  @override
+  String get quickPasteQuit => '退出';
+
+  @override
+  String get quickPasteClearHistoryTitle => '清除历史记录？';
+
+  @override
+  String get quickPasteClearHistoryMessage => '已置顶的剪贴项将保留在历史记录中。';
+
+  @override
+  String get quickPasteClearHistoryFailed => '无法删除历史记录。';
+
+  @override
+  String get quickPasteAboutDescription =>
+      '跨 macOS、Android、Windows 和 Linux 的私密剪贴板历史记录。';
+
+  @override
+  String get transfersTitle => '下载与传输';
+
+  @override
+  String transfersActiveTooltip(int count, String written, String total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个传输进行中',
+    );
+    return '$_temp0 · $written / $total';
+  }
+
+  @override
+  String transfersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个进行中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get transfersShowLatest => '最新';
+
+  @override
+  String get transfersShowEarlier => '更早';
+
+  @override
+  String get transfersClearCompletedHistory => '清除已完成的记录';
+
+  @override
+  String get transfersErrorTitle => '传输';
+
+  @override
+  String get transfersEmptyTitle => '无传输';
+
+  @override
+  String get transfersEmptyMessage => '文件导入、下载和传出传输将显示在这里。';
+
+  @override
+  String transfersSpeed(String size) {
+    return '$size/s';
+  }
+
+  @override
+  String transfersBytesProgress(String written, String total) {
+    return '$written / $total';
+  }
+
+  @override
+  String transfersProgressPercent(int percent) {
+    return '$percent%';
+  }
+
+  @override
+  String transfersStatusSize(String status, String size) {
+    return '$status · $size';
+  }
+
+  @override
+  String transfersStatusProgress(String status, String written, String total) {
+    return '$status · $written / $total';
+  }
+
+  @override
+  String get transfersRemoveFromHistory => '从记录中移除';
+
+  @override
+  String get transfersCancelDownload => '取消下载';
+
+  @override
+  String get transfersShowFile => '显示文件';
+
+  @override
+  String get transfersPhaseSending => '正在发送';
+
+  @override
+  String get transfersPhaseDownloading => '正在下载';
+
+  @override
+  String get transfersPhaseAdding => '正在添加';
+
+  @override
+  String get transfersPhaseAdded => '已添加';
+
+  @override
+  String get transfersPhaseSent => '已发送';
+
+  @override
+  String get transfersPhaseCompleted => '已完成';
+
+  @override
+  String get transfersPhaseCancelled => '已取消';
+
+  @override
+  String get transfersPhaseInterrupted => '已中断';
+
+  @override
+  String get transfersPhaseFailed => '失败';
+
+  @override
+  String get transfersUpdatesUnavailable => '无法获取传输更新。请重新打开以刷新。';
+
+  @override
+  String get transfersLoadFailed => '无法加载传输。请重试。';
+
+  @override
+  String get transfersUpdatesLoadFailed => '无法加载传输更新。';
+
+  @override
+  String get transfersRetryFailed => '无法重试此文件。';
+
+  @override
+  String get transfersClearHistoryFailed => '无法清除传输记录。';
+
+  @override
+  String get transfersRemoveRecordFailed => '无法移除此记录。';
+
+  @override
+  String get transfersCancelFailed => '无法取消传输。传输可能仍在进行。';
+
+  @override
+  String get transfersSavedFileUnavailable => '已保存的文件不可用。它可能已被移动或删除。';
+
+  @override
+  String notificationsTooltip(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '通知 · $count 条未读',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get notificationsTitle => '通知';
+
+  @override
+  String get notificationsClearRead => '清除已读通知';
+
+  @override
+  String get notificationsEmptyTitle => '无通知';
+
+  @override
+  String get notificationsEmptyMessage => '设备连接请求及其结果将显示在这里。';
+
+  @override
+  String get notificationsSystemAlertTitle => '系统通知';
+
+  @override
+  String get notificationsReview => '查看';
+
+  @override
+  String get notificationsConnectionRequest => '连接请求';
+
+  @override
+  String get notificationsConfirmConnection => '确认连接';
+
+  @override
+  String get notificationsDeviceConnected => '设备已连接';
+
+  @override
+  String get notificationsConnectionRejected => '连接已拒绝';
+
+  @override
+  String get notificationsConnectionCancelled => '连接已取消';
+
+  @override
+  String get notificationsConnectionRequestExpired => '连接请求已过期';
+
+  @override
+  String get notificationsConnectionFailed => '连接失败';
+
+  @override
+  String get notificationsNearbyDevice => '附近的设备';
+
+  @override
+  String get notificationsPermissionDenied => '请在系统设置中允许系统通知，以便在后台接收请求。';
+
+  @override
+  String get notificationsSystemUnavailable => '系统通知不可用。连接请求会保留在此处。';
+
+  @override
+  String get platformCaptureStateUnavailable => '不可用';
+
+  @override
+  String get platformCaptureStatePaused => '已暂停';
+
+  @override
+  String get platformCaptureStateRunning => '正在捕获';
+
+  @override
+  String get platformCaptureStateStopped => '未运行';
+
+  @override
+  String get platformCaptureActionUnavailable => '捕获不可用';
+
+  @override
+  String get platformCaptureActionResume => '恢复捕获';
+
+  @override
+  String get platformCaptureActionPause => '暂停捕获';
+
+  @override
+  String get platformCaptureActionResumeStopped => '恢复捕获（未运行）';
+
+  @override
+  String get platformTrayOpen => '打开';
+
+  @override
+  String get platformTraySettings => '设置';
+
+  @override
+  String get platformTrayQuit => '退出';
+
+  @override
+  String get platformWindowControlsUnavailable => '桌面窗口控制不可用。CopyPaste 将保持可见。';
+
+  @override
+  String get platformTrayUnavailable => '系统托盘不可用。请保持 CopyPaste 打开，然后重试或退出。';
+
+  @override
+  String get platformQuitFailed => 'CopyPaste 无法退出。请重试。';
+
+  @override
+  String get platformVisibilityChangeFailed => '无法更改应用的可见性。请重试。';
+
+  @override
+  String get platformCaptureNotificationTitle => '剪贴板已保存';
+
+  @override
+  String get platformCaptureNotificationBody => '新的剪贴项已添加到 CopyPaste。';
+
+  @override
+  String get platformPairingNotificationTitle => '连接请求';
+
+  @override
+  String platformPairingNotificationBody(String peerName) {
+    return '$peerName 请求连接。请打开 CopyPaste 比对代码并确认。';
+  }
+
+  @override
+  String get platformPairingNotificationChannelName => '设备连接请求';
+
+  @override
+  String get platformPairingNotificationChannelDescription => '连接附近设备的请求';
+
+  @override
+  String get platformNotificationDefaultAction => '打开';
+
+  @override
+  String get platformFilesSelectionFailed => '无法选择文件。';
+
+  @override
+  String get platformFilesOnlyRegular => '只能导入普通文件。';
+
+  @override
+  String get platformModulesUnavailable => '模块在此设备上不可用。';
+
+  @override
+  String get platformSmsAccessConfigureFailed => '无法配置短信访问权限。';
+
+  @override
+  String get platformSmsAccessVerifyFailed => '无法验证短信访问权限。';
+
+  @override
+  String get platformUpdatesUnavailableHere => '此处无法使用应用更新。';
+
+  @override
+  String get platformUpdateVersionUnavailable => '无法获取已安装的版本。';
+
+  @override
+  String get platformUpdatesUnavailableInstallation => '此安装无法使用应用更新。';
+
+  @override
+  String get platformUpdateLinuxUnsupported => '此 Linux 安装无法自动更新。';
+
+  @override
+  String get platformUpdateLinuxArchitectureMismatch =>
+      '此 Linux 更新与当前运行的架构不匹配。';
+
+  @override
+  String get platformUpdateMacosUnsupported => '此 macOS 安装无法自动更新。';
+
+  @override
+  String get platformUpdateStartFailed => 'CopyPaste 无法开始更新。';
+
+  @override
+  String get platformGlobalShortcutDescription => '打开 Quick Paste';
+
+  @override
+  String get settingsSectionGeneral => '通用';
+
+  @override
+  String get settingsSectionGeneralSummary => '语言和应用可见性。';
+
+  @override
+  String get settingsSectionClipboard => '剪贴板';
+
+  @override
+  String get settingsSectionClipboardSummary => '捕获和历史记录限制。';
+
+  @override
+  String get settingsSectionPrivacy => '隐私';
+
+  @override
+  String get settingsSectionPrivacySummary => '应用排除和屏幕保护。';
+
+  @override
+  String get settingsSectionQuickPasteSummary => '快捷键和自动粘贴行为。';
+
+  @override
+  String get settingsSectionSync => '同步';
+
+  @override
+  String get settingsSectionSyncSummary => '同步和附近设备发现。';
+
+  @override
+  String get settingsSectionNotifications => '通知';
+
+  @override
+  String get settingsSectionNotificationsSummary => '捕获通知和声音。';
+
+  @override
+  String get settingsSectionData => '数据';
+
+  @override
+  String get settingsSectionDataSummary => '导出、备份和恢复。';
+
+  @override
+  String get settingsSectionModules => '模块';
+
+  @override
+  String get settingsSectionModulesSummary => '安装和管理可选模块。';
+
+  @override
+  String get settingsSectionAbout => '关于';
+
+  @override
+  String get settingsSectionAboutSummary => '版本和应用更新。';
+
+  @override
+  String get settingsGeneralDescription => '语言、自动启动和应用可见性。';
+
+  @override
+  String get settingsModulesDescription => 'CopyPaste 的可选功能。';
+
+  @override
+  String get settingsClipboardDescription => '捕获剪贴板更改并管理历史记录限制。';
+
+  @override
+  String get settingsDataDescription => '导出、备份和恢复剪贴板历史记录。';
+
+  @override
+  String get settingsSyncDescription => '控制与已配对设备的同步。';
+
+  @override
+  String get settingsPrivacyDescription => '控制捕获哪些应用的内容，并保护剪贴板内容。';
+
+  @override
+  String get settingsNotificationsDescription => '为捕获的剪贴项选择通知和声音。';
+
+  @override
+  String get settingsAboutDescription => 'CopyPaste 版本和应用更新。';
+
+  @override
+  String get settingsQuickPasteDescription => '无需切换窗口，随时打开剪贴板历史记录。';
+
+  @override
+  String get settingsLoadingMessage => '正在加载设置。';
+
+  @override
+  String get settingsUnavailableTitle => '设置不可用';
+
+  @override
+  String get settingsNoResultsTitle => '未找到设置';
+
+  @override
+  String get settingsNoResultsMessage => '请尝试其他搜索词。';
+
+  @override
+  String get settingsAttentionTitle => '设置需要处理';
+
+  @override
+  String get settingsSearchPlaceholder => '搜索设置';
+
+  @override
+  String get settingsBackToSettings => '返回设置';
+
+  @override
+  String get settingsStartOnBootTitle => '开机时启动';
+
+  @override
+  String get settingsStartAtLoginTitle => '登录时启动';
+
+  @override
+  String get settingsStartupSearchDescription => '自动启动 CopyPaste。';
+
+  @override
+  String get settingsStartupKeywords =>
+      '启动 登录 开机 打开 自动 自启动 startup login boot launch automatically autostart';
+
+  @override
+  String get settingsStartupWindowsApproval =>
+      '已在任务管理器中禁用。请在“设置 → 应用 → 启动”中启用 CopyPaste。';
+
+  @override
+  String get settingsStartupMacApproval => '请在“系统设置 → 通用 → 登录项”中允许 CopyPaste。';
+
+  @override
+  String get settingsStartupUnavailable => '此安装不支持自动启动。';
+
+  @override
+  String get settingsStartupAndroidDescription => '重新启动设备后恢复已启用的后台服务。';
+
+  @override
+  String get settingsStartupDesktopDescription => '登录时自动打开 CopyPaste。';
+
+  @override
+  String get settingsShowInDock => '在程序坞中显示';
+
+  @override
+  String get settingsShowInTaskbar => '在任务栏中显示';
+
+  @override
+  String get settingsTaskbarVisibilityDescription => '显示用于切换窗口的应用图标。';
+
+  @override
+  String get settingsTaskbarVisibilityKeywords =>
+      '程序坞 任务栏 应用 图标 可见性 dock taskbar application icon visibility';
+
+  @override
+  String get settingsShowInMenuBar => '在菜单栏中显示';
+
+  @override
+  String get settingsShowInSystemTray => '在系统托盘中显示';
+
+  @override
+  String get settingsTrayVisibilityDescription => '显示 CopyPaste 和捕获控制的快速入口。';
+
+  @override
+  String get settingsTrayVisibilityKeywords =>
+      '托盘 菜单栏 状态 图标 可见性 tray menu bar menubar status icon visibility';
+
+  @override
+  String get settingsVisibilityErrorTitle => '无法更改可见性';
+
+  @override
+  String get settingsModulesSearchDescription => '安装、更新和移除可选模块。';
+
+  @override
+  String get settingsModulesKeywords => '功能 命令 扩展 features commands extensions';
+
+  @override
+  String get settingsAndroidCaptureTitle => 'Android 后台捕获';
+
+  @override
+  String get settingsAndroidCaptureSearchDescription =>
+      '“完整”或“受限”模式，使用 Shizuku 或 ADB 设置。';
+
+  @override
+  String get settingsAndroidCaptureKeywords =>
+      '后台 权限 设置 background permissions setup';
+
+  @override
+  String get settingsAndroidCaptureDescription =>
+      '选择“完整”或“受限”模式，并管理一次性的 Shizuku 或 ADB 设置。';
+
+  @override
+  String get settingsOpenSetup => '打开设置向导';
+
+  @override
+  String get settingsSaveScreenshotsTitle => '保存截屏';
+
+  @override
+  String get settingsSaveScreenshotsSearchDescription =>
+      '自动将新的 Android 截屏保存到历史记录。';
+
+  @override
+  String get settingsSaveScreenshotsKeywords =>
+      '图片 照片 捕获 权限 images photos capture permissions';
+
+  @override
+  String get settingsSaveScreenshotsDescription => '自动将新截屏添加到历史记录。';
+
+  @override
+  String get settingsScreenshotAccessTitle => '截屏访问权限';
+
+  @override
+  String get settingsScreenshotAccessDescription => '允许访问所有照片和通知，以便在后台保存新截屏。';
+
+  @override
+  String get settingsAllowAccess => '允许访问';
+
+  @override
+  String get settingsScreenshotCaptureStoppedTitle => '截屏捕获未运行';
+
+  @override
+  String get settingsScreenshotCaptureStoppedMessage => '新截屏未被保存。请恢复捕获以重新启动服务。';
+
+  @override
+  String get settingsResumeCapture => '恢复捕获';
+
+  @override
+  String get settingsClipboardCaptureTitle => '剪贴板捕获';
+
+  @override
+  String get settingsClipboardCaptureSearchDescription => '暂停或恢复剪贴板捕获。';
+
+  @override
+  String get settingsCaptureStateUnavailable => '状态不可用';
+
+  @override
+  String get settingsCaptureStoppedTitle => '捕获未运行';
+
+  @override
+  String get settingsCaptureStoppedMessage => 'CopyPaste 目前未在此设备上接收剪贴板更改。';
+
+  @override
+  String get settingsRetentionTitle => '保留期限';
+
+  @override
+  String get settingsRetentionDescription => '自动移除未置顶的旧剪贴项。';
+
+  @override
+  String get settingsRetentionForever => '永久保留';
+
+  @override
+  String get settingsStorageQuotaTitle => '存储配额';
+
+  @override
+  String get settingsStorageQuotaDescription => '未置顶历史记录可使用的最大本地存储空间。';
+
+  @override
+  String get settingsStorageQuotaKeywords => '磁盘 空间 限制 disk space limit';
+
+  @override
+  String get settingsMaxFileSizeTitle => '最大文件大小';
+
+  @override
+  String get settingsMaxFileSizeSearchDescription => '添加和下载文件的大小限制。';
+
+  @override
+  String get settingsMaxFileSizeKeywords =>
+      '导入 下载 传输 大小 限制 import download transfer size limit';
+
+  @override
+  String get settingsMaxFileSizeDescription =>
+      '添加和下载文件的大小限制。仅当你选择“下载”时才会传输文件内容。';
+
+  @override
+  String get settingsHistoryFilesTitle => '历史记录文件';
+
+  @override
+  String get settingsHistoryFilesSearchDescription => '导出历史记录、创建备份或恢复备份。';
+
+  @override
+  String get settingsHistoryFilesKeywords =>
+      '文本 加密 备份 数据 text encrypted backup data';
+
+  @override
+  String get settingsExportTextTitle => '导出文本历史记录';
+
+  @override
+  String get settingsExportTextDescription => '将文本剪贴项保存到可移植文件中。';
+
+  @override
+  String get settingsExportAction => '导出';
+
+  @override
+  String get settingsBackupTitle => '加密备份';
+
+  @override
+  String get settingsBackupDescription => '保存此设备的完整本地历史记录。';
+
+  @override
+  String get settingsCreateBackupAction => '创建备份';
+
+  @override
+  String get settingsRestoreTitle => '恢复备份';
+
+  @override
+  String get settingsRestoreDescription => '用加密备份替换本地历史记录。';
+
+  @override
+  String get settingsRestoreAction => '恢复';
+
+  @override
+  String get settingsRestoreDialogTitle => '替换本地历史记录？';
+
+  @override
+  String get settingsRestoreDialogMessage =>
+      '所选加密备份将替换此设备上的剪贴板历史记录。当前设置和设备身份将保留。';
+
+  @override
+  String get settingsRestoreFailed => '无法恢复备份。';
+
+  @override
+  String get settingsExportIncompleteTitle => '文本导出不完整';
+
+  @override
+  String settingsExportIncompleteMessage(String saved, String omissions) {
+    return '$saved；$omissions。';
+  }
+
+  @override
+  String settingsExportOmissionsJoin(String first, String second) {
+    return '$first，$second';
+  }
+
+  @override
+  String get settingsSyncSwitchTitle => '同步';
+
+  @override
+  String get settingsSyncSwitchDescription => '已配对设备同步的总开关。';
+
+  @override
+  String get settingsSyncSearchDescription => '已配对设备同步。';
+
+  @override
+  String get settingsInstantClipboardTitle => '即时剪贴板';
+
+  @override
+  String get settingsInstantClipboardSearchDescription => '自动复制来自其他设备的新剪贴项。';
+
+  @override
+  String get settingsInstantClipboardKeywords =>
+      '自动 复制 粘贴 同步 接收 automatic copy paste sync received';
+
+  @override
+  String get settingsInstantClipboardDescription => '自动将其他设备上较新的剪贴项复制到此设备的剪贴板。';
+
+  @override
+  String get settingsLanVisibilityTitle => '局域网可见性';
+
+  @override
+  String get settingsLanVisibilityDescription => '允许附近的设备发现此设备。';
+
+  @override
+  String get settingsLanVisibilityKeywords =>
+      '本地 网络 发现 local network discovery';
+
+  @override
+  String get settingsExcludedAppsTitle => '排除的应用';
+
+  @override
+  String get settingsExcludedAppsSearchDescription => '跳过对排除应用的自动捕获。';
+
+  @override
+  String get settingsExcludedAppsKeywords =>
+      '隐私 应用 标识符 privacy app identifiers';
+
+  @override
+  String get settingsExcludedAppsMacDescription =>
+      '这些应用处于活动状态时跳过自动捕获。后台复制可能会绕过排除规则。';
+
+  @override
+  String get settingsExcludedAppsDesktopDescription =>
+      '根据可识别的剪贴板所有者跳过自动捕获。设置了排除规则但无法识别来源时，将暂停捕获。';
+
+  @override
+  String get settingsExcludedAppsAndroidDescription =>
+      '由于 Android 无法识别来源应用，设置排除规则后将跳过自动捕获。';
+
+  @override
+  String get settingsExcludedAppsUnsupportedDescription =>
+      'macOS、Windows、Android 和 Linux 支持应用排除。';
+
+  @override
+  String get settingsExcludedAppsAdd => '添加';
+
+  @override
+  String get settingsExcludedAppsEmpty => '未排除任何应用。';
+
+  @override
+  String settingsExcludedAppsRemove(String app) {
+    return '移除 $app';
+  }
+
+  @override
+  String get settingsExcludeDialogTitle => '排除应用';
+
+  @override
+  String get settingsExcludeDialogAction => '排除';
+
+  @override
+  String get settingsExcludeDialogPlaceholder => '应用标识符';
+
+  @override
+  String get settingsExcludeFailed => '无法排除该应用。';
+
+  @override
+  String get settingsSkipSecretTitle => '跳过机密剪贴板内容';
+
+  @override
+  String get settingsSkipSecretDescription => '不将来源应用标记为机密的内容存入历史记录。';
+
+  @override
+  String get settingsSkipSecretKeywords =>
+      '机密 密码 敏感 隐藏 遮盖 secret password sensitive concealed spoiler';
+
+  @override
+  String get settingsSkipTransientTitle => '跳过临时剪贴板内容';
+
+  @override
+  String get settingsSkipTransientDescription => '不将来源应用标记为临时的副本存入历史记录。';
+
+  @override
+  String get settingsSkipTransientKeywords =>
+      '临时 暂时 隐私 transient temporary privacy';
+
+  @override
+  String get settingsBlockScreenshotsTitle => '阻止截屏';
+
+  @override
+  String get settingsBlockScreenshotsDescription => '阻止对 CopyPaste 进行截屏和录屏。';
+
+  @override
+  String get settingsBlockScreenshotsUnsupported => '此平台不支持阻止截屏。';
+
+  @override
+  String get settingsBlockScreenshotsKeywords =>
+      '隐私 屏幕 捕获 保护 配对 二维码 安全 代码 privacy screen capture protection pairing qr security code';
+
+  @override
+  String get settingsNotifyOnCopyTitle => '复制时通知';
+
+  @override
+  String get settingsNotifyOnCopyDescription => '后台捕获后显示通知。';
+
+  @override
+  String get settingsNotificationPreviewTitle => '显示剪贴板内容';
+
+  @override
+  String get settingsNotificationPreviewDescription => '在复制通知中包含剪贴项预览。';
+
+  @override
+  String get settingsNotificationPreviewKeywords =>
+      '通知 预览 文本 图片 隐私 notification preview text image privacy';
+
+  @override
+  String get settingsSoundOnCopyTitle => '复制时播放声音';
+
+  @override
+  String get settingsSoundOnCopyDescription => '成功捕获后播放系统反馈。';
+
+  @override
+  String get settingsVersionTitle => '版本';
+
+  @override
+  String get settingsVersionDescription => '已安装的 CopyPaste 版本。';
+
+  @override
+  String get settingsVersionUnavailable => '不可用';
+
+  @override
+  String get settingsUpdatesTitle => '应用更新';
+
+  @override
+  String get settingsUpdatesSearchDescription => '检查并安装 CopyPaste 更新。';
+
+  @override
+  String get settingsUpdatesKeywords => '版本 发布 version github release';
+
+  @override
+  String get settingsUpdateIdle => '检查是否有更新的 CopyPaste 版本。';
+
+  @override
+  String get settingsUpdateChecking => '正在检查更新。';
+
+  @override
+  String get settingsUpdateUpToDate => 'CopyPaste 已是最新版本。';
+
+  @override
+  String settingsUpdateVersionUpToDate(String version) {
+    return '版本 $version 已是最新。';
+  }
+
+  @override
+  String settingsUpdateAvailable(String available, String current) {
+    return '版本 $available 现已推出。此设备的版本为 $current。';
+  }
+
+  @override
+  String settingsUpdateDownloading(String version, int percent) {
+    return '正在下载版本 $version · $percent%。';
+  }
+
+  @override
+  String get settingsUpdatePreparingModules => '正在准备已安装模块的更新。';
+
+  @override
+  String settingsUpdateInstalling(String version) {
+    return '正在安装版本 $version。';
+  }
+
+  @override
+  String get settingsUpdateNeedsAttention => '应用更新需要处理。';
+
+  @override
+  String get settingsUpdateNowAction => '立即更新';
+
+  @override
+  String get settingsUpdateOpenReleaseAction => '打开发布页面';
+
+  @override
+  String get settingsUpdateCheckingAction => '正在检查';
+
+  @override
+  String get settingsUpdateDownloadingAction => '正在下载';
+
+  @override
+  String get settingsUpdateInstallingAction => '正在安装';
+
+  @override
+  String get settingsUpdateRestartAction => '重新启动 CopyPaste';
+
+  @override
+  String get settingsUpdateCheckAgainAction => '再次检查';
+
+  @override
+  String get settingsUpdateNoneTitle => '没有可用更新';
+
+  @override
+  String get settingsUpdateLatest => 'CopyPaste 已是最新版本。';
+
+  @override
+  String settingsUpdateVersionLatest(String version) {
+    return 'CopyPaste $version 已是最新版本。';
+  }
+
+  @override
+  String get settingsUpdateAvailableTitle => '有可用更新';
+
+  @override
+  String get settingsUpdateReady => '新版本的 CopyPaste 已可安装。';
+
+  @override
+  String settingsUpdateVersionReady(String version) {
+    return 'CopyPaste $version 已可安装。';
+  }
+
+  @override
+  String get settingsUpdateUnavailableTitle => '无法更新';
+
+  @override
+  String get settingsUpdateUnavailableMessage => '此安装无法自动更新。';
+
+  @override
+  String get settingsUpdateCheckFailedTitle => '检查更新失败';
+
+  @override
+  String get settingsUpdateCheckFailedMessage => 'CopyPaste 无法检查更新。';
+
+  @override
+  String get settingsQuickPasteSetupTitle => '设置 Quick Paste';
+
+  @override
+  String get settingsQuickPasteSetupMessage =>
+      '请启用已签名的 GNOME 或 KDE 配套组件，并允许键盘控制以返回上一个应用。';
+
+  @override
+  String get settingsQuickPasteDesktopIntegration => '桌面集成';
+
+  @override
+  String get settingsQuickPasteAllowKeyboard => '允许键盘控制';
+
+  @override
+  String get settingsQuickPasteCheckAgain => '再次检查';
+
+  @override
+  String get settingsQuickPasteLoading => '正在加载 Quick Paste 设置。';
+
+  @override
+  String get settingsQuickPasteUnavailableTitle => 'Quick Paste 不可用';
+
+  @override
+  String get settingsQuickPasteUnavailableMessage => '此设备不提供 Quick Paste 窗口。';
+
+  @override
+  String get settingsQuickPasteShortcutTitle => '打开 Quick Paste';
+
+  @override
+  String get settingsQuickPasteShortcutSearchDescription =>
+      '配置 Quick Paste 全局快捷键。';
+
+  @override
+  String get settingsQuickPasteShortcutKeywords => '键盘 快捷键 热键 keyboard hotkey';
+
+  @override
+  String get settingsQuickPasteShortcutDescription =>
+      'CopyPaste 在后台运行时，即可使用该快捷键。';
+
+  @override
+  String settingsQuickPasteRegisteredShortcut(String shortcut) {
+    return '已注册的快捷键：$shortcut';
+  }
+
+  @override
+  String get settingsAutoPasteTitle => '自动粘贴';
+
+  @override
+  String get settingsAutoPasteSearchDescription => '将所选剪贴项粘贴到上一个应用中。';
+
+  @override
+  String get settingsAutoPasteKeywords => '辅助功能 自动 accessibility automatic';
+
+  @override
+  String get settingsAutoPasteDescription => '选择剪贴项后会返回上一个应用并粘贴。';
+
+  @override
+  String get settingsAccessibilityRequiredTitle => '需要辅助功能权限';
+
+  @override
+  String get settingsAccessibilityRequiredMessage => '在授予权限之前，选择剪贴项只会复制而不会粘贴。';
+
+  @override
+  String get settingsQuickPasteAttentionTitle => 'Quick Paste 需要处理';
+
+  @override
+  String get settingsShortcutRecording => '请按快捷键…';
+
+  @override
+  String get settingsShortcutReset => '重置快捷键';
+
+  @override
+  String settingsRetentionDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 天',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsStorageQuotaGigabytes(String size) {
+    return '$size GB';
+  }
+
+  @override
+  String settingsFileSizeMebibytes(int size) {
+    return '$size MiB';
+  }
+
+  @override
+  String settingsFileSizeGibibytes(int size) {
+    return '$size GiB';
+  }
+
+  @override
+  String settingsExportSavedClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已保存 $count 个文本剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportSkippedNonText(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已排除 $count 个非文本剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportSkippedUnreadable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个文本剪贴项无法读取',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get devicesLoading => '正在加载设备…';
+
+  @override
+  String get devicesUnavailableTitle => '设备不可用';
+
+  @override
+  String get devicesNearbyTitle => '附近的设备';
+
+  @override
+  String get devicesScan => '扫描';
+
+  @override
+  String get devicesScanning => '正在扫描…';
+
+  @override
+  String get devicesNoneNearby => '附近没有设备';
+
+  @override
+  String get devicesThisDevice => '此设备';
+
+  @override
+  String get devicesTrusted => '受信任';
+
+  @override
+  String get devicesConnect => '连接';
+
+  @override
+  String devicesCardPing(String ping) {
+    return '延迟：$ping';
+  }
+
+  @override
+  String devicesCardPingStacked(String ping) {
+    return '延迟：\n$ping';
+  }
+
+  @override
+  String get devicesRenameDialogTitle => '重命名此设备';
+
+  @override
+  String get devicesNamePlaceholder => '设备名称';
+
+  @override
+  String get devicesRenameFailed => '无法保存设备名称。';
+
+  @override
+  String devicesRevokeDialogTitle(String device) {
+    return '撤销 $device？';
+  }
+
+  @override
+  String devicesUnpairDialogTitle(String device) {
+    return '解除与 $device 的配对？';
+  }
+
+  @override
+  String get devicesRevokeDialogMessage =>
+      '这会将该设备从你的设备组中移除，并永久阻止此配对。其他设备重新连接时会应用此移除操作。';
+
+  @override
+  String get devicesUnpairDialogMessage =>
+      '这会将该设备从你的设备组中移除。其他设备重新连接时会应用此移除操作。再次添加该设备需要重新确认。';
+
+  @override
+  String get devicesRevoke => '撤销';
+
+  @override
+  String get devicesUnpair => '解除配对';
+
+  @override
+  String get devicesActionFailedMessage => '无法完成设备操作。';
+
+  @override
+  String get devicesCloseDetails => '关闭设备详情';
+
+  @override
+  String get devicesDetailType => '设备类型';
+
+  @override
+  String get devicesDetailOperatingSystem => '操作系统';
+
+  @override
+  String get devicesDetailModel => '型号';
+
+  @override
+  String get devicesDetailAppVersion => 'CopyPaste 版本';
+
+  @override
+  String get devicesDetailProtocolVersion => '协议版本';
+
+  @override
+  String get devicesDetailStatus => '状态';
+
+  @override
+  String get devicesDetailPing => '延迟';
+
+  @override
+  String get devicesDetailMeasured => '测量时间';
+
+  @override
+  String get devicesDetailLastSeen => '上次发现';
+
+  @override
+  String get devicesDetailLanEndpoint => '局域网端点';
+
+  @override
+  String get devicesDetailDeviceId => '设备 ID';
+
+  @override
+  String get devicesDetailPairingId => '配对 ID';
+
+  @override
+  String get devicesDetailProfileProvenance => '信息来源';
+
+  @override
+  String get devicesDetailProfileTrust => '信息可信度';
+
+  @override
+  String get devicesDetailProfileUpdated => '信息更新时间';
+
+  @override
+  String get devicesValueUnavailable => '不可用';
+
+  @override
+  String get devicesRenameDevice => '重命名设备';
+
+  @override
+  String get devicesSyncNow => '立即同步';
+
+  @override
+  String get devicesRevokePairing => '撤销配对';
+
+  @override
+  String get devicesLocal => '本地';
+
+  @override
+  String get devicesTrustAuthenticated => '已认证';
+
+  @override
+  String get devicesTrustUnverified => '未验证';
+
+  @override
+  String get devicesProvenanceSelfReported => '自行报告';
+
+  @override
+  String get devicesProvenanceObserved => '观测';
+
+  @override
+  String get devicesProvenanceMeasured => '实测';
+
+  @override
+  String get devicesConnectionOnline => '在线';
+
+  @override
+  String get devicesConnectionOffline => '离线';
+
+  @override
+  String get devicesConnectionVisible => '可见';
+
+  @override
+  String get devicesConnectionNotSeen => '未发现';
+
+  @override
+  String get devicesConnectionUnknown => '未知';
+
+  @override
+  String get devicesPeerAvailable => '可用';
+
+  @override
+  String get devicesPeerVisibleNow => '当前可见';
+
+  @override
+  String get devicesPeerStatusUnknown => '状态未知';
+
+  @override
+  String get devicesPingUnavailable => '— ms';
+
+  @override
+  String get devicesPingUnderOneMillisecond => '<1 ms';
+
+  @override
+  String devicesPingMilliseconds(int milliseconds) {
+    return '$milliseconds ms';
+  }
+
+  @override
+  String get devicesClassDesktop => '台式电脑';
+
+  @override
+  String get devicesClassLaptop => '笔记本电脑';
+
+  @override
+  String get devicesClassPhone => '手机';
+
+  @override
+  String get devicesClassTablet => '平板电脑';
+
+  @override
+  String get devicesClassUnknown => '设备';
+
+  @override
+  String get devicesUnknownOs => '未知操作系统';
+
+  @override
+  String get devicesAddDevice => '添加设备';
+
+  @override
+  String get devicesScanQr => '扫描二维码';
+
+  @override
+  String get devicesEnterCode => '输入代码';
+
+  @override
+  String get devicesScannerUnavailableTitle => '扫描器不可用';
+
+  @override
+  String get devicesActionFailedTitle => '操作失败';
+
+  @override
+  String get devicesRefreshFailedTitle => '设备刷新失败';
+
+  @override
+  String get devicesNearbyPairingUnavailable => '附近配对不可用。';
+
+  @override
+  String get devicesNearbyPairingUnavailableUseAddDevice =>
+      '附近配对不可用。请使用“添加设备”显示配对代码。';
+
+  @override
+  String get pairingTitle => '配对';
+
+  @override
+  String get pairingPairDevice => '配对设备';
+
+  @override
+  String get pairingScanQrCode => '扫描二维码';
+
+  @override
+  String get pairingEnterPairingCode => '输入配对代码';
+
+  @override
+  String get pairingConnectNearbyDevice => '连接附近的设备';
+
+  @override
+  String get pairingSendingRequest => '正在发送连接请求…';
+
+  @override
+  String get pairingEmptyTitle => '选择配对方式';
+
+  @override
+  String get pairingEmptyMessage => '配对控件将显示在这里。';
+
+  @override
+  String get pairingCreatingInvitation => '正在创建配对邀请。';
+
+  @override
+  String get pairingCode => '配对代码';
+
+  @override
+  String get pairingCodeHint => '输入另一台设备上显示的 8 位代码。';
+
+  @override
+  String get pairingDeviceAddress => '设备地址';
+
+  @override
+  String get pairingDeviceAddressHint => '使用另一台设备报告的 host:port 地址。';
+
+  @override
+  String get pairingCheckDetailsTitle => '检查配对信息';
+
+  @override
+  String get pairingActionFailed => '配对操作失败';
+
+  @override
+  String get pairingConnectingDevice => '正在连接设备…';
+
+  @override
+  String get pairingQrScannerTitle => '二维码扫描器';
+
+  @override
+  String get pairingCameraPreviewPlaceholder => '相机预览将显示在这里。';
+
+  @override
+  String get pairingScannerNeedsAttention => '扫描器需要处理';
+
+  @override
+  String get pairingCodeIncomplete => '请输入完整的 8 位配对代码。';
+
+  @override
+  String get pairingAddressMissing => '请输入设备的 host:port 地址。';
+
+  @override
+  String get pairingWaitingForOtherDevice => '正在等待另一台设备';
+
+  @override
+  String get pairingInviteInstructions => '在另一台设备上，选择“添加设备 → 输入代码”，或扫描二维码。';
+
+  @override
+  String get pairingDetailsTitle => '配对信息';
+
+  @override
+  String get pairingAddress => '地址';
+
+  @override
+  String get pairingVerificationCode => '验证码';
+
+  @override
+  String get pairingVerificationCodeHint => '仅当两台设备上的验证码一致时才确认。';
+
+  @override
+  String get pairingReject => '拒绝';
+
+  @override
+  String get pairingConfirm => '确认';
+
+  @override
+  String get pairingAccept => '接受';
+
+  @override
+  String get pairingJoinDevice => '加入设备';
+
+  @override
+  String get pairingStartScanner => '启动扫描器';
+
+  @override
+  String get pairingActionNotStarted => '无法开始配对操作。';
+
+  @override
+  String get pairingStateHandshaking => '正在验证设备';
+
+  @override
+  String get pairingStateAwaitingConfirmation => '请在两台设备上确认';
+
+  @override
+  String get pairingStateConfirmed => '设备已配对';
+
+  @override
+  String get pairingStateRejected => '配对已拒绝';
+
+  @override
+  String get pairingStateCancelled => '配对已取消';
+
+  @override
+  String get pairingStateTimedOut => '配对超时';
+
+  @override
+  String get pairingStateFailed => '配对失败';
+
+  @override
+  String get pairingHandshakingDescription => '设备正在建立安全通道。';
+
+  @override
+  String get pairingAwaitingConfirmationDescription => '请比对受保护的验证码，然后在两台设备上确认。';
+
+  @override
+  String get pairingConfirmedDescription => '设备已连接。你的设备组成员信息将自动同步。';
+
+  @override
+  String get pairingNoDeviceAdded => '未添加任何设备。';
+
+  @override
+  String get pairingTimedOutDescription => '请重新开始配对以继续。';
+
+  @override
+  String get pairingIdleDescription => '开始配对以连接设备。';
+
+  @override
+  String get pairingProtectedUnavailableTitle => '受保护的配对不可用';
+
+  @override
+  String get pairingProtectedUnavailableMessage => '此配对会话必须在专用的受保护窗口中打开。';
+
+  @override
+  String get pairingCancel => '取消配对';
+
+  @override
+  String get pairingOrEnterCode => '或输入配对代码';
+
+  @override
+  String get pairingJoinSecurely => '安全加入';
+
+  @override
+  String get pairingProtectedWaitingDescription =>
+      '在此受保护窗口中显示二维码、扫描二维码或输入配对代码。';
+
+  @override
+  String pairingExpiresInSeconds(int seconds) {
+    return '$seconds 秒后过期';
+  }
+
+  @override
+  String get pairingInvalidQr => '请扫描 CopyPaste 配对二维码。';
+
+  @override
+  String get pairingGoogleScannerUnavailable => 'Google 扫描器不可用。请改为输入配对代码。';
+
+  @override
+  String get pairingScannerCouldNotOpen => '无法打开扫描器。请改为输入配对代码。';
+
+  @override
+  String get pairingSecurePresentationUnavailable => '无法安全显示配对信息。';
+
+  @override
+  String get pairingVerificationCodeRequired => '请先显示并比对验证码。';
+
+  @override
+  String get syncStatusUnavailable => '同步状态不可用';
+
+  @override
+  String get syncStatusOff => '同步已关闭';
+
+  @override
+  String get syncStatusWaitingForSync => '等待同步';
+
+  @override
+  String get syncStatusSyncing => '正在同步';
+
+  @override
+  String get syncStatusUpToDate => '已是最新';
+
+  @override
+  String get syncStatusInterrupted => '同步已中断';
+
+  @override
+  String get syncStatusPartiallySynchronized => '部分已同步';
+
+  @override
+  String get syncStatusRetrying => '正在重试';
+
+  @override
+  String get syncStatusWaitingToSync => '待同步';
+
+  @override
+  String get syncStatusWaitingForDevice => '等待设备';
+
+  @override
+  String get syncStatusNoPairedDevices => '没有已配对的设备';
+
+  @override
+  String get syncStatusDevicesOffline => '设备离线';
+
+  @override
+  String syncStatusWithActivityLogUnavailable(String status) {
+    return '$status · 活动日志不可用';
+  }
+
+  @override
+  String syncStatusOffWithIssues(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '同步已关闭 · $count 个问题',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusWithOfflineDevices(String status, int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$status · $count 台离线',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusDevicesNeedAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 台设备需要处理',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String syncStatusDevicesOfflineWithIssues(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '设备离线 · $count 个问题',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get syncConnectionChecking => '正在检查连接';
+
+  @override
+  String get syncConnectionUnknown => '连接状态未知';
+
+  @override
+  String get syncLogDeviceOffline => '设备已离线。';
+
+  @override
+  String get syncLogConnectionRestored => '连接已恢复。';
+
+  @override
+  String get syncLogProblemDetected => '检测到同步问题。';
+
+  @override
+  String get syncLogProblemResolved => '同步问题已解决。';
+
+  @override
+  String get syncLogFailed => '同步失败。';
+
+  @override
+  String get syncLogRecovered => '同步已恢复。';
+
+  @override
+  String syncLogClipsTransferred(int sent, int received) {
+    String _temp0 = intl.Intl.pluralLogic(
+      sent,
+      locale: localeName,
+      other: '$sent 个剪贴项',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      received,
+      locale: localeName,
+      other: '$received 个剪贴项',
+    );
+    return '已发送 $_temp0 · 已接收 $_temp1';
+  }
+
+  @override
+  String syncHeaderSemanticsLabel(String status) {
+    return '同步：$status';
+  }
+
+  @override
+  String get syncDetailsTitle => '同步';
+
+  @override
+  String get syncDetailsClose => '关闭同步详情';
+
+  @override
+  String get syncNoPairedDevicesMessage => '配对设备以同步剪贴板历史记录。';
+
+  @override
+  String get syncActivityLogUnavailableTitle => '活动日志不可用';
+
+  @override
+  String get syncActivityLogUnavailableMessage => '无法读取或保存同步活动。';
+
+  @override
+  String get syncDetailsDevicesHeading => '设备';
+
+  @override
+  String get syncDetailsActivityHeading => '活动';
+
+  @override
+  String get syncDetailsNoRecentProblems => '最近没有同步问题';
+
+  @override
+  String get syncDetailsUnknownPeer => '已配对的设备';
+
+  @override
+  String get syncPeerConnection => '连接';
+
+  @override
+  String get syncPeerLastCheckStarted => '上次检查开始时间';
+
+  @override
+  String get syncPeerItemsOverSizeLimit => '超出大小限制的项目';
+
+  @override
+  String syncPeerLastSeen(String time) {
+    return '上次发现：$time';
+  }
+
+  @override
+  String syncPeerLastSynced(String time) {
+    return '上次同步：$time';
+  }
+
+  @override
+  String get syncPeerLastSuccessfulSync => '上次成功同步';
+
+  @override
+  String get syncPeerConnectionDetails => '连接详情';
+
+  @override
+  String syncPeerConnectionDetailsFor(String device) {
+    return '$device 的连接详情';
+  }
+
+  @override
+  String get historyKindText => '文本';
+
+  @override
+  String get historyKindLink => '链接';
+
+  @override
+  String get historyKindEmail => '电子邮件';
+
+  @override
+  String get historyKindColor => '颜色';
+
+  @override
+  String get historyKindPhone => '电话';
+
+  @override
+  String get historyKindCode => '代码';
+
+  @override
+  String get historyKindPath => '路径';
+
+  @override
+  String get historyKindCredentials => '凭据';
+
+  @override
+  String get historyKindImage => '图片';
+
+  @override
+  String get historyKindFile => '文件';
+
+  @override
+  String get historyKindOther => '其他';
+
+  @override
+  String get historySortNewest => '最新优先';
+
+  @override
+  String get historySortOldest => '最早优先';
+
+  @override
+  String get historySortRelevance => '最佳匹配';
+
+  @override
+  String get historyErrorUpdatesUnavailable => '历史记录更新暂时不可用。';
+
+  @override
+  String get historyErrorBulkDelete => '部分所选剪贴项无法删除。请重试。';
+
+  @override
+  String get historyErrorBulkPin => '部分所选剪贴项的置顶状态无法更新。请重试。';
+
+  @override
+  String get historyErrorRefresh => '无法刷新历史记录。请重试。';
+
+  @override
+  String get historyErrorLoad => '无法加载历史记录。请重试。';
+
+  @override
+  String get historyErrorLoadMore => '无法加载更多历史记录。';
+
+  @override
+  String get historyErrorLoadEarlier => '无法加载更早的历史记录。';
+
+  @override
+  String get historyErrorOpenClip => '无法打开此剪贴项。';
+
+  @override
+  String get historyErrorCopyPlainText => '无法复制纯文本。';
+
+  @override
+  String get historyErrorCopyClip => '无法复制此剪贴项。';
+
+  @override
+  String get historyErrorCopyText => '无法复制此文本。';
+
+  @override
+  String get historyErrorPrepareFile => '无法下载此文件。请检查来源设备后重试。';
+
+  @override
+  String get historyErrorDownloadFile => '无法下载此文件。';
+
+  @override
+  String get historyErrorSelectFiles => '无法选择文件。请重试。';
+
+  @override
+  String get historyErrorReadSelectedFile => '无法读取所选文件。请检查访问权限和可用存储空间。';
+
+  @override
+  String historyErrorImportFiles(
+    int total,
+    int failed,
+    String name,
+    String reason,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$total 个文件中有 $failed 个无法导入。第一个：$name。$reason',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyErrorSecrecyUpdate => '无法更新剪贴项的机密状态。';
+
+  @override
+  String get historyErrorPinUpdate => '无法更新置顶状态。';
+
+  @override
+  String get historyErrorPinnedOrderSave => '无法保存置顶顺序。请重试。';
+
+  @override
+  String get historyErrorPinnedOrderRefresh => '顺序已保存，但无法刷新历史记录。';
+
+  @override
+  String get historyErrorDeleteClip => '无法删除此剪贴项。';
+
+  @override
+  String get historyErrorDeleteAll => '无法删除历史记录。';
+
+  @override
+  String get historyErrorBulkDeleteFallback => '无法删除所选剪贴项。';
+
+  @override
+  String get historyOcrErrorUnavailable => '文字识别不可用。请在设置中检查该模块后重试。';
+
+  @override
+  String get historyOcrErrorStart => '无法启动文字识别。请重试。';
+
+  @override
+  String get historyOcrErrorRecognize => '无法识别图片中的文字。请重试。';
+
+  @override
+  String get historyOcrRecognizing => '正在识别图片中的文字。';
+
+  @override
+  String get historyOcrFailedTitle => '文字识别失败';
+
+  @override
+  String get historyOcrNoText => '未找到文字';
+
+  @override
+  String get historyOcrTitle => '图片文字';
+
+  @override
+  String get historyOcrTextCopied => '已复制识别出的文字。';
+
+  @override
+  String get historyOcrCopyError => '无法复制文字。请重试。';
+
+  @override
+  String get historyTagsErrorLoad => '无法加载标签。请重试。';
+
+  @override
+  String get historyTagsErrorSave => '无法保存标签更改。请使用不超过 64 个字符的唯一名称，并选择已置顶的剪贴项。';
+
+  @override
+  String get historyTags => '标签';
+
+  @override
+  String get historyTagsUpdateErrorTitle => '无法更新标签';
+
+  @override
+  String get historyTagsEmpty => '尚无标签';
+
+  @override
+  String get historyTagRename => '重命名';
+
+  @override
+  String get historyTagActions => '标签操作';
+
+  @override
+  String get historyTagNamePlaceholder => '标签名称';
+
+  @override
+  String get historyCreateTag => '创建标签';
+
+  @override
+  String get historySaveTag => '保存标签';
+
+  @override
+  String get historyTagsFilterAll => '所有标签';
+
+  @override
+  String historyTagsFilterCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个标签',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyTagsFilterTooltip(String selection) {
+    return '按标签筛选：$selection';
+  }
+
+  @override
+  String get historyManageTags => '管理标签';
+
+  @override
+  String get historyTagsFilterSemantics => '按标签筛选已置顶的剪贴项';
+
+  @override
+  String get historyDownloadErrorCancelled => '文件下载已取消。';
+
+  @override
+  String get historyDownloadErrorServiceUnavailable =>
+      '下载服务不可用。请重新打开 CopyPaste 后重试。';
+
+  @override
+  String get historyDownloadErrorServiceTimeout => '下载服务未连接。请重试。';
+
+  @override
+  String get historyFileErrorAccess => '无法访问所选文件。';
+
+  @override
+  String get historySpoilerRevealSemantics => '机密内容。显示遮罩下的内容';
+
+  @override
+  String get historyActionFailedTitle => '操作失败';
+
+  @override
+  String get historyLoadingMessage => '正在加载剪贴板历史记录。';
+
+  @override
+  String get historyUnavailableTitle => '历史记录不可用';
+
+  @override
+  String get historyEmptyTitle => '未找到剪贴项';
+
+  @override
+  String get historyEmptyMessage => '捕获的剪贴项和匹配的历史记录将显示在这里。';
+
+  @override
+  String get historyAttentionTitle => '历史记录需要处理';
+
+  @override
+  String get historyLoadMore => '加载更多';
+
+  @override
+  String get historySectionPinned => '已置顶';
+
+  @override
+  String get historySectionToday => '今天';
+
+  @override
+  String get historySectionYesterday => '昨天';
+
+  @override
+  String historySkippedRowsTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已跳过 $count 条剪贴板记录',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historySkippedRowsMessage => '部分保留的剪贴项无法读取，未在此列表中显示。';
+
+  @override
+  String get historySearch => '搜索历史记录';
+
+  @override
+  String get historyResetFilters => '重置筛选条件';
+
+  @override
+  String get historyImportFiles => '导入文件';
+
+  @override
+  String get historySelectClips => '选择剪贴项';
+
+  @override
+  String get historyCloseSearch => '关闭搜索';
+
+  @override
+  String get historyFilterAllClips => '所有剪贴项';
+
+  @override
+  String get historyFilterAllDevices => '所有设备';
+
+  @override
+  String get historyFilterAllApps => '所有应用';
+
+  @override
+  String get historyPinClip => '置顶剪贴项';
+
+  @override
+  String get historyUnpinClip => '取消置顶剪贴项';
+
+  @override
+  String get historyReorderPinnedClip => '调整置顶剪贴项的顺序';
+
+  @override
+  String get historyReorderPinnedHint => '拖移以移动。按 Alt + 上箭头或下箭头可移动一个位置。';
+
+  @override
+  String get historyClipUnavailable => '剪贴项不可用';
+
+  @override
+  String historyClipKindSemantics(String kind) {
+    return '剪贴项类型：$kind';
+  }
+
+  @override
+  String get historyInspectorEmptyTitle => '选择一个剪贴项';
+
+  @override
+  String get historyInspectorEmptyMessage => '其完整内容和操作将显示在这里。';
+
+  @override
+  String get historyNoPreview => '无可用预览。';
+
+  @override
+  String get historyCloseClipDetails => '关闭剪贴项详情';
+
+  @override
+  String get historyCopyOptions => '复制选项';
+
+  @override
+  String get historyCopyPlainText => '复制纯文本';
+
+  @override
+  String get historyManageClipTags => '管理剪贴项标签';
+
+  @override
+  String get historyPinnedButton => '已置顶';
+
+  @override
+  String get historyAddSpoiler => '添加遮罩';
+
+  @override
+  String get historyRemoveSpoiler => '移除遮罩';
+
+  @override
+  String get historyUpdateFailedTitle => '更新失败';
+
+  @override
+  String get historyRecognizeImageText => '识别图片文字';
+
+  @override
+  String get historyCopiedTitle => '已复制';
+
+  @override
+  String get historyCopyFailedTitle => '复制失败';
+
+  @override
+  String get historyPlainTextCopied => '已复制纯文本。';
+
+  @override
+  String get historyClipCopied => '已复制剪贴项。';
+
+  @override
+  String get historyDownloadedTitle => '已下载';
+
+  @override
+  String get historyFileSaved => '文件已保存。';
+
+  @override
+  String get historyDownload => '下载';
+
+  @override
+  String get historyDownloading => '正在下载…';
+
+  @override
+  String historyDownloadingPercent(int percent) {
+    return '正在下载 $percent%';
+  }
+
+  @override
+  String historyDownloadProgressPercent(int percent) {
+    return '$percent%';
+  }
+
+  @override
+  String get historyDownloadCancelling => '正在取消…';
+
+  @override
+  String get historyDownloadCancellingTooltip => '正在取消下载';
+
+  @override
+  String historyDownloadingCancelTooltip(int percent) {
+    return '正在下载 $percent% · 点击以取消';
+  }
+
+  @override
+  String get historyDownloadFailedRetryTooltip => '下载失败 · 点击以重试';
+
+  @override
+  String historyCancelDownloadSemantics(int percent) {
+    return '取消下载，已完成 $percent%';
+  }
+
+  @override
+  String get historyRetryDownload => '重试下载';
+
+  @override
+  String get historyDownloadFailedTitle => '下载失败';
+
+  @override
+  String get historyShowFile => '显示文件';
+
+  @override
+  String get historyMetadataPrivacy => '隐私';
+
+  @override
+  String get historyMetadataConfidential => '机密';
+
+  @override
+  String get historyMetadataCaptured => '捕获时间';
+
+  @override
+  String get historyMetadataObservedApp => '来源应用';
+
+  @override
+  String get historyMetadataDevice => '设备';
+
+  @override
+  String get historyMetadataClipType => '剪贴项类型';
+
+  @override
+  String get historyMetadataType => '类型';
+
+  @override
+  String get historyMetadataPath => '路径';
+
+  @override
+  String get historyMetadataFile => '文件';
+
+  @override
+  String get historyMetadataResolution => '分辨率';
+
+  @override
+  String get historyMetadataSize => '大小';
+
+  @override
+  String get historyMetadataFiles => '文件数';
+
+  @override
+  String get historyMetadataSync => '同步';
+
+  @override
+  String get historyMetadataTooLargeToSync => '过大，无法同步';
+
+  @override
+  String historyBulkDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '删除 $count 个所选剪贴项？',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDeleteClipTitle => '删除此剪贴项？';
+
+  @override
+  String get historyBulkTagTooltip => '为所选的已置顶剪贴项添加标签';
+
+  @override
+  String get historyBulkExit => '退出选择';
+
+  @override
+  String get historyBulkPin => '置顶所选项';
+
+  @override
+  String get historyBulkUnpin => '取消置顶所选项';
+
+  @override
+  String get historyBulkDelete => '删除所选项';
+
+  @override
+  String historyBulkSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已选择 $count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDateFilter => '按日期筛选';
+
+  @override
+  String get historyDatePresetToday => '今天';
+
+  @override
+  String get historyDatePresetYesterday => '昨天';
+
+  @override
+  String historyDatePresetLastDays(int days) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '最近 $days 天',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyDatePresetAllTime => '全部时间';
+
+  @override
+  String get appRuntimeStartFailed => 'CopyPaste 无法启动其运行时。';
+
+  @override
+  String get appPreparing => '正在准备 CopyPaste。';
+
+  @override
+  String get appRuntimeWaiting => 'CopyPaste 正在等待受保护历史记录的访问权限。应用的其他可用部分仍可正常使用。';
+
+  @override
+  String get appHistoryUnavailableTitle => '历史记录运行时不可用';
+
+  @override
+  String get appHistoryUnavailableMessage => '请先启动应用运行时，再打开历史记录。';
+
+  @override
+  String get appDevicesUnavailableTitle => '设备运行时不可用';
+
+  @override
+  String get appDevicesUnavailableMessage => '请先启动应用运行时，再打开设备。';
+
+  @override
+  String get appSettingsUnavailableTitle => '设置运行时不可用';
+
+  @override
+  String get appSettingsUnavailableMessage => '请先启动应用运行时，再打开设置。';
+
+  @override
+  String get appQuit => '退出 CopyPaste';
+
+  @override
+  String get appWindowSetupTitle => '窗口设置需要处理';
+
+  @override
+  String get appCollapseNavigation => '收起导航栏';
+
+  @override
+  String get appExpandNavigation => '展开导航栏';
+
+  @override
+  String get appOpenHistory => '打开历史记录';
+
+  @override
+  String get appDestinationHistory => '历史记录';
+
+  @override
+  String get appDestinationDevices => '设备';
+
+  @override
+  String get appDestinationSettings => '设置';
+
+  @override
+  String appDestinationSelected(String destination) {
+    return '$destination，已选择';
+  }
+
+  @override
+  String get appActiveFilter => '已启用筛选';
+
+  @override
+  String get appActionFailed => '操作失败';
+
+  @override
+  String get sharedAndroidVersionRequired => '需要 Android 11 或更高版本';
+
+  @override
+  String get sharedUseAdbTab => '请在此设备上使用 ADB 标签页。';
+
+  @override
+  String get sharedOneTimeAccessApplied => '已应用一次性访问权限';
+
+  @override
+  String get sharedInstallShizuku => '安装 Shizuku';
+
+  @override
+  String get sharedPairAndStartShizuku => '配对并启动 Shizuku';
+
+  @override
+  String get sharedAllowCopyPaste => '允许 CopyPaste';
+
+  @override
+  String get sharedShizukuNoLongerNeeded => '不再需要 Shizuku。';
+
+  @override
+  String get sharedGetShizukuDescription => '获取 Shizuku 以应用一次性访问权限。';
+
+  @override
+  String get sharedShizukuWirelessDebugging => '在 Shizuku 中使用“无线调试”，然后返回。';
+
+  @override
+  String get sharedApproveInShizuku => '在 Shizuku 中允许 CopyPaste 一次。';
+
+  @override
+  String get sharedGetShizuku => '获取 Shizuku';
+
+  @override
+  String get sharedOpenShizuku => '打开 Shizuku';
+
+  @override
+  String get sharedRunOnComputer => '在电脑上运行';
+
+  @override
+  String get sharedCopyAllCommands => '复制全部命令';
+
+  @override
+  String get sharedEnableUsbDebugging => '启用“USB 调试”并连接此手机。';
+
+  @override
+  String get sharedAllow => '允许';
+
+  @override
+  String get sharedSetupCommandsCopyFailed => '无法复制设置命令。';
+
+  @override
+  String get sharedShizukuOpenFailed => '无法打开 Shizuku。';
+
+  @override
+  String sharedSizeBytes(String size) {
+    return '$size B';
+  }
+
+  @override
+  String sharedSizeKilobytes(String size) {
+    return '$size KB';
+  }
+
+  @override
+  String sharedSizeMegabytes(String size) {
+    return '$size MB';
+  }
+
+  @override
+  String get onboardingTitle => '设置 CopyPaste';
+
+  @override
+  String get onboardingWelcomeTitle => '欢迎使用 CopyPaste';
+
+  @override
+  String get onboardingWelcomeSubtitle => '你的剪贴板，随时待命。';
+
+  @override
+  String get onboardingReadyTitle => 'CopyPaste 已准备就绪';
+
+  @override
+  String get onboardingGetStarted => '开始使用';
+
+  @override
+  String get onboardingOptionalSetupTitle => '可选设置需要处理';
+
+  @override
+  String get onboardingOpenSystemSettings => '打开系统设置';
+
+  @override
+  String onboardingStepProgress(int step, int count, String platform) {
+    return '第 $step 步，共 $count 步 · $platform';
+  }
+
+  @override
+  String get onboardingSetupErrorTitle => '设置需要处理';
+
+  @override
+  String onboardingStateReadFailed(String platform) {
+    return 'CopyPaste 无法读取 $platform 设置状态。';
+  }
+
+  @override
+  String get onboardingSaveProgressFailed => 'CopyPaste 无法保存设置进度。';
+
+  @override
+  String get onboardingStartAtLogin => '登录时启动';
+
+  @override
+  String get onboardingStartAtLoginDescription => '登录时打开 CopyPaste';
+
+  @override
+  String get onboardingStartAtLoginSemantics => '登录时启动 CopyPaste';
+
+  @override
+  String get onboardingStartAtLoginEnableFailed => '无法启用“登录时启动”。你可以跳过此项继续。';
+
+  @override
+  String get onboardingStartAtLoginUpdateFailed => '无法更新“登录时启动”。你可以跳过此项继续。';
+
+  @override
+  String get onboardingMacosTitle => '设置你的 Mac';
+
+  @override
+  String get onboardingAccessibility => '辅助功能';
+
+  @override
+  String get onboardingAutoPasteEnabled => '已启用自动粘贴';
+
+  @override
+  String get onboardingAutoPasteOptional => '可选，用于自动粘贴';
+
+  @override
+  String get onboardingMacosStartAtLoginUnavailable => '在已安装的 CopyPaste 应用中可用。';
+
+  @override
+  String get onboardingLoginItemApprovalTitle => '需要批准登录项';
+
+  @override
+  String get onboardingLoginItemApprovalMessage =>
+      '请在“系统设置”中允许 CopyPaste，然后返回。';
+
+  @override
+  String get onboardingMacosStateReadFailed => 'CopyPaste 无法读取 macOS 设置状态。';
+
+  @override
+  String get onboardingMacosAccessibilityRequestFailed => '无法请求辅助功能权限。';
+
+  @override
+  String get onboardingMacosStateRefreshFailed => 'CopyPaste 无法刷新 macOS 设置状态。';
+
+  @override
+  String get onboardingMacosAccessibilityRefreshFailed => '无法刷新辅助功能状态。';
+
+  @override
+  String get onboardingMacosLoginItemsOpenFailed => '无法打开“登录项”设置。';
+
+  @override
+  String get onboardingMacosStartAtLoginApproval => '“登录时启动”需要在“系统设置”中批准。';
+
+  @override
+  String get onboardingMacosStartAtLoginDisableFailed => '无法停用“登录时启动”。';
+
+  @override
+  String get onboardingWindowsTitle => '设置你的电脑';
+
+  @override
+  String get onboardingWindowsStartAtLoginUnavailable => '此安装不支持此功能。你可以跳过此项继续。';
+
+  @override
+  String get onboardingTaskManagerDisabledTitle => '已在任务管理器中禁用';
+
+  @override
+  String get onboardingTaskManagerDisabledMessage =>
+      '请在 Windows 启动应用中启用 CopyPaste，然后返回。';
+
+  @override
+  String get onboardingWindowsTaskManagerDisabled =>
+      '“登录时启动”已在任务管理器中禁用。你稍后可以在 Windows 设置中启用。';
+
+  @override
+  String get onboardingWindowsStartAtLoginUnavailableNotice =>
+      '“登录时启动”不可用。你可以跳过此项继续。';
+
+  @override
+  String get onboardingWindowsStateReadFailed => 'CopyPaste 无法读取 Windows 设置状态。';
+
+  @override
+  String get onboardingWindowsStartupSettingsFailed => '无法打开 Windows 启动设置。';
+
+  @override
+  String get onboardingWindowsStartAtLoginChangeLater =>
+      '无法更新“登录时启动”。你稍后可以在“设置”中更改。';
+
+  @override
+  String get onboardingLinuxChecking => '正在检查你的 Linux 桌面会话。';
+
+  @override
+  String get onboardingLinuxTitle => '设置你的 Linux 桌面';
+
+  @override
+  String get onboardingLinuxSubtitle =>
+      'CopyPaste 需要经过验证的桌面集成，才能识别剪贴板来源并使用 Quick Paste。';
+
+  @override
+  String get onboardingLinuxSession => '桌面会话';
+
+  @override
+  String get onboardingLinuxX11Detected => '检测到 X11 会话。';
+
+  @override
+  String get onboardingLinuxWaylandDetected => '检测到 Wayland 会话。';
+
+  @override
+  String get onboardingLinuxSessionUnsupported =>
+      '未检测到受支持的 X11 或 Wayland 桌面会话。';
+
+  @override
+  String get onboardingLinuxCompanion => 'GNOME 或 KDE 配套组件';
+
+  @override
+  String get onboardingLinuxCompanionReady => '经过认证的 Clipboard v2 桥接已就绪。';
+
+  @override
+  String get onboardingLinuxCompanionCapturePaused =>
+      '由于来源应用排除规则，剪贴板捕获已暂停。请启用已签名的配套组件以恢复捕获。';
+
+  @override
+  String get onboardingLinuxCompanionInstall => '请安装并启用已签名的配套组件会话软件包，然后返回此处。';
+
+  @override
+  String get onboardingLinuxOpenSetup => '打开设置向导';
+
+  @override
+  String get onboardingLinuxKeyboardControl => '键盘控制';
+
+  @override
+  String get onboardingLinuxKeyboardAllowed => '已允许 Quick Paste 使用键盘控制。';
+
+  @override
+  String get onboardingLinuxKeyboardUnsupported => '此桌面会话不支持键盘控制。';
+
+  @override
+  String get onboardingLinuxAllowKeyboard => '允许键盘控制';
+
+  @override
+  String get onboardingLinuxQuickPasteReady => 'Quick Paste 已就绪。';
+
+  @override
+  String get onboardingLinuxQuickPastePending => '所需的桌面集成启用后，Quick Paste 即可就绪。';
+
+  @override
+  String get onboardingLinuxStartAtLoginDescription => '登录时打开 CopyPaste。';
+
+  @override
+  String get onboardingLinuxLinks => 'CopyPaste 链接';
+
+  @override
+  String get onboardingLinuxLinksRegistered => 'CopyPaste 链接将在此应用中打开。';
+
+  @override
+  String get onboardingLinuxLinksUnregistered => '注册 CopyPaste 链接以用于配对邀请。';
+
+  @override
+  String get onboardingLinuxRegisterLinks => '注册链接';
+
+  @override
+  String get onboardingLinuxScreenshotBlocking => '阻止截屏';
+
+  @override
+  String get onboardingLinuxScreenshotBlockingUnavailable =>
+      'Linux 不支持阻止截屏。受保护的存储数据仍保持加密。';
+
+  @override
+  String get onboardingLinuxCheckAgain => '再次检查';
+
+  @override
+  String get onboardingLinuxStatusReadFailed => 'CopyPaste 无法读取 Linux 集成状态。';
+
+  @override
+  String get onboardingLinuxSetupOpenFailed => '无法打开桌面集成设置。';
+
+  @override
+  String get onboardingLinuxKeyboardDenied => '未授予键盘控制权限。';
+
+  @override
+  String get onboardingLinuxStartAtLoginFailed => '无法更新“登录时启动”。';
+
+  @override
+  String get onboardingLinuxLinksFailed => '无法注册 CopyPaste 链接。';
+
+  @override
+  String get onboardingLinuxStatusRefreshFailed => '无法刷新 Linux 集成状态。';
+
+  @override
+  String get onboardingLinuxX11ClipboardUnavailable => '此 X11 会话无法访问剪贴板。';
+
+  @override
+  String get onboardingLinuxSessionRequired =>
+      'CopyPaste 需要 X11 或 Wayland 桌面会话。';
+
+  @override
+  String get onboardingAndroidFullCapture => '完整捕获';
+
+  @override
+  String get onboardingAndroidBackgroundCapture => '后台捕获';
+
+  @override
+  String get onboardingAndroidFullCaptureDescription => '只需设置一次，然后用真实复制进行验证。';
+
+  @override
+  String get onboardingAndroidLimitedCapture => '受限捕获';
+
+  @override
+  String get onboardingAndroidLimitedCaptureDescription =>
+      '分享到 CopyPaste，或复制后返回本应用。';
+
+  @override
+  String get onboardingAndroidNotification => '捕获通知';
+
+  @override
+  String get onboardingAndroidNotificationDescription => '捕获运行期间必需';
+
+  @override
+  String get onboardingAndroidBackgroundActivity => '后台活动';
+
+  @override
+  String get onboardingAndroidBackgroundActivityDescription => '建议开启，以减少捕获遗漏';
+
+  @override
+  String get onboardingAndroidOpen => '打开';
+
+  @override
+  String get onboardingAndroidApplyAccess => '应用捕获访问权限';
+
+  @override
+  String get onboardingAndroidApplyAccessDescription => '应用一次性捕获访问权限。';
+
+  @override
+  String get onboardingAndroidFullCaptureLater => '你稍后可以设置“完整捕获”。';
+
+  @override
+  String get onboardingAndroidCaptureWorking => '后台捕获正常运行';
+
+  @override
+  String get onboardingAndroidVerifyCopy => '验证真实复制';
+
+  @override
+  String get onboardingAndroidCopyReached => '新复制的内容已进入本地历史记录。';
+
+  @override
+  String get onboardingAndroidCopyInstruction => '在其他应用中复制内容，然后返回此处。';
+
+  @override
+  String get onboardingAndroidStartCapture => '开始捕获';
+
+  @override
+  String get onboardingAndroidStateReadFailed => 'CopyPaste 无法读取 Android 设置状态。';
+
+  @override
+  String get onboardingAndroidStateRefreshFailed => '无法刷新 Android 捕获状态。';
+
+  @override
+  String get onboardingAndroidMonitoringUnavailable => '无法监控 Android 设置状态。';
+
+  @override
+  String get onboardingAndroidIntakeFailed => '无法启用剪贴板接收。';
+
+  @override
+  String get onboardingAndroidStopCaptureFailed => '无法停止后台捕获。';
+
+  @override
+  String get onboardingAndroidBatterySettingsFailed => '无法打开电池设置。';
+
+  @override
+  String get onboardingAndroidGrantsFailed =>
+      '已在 Shizuku 中允许 CopyPaste，但无法应用 Android 捕获授权。';
+
+  @override
+  String get onboardingAndroidAllowInShizuku =>
+      '请在 Shizuku 中允许 CopyPaste 以应用捕获授权。';
+
+  @override
+  String get onboardingAndroidGrantAccessFirst => '请先授予后台剪贴板访问权限。';
+
+  @override
+  String get onboardingAndroidAllowNotificationsFirst => '开始后台捕获前，请先允许通知。';
+
+  @override
+  String get onboardingAndroidStartCaptureFailed => '无法启动后台捕获。';
+
+  @override
+  String get onboardingAndroidSetupOpenFailed => '无法打开 Android 捕获设置。';
+
+  @override
+  String get onboardingAndroidChoiceSaveFailed => '无法保存 Android 设置选项。';
+
+  @override
+  String get modulesMarketplaceTab => '市场';
+
+  @override
+  String get modulesInstalledTab => '已安装';
+
+  @override
+  String get modulesRefresh => '刷新';
+
+  @override
+  String get modulesSearchPlaceholder => '搜索模块';
+
+  @override
+  String get modulesOperationFailed => '模块操作失败';
+
+  @override
+  String get modulesLoading => '正在加载模块。';
+
+  @override
+  String get modulesUnavailableTitle => '模块不可用';
+
+  @override
+  String get modulesUnavailableMessage => '请尝试重新加载模块。';
+
+  @override
+  String get modulesNoneInstalled => '未安装任何模块';
+
+  @override
+  String get modulesNoMatches => '没有匹配的模块';
+
+  @override
+  String get modulesChooseFromMarketplace => '从市场中选择一个模块。';
+
+  @override
+  String get modulesTryDifferentSearch => '请尝试其他搜索词。';
+
+  @override
+  String get modulesMarketplaceLoading => '正在加载市场。';
+
+  @override
+  String get modulesMarketplaceUnavailableTitle => '市场不可用';
+
+  @override
+  String get modulesMarketplaceUnavailableMessage => '请尝试重新加载市场。';
+
+  @override
+  String get modulesNoneAvailable => '没有可用模块';
+
+  @override
+  String get modulesNoneAvailableMessage => '模块发布后将显示在这里。';
+
+  @override
+  String modulesEnableModule(String module) {
+    return '启用 $module';
+  }
+
+  @override
+  String get modulesInstall => '安装';
+
+  @override
+  String modulesUpdateTo(String version) {
+    return '更新到 $version';
+  }
+
+  @override
+  String get modulesRemoveModule => '移除模块';
+
+  @override
+  String get modulesModuleSettings => '模块设置';
+
+  @override
+  String modulesSettingsTitle(String module) {
+    return '$module 设置';
+  }
+
+  @override
+  String get modulesDownloadingModel => '正在下载语言模型…';
+
+  @override
+  String get modulesInstalling => '正在安装…';
+
+  @override
+  String modulesDownloadingProgress(int percent) {
+    return '正在下载 $percent%';
+  }
+
+  @override
+  String get modulesRun => '运行';
+
+  @override
+  String modulesRemoveTitle(String module) {
+    return '移除 $module？';
+  }
+
+  @override
+  String get modulesRemoveMessage => '该模块及其本地设置将被移除。';
+
+  @override
+  String get modulesRemove => '移除';
+
+  @override
+  String get modulesRemoveFailed => '无法移除该模块。';
+
+  @override
+  String get modulesCloseSettings => '关闭模块设置';
+
+  @override
+  String get modulesRemoved => '模块已移除';
+
+  @override
+  String get modulesNoSettingsTitle => '无其他设置';
+
+  @override
+  String get modulesNoSettingsMessage => '此模块无需额外配置。';
+
+  @override
+  String get modulesSetUpSmsAccess => '设置短信访问权限';
+
+  @override
+  String get modulesRestartApp => '重新启动 CopyPaste';
+
+  @override
+  String get modulesSmsAccessTitle => '短信访问权限';
+
+  @override
+  String get modulesCloseSmsAccess => '关闭短信访问权限面板';
+
+  @override
+  String get modulesSmsChecking => '正在检查短信访问权限。';
+
+  @override
+  String get modulesSmsReady => '访问权限已就绪。启用 SMS Codes 即可开始复制新验证码。';
+
+  @override
+  String get modulesSmsAllowAccess => '允许访问，以便从新短信中复制验证码。';
+
+  @override
+  String get modulesSmsNotification => '短信通知';
+
+  @override
+  String get modulesSmsNotificationDescription => 'SMS Codes 运行期间必需';
+
+  @override
+  String get modulesSmsApplyAccess => '应用短信访问权限';
+
+  @override
+  String get modulesSmsApplyAccessDescription => '应用一次性短信访问权限。';
+
+  @override
+  String get modulesSmsSetupFailed => '短信设置失败';
+
+  @override
+  String get modulesFileSelectionFailed => '文件选择失败';
+
+  @override
+  String get modulesChooseLanguages => '选择语言';
+
+  @override
+  String get modulesChooseFile => '选择文件';
+
+  @override
+  String modulesModelReady(String model) {
+    return '$model 模型已就绪';
+  }
+
+  @override
+  String modulesModelDownload(String model, String size) {
+    return '$model 模型 · 需下载 $size MiB';
+  }
+
+  @override
+  String get modulesPlatformsUnknown => '平台：未知';
+
+  @override
+  String modulesPlatforms(String platforms) {
+    return '平台：$platforms';
+  }
+
+  @override
+  String get modulesCatalogSignatureInvalid => '模块目录签名无效。';
+
+  @override
+  String get modulesMarketplaceConnectFailed => '无法连接模块市场。';
+
+  @override
+  String get modulesMarketplaceTimeout => '模块市场无响应。';
+
+  @override
+  String get modulesIncompatible => '此模块与此设备不兼容。';
+
+  @override
+  String get modulesPackageSizeInvalid => '模块包大小无效。';
+
+  @override
+  String get modulesDownloadInterrupted => '模块下载已中断。';
+
+  @override
+  String get modulesDownloadTimeout => '模块下载无响应。';
+
+  @override
+  String get modulesPackageUrlUntrusted => '模块包 URL 不受信任。';
+
+  @override
+  String get modulesDownloadLeftGithub => '模块下载被重定向到了 GitHub 之外。';
+
+  @override
+  String get modulesDownloadTooManyRedirects => '模块下载的重定向次数过多。';
+
+  @override
+  String get modulesDownloadTooLarge => '模块下载过大。';
+
+  @override
+  String get modulesPackageIntegrityFailed => '模块包未通过完整性检查。';
+
+  @override
+  String get modulesDownloadUnavailable => '此模块当前无法下载。';
+
+  @override
+  String get modulesMarketplaceUnavailableRetry => '模块市场不可用。请重试。';
+
+  @override
+  String get modulesCatalogInvalid => '模块目录无效。';
+
+  @override
+  String get modulesThisSystem => '此系统';
+
+  @override
+  String modulesSystemRequirement(String system, String version) {
+    return '$system $version 或更高版本';
+  }
+
+  @override
+  String get modulesNotAvailableForDevice => '不适用于此设备。';
+
+  @override
+  String get modulesAppVersionUnverified => '无法验证已安装的 CopyPaste 版本。';
+
+  @override
+  String modulesAppVersionUnsupported(String version) {
+    return '此模块不支持 CopyPaste $version。';
+  }
+
+  @override
+  String modulesRequires(String requirement) {
+    return '需要 $requirement。';
+  }
+
+  @override
+  String get modulesMarketplaceLoadFailed => '无法加载模块市场。';
+
+  @override
+  String get modulesSmsSetupRequired => '启用此模块前，请先设置短信访问权限。';
+
+  @override
+  String get modulesSmsMonitoringStillEnabled =>
+      '无法启动短信监控。该模块仍处于启用状态；请再次停用以重试。';
+
+  @override
+  String get modulesSmsMonitoringDisabled => '无法启动短信监控。该模块已被停用。';
+
+  @override
+  String get modulesSmsMonitoringUnconfirmed => '无法启动短信监控。无法确认该模块的启用状态。';
+
+  @override
+  String get modulesSmsMonitoringFailed => '无法启动短信监控。';
+
+  @override
+  String get modulesSmsAndroidOnly => '短信访问权限仅在 Android 上可用。';
+
+  @override
+  String get modulesSmsMonitoringNeedsSetup => '短信监控需要设置。';
+
+  @override
+  String get modulesOperationIncomplete => '无法完成模块操作。';
+
+  @override
+  String get modulesUnsupportedEvent => '该模块使用了不受支持的事件。';
+
+  @override
+  String get modulesUnsupportedResult => '该模块返回了不受支持的结果。';
+
+  @override
+  String get modulesUnsupportedField => '该模块使用了不受支持的字段。';
+
+  @override
+  String get modulesResponseInvalid => '模块响应无效。';
+
+  @override
+  String get modulesFileSelectionUnavailable => '文件选择不可用。';
+
+  @override
+  String get modulesFileSelectFailed => '无法选择该文件。';
+
+  @override
+  String modulesFileNotAccepted(String field) {
+    return '$field 不是可接受的文件。';
+  }
+
+  @override
+  String get modulesSmsVerifyFailed => '无法验证短信访问权限。';
+
+  @override
+  String get modulesSmsAllowNotifications => '请允许通知，以使 SMS Codes 在后台保持运行。';
+
+  @override
+  String get modulesSmsNotGranted => '未授予短信访问权限。';
+
+  @override
+  String get modulesSmsConfigureFailed => '无法配置短信访问权限。';
+
+  @override
+  String get onboardingLinuxContinueBasic => '以基本捕获继续';
+
+  @override
+  String get onboardingLinuxCompanionOptional => '可选。Quick Paste 和来源应用排除需要此组件。';
+
+  @override
+  String get onboardingLinuxKeyboardOptional =>
+      '可选。Quick Paste 需要此权限才能返回上一个应用。';
+
+  @override
+  String get onboardingLinuxWaylandClipboardUnavailable =>
+      '此 Wayland 会话无法访问剪贴板。请启用已签名的 GNOME 或 KDE 配套组件，然后再次检查。';
+
+  @override
+  String get historyMoreActions => '更多操作';
+
+  @override
+  String get historyTagsAction => '标签…';
+}

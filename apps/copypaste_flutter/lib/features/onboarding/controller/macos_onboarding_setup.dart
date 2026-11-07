@@ -1,5 +1,6 @@
 import '../../../platform/macos/macos_setup_gateway.dart';
 import '../../../platform/startup/launch_at_login.dart';
+import '../../../l10n/l10n.dart';
 import '../repository/onboarding_store.dart';
 import 'onboarding_setup.dart';
 
@@ -50,7 +51,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
       errorMessage = null;
       return wasComplete ? OnboardingResume.complete : OnboardingResume.welcome;
     } catch (_) {
-      errorMessage = 'CopyPaste could not read the macOS setup state.';
+      errorMessage = AppStrings.current.onboardingMacosStateReadFailed;
       return OnboardingResume.welcome;
     } finally {
       busy = false;
@@ -80,7 +81,8 @@ class MacosOnboardingSetup extends OnboardingSetup {
     try {
       _accessibilityGranted = await _setup.requestAccessibility();
     } catch (_) {
-      errorMessage = 'Accessibility permission could not be requested.';
+      errorMessage =
+          AppStrings.current.onboardingMacosAccessibilityRequestFailed;
     } finally {
       busy = false;
       notifyIfActive();
@@ -96,7 +98,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
       await _refreshSystemState();
       errorMessage = null;
     } catch (_) {
-      errorMessage = 'CopyPaste could not refresh the macOS setup state.';
+      errorMessage = AppStrings.current.onboardingMacosStateRefreshFailed;
     } finally {
       busy = false;
       notifyIfActive();
@@ -113,7 +115,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
     try {
       _accessibilityGranted = await _setup.accessibilityGranted();
     } catch (_) {
-      _addNotice('Accessibility status could not be refreshed.');
+      _addNotice(AppStrings.current.onboardingMacosAccessibilityRefreshFailed);
     }
     await _updateLaunchAtLogin(_launchAtLogin);
     busy = false;
@@ -126,7 +128,7 @@ class MacosOnboardingSetup extends OnboardingSetup {
     try {
       await _startup.openSystemSettings();
     } catch (_) {
-      errorMessage = 'Login Items settings could not be opened.';
+      errorMessage = AppStrings.current.onboardingMacosLoginItemsOpenFailed;
       notifyIfActive();
     }
   }
@@ -155,18 +157,16 @@ class MacosOnboardingSetup extends OnboardingSetup {
       if (enabled && _startupStatus != LaunchAtLoginStatus.enabled) {
         _addNotice(
           _startupStatus == LaunchAtLoginStatus.requiresApproval
-              ? 'Start at login requires approval in System Settings.'
-              : 'Start at login could not be enabled. You can continue without it.',
+              ? AppStrings.current.onboardingMacosStartAtLoginApproval
+              : AppStrings.current.onboardingStartAtLoginEnableFailed,
         );
       } else if (!enabled && _loginItemRegistered) {
-        _addNotice('Start at login could not be disabled.');
+        _addNotice(AppStrings.current.onboardingMacosStartAtLoginDisableFailed);
       }
     } catch (_) {
       // Restore the last confirmed system state after a failed update.
       _launchAtLogin = _loginItemRegistered;
-      _addNotice(
-        'Start at login could not be updated. You can continue without it.',
-      );
+      _addNotice(AppStrings.current.onboardingStartAtLoginUpdateFailed);
     }
   }
 

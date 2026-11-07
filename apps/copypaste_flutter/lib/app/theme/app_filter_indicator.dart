@@ -1,5 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../l10n/l10n.dart';
 import 'app_theme.dart';
 import 'app_tokens.dart';
 
@@ -27,7 +28,7 @@ class AppFilterIndicator extends StatelessWidget {
             end: AppSpacing.xs,
             child: IgnorePointer(
               child: Semantics(
-                label: 'Active filter',
+                label: context.l10n.appActiveFilter,
                 child: const AvatarBadge(
                   size: AppIconSize.statusIndicator,
                   borderRadius: AppRadius.full,

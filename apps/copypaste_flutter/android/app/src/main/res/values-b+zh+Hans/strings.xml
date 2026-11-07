@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">剪贴板已保存</string>
+    <string name="capture_channel_description">确认 CopyPaste 已保存剪贴板更改。</string>
+    <string name="capture_title">剪贴板已保存</string>
+    <string name="capture_body_default">新的剪贴项已添加到 CopyPaste。</string>
+    <string name="capture_image">图片</string>
+    <string name="capture_image_size">图片 · %1$d × %2$d</string>
+    <string name="background_channel_name">后台活动</string>
+    <string name="background_channel_description">让已启用的 CopyPaste 功能在后台保持运行。</string>
+    <string name="background_title">CopyPaste 正在运行</string>
+    <string name="background_text">已启用的功能正在后台运行。</string>
+    <string name="share_saved">已保存到 CopyPaste</string>
+    <string name="share_failed">CopyPaste 无法保存此项目</string>
+    <string name="chooser_open_file">打开 CopyPaste 文件</string>
+    <string name="chooser_save_file">保存 CopyPaste 文件</string>
+    <string name="pairing_invalid_qr">请扫描 CopyPaste 配对二维码。</string>
+    <string name="pairing_scanner_unavailable">无法打开 Google 扫描器。请改为输入配对代码。</string>
+    <string name="files_read_failed">无法读取所选文件。请检查文件访问权限和可用存储空间。</string>
+    <string name="files_picker_closed">文件选择器已关闭。</string>
+</resources>

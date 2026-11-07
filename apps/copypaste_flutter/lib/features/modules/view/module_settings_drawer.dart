@@ -8,6 +8,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../controller/module_form_draft.dart';
 import '../controller/modules_controller.dart';
@@ -108,7 +109,9 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
               headers: [
                 AppBar(
                   title: Text(
-                    '${module?.title ?? 'Module'} settings',
+                    module == null
+                        ? context.l10n.modulesModuleSettings
+                        : context.l10n.modulesSettingsTitle(module.title),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -117,11 +120,11 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                   ],
                   trailing: [
                     Tooltip(
-                      tooltip: (context) => const TooltipContainer(
-                        child: Text('Close module settings'),
+                      tooltip: (context) => TooltipContainer(
+                        child: Text(context.l10n.modulesCloseSettings),
                       ),
                       child: Semantics(
-                        label: 'Close module settings',
+                        label: context.l10n.modulesCloseSettings,
                         button: true,
                         child: Button.ghost(
                           key: ValueKey('module-settings-close-$moduleId'),
@@ -161,8 +164,8 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                   !draft.valid
                               ? null
                               : _savePreferences,
-                          child: const Text(
-                            'Save',
+                          child: Text(
+                            context.l10n.commonSave,
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -175,7 +178,10 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                         key: ValueKey('module-settings-done-$moduleId'),
                         alignment: AppTheme.moduleSettingsActionAlignment,
                         onPressed: () => closeDrawer(context),
-                        child: const Text('Done', textAlign: TextAlign.center),
+                        child: Text(
+                          context.l10n.commonDone,
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ],
                   ),
@@ -184,7 +190,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: module == null
-                    ? const StateView.empty(title: 'Module removed')
+                    ? StateView.empty(title: context.l10n.modulesRemoved)
                     : Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -202,23 +208,22 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                   )) &&
                               !(module.restartRequired &&
                                   controller.canRestart))
-                            const StateView.empty(
-                              title: 'No additional settings',
-                              message:
-                                  'This module does not need extra configuration.',
+                            StateView.empty(
+                              title: context.l10n.modulesNoSettingsTitle,
+                              message: context.l10n.modulesNoSettingsMessage,
                             ),
                           if (module.error ?? controller.errorMessage
                               case final error?) ...[
                             StateView.error(
-                              title: 'Module operation failed',
+                              title: context.l10n.modulesOperationFailed,
                               message: error,
                             ),
                             const Gap(AppSpacing.md),
                           ],
                           if (controller.configuringModel &&
                               controller.activeModuleId == moduleId) ...[
-                            const StateView.loading(
-                              message: 'Downloading language model…',
+                            StateView.loading(
+                              message: context.l10n.modulesDownloadingModel,
                             ),
                             const Gap(AppSpacing.md),
                           ],
@@ -240,8 +245,8 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                               onPressed: controller.busy
                                   ? null
                                   : widget.onSmsSetup,
-                              child: const Text(
-                                'Set up SMS access',
+                              child: Text(
+                                context.l10n.modulesSetUpSmsAccess,
                                 textAlign: TextAlign.center,
                               ),
                             ),
@@ -269,8 +274,8 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                               onPressed: controller.busy
                                   ? null
                                   : controller.restartApplication,
-                              child: const Text(
-                                'Restart CopyPaste',
+                              child: Text(
+                                context.l10n.modulesRestartApp,
                                 textAlign: TextAlign.center,
                               ),
                             ),

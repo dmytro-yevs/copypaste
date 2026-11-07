@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import 'history_controller.dart';
@@ -114,7 +115,7 @@ class HistoryPinnedOrderController {
     } catch (_) {
       if (window.isCurrent(epoch)) {
         window.restorePinnedOrder(previous, previousCursor);
-        _errors.message = 'The pinned order could not be saved. Try again.';
+        _errors.message = AppStrings.current.historyErrorPinnedOrderSave;
       }
       _isReorderingPinned = false;
       if (!_scope.disposed) _scope.notify();
@@ -131,8 +132,7 @@ class HistoryPinnedOrderController {
       }
     } catch (_) {
       if (window.isCurrent(epoch)) {
-        _errors.message =
-            'The order was saved, but history could not be refreshed.';
+        _errors.message = AppStrings.current.historyErrorPinnedOrderRefresh;
       }
     } finally {
       _isReorderingPinned = false;

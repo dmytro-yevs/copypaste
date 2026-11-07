@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 
 /// The mutually exclusive filter and presentation kinds exposed by Rust.
 enum HistoryClipKind {
@@ -19,20 +20,23 @@ enum HistoryClipKind {
 }
 
 extension HistoryClipKindX on HistoryClipKind {
-  String get label => switch (this) {
-    HistoryClipKind.text => 'Text',
-    HistoryClipKind.link => 'Link',
-    HistoryClipKind.email => 'Email',
-    HistoryClipKind.color => 'Color',
-    HistoryClipKind.phone => 'Phone',
-    HistoryClipKind.code => 'Code',
-    HistoryClipKind.json => 'JSON',
-    HistoryClipKind.path => 'Path',
-    HistoryClipKind.credentials => 'Credentials',
-    HistoryClipKind.image => 'Image',
-    HistoryClipKind.file => 'File',
-    HistoryClipKind.other => 'Other',
-  };
+  String get label {
+    final strings = AppStrings.current;
+    return switch (this) {
+      HistoryClipKind.text => strings.historyKindText,
+      HistoryClipKind.link => strings.historyKindLink,
+      HistoryClipKind.email => strings.historyKindEmail,
+      HistoryClipKind.color => strings.historyKindColor,
+      HistoryClipKind.phone => strings.historyKindPhone,
+      HistoryClipKind.code => strings.historyKindCode,
+      HistoryClipKind.json => 'JSON',
+      HistoryClipKind.path => strings.historyKindPath,
+      HistoryClipKind.credentials => strings.historyKindCredentials,
+      HistoryClipKind.image => strings.historyKindImage,
+      HistoryClipKind.file => strings.historyKindFile,
+      HistoryClipKind.other => strings.historyKindOther,
+    };
+  }
 
   bool get isTextual => switch (this) {
     HistoryClipKind.text ||
@@ -62,9 +66,9 @@ enum HistorySort { newest, oldest, relevance }
 
 extension HistorySortX on HistorySort {
   String get label => switch (this) {
-    HistorySort.newest => 'Newest first',
-    HistorySort.oldest => 'Oldest first',
-    HistorySort.relevance => 'Best match',
+    HistorySort.newest => AppStrings.current.historySortNewest,
+    HistorySort.oldest => AppStrings.current.historySortOldest,
+    HistorySort.relevance => AppStrings.current.historySortRelevance,
   };
 }
 

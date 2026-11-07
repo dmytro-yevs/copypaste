@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/services.dart';
 
 import '../android/android_capture_setup_gateway.dart';
@@ -44,7 +45,7 @@ class AndroidModuleAccess implements ModuleAccessRepository {
       return _decode(await _channel.invokeMapMethod<String, Object?>(method));
     } on PlatformException catch (error) {
       throw ModulesException(
-        error.message ?? 'SMS access could not be configured.',
+        error.message ?? AppStrings.current.platformSmsAccessConfigureFailed,
       );
     }
   }
@@ -62,7 +63,7 @@ class AndroidModuleAccess implements ModuleAccessRepository {
           'running',
           'permission',
         ].any((key) => shizuku[key] is! bool)) {
-      throw const ModulesException('SMS access could not be verified.');
+      throw ModulesException(AppStrings.current.platformSmsAccessVerifyFailed);
     }
     return SmsModuleAccessState(
       smsGranted: value['smsGranted'] as bool,

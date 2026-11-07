@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 enum FileOperationKind { import, receive, send }
@@ -29,21 +30,25 @@ class FileOperation {
   bool get active => phase == 'running';
   bool get failed => phase == 'failed' || phase == 'interrupted';
   double? get progress => total > 0 ? (written / total).clamp(0, 1) : null;
-  String get label => switch (phase) {
-    'running' => switch (kind) {
-      FileOperationKind.send => 'Sending',
-      FileOperationKind.receive => 'Downloading',
-      FileOperationKind.import => 'Adding',
-    },
-    'completed' => switch (kind) {
-      FileOperationKind.import => 'Added',
-      FileOperationKind.send => 'Sent',
-      FileOperationKind.receive => 'Completed',
-    },
-    'cancelled' => 'Cancelled',
-    'interrupted' => 'Interrupted',
-    _ => 'Failed',
-  };
+  String get label {
+    final strings = AppStrings.current;
+    return switch (phase) {
+      'running' => switch (kind) {
+        FileOperationKind.send => strings.transfersPhaseSending,
+        FileOperationKind.receive => strings.transfersPhaseDownloading,
+        FileOperationKind.import => strings.transfersPhaseAdding,
+      },
+      'completed' => switch (kind) {
+        FileOperationKind.import => strings.transfersPhaseAdded,
+        FileOperationKind.send => strings.transfersPhaseSent,
+        FileOperationKind.receive => strings.transfersPhaseCompleted,
+      },
+      'cancelled' => strings.transfersPhaseCancelled,
+      'interrupted' => strings.transfersPhaseInterrupted,
+      _ => strings.transfersPhaseFailed,
+    };
+  }
+
   FileOperation withProgress(int bytes, int size) => FileOperation(
     id: id,
     itemId: itemId,
@@ -227,7 +232,7 @@ class FileOperationsController extends ChangeNotifier {
       },
       onError: (Object _) {
         if (_disposed) return;
-        error = 'Transfer updates are unavailable. Reopen to refresh.';
+        error = AppStrings.current.transfersUpdatesUnavailable;
         notifyListeners();
       },
     );
@@ -283,7 +288,7 @@ class FileOperationsController extends ChangeNotifier {
       } while (_refreshAgain);
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfers could not be loaded. Try again.';
+        error = AppStrings.current.transfersLoadFailed;
         notifyListeners();
       }
     } finally {
@@ -346,7 +351,7 @@ class FileOperationsController extends ChangeNotifier {
       } while (_reloadIds.contains(id));
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfer updates could not be loaded.';
+        error = AppStrings.current.transfersUpdatesLoadFailed;
         notifyListeners();
       }
     } finally {
@@ -373,7 +378,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.retry(item);
     } catch (_) {
       if (!_disposed) {
-        error = 'This file could not be retried.';
+        error = AppStrings.current.transfersRetryFailed;
         notifyListeners();
       }
     }
@@ -388,7 +393,7 @@ class FileOperationsController extends ChangeNotifier {
       await refresh();
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfer history could not be cleared.';
+        error = AppStrings.current.transfersClearHistoryFailed;
         notifyListeners();
       }
     }
@@ -406,7 +411,7 @@ class FileOperationsController extends ChangeNotifier {
       await refresh();
     } catch (_) {
       if (!_disposed) {
-        error = 'This history record could not be removed.';
+        error = AppStrings.current.transfersRemoveRecordFailed;
         notifyListeners();
       }
     }
@@ -418,7 +423,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.cancel(item.id);
     } catch (_) {
       if (!_disposed) {
-        error = 'The transfer could not be cancelled. It may still be running.';
+        error = AppStrings.current.transfersCancelFailed;
         notifyListeners();
       }
     }
@@ -431,8 +436,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.openFile(path);
     } catch (_) {
       if (!_disposed) {
-        error =
-            'The saved file is unavailable. It may have been moved or deleted.';
+        error = AppStrings.current.transfersSavedFileUnavailable;
         notifyListeners();
       }
     }
