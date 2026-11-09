@@ -711,6 +711,43 @@ void main() {
     expect(search.controller!.text, 'recent');
   });
 
+  testWidgets(
+    'search keeps keyboard focus when the shown popup leaves the app inactive',
+    (tester) async {
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
+      final host = _FrameHost()..openWhenReady = true;
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(host.presentedIds, [1]);
+      final search = tester.widget<TextField>(
+        find.byKey(const ValueKey('quick-paste-search')),
+      );
+      expect(search.focusNode!.hasPrimaryFocus, isTrue);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pumpAndSettle();
+      expect(search.focusNode!.hasPrimaryFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(controller.focusedClip?.id, 'recent');
+      tester.testTextInput.enterText('recent');
+      await tester.pumpAndSettle();
+      expect(search.controller!.text, 'recent');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets('a superseded media load cannot reveal an older presentation', (
     tester,
   ) async {
