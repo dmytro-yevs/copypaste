@@ -1,9 +1,6 @@
-- Stop retrying sync every few seconds with a device that runs an older version: CopyPaste shows the version mismatch once and waits until that device is updated.
-- Check a device that connects but does not answer every 10 seconds instead of every second.
-- Stop exchanging the same tags and pins with paired devices on every sync: copies of them stored as ordinary clips by earlier versions are repaired once.
-- Stop requesting a deleted pinned clip from paired devices again on every sync.
-- Show each clip's tags in its History row.
-- On Android, keep completed setup when the system refuses clipboard access later instead of starting setup again.
-- Stop sending a copied file's original location on the capturing device to paired devices and the cloud.
-- Ignore pin times set far in the future by a paired device, so they can no longer override newer changes or stall sync.
-- Install module files readable only by your user account.
+- Use CopyPaste in English, Ukrainian, Spanish, German, French, Portuguese (Brazil), Italian, Polish, Turkish, Japanese, Korean or Simplified Chinese: choose the language in Settings. On Android 13 and later, CopyPaste also follows the per-app language set in system settings.
+- Copy a clip straight from its History row: use the Copy button, double-click it, press Enter or Cmd/Ctrl+C, or open its context menu. On Android, each row has a Copy button.
+- Start typing a search or move through clips with the arrow keys right after Quick Paste opens: the search field no longer loses keyboard focus on some openings.
+- In Quick Paste, delete a clip with Cmd/Ctrl+Shift+Backspace, so Option/Alt+Backspace edits the search again.
+- The macOS menu bar shows "CopyPaste" instead of a placeholder name.
+- On Linux, finish setup with basic clipboard capture when the desktop companion is missing.
