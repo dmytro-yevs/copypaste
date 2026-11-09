@@ -106,10 +106,14 @@ impl StagingArea {
         if bytes.is_empty() && metadata.transfer.is_none() {
             if let Some(reference) = metadata.source_reference.as_deref() {
                 let path = PathBuf::from(reference);
-                if path.is_absolute() && path.is_file() {
-                    return Ok(path);
+                if !path.is_absolute() {
+                    return Err(io::Error::from(io::ErrorKind::NotFound));
                 }
-                return Err(io::Error::from(io::ErrorKind::NotFound));
+                // macOS drops a file URL its writer cannot read, after the
+                // clipboard was already cleared. `stat` proves no read access
+                // and never asks for folder consent; opening does both.
+                open_regular(&path)?;
+                return Ok(path);
             }
         }
         // Declared before the lock, so the worker this paste-back replaces is
@@ -450,11 +454,23 @@ fn open_regular_at(dir_fd: &std::os::fd::OwnedFd, filename: &str) -> io::Result<
         OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::empty(),
     )?;
-    let file = File::from(fd);
+    regular(File::from(fd))
+}
+
+fn open_regular(path: &Path) -> io::Result<File> {
+    let fd = rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    regular(File::from(fd))
+}
+
+fn regular(file: File) -> io::Result<File> {
     if !file.metadata()?.file_type().is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "the staging target was not a regular file",
+            "the file is not a regular file",
         ));
     }
     Ok(file)
@@ -488,6 +504,33 @@ mod tests {
         assert_eq!(staging.materialize(&[], &metadata).unwrap(), source);
         assert_eq!(std::fs::read_dir(staging.root()).unwrap().count(), 0);
         assert_eq!(staging.worker_starts(), 0);
+    }
+
+    /// A reference that exists but cannot be read is the TCC-protected folder
+    /// case: the pasteboard rejects its URL only after the clipboard is cleared.
+    #[test]
+    fn unreadable_original_reference_is_refused_before_the_clipboard_write() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("private.bin");
+        std::fs::write(&source, b"original").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if File::open(&source).is_ok() {
+            // Root ignores permission bits, so there is no unreadable file.
+            return;
+        }
+        let staging = StagingArea::new(directory.path()).unwrap();
+        let metadata = FileMetadata::with_source_reference(
+            "private.bin",
+            "application/octet-stream",
+            source.to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(source.is_file());
+        assert_eq!(
+            staging.materialize(&[], &metadata).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
     }
 
     impl StagingArea {
