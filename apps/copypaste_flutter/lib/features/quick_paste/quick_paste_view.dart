@@ -48,7 +48,8 @@ class QuickPasteView extends StatefulWidget {
   State<QuickPasteView> createState() => _QuickPasteViewState();
 }
 
-class _QuickPasteViewState extends State<QuickPasteView> {
+class _QuickPasteViewState extends State<QuickPasteView>
+    with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _scroll = ScrollController();
@@ -170,6 +171,24 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     _pinnedScroll.addListener(_pinnedScrolled);
     controller.history.window.beforeWindowChange = _captureWindowAnchors;
     controller.history.window.afterWindowChange = _restoreWindowAnchors;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The key nonactivating popup leaves the application inactive, and the
+    // desktop FocusManager suspends keyboard focus on that transition.
+    if (state != AppLifecycleState.inactive) return;
+    scheduleMicrotask(() {
+      if (!mounted ||
+          _presentedFrame == null ||
+          _presentedFrame != controller.renderablePresentationId ||
+          FocusManager.instance.primaryFocus !=
+              FocusManager.instance.rootScope) {
+        return;
+      }
+      _searchFocus.requestFocus();
+    });
   }
 
   void _presentationChanged() {
@@ -296,6 +315,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_presentationChanged);
     controller.history.window.beforeWindowChange = null;
     controller.history.window.afterWindowChange = null;
