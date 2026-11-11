@@ -1,3 +1,5 @@
+import '../../../l10n/l10n.dart';
+
 enum ModulesLoadState { loading, ready, error }
 
 enum ModuleFieldKind { text, boolean, file, choices }
@@ -16,8 +18,13 @@ enum ModulePlatform {
 
 String formatModulePlatforms(List<ModulePlatform> platforms) =>
     platforms.isEmpty
-    ? 'Platforms: Unknown'
-    : 'Platforms: ${ModulePlatform.values.where(platforms.contains).map((platform) => platform.label).join(' · ')}';
+    ? AppStrings.current.modulesPlatformsUnknown
+    : AppStrings.current.modulesPlatforms(
+        ModulePlatform.values
+            .where(platforms.contains)
+            .map((platform) => platform.label)
+            .join(' · '),
+      );
 
 class ModuleField {
   const ModuleField({

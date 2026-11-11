@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 use image::{ColorType, GenericImageView, ImageEncoder, Pixel};
 
-use super::{decode_limits, ImagePreviewError, ImageThumbnail};
+use super::{ImagePreviewError, ImageThumbnail};
 
 const MAX_ROW_WINDOW_BYTES: usize = 1024 * 1024;
 
@@ -31,21 +31,10 @@ pub(super) fn thumbnail(
         return Ok(None);
     }
     let (width, height) = (info.width, info.height);
+    if width == 0 || height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
     let channels = color.samples() as u8;
-    let source_bytes = u64::from(width)
-        .saturating_mul(u64::from(height))
-        .saturating_mul(u64::from(channels));
-    // Preserve the existing decoded-size acceptance policy even though the
-    // streaming implementation does not allocate that full framebuffer.
-    decode_limits(
-        width,
-        height,
-        source_bytes,
-        channels,
-        max_width,
-        max_height,
-        budget,
-    )?;
     let ratio = (f64::from(max_width.min(width)) / f64::from(width))
         .min(f64::from(max_height.min(height)) / f64::from(height));
     let target = (
@@ -69,8 +58,18 @@ pub(super) fn thumbnail(
     let row_bytes = reader
         .output_line_size(width)
         .ok_or(ImagePreviewError::TooLarge)?;
-    if capacity.saturating_mul(row_bytes) > MAX_ROW_WINDOW_BYTES {
+    let window_bytes = capacity.saturating_mul(row_bytes);
+    if window_bytes > MAX_ROW_WINDOW_BYTES {
         return Ok(None);
+    }
+    // Only the row window and the thumbnail are retained, so the budget is
+    // charged for those and not for the source framebuffer that is never
+    // allocated. Tall screenshots would otherwise be refused needlessly.
+    let thumbnail_bytes = u64::from(target.0)
+        .saturating_mul(u64::from(target.1))
+        .saturating_mul(u64::from(channels));
+    if thumbnail_bytes.saturating_add(window_bytes as u64) > budget {
+        return Err(ImagePreviewError::TooLarge);
     }
     let rows = Rows {
         reader,

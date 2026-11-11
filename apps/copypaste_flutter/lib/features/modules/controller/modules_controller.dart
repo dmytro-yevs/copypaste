@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:pub_semver/pub_semver.dart';
 
+import '../../../l10n/l10n.dart';
 import '../models/module_marketplace_models.dart';
 import '../models/module_models.dart';
 import '../repository/module_marketplace_repository.dart';
@@ -141,7 +142,7 @@ class ModulesController extends ChangeNotifier {
         _catalogState = ModulesLoadState.error;
         _catalogError = error is ModulesException
             ? error.message
-            : 'The module marketplace could not be loaded.';
+            : AppStrings.current.modulesMarketplaceLoadFailed;
       }
     } finally {
       _catalogLoading = false;
@@ -223,9 +224,7 @@ class ModulesController extends ChangeNotifier {
     if (sms && enabled) {
       final state = await _access?.smsState();
       if (state?.granted != true) {
-        throw const ModulesException(
-          'Set up SMS access before enabling this module.',
-        );
+        throw ModulesException(AppStrings.current.modulesSmsSetupRequired);
       }
     }
     await _repository.setEnabled(id, enabled);
@@ -245,16 +244,13 @@ class ModulesController extends ChangeNotifier {
             // _perform refreshes again before it presents this error.
           }
           throw ModulesException(switch (persistedEnabled) {
-            true =>
-              'SMS monitoring could not be started. The module is still enabled; disable it again to retry.',
-            false =>
-              'SMS monitoring could not be started. The module was disabled.',
-            null =>
-              'SMS monitoring could not be started. The module enabled state could not be confirmed.',
+            true => AppStrings.current.modulesSmsMonitoringStillEnabled,
+            false => AppStrings.current.modulesSmsMonitoringDisabled,
+            null => AppStrings.current.modulesSmsMonitoringUnconfirmed,
           });
         }
       }
-      throw const ModulesException('SMS monitoring could not be started.');
+      throw ModulesException(AppStrings.current.modulesSmsMonitoringFailed);
     }
   });
 
@@ -263,7 +259,7 @@ class ModulesController extends ChangeNotifier {
   SmsAccessSetupController smsAccessSetup() {
     final access = _access;
     if (access == null) {
-      throw const ModulesException('SMS access is available only on Android.');
+      throw ModulesException(AppStrings.current.modulesSmsAndroidOnly);
     }
     return SmsAccessSetupController(access: access);
   }
@@ -278,7 +274,7 @@ class ModulesController extends ChangeNotifier {
               module.enabled &&
               module.events.contains(ModuleEventKind.smsReceived),
         )) {
-      throw const ModulesException('SMS monitoring needs setup.');
+      throw ModulesException(AppStrings.current.modulesSmsMonitoringNeedsSetup);
     }
   }
 
@@ -340,7 +336,7 @@ class ModulesController extends ChangeNotifier {
       if (!_disposed) {
         _error = error is ModulesException
             ? error.message
-            : 'The module operation could not be completed.';
+            : AppStrings.current.modulesOperationIncomplete;
       }
       if (refresh && !_disposed) {
         // A failed cleanup can still persist a removal state. Read that state

@@ -1,262 +1,16 @@
-//! Peer-to-peer sync, wired into the daemon.
-//!
-//! The node itself is [`copypaste_p2p::Node`] — the peer list, the
-//! advertisement, the inbound listener and the four pairing/sync operations. It
-//! lives there rather than here because Android has no daemon to put it in, and
-//! a second node is how the two would come apart.
-//!
-//! What this module supplies is what the node asks of *this* device:
-//!
-//! * [`P2p`] — the node plus the daemon's cadence and wake signal, hanging off
-//!   `AppState` exactly like the store and the keyring do,
-//! * [`handlers`] — the five IPC operations a client drives all of this with.
-//!
-//! The sync view of the history is *not* here: it is
-//! [`copypaste_core::StoreSource`], because the cloud transport reads and
-//! writes the same rows through the same comparator, and one of the two
-//! transports owning it is how the second one ends up with a copy.
+//! Peer sync through the daemon host: two daemons over loopback.
 
 pub mod handlers;
-pub mod poll;
 
-use std::sync::Arc;
+#[allow(unused_imports)]
+use crate::testutil::calls::*;
 
-use copypaste_p2p::discovery::{DiscoveredPeer, Discovery};
-use copypaste_p2p::node::SyncCycle;
-use copypaste_p2p::peers::PeerStore;
-use copypaste_p2p::sync::SyncOutcome;
-use copypaste_p2p::Node;
-use tokio::net::TcpListener;
-use tokio::sync::watch;
-use tracing::warn;
-
-use copypaste_core::sync::RoundGuard;
-
-use crate::cadence::Idle;
-use crate::sync::peer_source;
-use crate::AppState;
-
-/// The node, plus what only a long-lived daemon has: a cadence and a wake.
-pub struct P2p {
-    node: Arc<Node>,
-    driver: Arc<copypaste_sync::peer_driver::PeerSyncDriver>,
-}
-
-impl std::fmt::Debug for P2p {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.node.fmt(f)
-    }
-}
-
-impl P2p {
-    pub fn new(
-        peers: PeerStore,
-        discovery: Option<Discovery>,
-        port: u16,
-        lan_visible: bool,
-    ) -> Self {
-        Self {
-            node: Arc::new(Node::new(peers, discovery, port, lan_visible)),
-            driver: copypaste_sync::peer_driver::PeerSyncDriver::new(),
-        }
-    }
-
-    pub fn node(&self) -> &Arc<Node> {
-        &self.node
-    }
-
-    pub fn peers(&self) -> &PeerStore {
-        self.node.peers()
-    }
-
-    pub fn discovery(&self) -> Option<&Discovery> {
-        self.node.discovery()
-    }
-
-    /// Everything currently visible on the LAN. Empty when discovery is off or
-    /// degraded, which is never an error: an explicit address always works.
-    pub fn seen(&self) -> Vec<DiscoveredPeer> {
-        self.node.seen()
-    }
-
-    /// Whether a given pairing is visible right now.
-    pub fn find(&self, pairing_id: &str) -> Option<DiscoveredPeer> {
-        self.node.find(pairing_id)
-    }
-
-    pub fn port(&self) -> u16 {
-        self.node.port()
-    }
-
-    pub fn republish(&self) {
-        self.node.republish();
-    }
-
-    pub fn listen_addr(&self) -> Option<String> {
-        self.node.listen_addr()
-    }
-
-    pub fn idle(&self) -> &Idle {
-        &self.driver.cadence
-    }
-
-    /// The permit for one outbound pass, or `None` when one is running.
-    #[cfg(test)]
-    pub(crate) fn try_begin_round(&self) -> Option<RoundGuard> {
-        self.driver.rounds.try_enter()
-    }
-
-    /// The permit for one outbound pass, waiting for any running pass first.
-    pub(crate) async fn begin_round(&self) -> RoundGuard {
-        self.driver.rounds.enter().await
-    }
-
-    #[cfg(test)]
-    pub(crate) fn round_in_flight(&self) -> bool {
-        self.driver.rounds.is_running()
-    }
-
-    /// Ask the peer sync loop to run now.
-    pub fn wake(&self) {
-        self.driver.wake();
-    }
-
-    /// Resolves when someone calls [`P2p::wake`]. `Notify` stores one permit,
-    /// so a wake during a round is not lost.
-    pub async fn wake_signal(&self) {
-        self.driver.wake_signal().await;
-    }
-
-    pub(crate) fn sync_enabled_changed(&self, enabled: bool) {
-        self.driver.set_enabled(enabled);
-    }
-
-    pub(crate) fn sync_cycle(&self) -> SyncCycle {
-        self.driver.cycle.clone()
-    }
-}
-
-/// Accept peer connections until shutdown, serving them from this daemon's
-/// history.
-pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
-    let node = Arc::clone(state.p2p.node());
-    let source = Arc::new(peer_source(&state));
-    let session_state = Arc::clone(&state);
-    let on_session = move |_pairing_id: &str, outcome: &SyncOutcome| {
-        remember_device(&session_state, outcome);
-        if outcome.stats.received > 0 {
-            session_state.note_remote_change();
-        }
-    };
-    let probe_state = Arc::clone(&state);
-    let on_probe = move |sync_status_changed: bool| {
-        if sync_status_changed {
-            probe_state.note_sync_status_changed();
-        } else {
-            probe_state.note_peers_changed();
-        }
-    };
-    copypaste_p2p::node::listen(node, listener, source, on_session, on_probe, shutdown).await;
-}
-
-/// Pairing transitions originate in the shared node, including an inbound
-/// handshake that reaches `AwaitingConfirmation` without an IPC request.
-/// Forward them through the daemon's existing peer-change stream.
-pub async fn forward_pairing_changes(
-    state: Arc<AppState>,
-    mut changes: watch::Receiver<()>,
-    mut sync_changes: watch::Receiver<()>,
-    mut group_changes: watch::Receiver<u64>,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    loop {
-        tokio::select! {
-            _ = shutdown.changed() => return,
-            changed = group_changes.changed() => {
-                if changed.is_err() { return; }
-                state.modules.wake_sync();
-                state.p2p.wake();
-                state.note_peers_changed();
-            },
-            changed = sync_changes.changed() => {
-                if changed.is_err() { return; }
-                state.note_sync_status_changed();
-            },
-            changed = changes.changed() => {
-                if changed.is_err() {
-                    return;
-                }
-                state.note_peers_changed();
-            }
-        }
-    }
-}
-
-/// Remember what the device on the other end of a session calls itself.
-///
-/// The origin table has always held the device *id*, because the merge
-/// tie-break orders on it. An id is a UUID, so a row that arrived from the
-/// phone could be attributed but not named, and `Item::origin_device_name`
-/// would be `None` forever. This is the other half.
-///
-/// Recorded from both sides of a session, because either may be the first to
-/// speak to a given device — the responder here, the initiator in
-/// [`handlers`].
-///
-/// Best-effort: a failure costs a label, not an item, and it must not fail a
-/// session that has already exchanged its rows.
-pub(crate) fn remember_device(state: &AppState, outcome: &SyncOutcome) {
-    if let Err(e) = state
-        .meta
-        .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)
-    {
-        warn!(error = ?e, "could not record a peer device name");
-    }
-    if let Some(profile) = &outcome.peer_profile {
-        if let Err(e) = state
-            .meta
-            .record_device_class(&outcome.peer_device_id, profile.device_class)
-        {
-            warn!(error = ?e, "could not record a peer device class");
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{add, contents, test_state};
     use copypaste_ipc::{EventKind, ResponseData};
     use copypaste_p2p::peers::Peer;
     use std::net::SocketAddr;
-
-    #[test]
-    fn remember_device_persists_the_authenticated_device_class() {
-        let (state, _dir) = test_state("server");
-        remember_device(
-            &state,
-            &SyncOutcome {
-                stats: Default::default(),
-                peer_device_id: "phone-id".into(),
-                peer_device_name: "Phone".into(),
-                peer_profile: Some(copypaste_p2p::DeviceProfile {
-                    device_class: copypaste_ipc::DeviceClass::Phone,
-                    ..Default::default()
-                }),
-                peer_listen_addr: None,
-                cursor: Default::default(),
-                applied_floor: None,
-            },
-        );
-
-        assert_eq!(
-            state
-                .store
-                .device_classes(&["phone-id".to_string()])
-                .unwrap()["phone-id"],
-            copypaste_ipc::DeviceClass::Phone
-        );
-    }
 
     /// Pair two states over loopback and hand back the address A listens on.
     ///
@@ -307,11 +61,8 @@ mod tests {
     async fn inbound_pairing_forwards_a_peer_event_before_trust_is_committed() {
         let (responder, _responder_dir) = test_state("responder");
         let (initiator, _initiator_dir) = test_state("initiator");
-        let mut events = responder.subscribe();
+        let mut events = responder.subscribe_events();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let changes = responder.p2p.node().subscribe_pairing_changes();
-        let sync_changes = responder.p2p.node().subscribe_sync_changes();
-        let group_changes = responder.p2p.peers().subscribe_group_changes();
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("listener address");
         tokio::spawn(listen(
@@ -320,20 +71,14 @@ mod tests {
             shutdown_rx.clone(),
         ));
 
-        let invite = match crate::p2p::handlers::pair_create_invite(&responder, 1)
+        let bridge = tokio::spawn(responder.runtime.forward_changes(shutdown_rx.clone()));
+        let invite = match crate::testutil::calls::pair_create_invite(&responder, 1)
             .await
             .data
         {
             Some(ResponseData::PairingInvite(invite)) => invite,
             other => panic!("expected pairing invite, got {other:?}"),
         };
-        let bridge = tokio::spawn(forward_pairing_changes(
-            Arc::clone(&responder),
-            changes,
-            sync_changes,
-            group_changes,
-            shutdown_rx.clone(),
-        ));
         assert_eq!(
             tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
                 .await
@@ -344,7 +89,7 @@ mod tests {
         );
 
         assert!(
-            crate::p2p::handlers::pair_join(&initiator, 2, &invite.code, &addr.to_string(),)
+            crate::testutil::calls::pair_join(&initiator, 2, &invite.code, &addr.to_string(),)
                 .await
                 .ok
         );
@@ -373,18 +118,9 @@ mod tests {
     async fn inbound_probe_publishes_one_peer_event() {
         let (receiver, _receiver_dir) = test_state("receiver");
         let (sender, _sender_dir) = test_state("sender");
-        let mut events = receiver.subscribe();
+        let mut events = receiver.subscribe_events();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let pairing_changes = receiver.p2p.node().subscribe_pairing_changes();
-        let sync_changes = receiver.p2p.node().subscribe_sync_changes();
-        let group_changes = receiver.p2p.peers().subscribe_group_changes();
-        let bridge = tokio::spawn(forward_pairing_changes(
-            Arc::clone(&receiver),
-            pairing_changes,
-            sync_changes,
-            group_changes,
-            shutdown_rx.clone(),
-        ));
+        let bridge = tokio::spawn(receiver.runtime.forward_changes(shutdown_rx.clone()));
         let (pairing_id, addr) = pair(&receiver, &sender, shutdown_rx).await;
 
         let peer = sender.p2p.peers().get(&pairing_id).unwrap();
@@ -429,7 +165,7 @@ mod tests {
         add(&b, "from b");
         add(&a, "third item");
 
-        let response = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        let response = crate::testutil::calls::sync_now(&b, 1, Some(&pairing_id)).await;
         assert!(response.ok, "{:?}", response.error);
 
         let on_a = contents(&a);
@@ -486,7 +222,7 @@ mod tests {
                 },
             },
         );
-        let stopped = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        let stopped = crate::testutil::calls::sync_now(&b, 1, Some(&pairing_id)).await;
         assert!(!stopped.ok);
         assert!(contents(&b).is_empty());
         assert_eq!(b.p2p.node().cursors().get(&pairing_id).since_ms, 0);
@@ -501,7 +237,7 @@ mod tests {
                 },
             },
         );
-        let resumed = crate::p2p::handlers::sync_now(&b, 2, Some(&pairing_id)).await;
+        let resumed = crate::testutil::calls::sync_now(&b, 2, Some(&pairing_id)).await;
         assert!(resumed.ok);
         assert_eq!(contents(&b), ["off then on"]);
         let cursor = b.p2p.node().cursors().get(&pairing_id).since_ms;
@@ -510,7 +246,7 @@ mod tests {
             "the completed session did not commit its cursor"
         );
 
-        let replay = crate::p2p::handlers::sync_now(&b, 3, Some(&pairing_id)).await;
+        let replay = crate::testutil::calls::sync_now(&b, 3, Some(&pairing_id)).await;
         assert!(replay.ok);
         assert_eq!(contents(&b), ["off then on"]);
         assert_eq!(b.p2p.node().cursors().get(&pairing_id).since_ms, cursor);
@@ -529,9 +265,9 @@ mod tests {
         add(&a, "from a");
         add(&b, "from b");
 
-        let first = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        let first = crate::testutil::calls::sync_now(&b, 1, Some(&pairing_id)).await;
         assert!(first.ok);
-        let second = crate::p2p::handlers::sync_now(&b, 2, Some(&pairing_id)).await;
+        let second = crate::testutil::calls::sync_now(&b, 2, Some(&pairing_id)).await;
 
         let results = match second.data {
             Some(copypaste_ipc::ResponseData::Sync(results)) => results,
@@ -574,7 +310,7 @@ mod tests {
             })
             .unwrap();
 
-        let response = crate::p2p::handlers::sync_now(&b, 1, Some(&stranger.pairing_id())).await;
+        let response = crate::testutil::calls::sync_now(&b, 1, Some(&stranger.pairing_id())).await;
         let results = match response.data {
             Some(copypaste_ipc::ResponseData::Sync(results)) => results,
             other => panic!("{other:?}"),

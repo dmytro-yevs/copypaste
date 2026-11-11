@@ -134,8 +134,10 @@ async fn send_capture_snapshot(
     writer: &mut OwnedWriteHalf,
 ) -> bool {
     let state = std::sync::Arc::clone(state);
-    let snapshot =
-        tokio::task::spawn_blocking(move || crate::server::items::status(&state, 0).data).await;
+    let snapshot = tokio::task::spawn_blocking(move || {
+        Some(copypaste_ipc::ResponseData::Status(state.status_data()))
+    })
+    .await;
     let Ok(Some(ResponseData::Status(status))) = snapshot else {
         return false;
     };

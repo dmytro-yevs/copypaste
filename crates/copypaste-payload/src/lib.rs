@@ -179,6 +179,10 @@ pub struct SecretOverride {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadMetadata {
+    /// Content-free classification so confidential clips can be filtered
+    /// without putting their plaintext in the search index.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub credentials: bool,
     #[serde(
         default,
         skip_serializing_if = "copypaste_ipc::ClipboardPrivacy::is_empty"
@@ -200,6 +204,7 @@ impl PayloadMetadata {
 
     /// Preserve automatic restrictions unless a newer explicit choice exists.
     pub fn merge_privacy(&mut self, previous: &Self) {
+        self.credentials |= previous.credentials;
         self.privacy = self.privacy.union(previous.privacy);
         self.secret_override = self.secret_override.max(previous.secret_override);
         if let Some(choice) = self.secret_override {
@@ -229,6 +234,7 @@ impl PayloadMetadata {
         source_app_icon: Option<SourceAppIconMetadata>,
     ) -> Option<Self> {
         let metadata = Self {
+            credentials: false,
             privacy: Default::default(),
             secret_override: None,
             file,
@@ -240,6 +246,7 @@ impl PayloadMetadata {
     #[must_use]
     pub fn is_valid_for(&self, content_type: &str) -> bool {
         self.has_valid_components()
+            && (!self.credentials || copypaste_ipc::content_type::is_text(content_type))
             && if content_type == copypaste_ipc::content_type::FILE {
                 self.file.is_some()
             } else {
@@ -248,6 +255,7 @@ impl PayloadMetadata {
                     && self.file.is_some())
                     || (self.file.is_none()
                         && (self.source_app_icon.is_some()
+                            || self.credentials
                             || !self.privacy.is_empty()
                             || self.secret_override.is_some()))
             }
@@ -265,6 +273,7 @@ impl PayloadMetadata {
                 .secret_override
                 .is_none_or(|choice| choice.updated_at > 0 && choice.secret == self.privacy.secret)
             && (self.file.is_some()
+                || self.credentials
                 || self.source_app_icon.is_some()
                 || !self.privacy.is_empty()
                 || self.secret_override.is_some())
@@ -284,6 +293,7 @@ impl PayloadMetadata {
         }
         if let Some(file) = FileMetadata::from_json(value) {
             return (content_type == copypaste_ipc::content_type::FILE).then_some(Self {
+                credentials: false,
                 privacy: Default::default(),
                 secret_override: None,
                 file: Some(file),
@@ -389,6 +399,7 @@ mod tests {
         let icon = SourceAppIconMetadata::new(&png(64, 128), 64, 128).expect("valid icon");
         let file = FileMetadata::new("report.pdf", "application/pdf").unwrap();
         let metadata = PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: Some(file.clone()),
@@ -401,6 +412,7 @@ mod tests {
         );
 
         let icon_only = PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: Default::default(),
             file: None,

@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import 'desktop_visibility_preferences.dart';
@@ -69,7 +70,7 @@ class DesktopVisibilityController extends ChangeNotifier {
       _preferences = next;
       return true;
     } catch (_) {
-      _error = 'Application visibility could not be changed. Please try again.';
+      _error = AppStrings.current.platformVisibilityChangeFailed;
       return false;
     } finally {
       _pending = null;

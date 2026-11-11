@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../platform/notifications/pairing_notification_port.dart';
@@ -20,15 +21,21 @@ class AppNotification {
   final bool incoming;
   final bool read;
   bool get actionable => state == PairingState.awaitingConfirmation;
-  String get title => switch (state) {
-    PairingState.awaitingConfirmation =>
-      incoming ? 'Connection request' : 'Confirm connection',
-    PairingState.confirmed => 'Device connected',
-    PairingState.rejected => 'Connection rejected',
-    PairingState.cancelled => 'Connection cancelled',
-    PairingState.timedOut => 'Connection request expired',
-    _ => 'Connection failed',
-  };
+  String get title {
+    final strings = AppStrings.current;
+    return switch (state) {
+      PairingState.awaitingConfirmation =>
+        incoming
+            ? strings.notificationsConnectionRequest
+            : strings.notificationsConfirmConnection,
+      PairingState.confirmed => strings.notificationsDeviceConnected,
+      PairingState.rejected => strings.notificationsConnectionRejected,
+      PairingState.cancelled => strings.notificationsConnectionCancelled,
+      PairingState.timedOut => strings.notificationsConnectionRequestExpired,
+      _ => strings.notificationsConnectionFailed,
+    };
+  }
+
   AppNotification markRead() => AppNotification(
     id: id,
     peerName: peerName,
@@ -74,11 +81,10 @@ class NotificationsController extends ChangeNotifier {
       if (_disposed) return;
       _deliveryError = allowed
           ? null
-          : 'Allow system notifications in your OS settings to receive requests in the background.';
+          : AppStrings.current.notificationsPermissionDenied;
     } catch (_) {
       if (_disposed) return;
-      _deliveryError =
-          'System notifications are unavailable. Connection requests remain here.';
+      _deliveryError = AppStrings.current.notificationsSystemUnavailable;
     }
     notifyListeners();
   }
@@ -110,7 +116,8 @@ class NotificationsController extends ChangeNotifier {
     if (index >= 0 && _items[index].state == ceremony.state) return;
     final item = AppNotification(
       id: id,
-      peerName: ceremony.peerName ?? 'Nearby device',
+      peerName:
+          ceremony.peerName ?? AppStrings.current.notificationsNearbyDevice,
       state: ceremony.state,
       incoming: _devices.incomingPairing,
     );
@@ -138,8 +145,7 @@ class NotificationsController extends ChangeNotifier {
       if (_disposed || _shownRequest != item.id) await _platform.dismiss();
     } catch (_) {
       if (_disposed) return;
-      _deliveryError =
-          'System notifications are unavailable. Connection requests remain here.';
+      _deliveryError = AppStrings.current.notificationsSystemUnavailable;
       notifyListeners();
     }
   }

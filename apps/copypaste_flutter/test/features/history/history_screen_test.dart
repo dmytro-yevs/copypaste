@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
@@ -13,6 +14,7 @@ import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
@@ -23,6 +25,83 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets('icon filter actions show their tooltips on hover', (
+    tester,
+  ) async {
+    final controller = HistoryController(_TagScreenRepository());
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(600, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.byIcon(LucideIcons.monitorSmartphone)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('All devices'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) => widget is SelectPopup),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('retry reissues a request without changing selected filters', (
+    tester,
+  ) async {
+    final repository = _RecoveryScreenRepository();
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(600, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.window.state, HistoryLoadState.error);
+    expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
+    final requests = repository.queries.length;
+    repository.failAll = false;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(repository.queries.length, greaterThan(requests));
+    expect(controller.window.state, HistoryLoadState.empty);
+    repository.rejectFiltered = true;
+    await controller.window.updateQuery(
+      const HistoryQuery(kind: HistoryClipKind.image),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.window.state, HistoryLoadState.error);
+    expect(find.byKey(const ValueKey('history-date-filter')), findsOneWidget);
+    repository.rejectFiltered = false;
+    final filteredRequests = repository.queries.length;
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(repository.queries.length, greaterThan(filteredRequests));
+    expect(controller.window.query.kind, HistoryClipKind.image);
+    expect(controller.window.state, HistoryLoadState.empty);
+    expect(find.byKey(const ValueKey('history-reset-filters')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('history-reset-filters')));
+    await tester.pumpAndSettle();
+    expect(controller.window.query.kind, isNull);
+    expect(controller.window.hasActiveFilters, isFalse);
+    expect(find.byKey(const ValueKey('history-reset-filters')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('reuses code spans when the row and inspector rebuild', (
     tester,
   ) async {
@@ -46,7 +125,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await controller.initialize();
-    await controller.select('code-fixture');
+    await controller.selection.select('code-fixture');
     Widget app() => ShadcnApp(
       theme: AppTheme.light,
       builder: AppTheme.builder,
@@ -157,12 +236,12 @@ void main() {
       );
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
-      expect(controller.bulkSelectedIds, {'bulk-secret'});
+      expect(controller.bulk.bulkSelectedIds, {'bulk-secret'});
       expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
-      expect(controller.selectedId, isNull);
+      expect(controller.selection.selectedId, isNull);
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
-      expect(controller.bulkSelectedIds, isEmpty);
+      expect(controller.bulk.bulkSelectedIds, isEmpty);
       expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
       await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
       await tester.pump();
@@ -225,7 +304,7 @@ void main() {
           await _pumpHoverActions(tester);
         }
         expect(find.text('2 selected'), findsOneWidget);
-        expect(controller.selectedId, isNull);
+        expect(controller.selection.selectedId, isNull);
         expect(
           find.byKey(const ValueKey('history-detail-drawer')),
           findsNothing,
@@ -251,22 +330,22 @@ void main() {
         expect(repository.deletedIds, isEmpty);
         await tester.tap(find.widgetWithText(Button, 'Cancel'));
         await _pumpHoverActions(tester);
-        expect(controller.bulkSelectedIds, {'bulk-one', 'bulk-two'});
+        expect(controller.bulk.bulkSelectedIds, {'bulk-one', 'bulk-two'});
         await tester.tap(find.byKey(const ValueKey('history-bulk-delete')));
         await _pumpHoverActions(tester);
         await tester.tap(find.widgetWithText(Button, 'Delete'));
         await _pumpHoverActions(tester);
         expect(repository.deletedIds.toSet(), {'bulk-one', 'bulk-two'});
-        expect(controller.items.single.id, 'bulk-keep');
-        expect(controller.isBulkSelecting, isFalse);
+        expect(controller.window.items.single.id, 'bulk-keep');
+        expect(controller.bulk.isBulkSelecting, isFalse);
         await tester.tap(find.byKey(const ValueKey('history-select-clips')));
         await _pumpHoverActions(tester);
         await tester.tap(find.byKey(const ValueKey('history-clip-bulk-keep')));
         await _pumpHoverActions(tester);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await _pumpHoverActions(tester);
-        expect(controller.isBulkSelecting, isFalse);
-        expect(controller.bulkSelectedIds, isEmpty);
+        expect(controller.bulk.isBulkSelecting, isFalse);
+        expect(controller.bulk.bulkSelectedIds, isEmpty);
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
         expect(tester.takeException(), isNull);
@@ -320,8 +399,8 @@ void main() {
           kind: kind,
         );
         await _pumpHoverActions(tester);
-        expect(controller.bulkSelectedIds, {'hold'});
-        expect(controller.selectedId, isNull);
+        expect(controller.bulk.bulkSelectedIds, {'hold'});
+        expect(controller.selection.selectedId, isNull);
         expect(find.text('1 selected'), findsOneWidget);
         final sizes = [
           for (final action in ['close', 'pin', 'unpin', 'delete'])
@@ -334,12 +413,12 @@ void main() {
           findsNothing,
         );
         expect(
-          find.byKey(const ValueKey('history-row-delete-hold')),
+          find.byKey(const ValueKey('history-row-more-hold')),
           findsNothing,
         );
         await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
         await _pumpHoverActions(tester);
-        expect(controller.isBulkSelecting, isFalse);
+        expect(controller.bulk.isBulkSelecting, isFalse);
         expect(
           find.byKey(const ValueKey('history-select-clips')),
           findsOneWidget,
@@ -365,6 +444,7 @@ void main() {
             HistoryClip(
               id: 'secret-fixture',
               contentType: 'text',
+              kind: HistoryClipKind.credentials,
               preview: 'SYNTHETIC HISTORY SECRET',
               body: 'SYNTHETIC HISTORY SECRET',
               secret: true,
@@ -385,8 +465,9 @@ void main() {
       );
       await tester.pump();
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
-      await controller.select('secret-fixture');
+      await controller.selection.select('secret-fixture');
       await tester.pump();
+      expect(find.text('Credentials'), findsWidgets);
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       final inspectorSpoiler = find.byKey(
         const ValueKey('inspector-spoiler-secret-fixture-0'),
@@ -439,9 +520,9 @@ void main() {
         find.text('SYNTHETIC HISTORY SECRET').hitTestable(),
         findsNWidgets(2),
       );
-      controller.clearSelection();
+      controller.selection.clearSelection();
       await tester.pump();
-      await controller.select('secret-fixture');
+      await controller.selection.select('secret-fixture');
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
       expect(
@@ -521,7 +602,7 @@ void main() {
           tester.getRect(find.text('Clearance clip 29')).bottom,
           lessThan(dockTop),
         );
-        await controller.togglePin(controller.items.last);
+        await controller.mutations.togglePin(controller.window.items.last);
         await tester.pumpAndSettle();
         position.jumpTo(position.maxScrollExtent);
         await tester.pumpAndSettle();
@@ -551,7 +632,7 @@ void main() {
   );
 
   testWidgets(
-    'overlays compact pin and delete actions on mouse hover',
+    'overlays compact copy, pin and more actions on mouse hover',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1400, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -579,30 +660,41 @@ void main() {
       );
       await _pumpHoverActions(tester);
       final clip = find.byKey(const ValueKey<String>('history-clip-actions'));
+      final copy = find.byKey(
+        const ValueKey<String>('history-row-copy-actions'),
+      );
       final pin = find.byKey(const ValueKey<String>('history-row-pin-actions'));
+      final more = find.byKey(
+        const ValueKey<String>('history-row-more-actions'),
+      );
       final delete = find.byKey(
-        const ValueKey<String>('history-row-delete-actions'),
+        const ValueKey<String>('history-menu-delete-actions'),
       );
       final rect = tester.getRect(clip);
+      expect(copy, findsNothing);
       expect(pin, findsNothing);
-      expect(delete, findsNothing);
+      expect(more, findsNothing);
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
       addTearDown(mouse.removePointer);
       await mouse.moveTo(rect.center);
       await _pumpHoverActions(tester);
+      expect(copy, findsOneWidget);
       expect(pin, findsOneWidget);
-      expect(delete, findsOneWidget);
-      expect(tester.getSize(pin), const Size.square(24));
-      expect(tester.getSize(delete), const Size.square(24));
+      expect(more, findsOneWidget);
+      for (final action in [copy, pin, more]) {
+        expect(tester.getSize(action), const Size.square(24));
+      }
+      expect(tester.getCenter(copy).dx, lessThan(tester.getCenter(pin).dx));
+      expect(tester.getCenter(pin).dx, lessThan(tester.getCenter(more).dx));
       expect(tester.getRect(clip), rect);
-      expect(rect.contains(tester.getCenter(delete)), isTrue);
+      expect(rect.contains(tester.getCenter(more)), isTrue);
 
       await mouse.moveTo(Offset.zero);
       await _pumpHoverActions(tester);
       expect(pin, findsNothing);
-      expect(delete, findsNothing);
+      expect(more, findsNothing);
       await mouse.moveTo(rect.center);
       await _pumpHoverActions(tester);
 
@@ -612,7 +704,7 @@ void main() {
       await tester.tap(pin, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       expect(repository.pinnedUpdates, [('actions', true)]);
-      expect(controller.selectedId, isNull);
+      expect(controller.selection.selectedId, isNull);
       await mouse.moveTo(tester.getCenter(clip));
       await _pumpHoverActions(tester);
       expect(find.byIcon(LucideIcons.pinOff), findsWidgets);
@@ -621,6 +713,8 @@ void main() {
       expect(repository.pinnedUpdates, [('actions', true), ('actions', false)]);
 
       await mouse.moveTo(tester.getCenter(clip));
+      await _pumpHoverActions(tester);
+      await tester.tap(more, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       await tester.tap(delete, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
@@ -635,6 +729,8 @@ void main() {
 
       await mouse.moveTo(tester.getCenter(clip));
       await _pumpHoverActions(tester);
+      await tester.tap(more, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
       await tester.tap(delete, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       await tester.tap(
@@ -643,8 +739,8 @@ void main() {
       );
       await _pumpHoverActions(tester);
       expect(repository.deletedIds, ['actions']);
-      expect(controller.items, isEmpty);
-      expect(controller.selectedId, isNull);
+      expect(controller.window.items, isEmpty);
+      expect(controller.selection.selectedId, isNull);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
@@ -688,7 +784,7 @@ void main() {
         findsNothing,
       );
       expect(
-        find.byKey(const ValueKey<String>('history-row-delete-touch')),
+        find.byKey(const ValueKey<String>('history-row-more-touch')),
         findsNothing,
       );
       expect(tester.takeException(), isNull);
@@ -697,6 +793,150 @@ void main() {
       TargetPlatform.macOS,
       TargetPlatform.windows,
       TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'double-click, Enter and the copy shortcut copy a row with a toast',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'double',
+              contentType: 'text',
+              preview: 'Double-click clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey<String>('history-clip-double'));
+      final point = tester.getTopLeft(row) + const Offset(40, 16);
+
+      await tester.tapAt(point, kind: PointerDeviceKind.mouse);
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(repository.copiedIds, isEmpty);
+      await tester.tapAt(point, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(controller.selection.selectedId, 'double');
+      expect(repository.copiedIds, ['double']);
+      expect(find.text('Copied'), findsOneWidget);
+
+      final copyKey = defaultTargetPlatform == TargetPlatform.macOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(copyKey);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await tester.sendKeyUpEvent(copyKey);
+      await tester.pump();
+      expect(repository.copiedIds, ['double', 'double']);
+
+      tester.widget<Button>(row).focusNode!.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(repository.copiedIds, ['double', 'double', 'double']);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'context menu offers Copy first and Delete last',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'menu',
+              contentType: 'text',
+              preview: 'Context menu clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey<String>('history-clip-menu'));
+      final copy = find.byKey(const ValueKey('history-menu-copy-menu'));
+      final delete = find.byKey(const ValueKey('history-menu-delete-menu'));
+
+      await tester.tap(
+        row,
+        buttons: kSecondaryButton,
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(copy, findsOneWidget);
+      expect(delete, findsOneWidget);
+      expect(tester.getCenter(copy).dy, lessThan(tester.getCenter(delete).dy));
+      await tester.tap(copy, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(repository.copiedIds, ['menu']);
+      expect(find.text('Copied'), findsOneWidget);
+      expect(controller.selection.selectedId, isNull);
+
+      // macOS reserves Control-click for the menu instead of selection.
+      if (defaultTargetPlatform == TargetPlatform.macOS) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.tap(row, kind: PointerDeviceKind.mouse);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      } else {
+        await tester.tap(
+          row,
+          buttons: kSecondaryButton,
+          kind: PointerDeviceKind.mouse,
+        );
+      }
+      await _pumpHoverActions(tester);
+      expect(controller.bulk.isBulkSelecting, isFalse);
+      await tester.tap(delete, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(find.text('Delete this clip?'), findsOneWidget);
+      expect(repository.deletedIds, isEmpty);
+      await tester.tap(
+        find.widgetWithText(Button, 'Delete'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(repository.deletedIds, ['menu']);
+      expect(controller.window.items, isEmpty);
+      await tester.pump(const Duration(seconds: 6));
+      await _pumpHoverActions(tester);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
     }),
   );
 
@@ -1773,7 +2013,14 @@ void main() {
     final editorAvatar = tester.widget<Avatar>(
       find.descendant(of: editorLabel, matching: find.byType(Avatar)),
     );
-    expect(editorAvatar.provider, isA<MemoryImage>());
+    expect(
+      editorAvatar.provider,
+      isA<ResizeImage>().having(
+        (image) => image.imageProvider,
+        'source',
+        isA<MemoryImage>(),
+      ),
+    );
     expect(repository.requestedSourceIconIds, ['app:com.example.editor']);
     expect(find.text('com.example.editor'), findsNothing);
     controller.dispose();
@@ -1830,7 +2077,7 @@ void main() {
     expect(searchButton, findsOneWidget);
     expect(
       find.byWidgetPredicate((widget) => widget is Select),
-      findsNWidgets(4),
+      findsNWidgets(5),
     );
     expect(find.bySemanticsLabel('All pins'), findsNothing);
     expect(find.bySemanticsLabel('Pinned only'), findsNothing);
@@ -1864,9 +2111,11 @@ void main() {
   testWidgets(
     'compact search replaces all actions and keeps their height',
     (tester) async {
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       for (final width in [320.0, 390.0]) {
-        await tester.binding.setSurfaceSize(Size(width, 800));
+        tester.view.physicalSize = Size(width, 800);
         for (final scale in [1.0, 1.5, 2.0]) {
           final controller = HistoryController(_ScreenRepository());
           addTearDown(controller.dispose);
@@ -1889,7 +2138,7 @@ void main() {
           final searchToggle = find.byKey(
             const ValueKey<String>('history-search-toggle'),
           );
-          final actionHeight = tester.getSize(searchToggle).height;
+          final actionHeight = tester.getRect(searchToggle).height;
           final selection = find.byKey(const ValueKey('history-select-clips'));
           expect(
             tester.getRect(selection).right,
@@ -1901,11 +2150,14 @@ void main() {
 
           final searchField = find.byType(TextField);
           expect(
-            tester.getSize(searchField).height,
+            tester.getRect(searchField).height,
             closeTo(actionHeight, 0.01),
             reason: 'Width $width, text scale $scale',
           );
-          expect(tester.getSize(searchField).width, toolbarWidth);
+          expect(
+            tester.getRect(searchField).width,
+            closeTo(toolbarWidth, 0.01),
+          );
           expect(selection, findsNothing);
           expect(
             find.byKey(const ValueKey<String>('history-import-files')),
@@ -1917,17 +2169,17 @@ void main() {
           );
           await tester.enterText(searchField, 'Example');
           await tester.pump(const Duration(milliseconds: 300));
-          expect(controller.query.search, 'Example');
+          expect(controller.window.query.search, 'Example');
           await tester.tap(find.bySemanticsLabel('Close search'));
           await tester.pump(const Duration(milliseconds: 300));
           await tester.pumpAndSettle();
 
-          expect(controller.query.search, isEmpty);
+          expect(controller.window.query.search, isEmpty);
           expect(searchToggle, findsOneWidget);
           expect(selection, findsOneWidget);
           expect(
             find.byWidgetPredicate((widget) => widget is Select),
-            findsNWidgets(4),
+            findsNWidgets(5),
           );
           expect(tester.takeException(), isNull);
         }
@@ -1941,7 +2193,7 @@ void main() {
   );
 
   testWidgets(
-    'keeps the expanded search field at least 160 pixels wide beside all toolbar actions',
+    'collapses search before toolbar controls wrap onto a second row',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(480, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1958,15 +2210,25 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final searchField = find.byType(TextField);
-      expect(searchField, findsOneWidget);
-      expect(tester.getSize(searchField).width, 160);
-      expect(
-        tester
-            .getRect(find.byKey(const ValueKey('history-select-clips')))
-            .right,
-        lessThan(tester.getRect(searchField).left),
-      );
+      expect(find.byType(TextField), findsNothing);
+      final search = find.byKey(const ValueKey('history-search-toggle'));
+      expect(search, findsOneWidget);
+      final baseline = tester.getRect(search);
+      final controls = [
+        find.byKey(const ValueKey('history-select-clips')),
+        find.byKey(const ValueKey('history-date-filter')),
+        find.byKey(const ValueKey('history-import-files')),
+        ...find
+            .byWidgetPredicate((widget) => widget is Select)
+            .evaluate()
+            .map((element) => find.byWidget(element.widget)),
+      ];
+      for (final control in controls) {
+        final rect = tester.getRect(control);
+        expect(rect.top, closeTo(baseline.top, 0.01));
+        expect(rect.right, lessThanOrEqualTo(480 - AppSpacing.lg));
+      }
+      expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
       TargetPlatform.macOS,
@@ -2068,6 +2330,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(799, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _ScreenRepository()
+      ..availableFacets = const HistoryFacets(
+        tags: [HistoryTag(id: 'tag-work', name: 'Work')],
+      )
       ..page = HistoryClipPage(
         items: [
           HistoryClip(
@@ -2076,6 +2341,7 @@ void main() {
             preview: 'Content stays at its normal size',
             createdAt: DateTime.utc(2026),
             pinned: true,
+            tagIds: const ['tag-work', 'tag-removed'],
             kind: HistoryClipKind.text,
             sourceApp: 'Editor',
             sourceAppIconId: 'app:editor',
@@ -2103,6 +2369,11 @@ void main() {
     );
     final meta = tester.widget<Text>(metaFinder);
     expect(meta.textSpan?.toPlainText(), isNot(contains('Text')));
+    expect(meta.textSpan?.toPlainText(), endsWith(' Work'));
+    expect(
+      find.descendant(of: metaFinder, matching: find.byIcon(LucideIcons.tag)),
+      findsOneWidget,
+    );
     final kindIcon = find.descendant(
       of: metaFinder,
       matching: find.byIcon(LucideIcons.type),
@@ -2203,9 +2474,19 @@ void main() {
       expect(find.text(label), findsOneWidget, reason: label);
     }
 
-    await tester.tap(find.text('Link'));
+    await tester.scrollUntilVisible(
+      find.text('Credentials'),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byWidgetPredicate((widget) => widget is SelectPopup),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.text('Credentials'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(repository.queries.last.kind, HistoryClipKind.link);
+    expect(repository.queries.last.kind, HistoryClipKind.credentials);
   });
 
   testWidgets('facet dropdowns use no Radix overflow icons', (tester) async {
@@ -2261,7 +2542,7 @@ void main() {
       const surfaceSize = Size(1200, 800);
       await tester.binding.setSurfaceSize(surfaceSize);
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final controller = HistoryController(_ScreenRepository());
+      final controller = HistoryController(_TagScreenRepository());
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         ShadcnApp(
@@ -2275,7 +2556,7 @@ void main() {
       final selectFinder = find.byWidgetPredicate(
         (widget) => widget is Select<dynamic>,
       );
-      expect(selectFinder, findsNWidgets(4));
+      expect(selectFinder, findsNWidgets(5));
       expect(find.bySemanticsLabel('All pins'), findsNothing);
       expect(find.bySemanticsLabel('Pinned only'), findsNothing);
       for (final select in tester.widgetList<Select<dynamic>>(selectFinder)) {
@@ -2664,5 +2945,40 @@ class _ScreenFileDownloader implements HistoryFileDownloader {
   Future<void> presentSavedFile(String path, HistoryFileDetails file) async {
     presented.add(path);
     await presentPending;
+  }
+}
+
+class _TagScreenRepository extends _ScreenRepository
+    implements HistoryTagsRepository {
+  @override
+  Future<HistoryTags> tags(List<String> clipIds) async =>
+      HistoryTags(tags: availableFacets.tags);
+  @override
+  Future<void> saveTag({String? id, required String name}) =>
+      throw UnimplementedError();
+  @override
+  Future<void> deleteTag(String id) => throw UnimplementedError();
+  @override
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  }) => throw UnimplementedError();
+}
+
+class _RecoveryScreenRepository extends _ScreenRepository {
+  bool failAll = true;
+  bool rejectFiltered = false;
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async {
+    final page = await super.query(query: query, limit: limit, cursor: cursor);
+    if (failAll || (rejectFiltered && query.kind != null)) {
+      throw StateError('query refused');
+    }
+    return page;
   }
 }

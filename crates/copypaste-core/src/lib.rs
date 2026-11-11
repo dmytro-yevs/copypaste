@@ -11,6 +11,7 @@
 pub mod binary;
 mod binary_reference;
 pub mod clipboard_payload;
+mod credentials;
 pub mod crypto;
 pub mod device_name;
 pub mod file_download;
@@ -29,6 +30,7 @@ pub mod ingest;
 pub mod p2p_contract;
 pub mod peer_store;
 pub mod retention;
+mod rich_text;
 pub mod semantic;
 pub mod settings_record;
 pub mod settings_transition;
@@ -43,6 +45,7 @@ pub use binary::{
     CHUNK_BYTES,
 };
 pub use clipboard_payload::{ClipboardPayload, ClipboardWriteError};
+pub use credentials::classify_credentials;
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring, PreviewKey};
 pub use image_preview::{
     image_metadata, thumbnail_png, ImageMetadata, ImagePreviewError, ImageThumbnail,

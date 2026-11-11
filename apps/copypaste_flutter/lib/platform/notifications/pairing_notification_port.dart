@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'app_notification_service.dart';
@@ -32,52 +32,34 @@ class PlatformPairingNotificationPort implements PairingNotificationPort {
     required String peerName,
   }) async {
     await _service.initialize();
+    final strings = AppStrings.current;
     await _service.plugin.show(
       id: _id,
-      title: 'Connection request',
-      body:
-          '$peerName wants to connect. Open CopyPaste to compare the code and confirm.',
+      title: strings.platformPairingNotificationTitle,
+      body: strings.platformPairingNotificationBody(peerName),
       payload: '$_prefix$requestId',
-      notificationDetails: const NotificationDetails(
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           'pairing_requests',
-          'Device connection requests',
-          channelDescription: 'Requests to connect nearby devices',
+          strings.platformPairingNotificationChannelName,
+          channelDescription:
+              strings.platformPairingNotificationChannelDescription,
           importance: Importance.high,
           priority: Priority.high,
           timeoutAfter: 60000,
         ),
-        macOS: DarwinNotificationDetails(
+        macOS: const DarwinNotificationDetails(
           presentAlert: true,
           presentSound: true,
         ),
-        windows: WindowsNotificationDetails(),
-        linux: LinuxNotificationDetails(),
+        windows: const WindowsNotificationDetails(),
+        linux: const LinuxNotificationDetails(),
       ),
     );
   }
 
   @override
-  Future<bool> requestPermission() async {
-    await _service.initialize();
-    if (Platform.isMacOS) {
-      return await _service.plugin
-              .resolvePlatformSpecificImplementation<
-                MacOSFlutterLocalNotificationsPlugin
-              >()
-              ?.requestPermissions(alert: true, badge: false, sound: true) ??
-          false;
-    }
-    if (Platform.isAndroid) {
-      return await _service.plugin
-              .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin
-              >()
-              ?.requestNotificationsPermission() ??
-          false;
-    }
-    return Platform.isWindows || Platform.isLinux;
-  }
+  Future<bool> requestPermission() => _service.requestPermission(sound: true);
 
   @override
   Future<void> dismiss() async {

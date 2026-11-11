@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-24",
+  "date": "2026-11-06",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -52,7 +52,9 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart"
       ],
       "invariant": "Suspension releases retained payloads; late responses cannot refill released state.",
       "next_step": "Add cancellation and byte-accounted admission without weakening stale-response guards.",
@@ -76,7 +78,7 @@
     },
     {
       "id": "RUN-003",
-      "title": "Lazy Quick Paste engine with retirement",
+      "title": "Lazy Quick Paste engine per opening with retirement",
       "domain": "runtime",
       "implementation_status": "present_in_source",
       "priority": "P1",
@@ -91,12 +93,14 @@
         "apps/copypaste_flutter/macos/Runner/MacosWindowCommands.swift",
         "apps/copypaste_flutter/macos/RunnerTests/MacosWindowCommandsTests.swift",
         "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_app.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
         "apps/copypaste_flutter/linux/runner/linux_quick_paste_window.cc",
         "apps/copypaste_flutter/linux/runner/linux_host_channels.cc",
         "scripts/fixtures/linux-quick-paste-close.cc"
       ],
-      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior. Standard keyboard and native window close use the existing cancellation/hide/retirement paths. macOS Command-W and Option-Command-W invalidate the popup paste session before acknowledged retirement. Windows preserves the native system-menu close command. Linux GTK close/iconify coalesces duplicate requests, cancels/restores the transaction, and exits on idle; its callback is owned and released by the GTK window. Quit from the Linux popup requests primary-process termination through PID/transaction authorization. No event monitor, polling timer, retained presentation, or engine prewarming is introduced.",
-      "next_step": "Measure startup latency, peak and recovered memory for 100 open/close cycles; compare reuse only with evidence.",
+      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior. macOS and Windows share one in-process lifecycle: each opening without a live context starts a quickPasteMain engine that owns one QuickPasteController; Dart signals ready after its first page, native sends opened, reveals only after the present acknowledgement, retires on the next main-loop turn once the popup is hidden with no live presentation, and stops the engine after the acknowledged shutdown or a 1 s failsafe. Dart shutdown awaits an in-flight activation before acknowledging, so a started Copy completes and releases its watch lease; native replies to paste before scheduling retirement, so a completed paste is never delayed, and the failsafe bounds any slower Copy. A reopening before retirement reuses only that not-yet-retired context. Windows no longer retains a hidden engine with per-opening controllers. Linux still runs Quick Paste as a separate process that attaches to the runtime endpoint and exits on idle. Standard keyboard and native window close use the existing cancellation/hide/retirement paths. macOS Command-W and Option-Command-W invalidate the popup paste session before acknowledged retirement. Windows preserves the native system-menu close command. Linux GTK close/iconify coalesces duplicate requests, cancels/restores the transaction, and exits on idle; its callback is owned and released by the GTK window. Quit from the Linux popup requests primary-process termination through PID/transaction authorization. No event monitor, polling timer, retained presentation, or engine prewarming is introduced.",
+      "next_step": "Measure startup latency, peak and recovered memory for 100 open/close cycles; compare reuse only with evidence. Windows engine-per-opening retirement has no native build, interaction, latency or resource evidence yet. Moving Linux to the same in-process model requires replacing the child-PID D-Bus authorization of the Wayland transaction and the Linux native qualification evidence that requires a distinct quick_paste_pid; Linux evidence for either model is unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Windows": "not_established",
@@ -338,7 +342,7 @@
       ],
       "source_references": [
         "crates/copypaste-core/src/image_preview.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "apps/copypaste_flutter/lib/features/history/view/history_screen.dart"
       ],
       "invariant": "Bound individual decode allocations and thumbnail dimensions; avoid full-image list payloads.",
@@ -453,10 +457,11 @@
       "source_references": [
         "crates/copypaste-sync/src/peer_driver.rs",
         "crates/copypaste-sync/src/cadence.rs",
-        "crates/copypaste-daemon/src/p2p/poll.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-runtime/src/p2p.rs",
         "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5–10-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -641,7 +646,8 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart",
         "apps/copypaste_flutter/lib/features/history/controller/history_resource_limits.dart",
         "apps/copypaste_flutter/lib/features/history/controller/history_window_index.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_window_scroll.dart",
@@ -717,7 +723,7 @@
         "crates/copypaste-daemon/src/server/dispatch.rs",
         "crates/copypaste-core/src/image_preview.rs",
         "crates/copypaste-ipc/src/config.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "crates/copypaste-daemon/src/server/listener.rs",
         "crates/copypaste-ipc/src/lib.rs"
@@ -1048,6 +1054,69 @@
       "functional_validation": "not_recorded"
     },
     {
+      "id": "CI-003",
+      "title": "Build CodeQL Swift Dart and Rust outputs outside tracing",
+      "domain": "ci",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "CodeQL workflow",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        ".github/workflows/codeql-scheduled.yml",
+        "scripts/ci/xcodebuild-macos-release.sh",
+        "scripts/ci/tests/test_codeql_swift_build.py"
+      ],
+      "invariant": "The traced build compiles every Swift target of the universal Release app in fresh derived data; Dart AOT, the Rust bridge and the daemon are built before CodeQL init and reused through the shared products directory.",
+      "next_step": "Under tracing, the cnativeapi Objective-C++ compile (about 8 minutes) and the Swift extraction remain on the critical path; removing non-Swift work from the traced build needs a product build-script change.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "analyze-swift job wall clock seconds (scripts/ci/metrics.py)",
+        "baseline_p50": 3277,
+        "candidate_p50": 2834,
+        "baseline_runs": [
+          42124847085,
+          42205161689,
+          42222126997
+        ],
+        "candidate_runs": [
+          42283233466,
+          42283310085,
+          42283846287
+        ],
+        "build_steps_p50_before": 2916,
+        "build_steps_p50_after": 2594,
+        "cache_cohort": "unknown per metrics.py; neither variant restores build-output caches, only the Flutter SDK",
+        "attribution": "Baseline runs are main pushes; candidate runs are branch workflow_dispatch and pull_request runs with the same Swift, Xcode and hook inputs.",
+        "qualification": false
+      },
+      "evidence_refs": [
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42222126997",
+          "source_state": "main_d9e5ccc4_baseline_swift_database_54_sources",
+          "release_qualification": false
+        },
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283233466",
+          "source_state": "candidate_with_post_analysis_source_listing_54_identical_sources",
+          "release_qualification": false
+        },
+        {
+          "kind": "ci_run",
+          "name": "https://github.com/dmytro-yevs/copypaste/actions/runs/42283846287",
+          "source_state": "candidate_a95d4e3a_on_release_1_2_1",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "The Swift database source list is identical to main (54 of 54 paths, including 12 Runner files, GeneratedPluginRegistrant.swift and 3 hotkey_manager_macos files). Traced Flutter Assemble finished in 5 seconds and the daemon Cargo build was fresh. CI workflow lint, zizmor and 51 CI tests passed."
+    },
+    {
       "id": "DEV-001",
       "title": "Build-cache cleanup at commit/push",
       "domain": "developer_resources",
@@ -1169,7 +1238,9 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/controller/history_summary.dart",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+        "apps/copypaste_flutter/lib/features/history/controller/history_selection_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart"
       ],
       "invariant": "Selected detail keeps its full body, but cannot promote it into retained list rows. Spoiler cards retain the same grapheme-safe 1024-byte preview contract; the existing oversized first-grapheme exception is preserved.",
       "next_step": "Bound reloadable History page ownership without dropping access, selection, or reorder behavior. Measure large text and sustained pagination.",
@@ -1226,7 +1297,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_media_cache.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_screen.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart"
       ],
@@ -1407,7 +1478,7 @@
         "crates/copypaste-core/src/image_preview.rs",
         "crates/copypaste-core/src/image_preview/streaming_png.rs"
       ],
-      "invariant": "Use the existing image-rs thumbnail sampler and PNG encoder with a <=1MiB row window; preserve decoded-size acceptance, aspect ratio, no-upscale and byte-identical previews. Interlaced, animated,16-bit and oversized-window shapes retain the existing bounded decoder.",
+      "invariant": "Use the existing image-rs thumbnail sampler and PNG encoder with a <=1MiB row window; charge the decoded-memory budget for the retained row window and thumbnail only, and preserve aspect ratio, no-upscale and byte-identical previews. Interlaced, animated,16-bit and oversized-window shapes retain the existing bounded decoder.",
       "next_step": "Native isolated preview workload confirms lower daemon peak and byte-identical output. Complete History/hide/restore UI validation, fallback-format coverage, and native Android/Windows measurements. Profile observed CPU/latency increase before further tuning.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -1467,8 +1538,8 @@
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
         "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
       ],
-      "invariant": "Tray and shortcut share the existing lazy Quick Paste engine, repository, bounded media caches, paging, and paste session. Tray height is capped at 600 logical pixels and available work area; only the list scrolls. No independent history snapshot, watch lease, polling loop, or persistent engine is introduced. The existing acknowledged shutdown releases the repository and native engine after dismissal or paste.",
-      "next_step": "Verify tray placement, every clip kind, and focus-safe paste on installed macOS and Windows. Measure application, daemon, and workers separately and together for tray/shortcut cycles, peak, steady state, recovery, and growth. Non-memory budgets and native qualification remain unresolved.",
+      "invariant": "Tray and shortcut share the existing lazy Quick Paste engine, repository, bounded media caches, paging, and paste session; on macOS and Windows that engine is retired after each dismissal or paste (RUN-003). Tray height is capped at 600 logical pixels and available work area; only the list scrolls. No independent history snapshot, watch lease, polling loop, or persistent engine is introduced. The existing acknowledged shutdown releases the repository and native engine after dismissal or paste.",
+      "next_step": "Verify tray placement, every clip kind, and focus-safe paste on installed macOS and Windows, including the Windows engine-per-opening retirement. Measure application, daemon, and workers separately and together for tray/shortcut cycles, peak, steady state, recovery, and growth. Non-memory budgets and native qualification remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Windows": "not_established"
@@ -1493,9 +1564,9 @@
       "source_references": [
         "apps/copypaste_flutter/lib/main.dart",
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
         "crates/copypaste-core/src/spoiler.rs",
-        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/history/controller/history_ocr_controller.dart"
       ],
@@ -1573,8 +1644,8 @@
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
         "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
       ],
-      "invariant": "Position the on-demand popup while hidden, decode only mounted viewport media through existing bounded caches, submit its frame, then reveal by the current presentation ID. A changed foreground or superseded ID cannot activate an obsolete popup. Offscreen clips and image errors do not hold the reveal. macOS registers only file-selection and preferences plugins; Windows registers only file-selection. Existing shutdown retires the engine and owned repository, with no prewarming or persistent engine. Flutter decoded-cache limits remain unchanged.",
-      "next_step": "Measure native click-to-ready and first-visible-frame latency, including decode, with equivalent debug/AOT builds, fixture, and cache state. Compare peak/steady/recovery process-family memory, CPU, wakeups and I/O for cold openings and repeated cycles on macOS and installed Windows. Computer Use remains unauthorized; native latency/resource qualification is not established and non-memory budgets remain unresolved.",
+      "invariant": "Position the on-demand popup while hidden, decode only mounted viewport media through existing bounded caches, submit its frame, then reveal by the current presentation ID. A changed foreground or superseded ID cannot activate an obsolete popup. Offscreen clips and image errors do not hold the reveal. macOS registers only file-selection and preferences plugins; Windows registers only file-selection. Existing shutdown retires the engine and owned repository after each hidden presentation on both macOS and Windows, with no prewarming or persistent engine. Flutter decoded-cache limits remain unchanged.",
+      "next_step": "Measure native click-to-ready and first-visible-frame latency, including decode, with equivalent debug/AOT builds, fixture, and cache state. Compare peak/steady/recovery process-family memory, CPU, wakeups and I/O for cold openings and repeated cycles on macOS and installed Windows; every Windows opening after retirement is now a cold engine start. Computer Use remains unauthorized; native latency/resource qualification is not established and non-memory budgets remain unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Windows": "not_established"
@@ -1810,7 +1881,7 @@
         "crates/copypaste-core/src/file_download.rs",
         "crates/copypaste-core/src/storage/file_transfers.rs",
         "crates/copypaste-p2p/src/node/files.rs",
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_transfer_controller.dart",
         "crates/copypaste-core/src/history_actions.rs",
         "crates/copypaste-core/src/history_item.rs",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFocusCaptureGuard.kt"
@@ -1916,7 +1987,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
         "apps/copypaste_flutter/test/features/history/history_controller_test.dart"
       ],
       "invariant": "Repeated reads reuse one immutable canonical row list until row mutation. Previously exposed snapshots remain immutable; selection, order, pagination and watch behavior remain unchanged.",
@@ -2077,7 +2148,7 @@
         "Windows"
       ],
       "source_references": [
-        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_transfer_controller.dart",
         "apps/copypaste_flutter/lib/features/history/view/history_inspector.dart",
         "apps/copypaste_flutter/test/features/history/history_controller_test.dart",
         "apps/copypaste_flutter/test/features/history/history_screen_test.dart"
@@ -2160,7 +2231,7 @@
     },
     {
       "id": "RUN-043",
-      "title": "Use one filesystem probe per file progress tick",
+      "title": "Remove filesystem polling from file progress",
       "domain": "runtime",
       "implementation_status": "present_in_source",
       "priority": "P1",
@@ -2174,15 +2245,15 @@
         "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
         "apps/copypaste_flutter/test/features/history/history_file_transfer_test.dart"
       ],
-      "invariant": "Legacy progress fallback performs one stat per tick; typed runtime backends instead consume writer progress events.",
+      "invariant": "No filesystem progress polling remains: typed runtime backends consume writer progress events, and repositories without progress report only start and completion.",
       "allocation_lifetime": "One current FileStat result during the existing active-save progress callback.",
       "bounds": {
-        "legacy_filesystem_probes_per_tick": 1,
-        "legacy_timer_interval_ms": 40,
+        "legacy_filesystem_probes_per_tick": 0,
+        "legacy_timer_interval_ms": null,
         "typed_timer_interval_ms": null
       },
-      "cancellation": "Existing timer cancellation, partial-file rollback and caller cancellation are unchanged.",
-      "tradeoffs": "Source-level reduction from two filesystem probes to one per active tick. No isolated native CPU or IO saving is claimed; event-driven writer progress remains separate work.",
+      "cancellation": "Partial-file rollback and caller cancellation are unchanged; no progress timer exists.",
+      "tradeoffs": "Source-level removal of the dead 40 ms stat fallback; the production repository always reports writer progress (RUN-053). No isolated native CPU or IO saving is claimed.",
       "next_step": "Measure the isolated runtime effect and full-app scenarios on supported platforms; unresolved budgets and missing native evidence prevent qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2432,7 +2503,9 @@
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ScreenshotCaptureSignals.kt",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureChannel.kt",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureSignals.kt",
-        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureStateObserver.kt"
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureStateObserver.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidSmsModuleChannel.kt",
+        "apps/copypaste_flutter/lib/features/modules/controller/sms_access_setup_controller.dart"
       ],
       "invariant": "Initial/reconnect/lag snapshots preserve capture/private/health state; both capabilities must be present before retiring fallback polling.",
       "allocation_lifetime": "One lazy shared watch per engine, released after the last subscriber; Android screenshot listeners follow settings presentation.",
@@ -2441,10 +2514,10 @@
         "fallback_interval_seconds": 3,
         "android_pending_state_tasks": 1,
         "android_setup_fallback_seconds": 1,
-        "android_setup_fallback_condition": "active stream, focused window, unresolved privileged grants"
+        "android_setup_fallback_condition": "active stream, focused window, unresolved privileged grants or SMS grants"
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Legacy/unsupported/disconnected runtime backends retain polling. Android setup uses process-local signals, public own-UID AppOps observers and window resume/focus callbacks; a focused unresolved-grant setup stream retains a one-second fallback for READ_LOGS changes lacking a public listener. Signals coalesce to one pending UI task.",
+      "tradeoffs": "Legacy/unsupported/disconnected runtime backends retain polling. Android setup uses process-local signals, public own-UID AppOps observers and window resume/focus callbacks; a focused unresolved-grant setup stream retains a one-second fallback for READ_LOGS changes lacking a public listener. SMS access setup reuses the same native stream, observers and sampler instead of a Dart one-second poll. Signals coalesce to one pending UI task.",
       "next_step": "Physical Android and installed Windows runtime/resource evidence remain unavailable; qualification is not established.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2519,7 +2592,7 @@
         "progress_events_per_transfer_maximum": 101
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Production background file jobs publish typed operation updates through the existing shared runtime connection. Legacy token writer events remain compatible, and non-runtime repository adapters retain their polling fallback. RUN-056 defines durable ownership and cross-engine presentation; native resource qualification remains unestablished.",
+      "tradeoffs": "Production background file jobs publish typed operation updates through the existing shared runtime connection. Legacy token writer events remain compatible; the filesystem polling fallback was removed (RUN-043). RUN-056 defines durable ownership and cross-engine presentation; native resource qualification remains unestablished.",
       "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -2872,7 +2945,7 @@
         "file_payload_bytes": 65536,
         "binary_envelope_bytes": 16,
         "file_sessions_per_node": 1,
-        "protocol_version": 9
+        "protocol_version": 11
       },
       "functional_validation": "319 isolated P2P tests, two real encrypted loopback stream tests and three core file-download tests passed; the integrated application candidate requires its final combined validation.",
       "evidence_refs": [
@@ -3152,7 +3225,7 @@
       "source_references": [
         "crates/copypaste-core/src/history_actions.rs",
         "crates/copypaste-core/src/storage/items.rs",
-        "crates/copypaste-daemon/src/server/items/copy.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
         "crates/copypaste-runtime/src/lib.rs"
       ],
       "invariant": "Successful History and Quick Paste copies promote the existing live row and publish a history change. Failed clipboard writes do not change recency. The update preserves ciphertext, source identity and manual pin order, and uses the existing eviction index for the newest unpinned timestamp without materializing another payload.",
@@ -3208,8 +3281,7 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFloatingActivity.kt",
-        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ClipboardFloatingActivityTest.kt",
-        "docs/adr/0005-android-capture-in-rust-kotlin-reports.md"
+        "apps/copypaste_flutter/android/app/src/test/kotlin/com/copypaste/app/ClipboardFloatingActivityTest.kt"
       ],
       "invariant": "The focused 1x1 clipboard hand-off remains focusable for native reads but cannot become an input-method target. It preserves keyboard visibility and existing deferred closure without suppressing clipboard events or adding timers, workers, caches or retained payloads.",
       "next_step": "Validate receiving clips and immediate local copies in the installed app on physical Android. Measure app/runtime and keyboard transitions, peaks, steady state and growth; CPU, wakeup, I/O and growth thresholds remain unresolved in runtime-resource-budgets.json.",
@@ -3336,13 +3408,15 @@
         "crates/copypaste-p2p/src/node/activity.rs",
         "crates/copypaste-p2p/src/node/listen.rs",
         "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-core/src/p2p_contract.rs",
+        "apps/copypaste_flutter/lib/features/devices/devices_controller.dart",
+        "apps/copypaste_flutter/test/features/devices/devices_controller_test.dart",
         "crates/copypaste-runtime/src/lib.rs",
         "apps/copypaste_flutter/lib/features/settings/view/sync_header_action.dart",
         "crates/copypaste-ipc/src/sync_issue.rs",
-        "crates/copypaste-core/src/sync/diagnostics.rs",
-        "docs/engineering/synchronization-status-contract.json"
+        "crates/copypaste-core/src/sync/diagnostics.rs"
       ],
-      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. No extra timers or services are introduced.",
+      "invariant": "Retain at most 100 content-free events and at most 25 independently scoped conditions per paired device (maximum 16 devices), in a file capped at 128 KiB. Active conditions survive event eviction and restart. Unchanged conditions, successful transfers, presence changes and successful polls do not write the journal. A reachability transition emits one peer notification only after authenticated profile and last-seen metadata are stored. Activity retains only problem episodes and confirmed resolutions; routine historical entries are pruned on load. Only relevant positive evidence clears a condition; older sessions cannot clear newer observations. Current-history generations and per-session transfer leases prevent false Up to date or Syncing states. A measured Offline observation remains Offline during renewal without extending its probe freshness or retry cadence. Positive presence and RTT still expire. Flutter schedules no freshness-only timer for confirmed Offline presence. No extra timers or services are introduced.",
       "allocation_lifetime": "One bounded journal per node and one atomic last-published sync revision per daemon; UI consumes immutable bounded snapshots and builds activity rows lazily. No additional timers, workers or background services.",
       "next_step": "Measure native application, daemon and workers separately and together on all shipped platforms under offline, idle, transfer and failure/recovery workloads. Runtime resource budgets remain unresolved where not already specified.",
       "native_resource_qualification": {
@@ -3352,7 +3426,7 @@
       },
       "measured_saving": null,
       "evidence_refs": [],
-      "functional_validation": "2026-10-26 activity noise fix: 344 P2P library tests and 58 runtime tests passed, including historical noise pruning, routine-event write suppression, problem retention/recovery, live presence notifications, and post-persistence inbound probe events. Native UI/resource evidence for this change is not established."
+      "functional_validation": "2026-10-26 activity noise fix: 344 P2P library tests and 58 runtime tests passed. 2026-11-01 Offline renewal fix: 344 P2P tests, 7 shared device-contract tests, 59 runtime tests and 179 Flutter device/sync tests passed. Rust and Flutter regressions fail before the fix and pass afterward; expired Offline can still refresh and recover through an authenticated probe. Dart analysis passed. Native UI/resource evidence remains unestablished on macOS, Android and Windows; unresolved resource budgets are unchanged."
     },
     {
       "id": "RUN-071",
@@ -3414,6 +3488,1140 @@
         }
       ],
       "functional_validation": "344 P2P library tests, 37 capture tests and 21 runtime-log tests passed. Runtime-log Clippy with warnings denied, cargo fmt and git diff --check passed. Combined Clippy is blocked by three pre-existing unnecessary_lazy_evaluations findings in node/mod.rs at lines 361, 373 and 380. Native platform UI and resource measurements are not established."
+    },
+    {
+      "id": "RUN-072",
+      "title": "Copy feedback follows successful clipboard activity",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Clipboard feedback and instant clipboard",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/sync/instant_clipboard.rs",
+        "crates/copypaste-daemon/src/notify.rs",
+        "crates/copypaste-daemon/src/capture.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt"
+      ],
+      "invariant": "Successful duplicate captures and explicit History copies request one acknowledgement when sound is enabled. Self-write suppression prevents a second acknowledgement. Received secret clips use the same instant clipboard path and recency gates as ordinary clips while native notification previews remain concealed. Replays, metadata-only changes and failed native writes do not request copy feedback.",
+      "allocation_lifetime": "Reuse existing feedback adapters without additional retained services, caches or polling. Each newly acknowledged copy incurs the existing platform audio cost: a reaped afplay process on macOS, asynchronous embedded audio on Windows, and a released short-lived Android tone.",
+      "next_step": "Measure application, daemon and workers separately and together during repeated local and received copies on all three platforms. Native audio/UI evidence is missing; CPU, wakeup, I/O and sustained-growth budgets remain unresolved. No resource saving or resource qualification is claimed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "123 Rust tests passed: 12 clipboard privacy/secret-toggle tests, 4 instant clipboard tests, 59 runtime tests, 42 daemon History tests, 1 duplicate capture regression, 4 daemon sound gate tests and 1 cloud privacy/relay test. Three host-side Robolectric tests of the production Android feedback owner passed with fake runtime settings. Android aarch64 Rust bridge cross-check, Rust formatting and git diff --check passed. Native audio/UI and resource qualification remain unestablished on all supported platforms."
+    },
+    {
+      "id": "RUN-073",
+      "title": "Deferred file references and consistent bounded presentation state",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Clipboard actions, settings and file-operation presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardWriter.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "apps/copypaste_flutter/lib/features/transfers/file_operations_controller.dart",
+        "apps/copypaste_flutter/lib/features/settings/controller/quick_paste_settings_controller.dart",
+        "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-core/src/rich_text.rs",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/transfer/export.rs",
+        "crates/copypaste-core/src/transfer/import.rs",
+        "crates/copypaste-core/src/storage/content_bytes.rs",
+        "crates/copypaste-core/src/storage/privacy.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/storage/dbfile.rs"
+      ],
+      "invariant": "Capture and synchronization retain file references and metadata; bodies transfer only on explicit request. Android file copy publishes the original content URI or existing download FileProvider URI without opening or copying the body. Terminal transfer state and observed byte progress survive older responses using the existing bounded presentation collections. Auto-paste persistence and shortcut-registration state agree with acknowledged operations. Actual runtime configuration changes publish one existing watch revision; unchanged writes stay quiet. Settings reads coalesce on revisions/reconnect/resume, cannot overwrite newer local mutations, and do not poll on captures. Unconfirmed notification policy never displays content. Rich-text parsing runs only for explicit plain-text copy; input/output use the existing clipboard cap, the RTF parser bounds nesting, and no parser service or result cache is retained. Text export/import preserves privacy classification, including duplicate imports, and older exports remain compatible. Restore retains deferred file references. Metadata-only secrecy changes account for every retained encrypted chunk and shared payload. Imports publish actual duplicate and pin mutations, including progress before a later failure, while unchanged imports stay quiet. Fallback polling reconciles configuration on accepted revision changes. Android native clipboard sensitivity follows received, manual and derived copies without losing ownership receipts.",
+      "allocation_lifetime": "No new workers, recurring timers or unbounded collections. Configuration reconciliation retains one in-flight read and one dirty bit. Rich-text DOM/run iteration and converted payloads belong to one copy action and are released afterward. Existing file-transfer, staging and retention owners remain authoritative. Import mutation tracking reuses rows already read inside the existing transaction and retains one aggregate timestamp. Derived copies read classification without loading the source body. Byte accounting uses SQLite BLOB lengths without decrypting or materializing file bodies. Polling reconciliation reuses the existing coalesced read and adds no timer.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/core-contract-tests.log",
+          "sha256": "03173e289e03d6ce7783878ad907ae37dcd29eaa587c9e9a074898533b04cfa3",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/flutter-verified-tests.log",
+          "sha256": "7b6d98ca87cf6111eeee7768ab7f11f584ef8a9ddafd620d221e18f6ee09c35c",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/android-writer-tests.log",
+          "sha256": "3945c5448ede7d3431bf705237e18c1d9b1e1a950abbdadc0452823d56a50a4b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fixes/android-rust-final-check.log",
+          "sha256": "8d71708140b64269e99138813d76c84e81f7f96f9adebcf1e451ba3141d28c86",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-core-final.log",
+          "sha256": "5ec8f52186f126836510fa6329c64be96b92713398c0f1b19d8f5edb45bed29f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-runtime-final.log",
+          "sha256": "d1e58de3787c84f1ea4c7cc34c185d5ee96931b2640014905d0eb84083898339",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-daemon-import.log",
+          "sha256": "0d3feef5cc73829dc8b942200df9b1d3181df64b2eca7c3ae33888cea8016eb4",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-storage-final.log",
+          "sha256": "8b595f56d481f86616fc7c0ab331d222295d701b56418f7b132e332ca48c783f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-flutter-settings.log",
+          "sha256": "b0ab1dd98e1f1d0a49b8d1a5b05461386b0ba5e1a1098fbd404c9bd194d5974d",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-android-writer-tests.log",
+          "sha256": "20ff75b3f127b7c439e6592a137a469a1a9e4fe3832c46ec8af0ea63a06d949a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-android-rust-check.log",
+          "sha256": "28212a8442513eccff38d25d7007405c393fc48b1a49b29bf267c0947c2f4450",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-clippy-scoped.log",
+          "sha256": "5c8991c56f1cc3f161952f78ba960090ae4291539afe6d85083e030716a1bdda",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "fix-flutter-analyze.log",
+          "sha256": "bf28ae976546fd1f49f38a6bd7b5e2f8ecb9b7352e44a937eb1da682ad4bf88c",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "279 Rust tests, 327 Flutter tests and 6 Android Robolectric writer tests passed. Android aarch64 bridge cross-check, Dart analysis, Rust formatting, version identity and whitespace checks passed. Clippy for the changed crates with --no-deps and warnings denied passed; the dependency-inclusive check remains blocked by three pre-existing unnecessary_lazy_evaluations in copypaste-p2p/src/node/mod.rs. Native installed-app and resource evidence remains unestablished on macOS, Android and Windows. Adversarial review fixes: 488 core unit tests and the core integration suites, 61 runtime tests, 10 daemon transfer tests, 43 Flutter settings tests and 7 production Android clipboard-writer Robolectric tests passed. The Android aarch64 bridge cross-check passed. Native UI and process resource qualification remain unestablished; unresolved budgets are unchanged. Public import and clipboard-writer APIs retain their original signatures. Scoped Clippy for the changed Rust packages and Flutter analysis passed; the full dependency Clippy gate remains blocked by three pre-existing P2P unnecessary_lazy_evaluations findings.",
+      "next_step": "Collect same-build app, daemon and worker peaks, steady state and growth on all three platforms during file-reference copy, requested transfer, rich-text conversion and runtime configuration changes. CPU, wakeup, I/O, network and growth budgets remain unresolved where null in runtime-resource-budgets.json. No native resource qualification or measured saving is claimed."
+    },
+    {
+      "id": "RUN-074",
+      "title": "Bounded local credential recognition and confidential type filtering",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Shared credential classification and History",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/credentials.rs",
+        "crates/copypaste-core/src/ingest.rs",
+        "crates/copypaste-core/src/semantic.rs",
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/items.rs",
+        "crates/copypaste-core/src/history_item.rs",
+        "crates/copypaste-core/src/storage/history_preview.rs",
+        "crates/copypaste-core/src/sync/prepare.rs",
+        "crates/copypaste-payload/src/lib.rs",
+        "crates/copypaste-daemon/src/clipboard/mod.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "apps/copypaste_flutter/lib/features/history/models/history_models.dart"
+      ],
+      "invariant": "Recognized SSH/PEM private keys and JWT/GitHub/GitLab/Slack tokens are Credentials and secret by default. Public SSH keys are Credentials without adding secrecy. Capture respects skip_secret; explicit stored secret choices retain priority. Confidential type filtering uses a boolean metadata marker instead of indexing or decrypting secret bodies for filtering.",
+      "allocation_lifetime": "Recognition runs synchronously on admitted text with no model, worker, network, polling or retained detector cache. Token candidates are limited to 64 KiB, JWT headers to 4 KiB, and public SSH key bodies to 16 KiB before decoding. Decoded JWT claims are temporary and zeroized. Existing preview-cache entry/count bounds remain unchanged; the fingerprint version invalidates previews from the previous classifier.",
+      "next_step": "Measure application, daemon and workers separately and together on macOS, Android and Windows during ordinary capture, credential capture, repeated copies and filtered History reads. Native UI/resource evidence is not established. CPU, wakeup, I/O and sustained-growth budgets remain unresolved. No acceleration or resource qualification is claimed.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/rust-tests.log",
+          "sha256": "e9e8e077918227a3b1cbc6bb6723097e279734417c3022ba7791fd275e69a909",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/core-integration-tests.log",
+          "sha256": "9ef7c5883ca627ba6c3ed342df7dea53aa4bd8bdaf178a5f1404c11a3780f2cc",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/flutter-tests.log",
+          "sha256": "7defb89571cc4ad82df626b287c01fcf809571043418e094dcea65ba2e1f1789",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/flutter-analyze.log",
+          "sha256": "1c9b9e39f88939e280b434f84c9860ee2dd7bd37a8d31bb7269243b0b7e3909b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/bridge-check.log",
+          "sha256": "16960202839073574712a0a88cd5dc03d2f5523273c6aff67a21df17c5a1071e",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "/Users/dmytro/Documents/Codex/Artifacts/2026-11-01-credentials-clips/tmp/bridge-check-current.log",
+          "sha256": "e45e95f0d2d3536612b39ae95f6256914c7e69b6d60c3688b89a550d83969f6d",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "959 Rust library/binary tests passed (15 existing ignored daemon tests); 16 targeted core integration tests passed. 107 Flutter controller/repository/widget tests and flutter analyze passed in an isolated source copy. Rust-Flutter bindings regenerated with pinned 2.13.0-beta.5; the final workspace bridge cargo check passed after concurrent History organization edits completed. Earlier bridge checks in the evidence observed that work in progress. Task-owned Rust formatting checks and git diff --check passed. Native platform UI and resource evidence remain unestablished; no same-commit release or resource qualification is claimed."
+    },
+    {
+      "id": "RUN-075",
+      "title": "Bounded history date and tag queries with incremental organization sync",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History storage, sync and Flutter controllers",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/organization.rs",
+        "crates/copypaste-core/src/storage/migrations/009_history_organization.sql",
+        "apps/copypaste_flutter/lib/features/history/controller/history_tags_controller.dart",
+        "crates/copypaste-core/src/storage/versions.rs",
+        "apps/copypaste_flutter/lib/app/theme/app_overlays.dart",
+        "apps/copypaste_flutter/lib/features/history/view/history_tags_filter.dart"
+      ],
+      "invariant": "Apply date and tag predicates before keyset pagination. Merge bounded indexed version prefixes before reading ciphertext. Cache tag catalogues with existing facets and load memberships for explicit bounded selections. Replicate independently versioned encrypted organization records without recapturing content. Anchored editors use compositor links instead of per-frame anchor polling.",
+      "next_step": "Measure native application, daemon and worker peak, steady-state and repeated-use growth on supported platforms. CPU, wakeup, I/O, network and sustained-growth budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-ui-validation.log",
+          "sha256": "0ac9ce020b7cb2c909adc3fc19f02a23a25fdf0bc2e87da51818e70bea740d64",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-core-sync-validation.log",
+          "sha256": "9b1db887096b08e3886717fffb203ce0fd46cde95175e9f304211851adc9bfe6",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "dart-analysis.log",
+          "sha256": "8e6d5435ebe34621b567c370751f251c6437b1d104e25039b37ff323ab92b84f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "rust-host-ipc-validation.log",
+          "sha256": "f077f5276f7e4ef0e37402d52e072e4253469d66471038f466e2d29a8a53d743",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-076",
+      "title": "Persist unchanged authenticated peer profiles at most once per half TTL",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/mod.rs"
+      ],
+      "invariant": "Every session and probe records the authenticated profile in memory at its exact observation time. The encrypted peer file is rewritten only when the profile changes or its stored observation is older than half the authenticated-profile TTL, so the restart fallback stays within its freshness window without a full rewrite and directory fsync per session.",
+      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline and absent, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-077",
+      "title": "Schedule reachability renewal by deadline instead of a 1 Hz tick",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-p2p/src/node/mod.rs"
+      ],
+      "invariant": "The reachability monitor sleeps until the earliest renewal is due, a new observation is recorded, or a bounded recheck elapses for peers without dial candidates. Probe freshness, renewal lead and offline retry cadence are unchanged, and renewal batches never start closer than one second apart. Unmeasured presence is measured as soon as the monitor wakes, except for a peer whose last probe authenticated but was not acknowledged: it stays Online and is renewed no sooner than the 10-second failure freshness, whatever presence arrives meanwhile, until any other probe outcome. Previously such a peer was re-probed at the one-second batch floor.",
+      "next_step": "Measure native daemon and application wakeups, CPU and disk writes with paired peers idle, offline, absent and failing after authentication, before and after, on supported platforms. Wakeup, CPU and I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-078",
+      "title": "Truncate the WAL after deletions only when pages were reclaimed",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/space.rs"
+      ],
+      "invariant": "Committed deletions still reclaim free pages incrementally (DISK-001). A deletion that frees no whole page leaves the WAL to the configured autocheckpoint instead of forcing a TRUNCATE checkpoint per capture at the history cap. Store open still retries a truncation an earlier busy reader deferred.",
+      "next_step": "Measure native disk writes and fsyncs per capture at the history cap on macOS, physical Android and installed Windows. I/O budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-079",
+      "title": "Lay out only visible slices of large History clip bodies",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "History presentation",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/view/history_selectable_text.dart",
+        "apps/copypaste_flutter/test/features/history/history_selectable_text_test.dart"
+      ],
+      "invariant": "Clip bodies above 32 Ki code units are measured slice by slice with the exact SelectableText paragraph inputs and only slices near the viewport, or holding the current selection, stay laid out. Slice boundaries fall on hard line breaks or soft-wrap line starts, so wrapping, height and glyph positions match one paragraph. Select-all copies the whole clip, copy reads the full selected range, and the selection edge is revealed in the enclosing scroll view. Smaller bodies keep the single SelectableText.",
+      "next_step": "Measure native application peak and recovered footprint when selecting 1 MiB and 4 MiB text clips in History and Quick Paste on macOS, Android and Windows. Widget-test RSS for 1 MiB of text fell from about 350 MiB to about 9 MiB; that host measurement is not native qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-080",
+      "title": "Wake Linux clipboard capture from native events",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Linux ClipboardSource",
+      "platforms": [
+        "Linux"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/linux.rs",
+        "crates/copypaste-daemon/src/clipboard/linux/wayland.rs",
+        "crates/copypaste-daemon/src/clipboard/linux/gnome.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "One ChangeSignal per adaptive Linux source survives adapter replacement. XFixes selection-owner events, data-control selection events and bridge OwnerChanged signals wake capture only for a foreign change; self-write sentinels stay silent. The dirty cursor remains authoritative. Transport loss wakes capture once; unavailable transports, pending reads and required reprobes keep the timed poll_interval_ms wait and the five-second reprobe cadence.",
+      "allocation_lifetime": "Reuses each adapter's existing event thread and the shared tokio Notify; no thread, timer or buffer is added.",
+      "bounds": {
+        "added_threads": 0
+      },
+      "cancellation": "Adapters notify the shared signal from their existing workers and release it with the adaptive source.",
+      "tradeoffs": "A healthy idle X11, data-control or bridge adapter drops the fixed poll_interval_ms capture wakeup. Data-control with source exclusions and no bridge still polls for its reprobe. Linux is type-checked by cross-target clippy only; native behavior, latency and wakeups are unmeasured.",
+      "next_step": "Measure daemon idle wakeups, CPU and copy latency on X11, wlroots data-control, GNOME and KDE before native resource qualification.",
+      "native_resource_qualification": {
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "linux_cross_target_clippy_only_native_tests_pending"
+    },
+    {
+      "id": "RUN-081",
+      "title": "Release the retired Quick Paste view from AppKit focus-ring state",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS Quick Paste host",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift"
+      ],
+      "invariant": "Before the Quick Paste engine stops, first responder is cleared and the view is detached, so AppKit's focus-ring state cannot retain the FlutterView and its IOSurface; after close only the main window's FlutterView remains.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "retained FlutterView instances after Quick Paste close (macOS debug build; baseline from installed 1.1.2)",
+        "baseline": 2,
+        "candidate": 1,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-082",
+      "title": "Disable the libmalloc large-block cache for the app process family",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS app bundle",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/Info.plist",
+        "crates/copypaste-daemon/src/macos_allocator.rs"
+      ],
+      "invariant": "Every LaunchServices launch starts with MallocLargeCache=0 and child processes inherit it, so freed window-sized buffers are not kept resident; direct binary launches keep the daemon's own policy.",
+      "tradeoffs": "Large allocations always return to the kernel; CPU and latency cost in the UI process is unmeasured.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "app physical footprint bytes after 80 s hidden (macOS debug A/B, inflated by VM-service heap searches)",
+        "baseline": 348700000,
+        "candidate": 281900000,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-083",
+      "title": "Return freed allocator pages after suspension and on memory pressure",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "macOS memory relief",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/lib/platform/lifecycle/native_memory_relief.dart"
+      ],
+      "invariant": "One coalesced malloc_zone_pressure_relief call runs off the main thread after hidden suspension and on OS memory pressure, never on a timer.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": {
+        "metric": "app physical footprint bytes, single macOS debug sample",
+        "baseline": 303500000,
+        "candidate": 291400000,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-084",
+      "title": "Zero the Skia budget while presentation is suspended",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AppResourcePolicy",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/resource_policy.dart",
+        "apps/copypaste_flutter/lib/main.dart"
+      ],
+      "invariant": "AppResourcePolicy sets the Skia resource budget to 0 after image listeners are disposed on suspension and restores 16 MiB before the rebuild; memory pressure purges and restores it while visible.",
+      "tradeoffs": "No measurable change on the macOS debug build; remaining graphics memory is the window-sized surface.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-085",
+      "title": "Forward OS memory pressure to every live desktop engine",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Desktop memory-pressure adapters",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosMemoryPressure.swift",
+        "apps/copypaste_flutter/windows/runner/memory_pressure_monitor.cpp",
+        "apps/copypaste_flutter/windows/runner/memory_pressure_monitor.h",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/lib/app/resource_policy.dart"
+      ],
+      "invariant": "The macOS memory-pressure source and alternating Windows low/recovered resource-notification waits, without polling, send memoryPressure to the main, Quick Paste and pairing engines; engines unregister before shutdown. Android FlutterActivity already forwards onTrimMemory.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS_targeted_tests_passed_windows_not_built_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-086",
+      "title": "Process-wide SQLite soft heap limit over the pooled page caches",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/connection.rs",
+        "crates/copypaste-core/src/storage/store.rs"
+      ],
+      "invariant": "Opening a store sets one process-wide 10 MiB SQLite soft heap limit while RUN-012 stays unchanged (min_idle 1, max 4 connections, 8 MiB per-connection target, existing timeouts). The bundled build keeps SQLITE_ENABLE_MEMORY_MANAGEMENT (pinned by a test) and temp_store = MEMORY, so the limit never spills plaintext.",
+      "bounds": {
+        "sqlite_soft_heap_limit_bytes": 10485760
+      },
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "sqlite3_memory_used bytes after a 4-thread History workload (synthetic 48 MB store, macOS dev host)",
+        "baseline": 41880125,
+        "candidate": 7560233,
+        "peak_baseline": 52166656,
+        "peak_candidate": 11806966,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-087",
+      "title": "Release SQLite page cache on Android memory trim",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android runtime host",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/MainActivity.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs",
+        "crates/copypaste-core/src/storage/store.rs"
+      ],
+      "invariant": "One application-context ComponentCallbacks2 releases unpinned SQLite pages process-wide on every onTrimMemory/onLowMemory without waiting for a pooled connection, whether or not MainActivity exists.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-088",
+      "title": "Decode captured text without a second copy",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Clipboard capture",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/format.rs",
+        "crates/copypaste-daemon/src/clipboard/macos.rs",
+        "crates/copypaste-daemon/src/clipboard/windows/read.rs",
+        "crates/copypaste-core/src/transfer/export.rs"
+      ],
+      "invariant": "Valid UTF-8 text becomes the captured String in its own buffer; malformed input yields exactly String::from_utf8_lossy output and export keeps zeroizing invalid source bytes.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "macOS_targeted_tests_passed_windows_linux_not_built"
+    },
+    {
+      "id": "RUN-089",
+      "title": "Join row and shared ciphertext once in Rust",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/model.rs"
+      ],
+      "invariant": "Full-item projections select row and shared ciphertext as separate columns and join them once at exact capacity; bytes match the former SQLite concatenation and NULL row ciphertext maps to empty.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "SQLite heap peak bytes reading one 4 MiB row without a soft limit (macOS dev host)",
+        "baseline": 13841203,
+        "candidate": 9615442,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-090",
+      "title": "Keep loaded History detail across unchanged refreshes",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "HistoryController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart"
+      ],
+      "invariant": "A refresh reloads the selected detail only when its summary changed, its row is missing or its detail is not loaded; the inspector keeps the same HistoryClip instance.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-091",
+      "title": "Single-flight History refresh and spoiler reads",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "HistoryController",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_spoiler_controller.dart"
+      ],
+      "invariant": "One running refresh plus at most one coalesced pass; drag and reorder take the queued pass and the final state equals per-event refreshes. Facets notify only on change; spoiler reads coalesce within one generation.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-092",
+      "title": "Bounded capture notification text preview",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Capture notifications",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/notifications/capture_notification_preview.dart"
+      ],
+      "invariant": "Normalization reads at most 2001 runes and yields the same output as full-length normalization; the bridge still reads the full clip.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-093",
+      "title": "Decode brand logo at display size",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "AppBrandLogo",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/app/theme/app_brand_logo.dart",
+        "apps/copypaste_flutter/lib/app/shell/app_shell.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_view.dart"
+      ],
+      "invariant": "AppBrandLogo is the only renderer of the brand asset and decodes at size x devicePixelRatio; the 512 px launcher source is unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-094",
+      "title": "Decode source app icons at avatar size",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "SourceAppLabel",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/presentation/source_app_label.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_view.dart",
+        "apps/copypaste_flutter/lib/features/history/models/history_models.dart"
+      ],
+      "invariant": "SourceAppLabel decodes icons at size x devicePixelRatio, scaling by the shorter side for cover, and the Quick Paste precache uses the same provider key.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-095",
+      "title": "Subsample Android notification image decodes",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android capture feedback",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidCaptureFeedback.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardReader.kt"
+      ],
+      "invariant": "Notification thumbnails decode bounds first, apply the shared 50 MiB decoded cap and a power-of-two inSampleSize keeping the long edge at least 256 px; thumbnail size and text are unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "kotlin_unit_test_not_run_jdk25_unavailable"
+    },
+    {
+      "id": "RUN-096",
+      "title": "Binary P2P items envelope (protocol v11)",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P protocol",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/protocol.rs",
+        "crates/copypaste-p2p/src/protocol/items.rs",
+        "crates/copypaste-p2p/src/protocol/codec.rs",
+        "crates/copypaste-p2p/src/transport/session.rs",
+        "crates/copypaste-p2p/src/node/channel.rs"
+      ],
+      "invariant": "Text and binary item payloads travel as raw bytes after a JSON metadata header in one CPI1 envelope that announces its exact length; JSON items are refused. Every per-item and per-message bound, UTF-8 validation, content-hash recomputation and the exact protocol-version match are kept; senders write payloads without a second copy and receivers allocate the message once.",
+      "bounds": {
+        "protocol_version": 11,
+        "envelope_prefix_bytes": 12
+      },
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted receive decode peak bytes for a 4 MiB image over a loopback Noise session (developer diagnostic)",
+        "baseline": 218103808,
+        "candidate": 4330619,
+        "wire_bytes": [
+          14977328,
+          4194736
+        ],
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-097",
+      "title": "Exact-size JSON P2P encoding and direct summary decode",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P protocol",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/protocol/codec.rs"
+      ],
+      "invariant": "JSON sync messages are serialized once into an exactly sized buffer after a counting pass, byte-identical to serde_json::to_vec; tag-led summary pages decode straight into their body with identical acceptance.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted transient bytes for a 10k summary page (developer diagnostic)",
+        "baseline": 6710886,
+        "candidate": 3879731,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-098",
+      "title": "Exact-size module host buffers and typed host request parsing",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Module host ABI",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-modules/src/native.rs",
+        "crates/copypaste-modules/src/sync.rs",
+        "crates/copypaste-module-sdk/src/native.rs"
+      ],
+      "invariant": "Host requests parse as typed values without a serde_json::Value tree and replies serialize into exactly sized buffers; ABI bytes are unchanged, so modules need no update.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": {
+        "metric": "allocator-counted peak bytes for an 8 MiB scan reply (developer diagnostic)",
+        "baseline": 44774195,
+        "candidate": 25165824,
+        "qualification": false
+      },
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-099",
+      "title": "Shared HTTP client per cloud account",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/lib.rs",
+        "crates/copypaste-cloud/src/auth/client.rs",
+        "crates/copypaste-cloud/src/rest/client.rs",
+        "modules/supabase/src/lib.rs"
+      ],
+      "invariant": "Auth and REST clients of one cloud account share one reqwest Client, TLS configuration and connection pool without changing request behavior.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-100",
+      "title": "Single exact-size cloud upsert body",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-cloud",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-cloud/src/rest/client.rs"
+      ],
+      "invariant": "Each upsert chunk is serialized once into an exactly sized JSON body without an intermediate JSON tree and shared by every retry; headers, rows and server schema are unchanged.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-101",
+      "title": "Defer background dials and probes to a version-incompatible peer",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "P2P node",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/node/activity.rs",
+        "crates/copypaste-p2p/src/node/dial.rs",
+        "crates/copypaste-p2p/src/node/group.rs",
+        "crates/copypaste-p2p/src/node/probe.rs",
+        "crates/copypaste-runtime/src/peer_sync.rs"
+      ],
+      "invariant": "An authenticated peer that proves to speak another protocol version, by declaring it or by closing without replying to the first message while its advertisement or last authenticated profile names another version, is shown as a version mismatch and left alone by scheduled sessions and reachability probes for five minutes, each new mismatch restarting the wait. Compatibility evidence ends the wait at once, explicit sync still dials, and no protocol check is relaxed. Previously such a peer was dialled every scheduler round (10 s) and probed about once per second.",
+      "next_step": "Measure native daemon connections, wakeups and CPU with a paired peer on an older protocol version, before and after, on supported platforms. Network and wakeup budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-102",
+      "title": "One synchronized version per organization record id",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/organization.rs",
+        "crates/copypaste-core/tests/history_organization.rs"
+      ],
+      "invariant": "An organization record id lives only in organization_records. Record copies that builds without organization records stored as ordinary clips are adopted (when no record holds the id) and removed from the clipboard history before pins are seeded, found by one primary-key range seek. Previously a seeded or received record left the id in both tables, so a peer advertised two versions of it and served whichever row the read returned first: the receiver dropped every such item as not matching its summary, re-requested it every round (about 9 items per session on the reporting Mac), and its receive cursor never advanced past them.",
+      "next_step": "Measure native daemon sync bytes, CPU and wakeups per session with a paired peer that holds legacy record copies, before and after, on supported platforms. Network and CPU budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-103",
+      "title": "No per-session resend of tombstones for leftover pin stamps",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/sync/merge.rs",
+        "crates/copypaste-p2p/src/sync/workspace.rs",
+        "crates/copypaste-p2p/src/sync/plan.rs"
+      ],
+      "invariant": "P2P planning requests a version for its pin state only when both the local and remote versions are live, matching apply, which never stores pin state on or from a tombstone. A deleted pinned item's tombstone keeps its pin stamp on the deleting device, but it is transferred once and then no longer re-sent and declined every session.",
+      "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

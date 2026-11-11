@@ -38,10 +38,9 @@ abstract interface class HistoryFileDownloadCancellation {
   Future<void> cancelFileDownload(String id);
 }
 
-/// Uses native writer events when the backend supports them. Returns false
-/// without starting a save when the legacy filesystem fallback is required.
+/// Reports native writer progress and completes when the save is committed.
 abstract interface class HistoryFileProgressRepository {
-  Future<bool> saveFileWithProgress(
+  Future<void> saveFileWithProgress(
     String id,
     String destinationPath,
     void Function(int written, int total) onProgress,
@@ -51,4 +50,16 @@ abstract interface class HistoryFileProgressRepository {
 /// Reuses native-verified downloads by clip version across UI engines.
 abstract interface class HistoryDownloadedFileRepository {
   Future<String?> downloadedFile(String id);
+}
+
+/// Tag management is separate from paged payload access.
+abstract interface class HistoryTagsRepository {
+  Future<HistoryTags> tags(List<String> clipIds);
+  Future<void> saveTag({String? id, required String name});
+  Future<void> deleteTag(String id);
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  });
 }

@@ -11,12 +11,14 @@ bool get usesDesktopShortcuts => switch (defaultTargetPlatform) {
   _ => false,
 };
 
-SingleActivator desktopShortcut(LogicalKeyboardKey key) => SingleActivator(
-  key,
-  meta: defaultTargetPlatform == TargetPlatform.macOS,
-  control: defaultTargetPlatform != TargetPlatform.macOS,
-  includeRepeats: false,
-);
+SingleActivator desktopShortcut(LogicalKeyboardKey key, {bool shift = false}) =>
+    SingleActivator(
+      key,
+      meta: defaultTargetPlatform == TargetPlatform.macOS,
+      control: defaultTargetPlatform != TargetPlatform.macOS,
+      shift: shift,
+      includeRepeats: false,
+    );
 
 Map<ShortcutActivator, VoidCallback> desktopWindowBindings({
   Future<void> Function()? onClose,
@@ -35,6 +37,18 @@ Map<ShortcutActivator, VoidCallback> desktopWindowBindings({
         includeRepeats: false,
       ): () =>
           unawaited(onToggleFullScreen()),
+  },
+};
+
+/// Refresh uses Cmd/Ctrl+R everywhere and the F5 convention off macOS.
+Map<ShortcutActivator, VoidCallback> desktopRefreshBindings(
+  VoidCallback onRefresh,
+) => {
+  if (usesDesktopShortcuts) ...{
+    desktopShortcut(LogicalKeyboardKey.keyR): onRefresh,
+    if (defaultTargetPlatform != TargetPlatform.macOS)
+      const SingleActivator(LogicalKeyboardKey.f5, includeRepeats: false):
+          onRefresh,
   },
 };
 

@@ -21,6 +21,7 @@ fn item() -> Item {
         color_rgba: None,
         created_at: 1,
         pinned: false,
+        tag_ids: vec!["tag-1".into()],
         file_details: Some(FileDetails {
             filename: Some("report.pdf".into()),
             mime_type: Some("application/pdf".into()),
@@ -47,6 +48,7 @@ fn item() -> Item {
 
 fn export_item() -> ExportItem {
     ExportItem {
+        privacy: Default::default(),
         content: "hello".into(),
         content_type: "text/plain".into(),
         created_at: 1,
@@ -83,6 +85,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Event(_) => "event",
         ResponseData::Page(_) => "page",
         ResponseData::HistoryFacets(_) => "history_facets",
+        ResponseData::HistoryTags(_) => "history_tags",
         ResponseData::SpoilerState { .. } => "spoiler_state",
         ResponseData::Item(_) => "item",
         ResponseData::ImagePreview(_) => "image_preview",
@@ -131,6 +134,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             progress: None,
             capture: None,
         }),
+        ResponseData::HistoryTags(Default::default()),
         ResponseData::Status(StatusData {
             runtime_watch: false,
             capture_watch: false,
@@ -193,6 +197,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             next_cursor: Some("cursor".into()),
         }),
         ResponseData::HistoryFacets(HistoryFacets {
+            tags: vec![copypaste_ipc::HistoryTag {
+                id: "work".into(),
+                name: "Work".into(),
+            }],
             origin_devices: vec![HistoryDeviceFacet {
                 id: "device-1".into(),
                 label: "Laptop".into(),
@@ -267,7 +275,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 26);
+    assert_eq!(variants.len(), 27);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

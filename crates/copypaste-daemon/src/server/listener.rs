@@ -126,8 +126,7 @@ fn bind_owner_only(path: &Path) -> anyhow::Result<UnixListener> {
 #[cfg(unix)]
 fn bind_staged(staged: &Path, path: &Path) -> anyhow::Result<UnixListener> {
     let listener = UnixListener::bind(staged).context("bind the daemon socket")?;
-    std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
-        .context("restrict the daemon socket to the owner")?;
+    copypaste_fs::restrict_to_owner(staged).context("restrict the daemon socket to the owner")?;
     std::fs::rename(staged, path).context("move the daemon socket into place")?;
     Ok(listener)
 }
@@ -361,8 +360,8 @@ async fn handle_connection(
             // any change after a client sees it reaches this connection. Taking
             // the receiver afterwards would drop everything that happened in
             // between, which is a race a client cannot see or retry around.
-            let events = state.subscribe();
-            let runtime_events = typed.then(|| state.subscribe_runtime());
+            let events = state.subscribe_events();
+            let runtime_events = typed.then(|| state.subscribe_runtime_events());
             if send(&mut writer, &Response::ok(id, ResponseData::Empty {}))
                 .await
                 .is_err()
@@ -1917,10 +1916,21 @@ mod tests {
         }
 
         // The next one is accepted by the OS and then dropped, so it is never
-        // served. Which of the three symptoms shows up — a broken pipe on the
-        // write, a reset on the read, or a clean EOF — depends on timing; the
-        // property is that no `Response` comes back.
-        let stream = transport::connect(&path).await.expect("connect");
+        // served. Which symptom shows up — the dial's peer-credential check
+        // finding the socket already closed, a broken pipe on the write, a
+        // reset on the read, or a clean EOF — depends on timing; the property
+        // is that no `Response` comes back.
+        let stream = match transport::connect(&path).await {
+            Ok(stream) => stream,
+            Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {
+                drop(idle);
+                shutdown_tx.send(true).unwrap();
+                state.release_drain_listener();
+                let _ = server.await;
+                return;
+            }
+            Err(error) => panic!("connect: {error:?}"),
+        };
         let mut client = Client::new(stream);
         let line = serde_json::to_string(&request(1, Method::Status)).unwrap();
         let served = tokio::time::timeout(Duration::from_secs(5), async {

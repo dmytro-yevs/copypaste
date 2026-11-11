@@ -45,17 +45,9 @@ pub(super) fn create(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     fs::create_dir_all(data_dir)
         .map_err(|_| CryptoError::KeystoreUnavailable("could not create the data directory"))?;
 
-    let mut opts = fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    // 0600 is set *at create time*, not chmod'd afterwards, so the secret is
-    // never momentarily group- or world-readable.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-
-    let mut file = match opts.open(&path) {
+    // Owner-only *at create time*, not narrowed afterwards, so the secret is
+    // never momentarily readable by anyone else.
+    let mut file = match copypaste_fs::create_private(&path) {
         Ok(f) => f,
         // `create_new` fails if the file exists, so two daemons racing on first
         // run cannot clobber each other's secret — the loser reads the
@@ -73,12 +65,6 @@ pub(super) fn create(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
             ));
         }
     };
-
-    #[cfg(not(unix))]
-    tracing::warn!(
-        "this platform has no file-permission enforcement here; the device \
-         secret is stored without restricted permissions"
-    );
 
     let secret = Zeroizing::new(random_secret());
     let write = file
@@ -127,7 +113,7 @@ fn read_secret(path: &Path, mut file: fs::File) -> Result<DeviceSecret, CryptoEr
                     found_mode = format!("{mode:o}"),
                     "device secret file had permissive modes; tightening to 0600"
                 );
-                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+                let _ = copypaste_fs::restrict_to_owner(path);
             }
         }
     }

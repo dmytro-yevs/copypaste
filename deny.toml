@@ -16,7 +16,10 @@ version = 2
 # dependencies while retaining vulnerability and unsoundness checks for the
 # entire graph. Revisit this when secret-service 6 is released.
 unmaintained = "workspace"
-ignore = []
+ignore = [
+    # Reviewed in config/reviewed-decisions/rustsec-2026-0459.md; expires 2026-12-09.
+    { id = "RUSTSEC-2026-0459", reason = "no libsqlite3-sys release bundles a fixed SQLCipher; CopyPaste never opens an untrusted -wal" },
+]
 
 [licenses]
 version = 2

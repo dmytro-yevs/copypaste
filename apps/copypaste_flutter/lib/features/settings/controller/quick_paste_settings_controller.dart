@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../../platform/desktop/global_shortcut.dart';
@@ -34,6 +35,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool _accessibilityGranted = false;
   bool _observingLifecycle = false;
   bool _recordingShortcut = false;
+  DesktopShortcut? _registeredShortcut;
   bool _disposed = false;
   Future<void> _registrationOperation = Future<void>.value();
   String? _errorMessage;
@@ -76,7 +78,10 @@ class QuickPasteSettingsController extends ChangeNotifier
       }
       _errorMessage = null;
     } catch (_) {
-      if (!_disposed) _errorMessage = 'Quick Paste could not be prepared.';
+      if (!_disposed) {
+        _errorMessage =
+            AppStrings.current.settingsRuntimeQuickPastePrepareFailed;
+      }
     } finally {
       _initialized = true;
       if (!_disposed && (_supported || _linuxIntegrationPort != null)) {
@@ -88,26 +93,27 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<bool> setAutoPaste(bool value) async {
-    if (_busy || value == _preferences.autoPaste) return false;
+    if (_disposed || _busy || value == _preferences.autoPaste) return false;
     _busy = true;
     _errorMessage = null;
     notifyListeners();
     final before = _preferences;
     final next = before.copyWith(autoPaste: value);
     try {
-      await _store.write(next);
-      _preferences = next;
       if (value && _supported) {
         _accessibilityGranted = await _windowHost.requestAccessibility();
       }
+      if (_disposed) return false;
+      await _store.write(next);
+      _preferences = next;
       return true;
     } catch (_) {
       _preferences = before;
-      _errorMessage = 'Auto-paste could not be updated.';
+      _errorMessage = AppStrings.current.settingsRuntimeAutoPasteUpdateFailed;
       return false;
     } finally {
       _busy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -138,7 +144,10 @@ class QuickPasteSettingsController extends ChangeNotifier
       } catch (_) {
         // The visible error remains the only safe claim when registration fails.
       }
-      if (!_disposed) _errorMessage = 'That shortcut could not be registered.';
+      if (!_disposed) {
+        _errorMessage =
+            AppStrings.current.settingsRuntimeShortcutRegisterFailed;
+      }
       return false;
     } finally {
       _busy = false;
@@ -160,7 +169,7 @@ class QuickPasteSettingsController extends ChangeNotifier
       return true;
     } catch (_) {
       if (!_disposed) {
-        _errorMessage = 'The current shortcut could not be paused.';
+        _errorMessage = AppStrings.current.settingsRuntimeShortcutPauseFailed;
       }
       return false;
     } finally {
@@ -170,15 +179,22 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<void> cancelShortcutRecording() async {
-    if (_disposed || !_supported || _busy || !_recordingShortcut) return;
-    _recordingShortcut = false;
+    if (_disposed ||
+        !_supported ||
+        _busy ||
+        (!_recordingShortcut && _registeredShortcut == _preferences.shortcut)) {
+      return;
+    }
     _busy = true;
     notifyListeners();
     try {
       if (!await _changeRegistration(_preferences.shortcut)) return;
+      _recordingShortcut = false;
       _errorMessage = null;
     } catch (_) {
-      if (!_disposed) _errorMessage = 'The shortcut could not be restored.';
+      if (!_disposed) {
+        _errorMessage = AppStrings.current.settingsRuntimeShortcutRestoreFailed;
+      }
     } finally {
       _busy = false;
       if (!_disposed) notifyListeners();
@@ -188,10 +204,12 @@ class QuickPasteSettingsController extends ChangeNotifier
   Future<bool> _changeRegistration(DesktopShortcut? shortcut) {
     final operation = _registrationOperation.then((_) async {
       if (_disposed) return false;
+      _registeredShortcut = null;
       if (shortcut == null) {
         await _registrar.unregister();
       } else {
         await _registrar.register(shortcut, _openWindow);
+        _registeredShortcut = shortcut;
       }
       return !_disposed;
     });
@@ -220,7 +238,7 @@ class QuickPasteSettingsController extends ChangeNotifier
       _errorMessage = null;
     } catch (_) {
       if (_disposed) return;
-      _errorMessage = 'Quick Paste could not be opened.';
+      _errorMessage = AppStrings.current.settingsRuntimeQuickPasteOpenFailed;
     }
     notifyListeners();
   }
@@ -233,7 +251,8 @@ class QuickPasteSettingsController extends ChangeNotifier
       _accessibilityGranted = await _windowHost.requestAccessibility();
       _errorMessage = null;
     } catch (_) {
-      _errorMessage = 'Accessibility permission could not be requested.';
+      _errorMessage =
+          AppStrings.current.settingsRuntimeAccessibilityRequestFailed;
     } finally {
       _busy = false;
       notifyListeners();
@@ -258,7 +277,8 @@ class QuickPasteSettingsController extends ChangeNotifier
     try {
       await _refreshLinuxIntegration();
     } catch (_) {
-      _errorMessage = 'Linux integration status could not be refreshed.';
+      _errorMessage =
+          AppStrings.current.settingsRuntimeLinuxIntegrationRefreshFailed;
     } finally {
       _busy = false;
       if (!_disposed) notifyListeners();
@@ -276,12 +296,14 @@ class QuickPasteSettingsController extends ChangeNotifier
       await _refreshLinuxIntegration();
       if (!granted ||
           _linuxIntegration?.remoteDesktop != LinuxRemoteDesktopState.active) {
-        _errorMessage = 'Clipboard input permission was not granted.';
+        _errorMessage =
+            AppStrings.current.settingsRuntimeClipboardInputNotGranted;
         return false;
       }
       return true;
     } catch (_) {
-      _errorMessage = 'Clipboard input permission could not be requested.';
+      _errorMessage =
+          AppStrings.current.settingsRuntimeClipboardInputRequestFailed;
       return false;
     } finally {
       _busy = false;
@@ -299,11 +321,13 @@ class QuickPasteSettingsController extends ChangeNotifier
       final opened = await integration.openCompanionSetup();
       await _refreshLinuxIntegration();
       if (!opened) {
-        _errorMessage = 'Desktop integration setup could not be opened.';
+        _errorMessage =
+            AppStrings.current.settingsRuntimeDesktopIntegrationSetupOpenFailed;
       }
       return opened;
     } catch (_) {
-      _errorMessage = 'Desktop integration setup could not be opened.';
+      _errorMessage =
+          AppStrings.current.settingsRuntimeDesktopIntegrationSetupOpenFailed;
       return false;
     } finally {
       _busy = false;

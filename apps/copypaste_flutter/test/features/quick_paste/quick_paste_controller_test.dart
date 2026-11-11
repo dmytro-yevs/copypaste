@@ -34,229 +34,6 @@ import 'package:copypaste_flutter/features/transfers/file_operations_controller.
 import '../modules/modules_test_support.dart';
 
 void main() {
-  testWidgets(
-    'retained Windows engine releases hidden views and watches and reloads fresh sessions',
-    (tester) async {
-      final host = _ContextHost();
-      final preferences = MemoryQuickPastePreferencesStore();
-      final repositories = <_RetainedRepository>[];
-      final operations = <_RetainedOperations>[];
-      final controllers = <QuickPasteController>[];
-      var disposed = 0;
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        repository.clips.removeWhere((clip) => clip.pinned);
-        repositories.add(repository);
-        repository.clips
-          ..clear()
-          ..add(
-            HistoryClip(
-              id: 'session-${repositories.length}',
-              pinned: false,
-              contentType: 'text',
-              preview: 'Fresh session ${repositories.length}',
-              createdAt: DateTime.utc(2026),
-            ),
-          );
-        final transfers = _RetainedOperations();
-        operations.add(transfers);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: preferences,
-          host: host,
-          ownsHostLifecycle: false,
-          fileOperations: FileOperationsController(transfers),
-          disposeRepository: () async {
-            disposed++;
-          },
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      expect(host.readyCalls, 1);
-      expect(repositories, isEmpty);
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(repositories.single.activeWatches, 1);
-      expect(operations.single.activeWatches, 1);
-      await host.hiddenHandler!(1);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsNothing);
-      expect(repositories.single.activeWatches, 0);
-      expect(operations.single.activeWatches, 0);
-      expect(disposed, 1);
-      preferences.value = preferences.value.copyWith(autoPaste: false);
-      await host.openedHandler!(2, inspectorVisible: true);
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(controllers.last.autoPaste, isFalse);
-      expect(controllers.last.inspectorOpen, isTrue);
-      expect(repositories.last.queryCalls, greaterThan(0));
-      expect(controllers.last.items.single.id, 'session-2');
-      expect(repositories.last.activeWatches, 1);
-      expect(host.readyCalls, 1);
-      await host.hiddenHandler!(1); // Old native hide cannot remove session 2.
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(disposed, 1);
-      await host.hiddenHandler!(2);
-      await tester.pumpAndSettle();
-      expect(disposed, 2);
-      expect(repositories.last.activeWatches, 0);
-      expect(operations.last.activeWatches, 0);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine waits for old Copy without stale paste before reopening',
-    (tester) async {
-      final host = _ContextHost()..permissionGranted = true;
-      final repositories = <_RetainedRepository>[];
-      final controllers = <QuickPasteController>[];
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        repositories.add(repository);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      final old = repositories.single;
-      old.copyGate = Completer<void>();
-      final action = controllers.single.activate(
-        controllers.single.items.first,
-      );
-      await old.copyStarted.future;
-      final hidden = host.hiddenHandler!(1);
-      final reopened = host.openedHandler!(2, inspectorVisible: false);
-      await tester.pump();
-      expect(controllers, hasLength(1));
-      old.copyGate!.complete();
-      await action;
-      await hidden;
-      await reopened;
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(old.activeWatches, 0);
-      expect(host.pasteIds, isEmpty);
-      await controllers.last.activate(controllers.last.items.first);
-      expect(host.pasteIds, [2]);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine ignores late bootstrap completion after hide and reopen',
-    (tester) async {
-      final host = _ContextHost();
-      final gate = Completer<void>();
-      final controllers = <QuickPasteController>[];
-      final repositories = <_RetainedRepository>[];
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        if (repositories.isEmpty) repository.queryGate = gate;
-        repositories.add(repository);
-        final controller = QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-        controllers.add(controller);
-        return controller;
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      final first = host.openedHandler!(1, inspectorVisible: false);
-      await tester.pump();
-      await host.hiddenHandler!(1);
-      await host.openedHandler!(2, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      expect(controllers, hasLength(2));
-      expect(repositories.first.activeWatches, 0);
-      expect(repositories.last.activeWatches, 1);
-      gate.complete();
-      await first;
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('quick-paste-search')), findsOneWidget);
-      expect(host.pasteIds, isEmpty);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
-  testWidgets(
-    'retained Windows engine never reveals media from a hidden session',
-    (tester) async {
-      final host = _FrameHost();
-      final gate = Completer<void>();
-      var created = 0;
-      QuickPasteController create() {
-        final repository = _RetainedRepository();
-        if (created++ == 0) {
-          repository.imageLoadGate = gate;
-          repository.clips.insert(
-            0,
-            HistoryClip(
-              id: 'image',
-              pinned: false,
-              contentType: 'image/png',
-              preview: '[image]',
-              createdAt: DateTime.utc(2026),
-            ),
-          );
-        }
-        return QuickPasteController(
-          repository: repository,
-          preferencesStore: MemoryQuickPastePreferencesStore(),
-          host: host,
-          ownsHostLifecycle: false,
-        );
-      }
-
-      await tester.pumpWidget(
-        QuickPasteApp.retained(createController: create, host: host),
-      );
-      await tester.pumpAndSettle();
-      await host.openedHandler!(1, inspectorVisible: false);
-      await tester.pump();
-      await tester.pump();
-      await host.hiddenHandler!(1);
-      await host.openedHandler!(2, inspectorVisible: false);
-      await tester.pumpAndSettle();
-      gate.complete();
-      await tester.pumpAndSettle();
-      expect(host.presentedIds, [2]);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
-
   test(
     'inspector refreshes completed metadata on each opening, not in the background',
     () async {
@@ -460,8 +237,59 @@ void main() {
       variant: TargetPlatformVariant({platform}),
     );
   }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testWidgets(
+      'word deletion edits the search while Shift deletes a clip on $platform',
+      (tester) async {
+        final repository = _Repository();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: _ContextHost(),
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        await controller.opened(1);
+        await tester.pumpAndSettle();
+        final clips = repository.clips.length;
+        final search = find.byType(EditableText).first;
+        await tester.enterText(search, 'two words');
+        await tester.pumpAndSettle();
+        final wordModifier = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.altLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(wordModifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.sendKeyUpEvent(wordModifier);
+        await tester.pumpAndSettle();
+        final editable = tester.widget<EditableText>(search);
+        expect(editable.controller.text, 'two ');
+        expect(repository.clips, hasLength(clips));
+
+        await tester.enterText(search, '');
+        await tester.pumpAndSettle();
+        controller.focus(controller.items.first);
+        final primary = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(primary);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(primary);
+        await tester.pumpAndSettle();
+        expect(controller.items, hasLength(clips - 1));
+        expect(repository.clips, hasLength(clips - 1));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
   test(
-    'file transfer reports written bytes, reuses a copy, and retries failure',
+    'file transfer reuses a copy, retries failure, and honors cancellation',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'copypaste-transfer-test-',
@@ -488,16 +316,11 @@ void main() {
       repository.failSave = false;
       repository.saveGate = Completer<void>();
       final progress = <double>[];
-      final halfWritten = Completer<void>();
-      final preparation = transfer.prepare(
-        clip,
-        onProgress: (value) {
-          progress.add(value);
-          if (value == 0.5 && !halfWritten.isCompleted) halfWritten.complete();
-        },
-      );
-      await halfWritten.future;
-      expect(progress, contains(0.5));
+      final preparation = transfer.prepare(clip, onProgress: progress.add);
+      while (repository.saved.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(progress, [0]);
       repository.saveGate!.complete();
       final path = await preparation;
       repository.saveGate = null;
@@ -509,18 +332,15 @@ void main() {
       repository.saveGate = Completer<void>();
       var cancelled = false;
       final destination = File('${directory.path}/cancelled.bin');
-      final cancellableWriteStarted = Completer<void>();
       final cancelledSave = transfer.saveTo(
         clip,
         destination.path,
-        onProgress: (value) {
-          if (value == 0.5 && !cancellableWriteStarted.isCompleted) {
-            cancellableWriteStarted.complete();
-          }
-        },
+        onProgress: (_) {},
         isCancelled: () => cancelled,
       );
-      await cancellableWriteStarted.future;
+      while (repository.saved.length < 2) {
+        await Future<void>.delayed(Duration.zero);
+      }
       cancelled = true;
       repository.saveGate!.complete();
       await expectLater(
@@ -566,9 +386,9 @@ void main() {
     expect(repository.copied, isEmpty);
     expect(controller.activating, isFalse);
     expect(controller.transferProgressFor(clip.id), isNotNull);
-    expect(controller.history.isDownloadPending(clip.id), isTrue);
+    expect(controller.history.transfers.isDownloadPending(clip.id), isTrue);
     expect(
-      controller.history.downloadProgressFor(clip.id),
+      controller.history.transfers.downloadProgressFor(clip.id),
       controller.transferProgressFor(clip.id),
     );
     await controller.activate(clip);
@@ -613,7 +433,10 @@ void main() {
       await controller.opened(1);
       await controller.activate(clip);
       expect(controller.transferFailedFor(clip.id), isTrue);
-      expect(controller.history.downloadErrorFor(clip.id), isNotEmpty);
+      expect(
+        controller.history.transfers.downloadErrorFor(clip.id),
+        isNotEmpty,
+      );
       expect(repository.copied, isEmpty);
       repository.failSave = false;
       await controller.activate(clip);
@@ -657,7 +480,7 @@ void main() {
       final pending = controller.activate(file);
       await Future<void>.delayed(Duration.zero);
       expect(controller.activating, isFalse);
-      expect(controller.history.isDownloadPending(file.id), isTrue);
+      expect(controller.history.transfers.isDownloadPending(file.id), isTrue);
       await controller.activate(text);
       expect(repository.copied, [text.id]);
       transfer.finish.complete('/downloaded/file.bin');
@@ -842,7 +665,7 @@ void main() {
       repository.imageLoadGate!.complete();
       await tester.pump();
       await tester.runAsync(() async {
-        final preview = await controller.history.requestImagePreview(
+        final preview = await controller.history.media.requestImagePreview(
           'image',
           maxEdge: 480,
         );
@@ -856,6 +679,73 @@ void main() {
       expect(find.text('[image]'), findsNothing);
       expect(tester.takeException(), isNull);
     },
+  );
+
+  testWidgets('native reveal restores search focus lost while opening', (
+    tester,
+  ) async {
+    final host = _FrameHost()
+      ..openWhenReady = true
+      ..revealGate = Completer<void>();
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    expect(host.presentedIds, [1]);
+    final search = tester.widget<TextField>(
+      find.byKey(const ValueKey('quick-paste-search')),
+    );
+    search.focusNode!.unfocus();
+    await tester.pump();
+    expect(search.focusNode!.hasPrimaryFocus, isFalse);
+
+    host.revealGate!.complete();
+    await tester.pumpAndSettle();
+    expect(search.focusNode!.hasPrimaryFocus, isTrue);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    tester.testTextInput.enterText('recent');
+    await tester.pumpAndSettle();
+    expect(search.controller!.text, 'recent');
+  });
+
+  testWidgets(
+    'search keeps keyboard focus when the shown popup leaves the app inactive',
+    (tester) async {
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
+      final host = _FrameHost()..openWhenReady = true;
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(host.presentedIds, [1]);
+      final search = tester.widget<TextField>(
+        find.byKey(const ValueKey('quick-paste-search')),
+      );
+      expect(search.focusNode!.hasPrimaryFocus, isTrue);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pumpAndSettle();
+      expect(search.focusNode!.hasPrimaryFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(controller.focusedClip?.id, 'recent');
+      tester.testTextInput.enterText('recent');
+      await tester.pumpAndSettle();
+      expect(search.controller!.text, 'recent');
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
 
   testWidgets('a superseded media load cannot reveal an older presentation', (
@@ -888,7 +778,7 @@ void main() {
     repository.imageLoadGate!.complete();
     await tester.pump();
     await tester.runAsync(() async {
-      final preview = await controller.history.requestImagePreview(
+      final preview = await controller.history.media.requestImagePreview(
         'image',
         maxEdge: 480,
       );
@@ -1219,7 +1109,7 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     expect(controller.inspectorOpen, isTrue);
-    expect(controller.history.selectedClip?.id, 'recent');
+    expect(controller.history.selection.selectedClip?.id, 'recent');
   });
 
   test('cold engine opening waits until its controller is ready', () async {
@@ -1304,7 +1194,7 @@ void main() {
         repository.requests.map((request) => request.limit),
         everyElement(50),
       );
-      expect(controller.history.canLoadMore, isFalse);
+      expect(controller.history.window.canLoadMore, isFalse);
       scroll().jumpTo(scroll().position.maxScrollExtent);
       await tester.pumpAndSettle();
       expect(
@@ -1347,7 +1237,7 @@ void main() {
     await tester.pumpWidget(QuickPasteApp(controller: controller));
     await tester.pumpAndSettle();
     Future<void> loadPage() async {
-      final load = controller.history.loadMore();
+      final load = controller.history.window.loadMore();
       await tester.pumpAndSettle();
       await load;
       await tester.pumpAndSettle();
@@ -1367,7 +1257,7 @@ void main() {
     expect(recent, findsOneWidget);
     expect(tester.getTopLeft(pinned).dy, closeTo(pinnedY, 1));
     expect(tester.getTopLeft(recent).dy, closeTo(recentY, 1));
-    expect(controller.history.visitedIds.length, 250);
+    expect(controller.history.window.visitedIds.length, 250);
     expect(controller.items.where((clip) => clip.pinned), hasLength(80));
     expect(
       controller.items.where((clip) => !clip.pinned).length,
@@ -1592,7 +1482,7 @@ void main() {
     expect(repository.getCalls, 1);
     await controller.moveFocus(5);
     expect(controller.focusedClip?.id, 'clip-4');
-    expect(controller.history.selectedClip?.id, 'clip-4');
+    expect(controller.history.selection.selectedClip?.id, 'clip-4');
     expect(repository.getCalls, 2);
   });
 
@@ -1862,14 +1752,21 @@ void main() {
         matching: find.byType(Avatar),
       );
       final provider = tester.widget<Avatar>(iconFinder).provider;
-      expect(provider, isNotNull);
+      expect(
+        provider,
+        isA<ResizeImage>().having(
+          (image) => image.width,
+          'decoded width',
+          (AppIconSize.sm * tester.view.devicePixelRatio).ceil(),
+        ),
+      );
       controller.focus(controller.items[1]);
       for (var frame = 0; frame < 4; frame++) {
         await tester.pump(const Duration(milliseconds: 100));
         expect(tester.widget<Avatar>(iconFinder).provider, provider);
       }
       expect(repository.sourceIconCalls, 1);
-      await controller.history.deleteClip('icon-0');
+      await controller.history.mutations.deleteClip('icon-0');
       await tester.pump(const Duration(milliseconds: 100));
       final nextIconFinder = find.descendant(
         of: find.byKey(const ValueKey('quick-paste-icon-1')),
@@ -1928,7 +1825,7 @@ void main() {
     );
     final row = find.byKey(const ValueKey('quick-paste-image'));
     final size = tester.getSize(row);
-    await controller.history.toggleSecret(repository.clips.first);
+    await controller.history.mutations.toggleSecret(repository.clips.first);
     await tester.pump();
     await tester.pump();
     expect(tester.getSize(row), size);
@@ -2121,7 +2018,7 @@ void main() {
       expect(host.inspectorChanges, [true]);
       expect(host.inspectorPresentationIds, [1]);
       expect(controller.inspectorOpen, isTrue);
-      expect(controller.history.selectedClip?.id, 'recent');
+      expect(controller.history.selection.selectedClip?.id, 'recent');
       expect(
         find.byKey(const ValueKey('history-detail-inspector')),
         findsOneWidget,
@@ -2135,7 +2032,7 @@ void main() {
       );
       await mouse.moveTo(tester.getCenter(pinned));
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.inspectorChanges, [true]);
       await mouse.moveTo(
         tester.getCenter(
@@ -2194,7 +2091,7 @@ void main() {
     expect(controller.inspectorOpen, isFalse);
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
     expect(repository.getCalls, 1);
     expect(host.inspectorChanges, [true]);
     expect(tester.takeException(), isNull);
@@ -2264,7 +2161,7 @@ void main() {
       controller.hoverClip(repository.clips.first, hovered: true);
       await tester.pump(const Duration(milliseconds: 1500));
       expect(controller.inspectorOpen, isTrue);
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.inspectorChanges, [true, false, true]);
     },
   );
@@ -2315,7 +2212,7 @@ void main() {
         case 'shutdown':
           await controller.shutdown();
         case 'delete':
-          await controller.history.deleteClip(recent.id);
+          await controller.history.mutations.deleteClip(recent.id);
         default:
           throw StateError('Unknown cancellation action: $action');
       }
@@ -2377,7 +2274,7 @@ void main() {
     await close;
     expect(host.inspectorChanges, [true, false, true]);
     expect(controller.inspectorOpen, isTrue);
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
   });
 
   testWidgets('a reopened popup ignores completion of an old hover open', (
@@ -2547,14 +2444,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(host.inspectorChanges, [true]);
-    expect(controller.history.selectedClip?.id, 'recent');
+    expect(controller.history.selection.selectedClip?.id, 'recent');
     expect(
       find.byKey(const ValueKey('history-detail-inspector')),
       findsOneWidget,
     );
     controller.focus(repository.clips.first);
     await tester.pumpAndSettle();
-    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(controller.history.selection.selectedClip?.id, 'pinned');
     await tester.tap(
       find.byKey(const ValueKey('history-detail-inspector-close')),
     );
@@ -2587,10 +2484,10 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
       await tester.pump();
-      expect(controller.history.selectedClip!.secret, isTrue);
+      expect(controller.history.selection.selectedClip!.secret, isTrue);
       await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.secret, isFalse);
+      expect(controller.history.selection.selectedClip!.secret, isFalse);
 
       await tester.tap(find.byKey(const ValueKey('history-detail-copy')));
       await tester.pumpAndSettle();
@@ -2604,11 +2501,11 @@ void main() {
       expect(host.closeCalls, 0);
       expect(host.pasteCalls, 0);
 
-      controller.focus(controller.history.selectedClip!);
+      controller.focus(controller.history.selection.selectedClip!);
       final pin = find.byKey(const ValueKey('history-pin-recent'));
       await tester.tap(pin);
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.pinned, isTrue);
+      expect(controller.history.selection.selectedClip!.pinned, isTrue);
       expect(controller.focusedClip!.pinned, isTrue);
       expect(controller.shortcutFor(controller.focusedClip!), isNotNull);
       expect(
@@ -2617,7 +2514,7 @@ void main() {
       );
       await tester.tap(pin);
       await tester.pumpAndSettle();
-      expect(controller.history.selectedClip!.pinned, isFalse);
+      expect(controller.history.selection.selectedClip!.pinned, isFalse);
       expect(
         controller.shortcutFor(controller.focusedClip!),
         LogicalKeyboardKey.digit1,
@@ -2635,7 +2532,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.clips.map((clip) => clip.id), ['pinned']);
       expect(controller.focusedClip?.id, 'pinned');
-      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(controller.history.selection.selectedClip?.id, 'pinned');
       expect(host.closeCalls, 0);
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(seconds: 6));
@@ -2704,7 +2601,10 @@ void main() {
     expect(cancelButtonSize.width, cancelButtonSize.height);
     await tester.tap(download);
     await tester.pump();
-    expect(controller.history.isDownloadCancelling('download'), isTrue);
+    expect(
+      controller.history.transfers.isDownloadCancelling('download'),
+      isTrue,
+    );
     repository.saveGate!.complete();
     repository.saveGate = null;
     await tester.runAsync(
@@ -2712,7 +2612,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(downloader.presented, ['/tmp/report.pdf']);
-    expect(controller.history.isDownloadPending('download'), isFalse);
+    expect(controller.history.transfers.isDownloadPending('download'), isFalse);
     await mouse.removePointer();
     downloader.destination = null;
     await tester.tap(download);
@@ -2724,10 +2624,10 @@ void main() {
     await tester.tap(download);
     await tester.pumpAndSettle();
     expect(
-      controller.history.errorMessage,
+      controller.history.errors.message,
       'This file could not be downloaded.',
     );
-    expect(controller.history.downloadFailedFor('download'), isTrue);
+    expect(controller.history.transfers.downloadFailedFor('download'), isTrue);
     expect(
       find.descendant(
         of: download,
@@ -2837,7 +2737,7 @@ void main() {
       expect(identical(controller.shortcuts, shortcuts), isTrue);
       expect(() => items.clear(), throwsUnsupportedError);
       expect(() => shortcuts.clear(), throwsUnsupportedError);
-      await controller.history.select('recent');
+      await controller.history.selection.select('recent');
       expect(identical(controller.items, items), isTrue);
       expect(identical(controller.shortcuts, shortcuts), isTrue);
       repository.clips.removeWhere((clip) => clip.id == 'recent');
@@ -2864,8 +2764,8 @@ void main() {
       await controller.initialize();
       await Future<void>.delayed(Duration.zero);
       final writes = store.writes;
-      await controller.history.select('recent');
-      await controller.history.select('pinned');
+      await controller.history.selection.select('recent');
+      await controller.history.selection.select('pinned');
       await Future<void>.delayed(Duration.zero);
       expect(store.writes, writes);
     },
@@ -3111,7 +3011,7 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
 
-    final clip = controller.history.items.last;
+    final clip = controller.history.window.items.last;
     controller.focus(clip);
     await controller.activateFocused();
 
@@ -3132,7 +3032,7 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
 
-    await controller.activate(controller.history.items.last);
+    await controller.activate(controller.history.window.items.last);
 
     expect(host.permissionRequests, 1);
     expect(repository.copied, ['recent']);
@@ -3158,7 +3058,7 @@ void main() {
     await controller.opened(1);
 
     await controller.activate(
-      controller.history.items.last,
+      controller.history.window.items.last,
       invertAutoPaste: true,
     );
 
@@ -3178,7 +3078,7 @@ void main() {
     await controller.opened(1);
 
     expect(await controller.clearUnpinned(), isTrue);
-    expect(controller.history.items.map((clip) => clip.id), ['pinned']);
+    expect(controller.history.window.items.map((clip) => clip.id), ['pinned']);
     expect(repository.deleteAllCalls, 1);
   });
   test(
@@ -3195,10 +3095,12 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.copyGate = Completer<void>();
-      final oldAction = controller.activate(controller.history.items.last);
+      final oldAction = controller.activate(
+        controller.history.window.items.last,
+      );
       await repository.copyStarted.future;
       await controller.opened(2);
-      await controller.activate(controller.history.items.first);
+      await controller.activate(controller.history.window.items.first);
       expect(controller.activating, isTrue);
       expect(repository.copied, ['recent']);
       repository.copyGate!.complete();
@@ -3210,7 +3112,9 @@ void main() {
 
       repository.copyGate = Completer<void>();
       repository.copyStarted = Completer<void>();
-      final newAction = controller.activate(controller.history.items.first);
+      final newAction = controller.activate(
+        controller.history.window.items.first,
+      );
       await repository.copyStarted.future;
       expect(controller.activating, isTrue);
       repository.copyGate!.complete();
@@ -3233,12 +3137,12 @@ void main() {
     await controller.initialize();
     await controller.opened(1);
     repository.selectGate = Completer<HistoryClip>();
-    final clip = controller.history.items.last;
+    final clip = controller.history.window.items.last;
     final action = controller.activate(clip);
     await repository.selectStarted.future;
     await controller.opened(2);
     expect(controller.activating, isTrue);
-    await controller.activate(controller.history.items.first);
+    await controller.activate(controller.history.window.items.first);
     repository.selectGate!.complete(clip);
     await action;
     expect(repository.copied, isEmpty);
@@ -3260,7 +3164,7 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.copyGate = Completer<void>();
-      final action = controller.activate(controller.history.items.last);
+      final action = controller.activate(controller.history.window.items.last);
       await repository.copyStarted.future;
       host.nativeId = 2;
       repository.copyGate!.complete();
@@ -3296,7 +3200,7 @@ void main() {
         addTearDown(controller.dispose);
         await controller.initialize();
         await controller.opened(1);
-        await controller.activate(controller.history.items.last);
+        await controller.activate(controller.history.window.items.last);
         expect(repository.copied, ['recent']);
         expect(host.pasteCalls, 1);
         expect(host.closeIds, [1]);
@@ -3319,10 +3223,10 @@ void main() {
       addTearDown(controller.dispose);
       await controller.initialize();
       await controller.opened(1);
-      final action = controller.activate(controller.history.items.last);
+      final action = controller.activate(controller.history.window.items.last);
       await host.pasteStarted.future;
       await controller.opened(2);
-      await controller.activate(controller.history.items.first);
+      await controller.activate(controller.history.window.items.first);
       expect(controller.activating, isTrue);
       host.pasteGate!.complete(false);
       await action;
@@ -3331,35 +3235,31 @@ void main() {
     },
   );
 
-  test(
-    'retained shutdown completes when deferred action cleanup throws',
-    () async {
-      final repository = _Repository();
-      final host = _ContextHost()..permissionGranted = true;
-      final operations = _ThrowingDisposeOperations();
-      final controller = QuickPasteController(
-        repository: repository,
-        preferencesStore: MemoryQuickPastePreferencesStore(),
-        host: host,
-        ownsHostLifecycle: false,
-        fileOperations: operations,
-      );
-      await controller.initialize();
-      await controller.opened(1);
-      repository.copyGate = Completer<void>();
-      final action = controller.activate(controller.history.items.last);
-      await repository.copyStarted.future;
-      final shutdown = controller.shutdown();
-      final failedAction = expectLater(action, throwsStateError);
-      repository.copyGate!.complete();
-      await failedAction;
-      await shutdown;
-      expect(host.pasteIds, isEmpty);
-      expect(host.closeIds, isEmpty);
-      // Finish the deliberately failed cleanup without leaving test watchers.
-      controller.history.dispose();
-    },
-  );
+  test('shutdown completes when deferred action cleanup throws', () async {
+    final repository = _Repository();
+    final host = _ContextHost()..permissionGranted = true;
+    final operations = _ThrowingDisposeOperations();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+      fileOperations: operations,
+    );
+    await controller.initialize();
+    await controller.opened(1);
+    repository.copyGate = Completer<void>();
+    final action = controller.activate(controller.history.window.items.last);
+    await repository.copyStarted.future;
+    final shutdown = controller.shutdown();
+    final failedAction = expectLater(action, throwsStateError);
+    repository.copyGate!.complete();
+    await failedAction;
+    await shutdown;
+    expect(host.pasteIds, isEmpty);
+    expect(host.closeIds, isEmpty);
+    // Finish the deliberately failed cleanup without leaving test watchers.
+    controller.history.dispose();
+  });
 
   for (final copyFails in [false, true]) {
     test(
@@ -3375,7 +3275,9 @@ void main() {
         await controller.initialize();
         await controller.opened(1);
         repository.copyGate = Completer<void>();
-        final action = controller.activate(controller.history.items.last);
+        final action = controller.activate(
+          controller.history.window.items.last,
+        );
         await repository.copyStarted.future;
         var notifications = 0;
         controller.addListener(() {
@@ -3410,7 +3312,7 @@ void main() {
       await controller.initialize();
       await controller.opened(1);
       repository.selectGate = Completer<HistoryClip>();
-      final clip = controller.history.items.last;
+      final clip = controller.history.window.items.last;
       final action = controller.activate(clip);
       await repository.selectStarted.future;
       controller.dispose();
@@ -3438,12 +3340,15 @@ void main() {
     addTearDown(controller.dispose);
     await controller.initialize();
     await controller.opened(1);
-    await controller.activate(controller.history.items.last);
+    await controller.activate(controller.history.window.items.last);
     expect(repository.copied, ['recent']);
     expect(host.pasteIds, isEmpty);
     expect(host.closeIds, [1]);
     await controller.opened(2);
-    await controller.activate(controller.history.items.first, forcePaste: true);
+    await controller.activate(
+      controller.history.window.items.first,
+      forcePaste: true,
+    );
     expect(host.pasteIds, [2]);
   });
 }
@@ -3671,7 +3576,7 @@ class _PagedRepository extends _Repository {
 }
 
 class _ThrowingDisposeOperations extends FileOperationsController {
-  _ThrowingDisposeOperations() : super(_RetainedOperations());
+  _ThrowingDisposeOperations() : super(_NoopOperations());
 
   bool _throwOnce = true;
 
@@ -3685,37 +3590,9 @@ class _ThrowingDisposeOperations extends FileOperationsController {
   }
 }
 
-class _RetainedRepository extends _Repository {
-  int activeWatches = 0;
-  Completer<void>? queryGate;
+class _NoopOperations implements FileOperationsRepository {
   @override
-  Future<HistoryClipPage> query({
-    required HistoryQuery query,
-    required int limit,
-    String? cursor,
-  }) async {
-    await queryGate?.future;
-    return super.query(query: query, limit: limit, cursor: cursor);
-  }
-
-  @override
-  Stream<HistoryRuntimeEvent> watch() => Stream.multi((sink) {
-    activeWatches++;
-    sink.onCancel = () {
-      activeWatches--;
-    };
-  });
-}
-
-class _RetainedOperations implements FileOperationsRepository {
-  int activeWatches = 0;
-  @override
-  Stream<FileOperationsChange> watch() => Stream.multi((sink) {
-    activeWatches++;
-    sink.onCancel = () {
-      activeWatches--;
-    };
-  });
+  Stream<FileOperationsChange> watch() => const Stream.empty();
   @override
   Future<List<FileOperation>> load({
     bool clear = false,
@@ -3730,11 +3607,7 @@ class _RetainedOperations implements FileOperationsRepository {
   Future<void> openFile(String path) async {}
 }
 
-class _ContextHost implements RetainedQuickPasteContextHost {
-  Future<void> Function(int)? hiddenHandler;
-  @override
-  void setHiddenHandler(Future<void> Function(int)? handler) =>
-      hiddenHandler = handler;
+class _ContextHost implements QuickPasteContextHost {
   @override
   void setShutdownHandler(Future<void> Function()? handler) {
     shutdownHandler = handler;
@@ -3907,10 +3780,12 @@ class _OcrClipboard implements ClipboardWriter {
 
 class _FrameHost extends _ContextHost implements QuickPasteFrameHost {
   final presentedIds = <int>[];
+  Completer<void>? revealGate;
 
   @override
   Future<bool> presentFrame({required int presentationId}) async {
     presentedIds.add(presentationId);
+    if (revealGate case final gate?) await gate.future;
     return true;
   }
 }

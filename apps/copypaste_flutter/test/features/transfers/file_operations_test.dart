@@ -37,6 +37,67 @@ FileOperation operation(
 
 void main() {
   test(
+    'a delayed list cannot undo completion or a newer byte-progress event',
+    () async {
+      final repository = _Repository()
+        ..records = [operation('report', 'running', written: 10)];
+      final controller = FileOperationsController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final stale = Completer<List<FileOperation>>();
+      repository.pendingList = stale;
+      final refreshing = controller.refresh();
+      repository.records = [
+        operation('report', 'completed', written: 1024 * 1024),
+      ];
+      repository.changes.add(const FileOperationsChange(id: 'report'));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.items.single.phase, 'completed');
+      stale.complete([operation('report', 'running', written: 20)]);
+      await refreshing;
+      repository.changes.add(
+        const FileOperationsChange(
+          id: 'report',
+          written: 5,
+          total: 1024 * 1024,
+          finished: false,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.items.single.phase, 'completed');
+      expect(controller.forClip('clip-report')!.written, 1024 * 1024);
+      await repository.changes.close();
+    },
+  );
+
+  test(
+    'running progress stays monotonic across an older list response',
+    () async {
+      final repository = _Repository()
+        ..records = [operation('report', 'running', written: 10)];
+      final controller = FileOperationsController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final stale = Completer<List<FileOperation>>();
+      repository.pendingList = stale;
+      final refreshing = controller.refresh();
+      repository.changes.add(
+        const FileOperationsChange(
+          id: 'report',
+          written: 90,
+          total: 1024 * 1024,
+          finished: false,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      stale.complete([operation('report', 'running', written: 20)]);
+      await refreshing;
+      expect(controller.items.single.written, 90);
+      await repository.changes.close();
+    },
+  );
+
+  test(
     'independent screens share progress and reconnect without cancelling the worker',
     () async {
       final repository = _Repository()
@@ -330,6 +391,7 @@ void main() {
 }
 
 class _Repository implements FileOperationsRepository {
+  Completer<List<FileOperation>>? pendingList;
   final changes = StreamController<FileOperationsChange>.broadcast();
   List<FileOperation> records = [];
   final List<String> cancelled = [], opened = [], retried = [];
@@ -345,6 +407,11 @@ class _Repository implements FileOperationsRepository {
     String? id,
   }) async {
     loads++;
+    if (id == null && !clear && pendingList != null) {
+      final pending = pendingList!;
+      pendingList = null;
+      return pending.future;
+    }
     if (clear) {
       clearIds.add(id);
       if (failClear) throw StateError('storage unavailable');

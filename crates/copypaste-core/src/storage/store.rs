@@ -9,7 +9,7 @@ use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use zeroize::Zeroizing;
 
-use super::connection::{build_pool, run_pragma};
+use super::connection::{build_pool, limit_process_heap, release_cached_pages, run_pragma};
 use super::model::StoreError;
 use super::schema::create;
 
@@ -83,6 +83,7 @@ impl Store {
         }
         let incremental_reclaim =
             conn.pragma_query_value(None, "auto_vacuum", |r| r.get::<_, u32>(0))? == 2;
+        limit_process_heap(&conn)?;
         drop(conn);
 
         let manager = SqliteConnectionManager::file(path).with_flags(flags);
@@ -121,6 +122,7 @@ impl Store {
         );
         let pool = build_pool(manager, db_key, true)?;
         let mut conn = pool.get()?;
+        limit_process_heap(&conn)?;
         create(&mut conn)?;
         drop(conn);
         Ok(Self {
@@ -143,6 +145,16 @@ impl Store {
     /// share one pool without exposing it to callers.
     pub(super) fn conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, StoreError> {
         Ok(self.pool.get()?)
+    }
+
+    /// Returns cached database pages to the allocator, for an OS memory-pressure
+    /// signal. Never waits for a connection: when none is idle, the pages are
+    /// serving work in flight and releasing them would only cost a re-read.
+    pub fn release_memory(&self) -> Result<(), StoreError> {
+        match self.pool.try_get() {
+            Some(conn) => Ok(release_cached_pages(&conn)?),
+            None => Ok(()),
+        }
     }
 
     /// Serialises destructive retention with settings publication. The closure
@@ -232,5 +244,40 @@ mod tests {
         assert_eq!(s.count().unwrap(), 1);
         assert!(s.get(&stored.id).unwrap().is_some());
         drop(held);
+    }
+
+    #[test]
+    fn opening_bounds_sqlite_heap_and_release_never_waits_for_the_pool() {
+        let dir = TempDir::new().unwrap();
+        let s = Store::open(&dir.path().join("copypaste-v2.db"), &KEY).unwrap();
+        let stored = s.insert(item("kept across a release", T0)).unwrap();
+        {
+            let conn = s.conn().unwrap();
+            let limit: i64 = conn
+                .query_row("PRAGMA soft_heap_limit", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(limit, 10 * 1024 * 1024);
+            // Without it the page cache is per connection: the limit could not
+            // recycle across the pool and one shrink would not release it all.
+            let options = conn
+                .prepare("PRAGMA compile_options")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert!(options.iter().any(|o| o == "ENABLE_MEMORY_MANAGEMENT"));
+        }
+
+        s.release_memory().unwrap();
+        // A pool with no idle connection is skipped, not waited on for the
+        // ten-second checkout timeout.
+        let busy: Vec<_> = (0..4).map(|_| s.conn().unwrap()).collect();
+        s.release_memory().unwrap();
+        drop(busy);
+        assert_eq!(
+            s.get(&stored.id).unwrap().unwrap().content_ciphertext,
+            b"ct:kept across a release"
+        );
     }
 }

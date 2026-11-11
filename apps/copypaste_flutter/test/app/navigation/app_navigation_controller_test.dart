@@ -53,6 +53,17 @@ void main() {
     expect(notifications, 2);
   });
 
+  test('keeps navigation hidden while a replacement drawer is open', () {
+    final controller = AppNavigationController();
+    addTearDown(controller.dispose);
+    controller.handleDrawerVisibilityChanged(true);
+    controller.handleDrawerVisibilityChanged(true);
+    controller.handleDrawerVisibilityChanged(false);
+    expect(controller.bottomOverlayOpen, isTrue);
+    controller.handleDrawerVisibilityChanged(false);
+    expect(controller.bottomOverlayOpen, isFalse);
+  });
+
   testWidgets('pops the top nested route before reaching the root', (
     WidgetTester tester,
   ) async {

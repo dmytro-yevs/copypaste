@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 import '../../../platform/update/app_update_architecture.dart';
@@ -21,9 +22,11 @@ class GitHubAppUpdateRepository
     HttpClient? client,
     Uri? releasesUri,
     AndroidAppUpdateArchitecture? Function()? androidArchitecture,
+    MacosAppUpdateArchitecture? Function()? macosArchitecture,
   }) : _temporaryDirectory = temporaryDirectory,
        _androidArchitecture =
            androidArchitecture ?? currentAndroidUpdateArchitecture,
+       _macosArchitecture = macosArchitecture ?? currentMacosUpdateArchitecture,
        _client = client ?? HttpClient(),
        _releasesUri =
            releasesUri ??
@@ -40,6 +43,7 @@ class GitHubAppUpdateRepository
 
   final UpdateTemporaryDirectoryProvider _temporaryDirectory;
   final AndroidAppUpdateArchitecture? Function() _androidArchitecture;
+  final MacosAppUpdateArchitecture? Function() _macosArchitecture;
   final HttpClient _client;
   late final _downloader = GitHubArtifactDownloader(
     _client,
@@ -111,9 +115,7 @@ class GitHubAppUpdateRepository
         }
         if (response.statusCode != HttpStatus.ok) {
           await response.drain<void>();
-          throw const AppUpdateException(
-            'CopyPaste could not check for updates.',
-          );
+          throw AppUpdateException(AppStrings.current.updateCheckFailed);
         }
         return _readBoundedUtf8(response, maximumBytes: _maximumMetadataBytes);
       })().timeout(_requestTimeout - elapsed.elapsed);
@@ -128,6 +130,9 @@ class GitHubAppUpdateRepository
       androidArchitecture: target == AppUpdateTarget.android
           ? _androidArchitecture()
           : null,
+      macosArchitecture: target == AppUpdateTarget.macos
+          ? _macosArchitecture()
+          : null,
       linuxInstallation: linuxInstallation,
     );
   }
@@ -139,13 +144,11 @@ class GitHubAppUpdateRepository
   }) async {
     final asset = release.asset;
     if (asset == null) {
-      throw const AppUpdateException(
-        'This platform does not use a downloadable update package.',
-      );
+      throw AppUpdateException(AppStrings.current.updatePackageNotDownloadable);
     }
     _validateReleaseAssetUri(asset.downloadUri);
     if (asset.sizeBytes <= 0 || asset.sizeBytes > _maximumArtifactBytes) {
-      throw const AppUpdateException('The update package size is invalid.');
+      throw AppUpdateException(AppStrings.current.updatePackageSizeInvalid);
     }
 
     final root = await _temporaryDirectory();
@@ -181,8 +184,8 @@ class GitHubAppUpdateRepository
     await partial.rename(destination.path);
     if (!await _verifyUpdaterSignature(destination, asset, directory)) {
       if (await destination.exists()) await destination.delete();
-      throw const AppUpdateException(
-        'The downloaded update has an invalid updater signature.',
+      throw AppUpdateException(
+        AppStrings.current.updateUpdaterSignatureInvalid,
       );
     }
     onProgress(1);
@@ -209,16 +212,17 @@ class GitHubAppUpdateRepository
     } on ArtifactDownloadException catch (error) {
       throw AppUpdateException(switch (error.failure) {
         ArtifactDownloadFailure.untrustedUrl =>
-          'The update package URL is not trusted.',
+          AppStrings.current.updatePackageUrlUntrusted,
         ArtifactDownloadFailure.untrustedRedirect =>
-          'The update download left GitHub.',
+          AppStrings.current.updateDownloadLeftGitHub,
         ArtifactDownloadFailure.redirects =>
-          'The update download used too many redirects.',
-        ArtifactDownloadFailure.tooLarge => 'The update package is too large.',
+          AppStrings.current.updateDownloadTooManyRedirects,
+        ArtifactDownloadFailure.tooLarge =>
+          AppStrings.current.updatePackageTooLarge,
         ArtifactDownloadFailure.integrity =>
-          'The downloaded update failed its integrity check.',
+          AppStrings.current.updateIntegrityCheckFailed,
         ArtifactDownloadFailure.unavailable =>
-          'CopyPaste could not download the update.',
+          AppStrings.current.updateDownloadFailed,
       });
     }
   }
@@ -245,7 +249,7 @@ class GitHubAppUpdateRepository
     _validateReleaseAssetUri(asset.signatureUri);
     if (asset.signatureSizeBytes <= 0 ||
         asset.signatureSizeBytes > _maximumSignatureBytes) {
-      throw const AppUpdateException('The updater signature size is invalid.');
+      throw AppUpdateException(AppStrings.current.updateSignatureSizeInvalid);
     }
     final destination = File(
       '${directory.path}${Platform.pathSeparator}${asset.name}.sig',
@@ -275,7 +279,7 @@ class GitHubAppUpdateRepository
     try {
       GitHubArtifactDownloader.validateAssetUri(uri);
     } on ArtifactDownloadException {
-      throw const AppUpdateException('The update package URL is not trusted.');
+      throw AppUpdateException(AppStrings.current.updatePackageUrlUntrusted);
     }
   }
 
@@ -294,22 +298,19 @@ class GitHubReleaseParser {
     required Version currentVersion,
     required AppUpdateTarget target,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    MacosAppUpdateArchitecture? macosArchitecture,
     LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     final Object? decoded;
     try {
       decoded = jsonDecode(body);
     } on FormatException {
-      throw const AppUpdateException(
-        'GitHub returned invalid update metadata.',
-      );
+      throw AppUpdateException(AppStrings.current.updateMetadataInvalid);
     }
     final releases = switch (decoded) {
       List<Object?> values => values,
       Map<String, Object?> value => [value],
-      _ => throw const AppUpdateException(
-        'GitHub returned invalid update metadata.',
-      ),
+      _ => throw AppUpdateException(AppStrings.current.updateMetadataInvalid),
     };
     AppRelease? selected;
     for (final rawRelease in releases) {
@@ -325,22 +326,20 @@ class GitHubReleaseParser {
       if (version == null || version <= currentVersion) continue;
 
       final releaseUri = _releaseUri(rawRelease['html_url'], tag);
-      final asset = target == AppUpdateTarget.macos
-          ? null
-          : _assetFor(
-              rawRelease['assets'],
-              target: target,
-              version: versionText,
-              androidArchitecture: androidArchitecture,
-              linuxInstallation: linuxInstallation,
-            );
+      final asset = _assetFor(
+        rawRelease['assets'],
+        target: target,
+        version: versionText,
+        androidArchitecture: androidArchitecture,
+        macosArchitecture: macosArchitecture,
+        linuxInstallation: linuxInstallation,
+      );
+      // Homebrew installations need only the release; bundle installations
+      // require the signed disk image and report its absence explicitly.
       final releasePageOnly =
-          target == AppUpdateTarget.linux && linuxInstallation == null;
-      if (target != AppUpdateTarget.macos &&
-          !releasePageOnly &&
-          asset == null) {
-        continue;
-      }
+          target == AppUpdateTarget.macos ||
+          (target == AppUpdateTarget.linux && linuxInstallation == null);
+      if (!releasePageOnly && asset == null) continue;
       final candidate = AppRelease(
         version: version,
         releaseUri: releaseUri,
@@ -362,16 +361,19 @@ class GitHubReleaseParser {
     required AppUpdateTarget target,
     required String version,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    MacosAppUpdateArchitecture? macosArchitecture,
     LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     if (rawAssets is! List<Object?>) return null;
-    if (target == AppUpdateTarget.linux && linuxInstallation == null) {
+    if ((target == AppUpdateTarget.linux && linuxInstallation == null) ||
+        (target == AppUpdateTarget.macos && macosArchitecture == null)) {
       return null;
     }
     final expectedName = switch (target) {
       AppUpdateTarget.windows => 'CopyPaste-v$version-windows-x86_64-setup.exe',
       AppUpdateTarget.android => 'CopyPaste-v$version-android.apk',
-      AppUpdateTarget.macos => throw StateError('macOS uses Homebrew.'),
+      AppUpdateTarget.macos =>
+        'CopyPaste-v$version-macos-${macosArchitecture!.name}.dmg',
       AppUpdateTarget.linux => _linuxAssetName(
         version: version,
         installation: linuxInstallation,
@@ -480,13 +482,13 @@ Future<String> _readBoundedUtf8(
   final bytes = <int>[];
   await for (final chunk in input.timeout(const Duration(seconds: 30))) {
     if (bytes.length + chunk.length > maximumBytes) {
-      throw const AppUpdateException('The update metadata is too large.');
+      throw AppUpdateException(AppStrings.current.updateMetadataTooLarge);
     }
     bytes.addAll(chunk);
   }
   try {
     return utf8.decode(bytes);
   } on FormatException {
-    throw const AppUpdateException('GitHub returned invalid update metadata.');
+    throw AppUpdateException(AppStrings.current.updateMetadataInvalid);
   }
 }

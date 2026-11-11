@@ -4,6 +4,7 @@ import 'package:copypaste_flutter/features/history/repository/history_file_impor
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
@@ -27,23 +28,26 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(repository.events.close);
       await controller.initialize();
-      await controller.select('a');
+      await controller.selection.select('a');
       final states = <HistoryLoadState>[];
-      controller.addListener(() => states.add(controller.state));
+      controller.addListener(() => states.add(controller.window.state));
 
-      expect(await controller.movePinned('a', 'b', before: false), isTrue);
+      expect(
+        await controller.pinnedOrder.movePinned('a', 'b', before: false),
+        isTrue,
+      );
       expect(repository.orders, [
         ['b', 'a'],
       ]);
       expect(_ids(repository.items), ['b', 'a', 'c', 'd', 'loose']);
-      expect(controller.selectedId, 'a');
-      expect(controller.selectedClip?.id, 'a');
+      expect(controller.selection.selectedId, 'a');
+      expect(controller.selection.selectedClip?.id, 'a');
       expect(states, everyElement(HistoryLoadState.ready));
       expect(repository.requests.last.$2, isNull);
-      await controller.loadMore();
+      await controller.window.loadMore();
       // The queued authoritative refresh rebuilds the reordered boundary and
       // prefetches its neighbor before this explicit continuation is consumed.
-      expect(_ids(controller.items), ['b', 'a', 'c', 'd', 'loose']);
+      expect(_ids(controller.window.items), ['b', 'a', 'c', 'd', 'loose']);
       expect(repository.requests.last.$2, '4');
     },
   );
@@ -59,20 +63,26 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(repository.events.close);
       await controller.initialize();
-      final saving = controller.movePinned('c', 'a', before: true);
-      expect(_ids(controller.items), ['c', 'a', 'b']);
-      expect(controller.isReorderingPinned, isTrue);
-      expect(controller.canReorderPinned, isFalse);
-      expect(await controller.movePinned('b', 'a', before: true), isFalse);
-      expect(await controller.togglePin(controller.items.first), isFalse);
-      expect(await controller.deleteClip('a'), isFalse);
-      expect(await controller.deleteAll(), isFalse);
+      final saving = controller.pinnedOrder.movePinned('c', 'a', before: true);
+      expect(_ids(controller.window.items), ['c', 'a', 'b']);
+      expect(controller.pinnedOrder.isReorderingPinned, isTrue);
+      expect(controller.pinnedOrder.canReorderPinned, isFalse);
+      expect(
+        await controller.pinnedOrder.movePinned('b', 'a', before: true),
+        isFalse,
+      );
+      expect(
+        await controller.mutations.togglePin(controller.window.items.first),
+        isFalse,
+      );
+      expect(await controller.mutations.deleteClip('a'), isFalse);
+      expect(await controller.mutations.deleteAll(), isFalse);
 
       repository.saveGate!.complete();
       expect(await saving, isFalse);
-      expect(_ids(controller.items), ['a', 'b', 'c']);
-      expect(controller.isReorderingPinned, isFalse);
-      expect(controller.errorMessage, contains('could not be saved'));
+      expect(_ids(controller.window.items), ['a', 'b', 'c']);
+      expect(controller.pinnedOrder.isReorderingPinned, isFalse);
+      expect(controller.errors.message, contains('could not be saved'));
       expect(repository.orders, hasLength(1));
     },
   );
@@ -83,17 +93,17 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(repository.events.close);
     await controller.initialize();
-    controller.beginPinnedDrag('a');
+    controller.pinnedOrder.beginPinnedDrag('a');
     repository.items.add(_clip('c'));
     repository.events.add(HistoryRuntimeEvent.itemsChanged);
     await Future<void>.delayed(Duration.zero);
     expect(repository.requests, hasLength(1));
-    expect(_ids(controller.items), ['a', 'b']);
-    controller.endPinnedDrag();
+    expect(_ids(controller.window.items), ['a', 'b']);
+    controller.pinnedOrder.endPinnedDrag();
     await Future<void>.delayed(Duration.zero);
-    expect(_ids(controller.items), ['a', 'b', 'c']);
+    expect(_ids(controller.window.items), ['a', 'b', 'c']);
     expect(repository.orders, isEmpty);
-    expect(controller.draggedPinnedId, isNull);
+    expect(controller.pinnedOrder.draggedPinnedId, isNull);
   });
 
   test(
@@ -107,15 +117,15 @@ void main() {
       repository.queryGate = Completer<void>();
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
-      controller.beginPinnedDrag('a');
+      controller.pinnedOrder.beginPinnedDrag('a');
       repository.items.add(_clip('c'));
       repository.queryGate!.complete();
       await Future<void>.delayed(Duration.zero);
-      expect(_ids(controller.items), ['a', 'b']);
-      expect(controller.draggedPinnedId, 'a');
-      controller.endPinnedDrag();
+      expect(_ids(controller.window.items), ['a', 'b']);
+      expect(controller.pinnedOrder.draggedPinnedId, 'a');
+      controller.pinnedOrder.endPinnedDrag();
       await Future<void>.delayed(Duration.zero);
-      expect(_ids(controller.items), ['a', 'b', 'c']);
+      expect(_ids(controller.window.items), ['a', 'b', 'c']);
     },
   );
 
@@ -126,14 +136,16 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(repository.events.close);
     await controller.initialize();
-    final saving = controller.movePinned('a', 'b', before: false);
-    await controller.updateQuery(const HistoryQuery(search: 'new query'));
+    final saving = controller.pinnedOrder.movePinned('a', 'b', before: false);
+    await controller.window.updateQuery(
+      const HistoryQuery(search: 'new query'),
+    );
     repository.saveGate!.complete();
     await saving;
     await Future<void>.delayed(Duration.zero);
     expect(repository.requests.last.$1.search, 'new query');
-    expect(controller.state, HistoryLoadState.ready);
-    expect(controller.isReorderingPinned, isFalse);
+    expect(controller.window.state, HistoryLoadState.ready);
+    expect(controller.pinnedOrder.isReorderingPinned, isFalse);
   });
 
   test('keeps the committed order when only the refresh fails', () async {
@@ -143,11 +155,14 @@ void main() {
     addTearDown(repository.events.close);
     await controller.initialize();
     repository.queryError = StateError('refresh failed');
-    expect(await controller.movePinned('a', 'b', before: false), isTrue);
-    expect(_ids(controller.items), ['b', 'a']);
+    expect(
+      await controller.pinnedOrder.movePinned('a', 'b', before: false),
+      isTrue,
+    );
+    expect(_ids(controller.window.items), ['b', 'a']);
     expect(_ids(repository.items), ['b', 'a']);
-    expect(controller.errorMessage, contains('order was saved'));
-    expect(controller.state, HistoryLoadState.ready);
+    expect(controller.errors.message, contains('order was saved'));
+    expect(controller.window.state, HistoryLoadState.ready);
   });
 
   for (final query in [
@@ -162,9 +177,12 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       addTearDown(repository.events.close);
-      await controller.updateQuery(query);
-      expect(controller.hasUnfilteredQuery, isFalse);
-      expect(await controller.movePinned('a', 'b', before: false), isFalse);
+      await controller.window.updateQuery(query);
+      expect(controller.window.hasUnfilteredQuery, isFalse);
+      expect(
+        await controller.pinnedOrder.movePinned('a', 'b', before: false),
+        isFalse,
+      );
       expect(repository.orders, isEmpty);
     });
   }
@@ -181,13 +199,22 @@ void main() {
       addTearDown(controller.dispose);
       addTearDown(repository.events.close);
       await controller.initialize();
-      expect(await controller.movePinned('a', 'a', before: true), isFalse);
-      expect(await controller.movePinned('a', 'b', before: true), isFalse);
-      expect(await controller.movePinned('loose', 'b', before: true), isFalse);
-      expect(await controller.shiftPinned('a', up: true), isFalse);
+      expect(
+        await controller.pinnedOrder.movePinned('a', 'a', before: true),
+        isFalse,
+      );
+      expect(
+        await controller.pinnedOrder.movePinned('a', 'b', before: true),
+        isFalse,
+      );
+      expect(
+        await controller.pinnedOrder.movePinned('loose', 'b', before: true),
+        isFalse,
+      );
+      expect(await controller.pinnedOrder.shiftPinned('a', up: true), isFalse);
       expect(repository.orders, isEmpty);
-      expect(await controller.shiftPinned('a', up: false), isTrue);
-      expect(_ids(controller.items), ['b', 'a', 'loose']);
+      expect(await controller.pinnedOrder.shiftPinned('a', up: false), isTrue);
+      expect(_ids(controller.window.items), ['b', 'a', 'loose']);
     },
   );
 
@@ -216,19 +243,25 @@ void main() {
             tester.getSize(handle),
             const Size.square(AppControlSize.touch),
           );
+          final copy = find.byKey(const ValueKey<String>('history-row-copy-a'));
+          expect(tester.getSize(copy), const Size.square(AppControlSize.touch));
           expect(
-            find.byKey(const ValueKey<String>('history-row-delete-a')),
+            tester.getCenter(copy).dx,
+            lessThan(tester.getCenter(handle).dx),
+          );
+          expect(
+            find.byKey(const ValueKey<String>('history-row-more-a')),
             findsNothing,
           );
         } else {
           final pin = tester.getCenter(
             find.byKey(const ValueKey<String>('history-row-pin-a')),
           );
-          final delete = tester.getCenter(
-            find.byKey(const ValueKey<String>('history-row-delete-a')),
+          final more = tester.getCenter(
+            find.byKey(const ValueKey<String>('history-row-more-a')),
           );
-          expect(pin.dx, lessThan(delete.dx));
-          expect(delete.dx, lessThan(tester.getCenter(handle).dx));
+          expect(pin.dx, lessThan(more.dx));
+          expect(more.dx, lessThan(tester.getCenter(handle).dx));
         }
 
         final kind = platform == TargetPlatform.android
@@ -241,7 +274,7 @@ void main() {
         final target = tester.getRect(_rowContent('c'));
         await gesture.moveTo(Offset(target.center.dx, target.bottom - 4));
         await tester.pump(const Duration(milliseconds: 250));
-        expect(controller.draggedPinnedId, 'a');
+        expect(controller.pinnedOrder.draggedPinnedId, 'a');
         final placeholder = find.byKey(
           const ValueKey<String>('history-pin-drop-placeholder'),
         );
@@ -252,15 +285,15 @@ void main() {
         expect(decoration.border, isNotNull);
         expect(decoration.color, isNotNull);
         expect(repository.orders, isEmpty);
-        expect(controller.selectedId, isNull);
+        expect(controller.selection.selectedId, isNull);
         await gesture.up();
         if (mouse != null) await mouse.moveTo(Offset.zero);
         await _pumpActions(tester);
         expect(repository.orders, [
           ['b', 'c', 'a'],
         ]);
-        expect(_ids(controller.items), ['b', 'c', 'a', 'loose']);
-        expect(controller.draggedPinnedId, isNull);
+        expect(_ids(controller.window.items), ['b', 'c', 'a', 'loose']);
+        expect(controller.pinnedOrder.draggedPinnedId, isNull);
         expect(placeholder, findsNothing);
         expect(tester.takeException(), isNull);
       },
@@ -294,9 +327,9 @@ void main() {
     await mouse.moveTo(Offset.zero);
     await _pumpActions(tester);
     expect(repository.orders, isEmpty);
-    expect(_ids(controller.items), ['a', 'b', 'loose']);
-    expect(controller.selectedId, isNull);
-    expect(controller.draggedPinnedId, isNull);
+    expect(_ids(controller.window.items), ['a', 'b', 'loose']);
+    expect(controller.selection.selectedId, isNull);
+    expect(controller.pinnedOrder.draggedPinnedId, isNull);
     expect(tester.takeException(), isNull);
   });
 
@@ -333,11 +366,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(scroll.position.pixels, greaterThan(0));
-    expect(controller.items.length, greaterThan(10));
+    expect(controller.window.items.length, greaterThan(10));
     await gesture.cancel();
     await tester.pumpAndSettle();
     expect(repository.orders, isEmpty);
-    expect(controller.draggedPinnedId, isNull);
+    expect(controller.pinnedOrder.draggedPinnedId, isNull);
     expect(tester.takeException(), isNull);
   });
 
@@ -350,12 +383,12 @@ void main() {
       repository,
       TargetPlatform.android,
     );
-    await controller.updateQuery(const HistoryQuery(search: 'clip'));
+    await controller.window.updateQuery(const HistoryQuery(search: 'clip'));
     await tester.pumpAndSettle();
     expect(_handle('a'), findsNothing);
     await tester.tap(_rowContent('a'));
     await tester.pumpAndSettle();
-    expect(controller.selectedId, 'a');
+    expect(controller.selection.selectedId, 'a');
   });
 
   testWidgets('scrolling a clip body never starts a reorder', (tester) async {
@@ -379,8 +412,8 @@ void main() {
     );
     expect(scroll.position.pixels, greaterThan(0));
     expect(repository.orders, isEmpty);
-    expect(controller.draggedPinnedId, isNull);
-    expect(controller.selectedId, isNull);
+    expect(controller.pinnedOrder.draggedPinnedId, isNull);
+    expect(controller.selection.selectedId, isNull);
   });
 
   testWidgets('keyboard focus reveals the handle and Alt + Down moves a pin', (

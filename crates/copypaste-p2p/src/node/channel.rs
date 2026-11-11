@@ -9,8 +9,8 @@
 //!   deadline turns that into a task that never finishes and a peer slot that is
 //!   never freed.
 //! * **`encode`/`decode` rather than serde on `SyncMessage` directly.** Those
-//!   functions own the wire bounds, timestamp clamp, and compact binary file
-//!   chunks, so authenticated bytes are handed to them verbatim. Calling
+//!   functions own the wire bounds, timestamp clamp, and the binary item and
+//!   file-chunk envelopes, so authenticated bytes are handed to them verbatim. Calling
 //!   `Session::recv::<SyncMessage>()` would deserialize JSON directly and
 //!   quietly skip part of that contract.
 
@@ -94,6 +94,17 @@ impl NoiseChannel {
 
 impl SyncChannel for NoiseChannel {
     async fn send(&mut self, mut msg: SyncMessage) -> Result<(), SyncError> {
+        if let Some(frame) = msg.items_frame() {
+            // Payloads go to the wire from the items themselves; the frame
+            // holds only the validated header.
+            let frame = frame?;
+            self.observe_transfer(&msg);
+            return self
+                .session
+                .send_parts(&frame.parts())
+                .await
+                .map_err(transport_error);
+        }
         // Handed down verbatim, so what reaches the wire is exactly the bytes
         // `encode` validated.
         let encoded = msg.encode()?;
@@ -101,6 +112,9 @@ impl SyncChannel for NoiseChannel {
         if let SyncMessage::FileChunk { bytes, .. } = &mut msg {
             zeroize::Zeroize::zeroize(bytes);
         }
+        // Only the encoded copy is needed from here; a slow peer must not
+        // keep the decoded payload resident through the write.
+        drop(msg);
         let bytes = Zeroizing::new(encoded);
 
         self.session
@@ -110,7 +124,11 @@ impl SyncChannel for NoiseChannel {
     }
 
     async fn recv(&mut self) -> Result<SyncMessage, SyncError> {
-        let received = tokio::time::timeout(self.read_timeout, self.session.recv_bytes()).await;
+        let received = tokio::time::timeout(
+            self.read_timeout,
+            self.session.recv_bytes_sized(SyncMessage::announced_len),
+        )
+        .await;
 
         match received {
             Err(_) => Err(SyncError::Diagnostic(
@@ -122,7 +140,7 @@ impl SyncChannel for NoiseChannel {
                 copypaste_ipc::sync_issue::SyncIssueCode::ConnectionLost,
             )),
             Ok(Ok(Some(raw))) => {
-                let message = SyncMessage::decode(&raw)?;
+                let message = SyncMessage::decode_owned(raw)?;
                 self.observe_transfer(&message);
                 Ok(message)
             }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/widgets.dart';
 
 import '../../../platform/startup/launch_at_login.dart';
@@ -54,7 +55,7 @@ class LaunchAtLoginController extends ChangeNotifier
       if (!_disposed) _status = next;
     } catch (_) {
       if (!_disposed) {
-        _error = 'Start at login could not be updated. Try again.';
+        _error = AppStrings.current.settingsRuntimeLaunchAtLoginUpdateFailed;
       }
     } finally {
       _busy = false;
@@ -67,7 +68,7 @@ class LaunchAtLoginController extends ChangeNotifier
       await _gateway.openSystemSettings();
     } catch (_) {
       if (!_disposed) {
-        _error = 'System startup settings could not be opened.';
+        _error = AppStrings.current.settingsRuntimeStartupSettingsOpenFailed;
         notifyListeners();
       }
     }

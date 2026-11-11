@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 enum FileOperationKind { import, receive, send }
@@ -29,21 +30,25 @@ class FileOperation {
   bool get active => phase == 'running';
   bool get failed => phase == 'failed' || phase == 'interrupted';
   double? get progress => total > 0 ? (written / total).clamp(0, 1) : null;
-  String get label => switch (phase) {
-    'running' => switch (kind) {
-      FileOperationKind.send => 'Sending',
-      FileOperationKind.receive => 'Downloading',
-      FileOperationKind.import => 'Adding',
-    },
-    'completed' => switch (kind) {
-      FileOperationKind.import => 'Added',
-      FileOperationKind.send => 'Sent',
-      FileOperationKind.receive => 'Completed',
-    },
-    'cancelled' => 'Cancelled',
-    'interrupted' => 'Interrupted',
-    _ => 'Failed',
-  };
+  String get label {
+    final strings = AppStrings.current;
+    return switch (phase) {
+      'running' => switch (kind) {
+        FileOperationKind.send => strings.transfersPhaseSending,
+        FileOperationKind.receive => strings.transfersPhaseDownloading,
+        FileOperationKind.import => strings.transfersPhaseAdding,
+      },
+      'completed' => switch (kind) {
+        FileOperationKind.import => strings.transfersPhaseAdded,
+        FileOperationKind.send => strings.transfersPhaseSent,
+        FileOperationKind.receive => strings.transfersPhaseCompleted,
+      },
+      'cancelled' => strings.transfersPhaseCancelled,
+      'interrupted' => strings.transfersPhaseInterrupted,
+      _ => strings.transfersPhaseFailed,
+    };
+  }
+
   FileOperation withProgress(int bytes, int size) => FileOperation(
     id: id,
     itemId: itemId,
@@ -52,8 +57,8 @@ class FileOperation {
     phase: phase,
     sourceDevice: sourceDevice,
     destinationDevice: destinationDevice,
-    written: bytes,
-    total: size,
+    written: bytes < written ? written : bytes,
+    total: size < total ? total : size,
     startedAt: startedAt,
     finishedAt: finishedAt,
     error: error,
@@ -204,6 +209,7 @@ class FileOperationsController extends ChangeNotifier {
       (change) {
         final index = _items.indexWhere((item) => item.id == change.id);
         if (!change.finished && index >= 0) {
+          if (!_items[index].active) return;
           _recordSpeed(change);
           _items = List.unmodifiable([
             for (var i = 0; i < _items.length; i++)
@@ -226,7 +232,7 @@ class FileOperationsController extends ChangeNotifier {
       },
       onError: (Object _) {
         if (_disposed) return;
-        error = 'Transfer updates are unavailable. Reopen to refresh.';
+        error = AppStrings.current.transfersUpdatesUnavailable;
         notifyListeners();
       },
     );
@@ -263,25 +269,45 @@ class FileOperationsController extends ChangeNotifier {
         for (final previous in absentActive) {
           final result = await _repository.load(id: previous.id);
           if (_disposed) return;
+          if (generation != _generation) break;
           _remember(result);
         }
-        _remember(records);
-        _retainActiveSpeedSamples(records);
+        if (generation != _generation) {
+          _refreshAgain = true;
+          continue;
+        }
+        final current = records.map(_keepNewerState).toList(growable: false);
+        _remember(current);
+        _retainActiveSpeedSamples(current);
         _items = List.unmodifiable([
-          ...records.where((item) => item.active),
-          ...records.where((item) => !item.active),
+          ...current.where((item) => item.active),
+          ...current.where((item) => !item.active),
         ]);
         error = null;
         notifyListeners();
       } while (_refreshAgain);
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfers could not be loaded. Try again.';
+        error = AppStrings.current.transfersLoadFailed;
         notifyListeners();
       }
     } finally {
       _refresh = null;
     }
+  }
+
+  /// An operation ID owns one lifetime: terminal results never become active
+  /// again, and delayed snapshots cannot undo byte progress already observed.
+  FileOperation _keepNewerState(FileOperation incoming) {
+    final cached = _clipStates[incoming.itemId];
+    final previous =
+        _items.where((item) => item.id == incoming.id).firstOrNull ??
+        (cached?.id == incoming.id ? cached : null);
+    if (previous == null) return incoming;
+    if (!previous.active) return incoming.active ? previous : incoming;
+    return incoming.active
+        ? incoming.withProgress(previous.written, previous.total)
+        : incoming;
   }
 
   Future<void> _loadChanged(String id, {required bool terminal}) async {
@@ -298,8 +324,9 @@ class FileOperationsController extends ChangeNotifier {
     try {
       do {
         _reloadIds.remove(id);
-        final records = await _repository.load(id: id);
+        final loaded = await _repository.load(id: id);
         if (_disposed || generation != _generation) return;
+        final records = loaded.map(_keepNewerState).toList(growable: false);
         _remember(records);
         final next = {for (final item in _items) item.id: item};
         for (final item in records) {
@@ -324,7 +351,7 @@ class FileOperationsController extends ChangeNotifier {
       } while (_reloadIds.contains(id));
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfer updates could not be loaded.';
+        error = AppStrings.current.transfersUpdatesLoadFailed;
         notifyListeners();
       }
     } finally {
@@ -351,7 +378,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.retry(item);
     } catch (_) {
       if (!_disposed) {
-        error = 'This file could not be retried.';
+        error = AppStrings.current.transfersRetryFailed;
         notifyListeners();
       }
     }
@@ -366,7 +393,7 @@ class FileOperationsController extends ChangeNotifier {
       await refresh();
     } catch (_) {
       if (!_disposed) {
-        error = 'Transfer history could not be cleared.';
+        error = AppStrings.current.transfersClearHistoryFailed;
         notifyListeners();
       }
     }
@@ -384,7 +411,7 @@ class FileOperationsController extends ChangeNotifier {
       await refresh();
     } catch (_) {
       if (!_disposed) {
-        error = 'This history record could not be removed.';
+        error = AppStrings.current.transfersRemoveRecordFailed;
         notifyListeners();
       }
     }
@@ -396,7 +423,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.cancel(item.id);
     } catch (_) {
       if (!_disposed) {
-        error = 'The transfer could not be cancelled. It may still be running.';
+        error = AppStrings.current.transfersCancelFailed;
         notifyListeners();
       }
     }
@@ -409,8 +436,7 @@ class FileOperationsController extends ChangeNotifier {
       await _repository.openFile(path);
     } catch (_) {
       if (!_disposed) {
-        error =
-            'The saved file is unavailable. It may have been moved or deleted.';
+        error = AppStrings.current.transfersSavedFileUnavailable;
         notifyListeners();
       }
     }

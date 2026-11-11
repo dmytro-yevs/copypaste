@@ -4,41 +4,48 @@
 //! never opens a network listener and intentionally collapses transport details
 //! to pathless errors before a Flutter caller can see them.
 
+#[cfg(not(target_os = "android"))]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_os = "android"))]
 use std::time::Duration;
 
-use copypaste_ipc::transport;
-use copypaste_ipc::{Method, Request, Response, MAX_FRAME_BYTES, PROTOCOL_VERSION};
+#[cfg(not(target_os = "android"))]
+use copypaste_ipc::{transport, Request, MAX_FRAME_BYTES, PROTOCOL_VERSION};
+use copypaste_ipc::{Method, Response};
+#[cfg(not(target_os = "android"))]
 use futures_util::{SinkExt, StreamExt};
+#[cfg(not(target_os = "android"))]
 use tokio::time::timeout;
+#[cfg(not(target_os = "android"))]
 use tokio_util::codec::{Framed, LinesCodec};
 
 use crate::api::RuntimeError;
 use crate::{api::RuntimeEvent, frb_generated::StreamSink};
 
+#[cfg(not(target_os = "android"))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(not(target_os = "android"))]
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
+#[cfg(not(target_os = "android"))]
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(target_os = "android")]
 pub(crate) async fn request(method: Method) -> Result<Response, RuntimeError> {
-    #[cfg(target_os = "android")]
-    {
-        return crate::runtime_android::request(method)
-            .await
-            .and_then(response_to_result);
-    }
+    crate::runtime_android::request(method)
+        .await
+        .and_then(response_to_result)
+}
 
-    #[cfg(not(target_os = "android"))]
-    {
-        let timeout_budget = if method.is_long_running() {
-            TRANSFER_TIMEOUT
-        } else {
-            REQUEST_TIMEOUT
-        };
-        timeout(timeout_budget, request_once(method))
-            .await
-            .map_err(|_| RuntimeError::timeout())?
-    }
+#[cfg(not(target_os = "android"))]
+pub(crate) async fn request(method: Method) -> Result<Response, RuntimeError> {
+    let timeout_budget = if method.is_long_running() {
+        TRANSFER_TIMEOUT
+    } else {
+        REQUEST_TIMEOUT
+    };
+    timeout(timeout_budget, request_once(method))
+        .await
+        .map_err(|_| RuntimeError::timeout())?
 }
 
 #[cfg(not(target_os = "android"))]
@@ -110,79 +117,69 @@ fn response_to_result(response: Response) -> Result<Response, RuntimeError> {
     Err(RuntimeError::from_daemon(code, message))
 }
 
-/// Keeps a dedicated daemon watch connection open until Flutter cancels its
-/// generated stream. Events hold no clip content; callers reload through the
-/// ordinary typed methods after a signal.
+#[cfg(target_os = "android")]
 pub(crate) async fn watch(
     watch_id: u64,
     sink: StreamSink<RuntimeEvent>,
 ) -> Result<(), RuntimeError> {
-    #[cfg(target_os = "android")]
-    {
-        return crate::runtime_android::watch(watch_id, sink).await;
-    }
+    crate::runtime_android::watch(watch_id, sink).await
+}
 
-    #[cfg(not(target_os = "android"))]
-    {
-        let typed = match request(Method::Status).await?.data {
-            Some(copypaste_ipc::ResponseData::Status(status)) => status.runtime_watch,
-            _ => return Err(RuntimeError::internal()),
+/// Keeps a dedicated daemon watch connection open until Flutter cancels its
+/// generated stream. Events hold no clip content; callers reload through the
+/// ordinary typed methods after a signal.
+#[cfg(not(target_os = "android"))]
+pub(crate) async fn watch(
+    watch_id: u64,
+    sink: StreamSink<RuntimeEvent>,
+) -> Result<(), RuntimeError> {
+    let stream = transport::connect(&crate::runtime::socket_path()?)
+        .await
+        .map_err(|_| RuntimeError::daemon_unreachable())?;
+    let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let request = Request {
+        id,
+        protocol_version: PROTOCOL_VERSION,
+        method: Method::WatchRuntime,
+    };
+    let line = serde_json::to_string(&request).map_err(|_| RuntimeError::internal())?;
+    framed
+        .send(line)
+        .await
+        .map_err(|_| RuntimeError::daemon_unreachable())?;
+    let ack = next_response(&mut framed, id).await?;
+    if !matches!(ack.data, Some(copypaste_ipc::ResponseData::Empty {})) {
+        return Err(RuntimeError::internal());
+    }
+    if sink.add(runtime_ready()).is_err() {
+        return Ok(());
+    }
+    let mut cancelled = crate::runtime::watch_stop_rx(watch_id)?;
+    loop {
+        let line = tokio::select! {
+            changed = cancelled.changed() => {
+                changed.map_err(|_| RuntimeError::internal())?;
+                return Ok(());
+            }
+            line = framed.next() => line,
         };
-        let stream = transport::connect(&crate::runtime::socket_path()?)
-            .await
-            .map_err(|_| RuntimeError::daemon_unreachable())?;
-        let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let request = Request {
-            id,
-            protocol_version: PROTOCOL_VERSION,
-            method: if typed {
-                Method::WatchRuntime
-            } else {
-                Method::Watch
-            },
+        let Some(line) = line else {
+            return Ok(());
         };
-        let line = serde_json::to_string(&request).map_err(|_| RuntimeError::internal())?;
-        framed
-            .send(line)
-            .await
-            .map_err(|_| RuntimeError::daemon_unreachable())?;
-        let ack = next_response(&mut framed, id).await?;
-        if !matches!(ack.data, Some(copypaste_ipc::ResponseData::Empty {})) {
+        let line = line.map_err(|_| RuntimeError::daemon_unreachable())?;
+        let response: Response =
+            serde_json::from_str(&line).map_err(|_| RuntimeError::internal())?;
+        if response.id != id {
             return Err(RuntimeError::internal());
         }
-        if sink.add(runtime_ready(typed)).is_err() {
+        let response = response_to_result(response)?;
+        let Some(copypaste_ipc::ResponseData::RuntimeEvent(event)) = response.data else {
+            return Err(RuntimeError::internal());
+        };
+        let event = typed_runtime_event(event);
+        if sink.add(event).is_err() {
             return Ok(());
-        }
-        let mut cancelled = crate::runtime::watch_stop_rx(watch_id)?;
-        loop {
-            let line = tokio::select! {
-                changed = cancelled.changed() => {
-                    changed.map_err(|_| RuntimeError::internal())?;
-                    return Ok(());
-                }
-                line = framed.next() => line,
-            };
-            let Some(line) = line else {
-                return Ok(());
-            };
-            let line = line.map_err(|_| RuntimeError::daemon_unreachable())?;
-            let response: Response =
-                serde_json::from_str(&line).map_err(|_| RuntimeError::internal())?;
-            if response.id != id {
-                return Err(RuntimeError::internal());
-            }
-            let response = response_to_result(response)?;
-            let event = match response.data {
-                Some(copypaste_ipc::ResponseData::Event(event)) if !typed => runtime_event(event),
-                Some(copypaste_ipc::ResponseData::RuntimeEvent(event)) if typed => {
-                    typed_runtime_event(event)
-                }
-                _ => return Err(RuntimeError::internal()),
-            };
-            if sink.add(event).is_err() {
-                return Ok(());
-            }
         }
     }
 }
@@ -204,7 +201,7 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
     }
 }
 
-pub(crate) fn runtime_ready(typed: bool) -> RuntimeEvent {
+pub(crate) fn runtime_ready() -> RuntimeEvent {
     RuntimeEvent {
         sync_status: None,
         kind: "ready".into(),
@@ -214,7 +211,7 @@ pub(crate) fn runtime_ready(typed: bool) -> RuntimeEvent {
         file_operation: None,
         progress: None,
         capture: None,
-        runtime_watch: typed,
+        runtime_watch: true,
     }
 }
 
@@ -266,6 +263,7 @@ pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> Run
     mapped
 }
 
+#[cfg(not(target_os = "android"))]
 async fn next_response(
     framed: &mut Framed<transport::Stream, LinesCodec>,
     expected_id: u64,

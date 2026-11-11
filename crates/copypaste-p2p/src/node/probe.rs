@@ -36,6 +36,10 @@ const PROBE_TIMEOUT_SECS: u64 = 5;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
 // At most one discovery address and one persisted address are attempted.
 const PROBE_REFRESH_LEAD_MS: i64 = PROBE_TIMEOUT_SECS as i64 * 2 * 1_000;
+/// Renewal batches never start closer together than this.
+const PROBE_BATCH_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// Bounds how late a peer that gains its first dial candidate is noticed.
+const PROBE_IDLE_RECHECK: Duration = Duration::from_millis(PROBE_FRESH_MS as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeState {
@@ -75,21 +79,24 @@ impl AuthenticatedReachability {
         }
     }
 
-    /// Returns `Unknown` rather than an expired positive or negative value.
+    /// Retain a failed observation while it is renewed. Only a current positive
+    /// observation may claim Online; a missing observation remains Unknown.
     #[must_use]
     pub fn state_at(&self, now_ms: i64) -> ProbeState {
-        if self.observed_at_ms > now_ms
-            || !matches!(self.fresh_until_ms, Some(fresh_until_ms) if now_ms <= fresh_until_ms)
-        {
+        if self.observed_at_ms > now_ms {
             ProbeState::Unknown
-        } else {
+        } else if self.state == ProbeState::Offline || self.is_current_at(now_ms) {
             self.state
+        } else {
+            ProbeState::Unknown
         }
     }
 
     #[must_use]
     pub fn is_current_at(&self, now_ms: i64) -> bool {
-        self.state_at(now_ms) != ProbeState::Unknown
+        self.state != ProbeState::Unknown
+            && self.observed_at_ms <= now_ms
+            && matches!(self.fresh_until_ms, Some(fresh_until_ms) if now_ms <= fresh_until_ms)
     }
 
     fn should_refresh_at(&self, now_ms: i64) -> bool {
@@ -105,11 +112,27 @@ impl AuthenticatedReachability {
                     if fresh_until_ms.saturating_sub(now_ms) <= refresh_lead_ms
             )
     }
+
+    /// The earliest time at which [`Self::should_refresh_at`] becomes true.
+    fn refresh_due_at(&self, now_ms: i64) -> i64 {
+        if self.should_refresh_at(now_ms) {
+            return now_ms;
+        }
+        let refresh_lead_ms = match self.state {
+            ProbeState::Online => PROBE_REFRESH_LEAD_MS,
+            ProbeState::Offline | ProbeState::Unknown => 0,
+        };
+        self.fresh_until_ms.map_or(now_ms, |fresh_until_ms| {
+            fresh_until_ms.saturating_sub(refresh_lead_ms)
+        })
+    }
 }
 
 impl Node {
     /// Maintains RTT independently of UI reads for the lifetime of the listener.
     /// Existing freshness and in-flight guards coalesce every renewal batch.
+    /// The monitor sleeps until the earliest renewal is due or a new
+    /// observation is recorded, instead of waking on a fixed tick.
     pub(super) async fn monitor_reachability<F>(
         self: Arc<Self>,
         on_complete: F,
@@ -117,26 +140,62 @@ impl Node {
     ) where
         F: Fn(bool) + Send + Sync + Clone + 'static,
     {
-        let mut tick = tokio::time::interval(Duration::from_secs(1));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut next_batch = tokio::time::Instant::now();
         loop {
-            if *shutdown.borrow() {
-                return;
-            }
             tokio::select! {
                 biased;
                 _ = shutdown.changed() => return,
-                _ = tick.tick() => {
-                    let notify = on_complete.clone();
-                    let completion_shutdown = shutdown.clone();
-                    self.refresh_reachability(self.peers().list(), move |state_changed| {
-                        if !*completion_shutdown.borrow() {
-                            notify(state_changed);
-                        }
-                    });
-                }
+                () = tokio::time::sleep_until(next_batch) => {}
             }
+            if *shutdown.borrow() {
+                return;
+            }
+            let started = tokio::time::Instant::now();
+            let notify = on_complete.clone();
+            let completion_shutdown = shutdown.clone();
+            self.refresh_reachability(self.peers().list(), move |state_changed| {
+                if !*completion_shutdown.borrow() {
+                    notify(state_changed);
+                }
+            });
+            let due = started + self.next_reachability_refresh_in(crate::now_ms());
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                () = tokio::time::sleep_until(due) => {}
+                () = self.reachability_recorded.notified() => {}
+            }
+            next_batch = started + PROBE_BATCH_MIN_INTERVAL;
         }
+    }
+
+    /// Time until a peer with a dial candidate next needs renewal. In-flight
+    /// probes record an observation on completion, which wakes the monitor.
+    fn next_reachability_refresh_in(&self, now_ms: i64) -> Duration {
+        let in_flight = self
+            .probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let due_ms = self
+            .peers()
+            .list()
+            .iter()
+            .filter(|peer| !in_flight.contains(&peer.pairing_id))
+            .filter(|peer| !self.sync_activity.version_retry_deferred(&peer.pairing_id))
+            .filter(|peer| !self.dial_candidates(peer).is_empty())
+            .map(|peer| {
+                let due_ms = self
+                    .authenticated_reachability(&peer.pairing_id)
+                    .map_or(now_ms, |observation| observation.refresh_due_at(now_ms));
+                self.probe_retry(&peer.pairing_id)
+                    .map_or(due_ms, |retry_ms| due_ms.max(retry_ms))
+            })
+            .min();
+        due_ms.map_or(PROBE_IDLE_RECHECK, |due_ms| {
+            Duration::from_millis(u64::try_from(due_ms.saturating_sub(now_ms)).unwrap_or(0))
+                .min(PROBE_IDLE_RECHECK)
+        })
     }
 
     /// Starts one probe per peer needing renewal and returns immediately.
@@ -203,9 +262,15 @@ impl Node {
     }
 
     fn claim_probe(&self, pairing_id: &str, now_ms: i64) -> bool {
-        if self
-            .authenticated_reachability(pairing_id)
-            .is_some_and(|observation| !observation.should_refresh_at(now_ms))
+        // An incompatible peer can authenticate but never acknowledge, so it
+        // never gains a measured observation that would end the renewal.
+        if self.sync_activity.version_retry_deferred(pairing_id)
+            || self
+                .probe_retry(pairing_id)
+                .is_some_and(|retry_ms| now_ms < retry_ms)
+            || self
+                .authenticated_reachability(pairing_id)
+                .is_some_and(|observation| !observation.should_refresh_at(now_ms))
         {
             return false;
         }
@@ -213,6 +278,27 @@ impl Node {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(pairing_id.to_string())
+    }
+
+    fn probe_retry(&self, pairing_id: &str) -> Option<i64> {
+        self.probe_retry_at
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(pairing_id)
+            .copied()
+    }
+
+    /// Holds the next renewal after an unacknowledged probe; every other
+    /// outcome is governed by the freshness of the observation it records.
+    fn set_probe_retry(&self, pairing_id: &str, retry_ms: Option<i64>) {
+        let mut retries = self
+            .probe_retry_at
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match retry_ms {
+            Some(retry_ms) => retries.insert(pairing_id.to_string(), retry_ms),
+            None => retries.remove(pairing_id),
+        };
     }
 
     fn release_probe(&self, pairing_id: &str) {
@@ -247,6 +333,7 @@ impl Node {
             if let Ok(Ok((latency_ms, profile, current))) = result {
                 let observation =
                     AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
+                self.set_probe_retry(&peer.pairing_id, None);
                 self.record_authenticated_profile(&current.pairing_id, profile.as_ref());
                 self.touch_peer(
                     &current,
@@ -268,20 +355,25 @@ impl Node {
         }
         // A successful authenticated transport followed by an application
         // protocol failure is an online device with a condition, not Offline.
+        // Its presence stays unmeasured, so it is renewed at the failure
+        // cadence rather than as soon as the monitor wakes.
+        let now = crate::now_ms();
         if self
             .sync_activity
             .authenticated_since(&peer.pairing_id, probe_started)
         {
             self.sync_activity.failure(&peer.pairing_id, last_error);
+            self.set_probe_retry(
+                &peer.pairing_id,
+                Some(now.saturating_add(PROBE_FAILURE_FRESH_MS)),
+            );
             self.record_reachability(
                 &peer.pairing_id,
-                AuthenticatedReachability::online(None, crate::now_ms()),
+                AuthenticatedReachability::online(None, now),
             );
         } else {
-            self.record_reachability(
-                &peer.pairing_id,
-                AuthenticatedReachability::offline(crate::now_ms()),
-            );
+            self.set_probe_retry(&peer.pairing_id, None);
+            self.record_reachability(&peer.pairing_id, AuthenticatedReachability::offline(now));
         }
         Err(last_error)
     }
@@ -326,7 +418,11 @@ async fn probe_session(
             })
             .await
             .map_err(super::dial::session_error)?;
-        match channel.recv().await.map_err(super::dial::session_error)? {
+        match channel
+            .recv()
+            .await
+            .map_err(|error| node.first_reply_error(&current.pairing_id, error))?
+        {
             SyncMessage::ProbeAck {
                 protocol_version,
                 nonce: received,
@@ -384,6 +480,26 @@ mod tests {
             profile: None,
             profile_observed_at_ms: 0,
         }
+    }
+
+    #[test]
+    fn the_monitor_sleeps_until_the_next_renewal_is_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let now = crate::now_ms();
+        assert_eq!(node.next_reachability_refresh_in(now), PROBE_IDLE_RECHECK);
+
+        let token = PairingToken::generate();
+        let trusted = peer(&token, Some("127.0.0.1:9".parse().unwrap()));
+        node.peers().upsert(trusted.clone()).unwrap();
+        assert_eq!(node.next_reachability_refresh_in(now), Duration::ZERO);
+
+        node.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::online(Some(5), now),
+        );
+        let due = Duration::from_millis((PROBE_FRESH_MS - PROBE_REFRESH_LEAD_MS) as u64);
+        assert_eq!(node.next_reachability_refresh_in(now), due);
     }
 
     #[test]
@@ -449,11 +565,16 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == Code::VersionMismatch));
+        assert!(client.sync_deferred(&trusted.pairing_id));
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "an incompatible peer must not be re-probed by the monitor"
+        )));
         client.sync_activity.failure(
             &trusted.pairing_id,
             NodeError::Diagnostic(Code::StorageFull),
         );
         client.probe_one(&trusted).await.unwrap();
+        assert!(!client.sync_deferred(&trusted.pairing_id));
         let after = client.sync_status(true);
         assert!(!after.peers[0]
             .issues
@@ -464,6 +585,42 @@ mod tests {
             .iter()
             .any(|issue| issue.code == Code::StorageFull));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_authenticated_peer_that_never_acknowledges_is_renewed_at_the_failure_cadence() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = node(&dir);
+        let token = PairingToken::generate();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let trusted = peer(&token, Some(listener.local_addr().unwrap()));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut session = Session::accept(socket, &token.psk()).await.unwrap();
+            session.recv_bytes().await.unwrap();
+            session.close().await.unwrap();
+        });
+        assert!(client.probe_one(&trusted).await.is_err());
+        server.await.unwrap();
+        let observation = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert_eq!(observation.state, ProbeState::Online);
+        assert_eq!(observation.latency_ms, None);
+
+        // Further presence from the same peer does not bypass the hold.
+        client.note_authenticated(&trusted.pairing_id);
+        assert!(!client.refresh_reachability([trusted.clone()], |_| panic!(
+            "an unacknowledged peer must not be re-probed at the batch floor"
+        )));
+        let wait = client.next_reachability_refresh_in(crate::now_ms());
+        assert!(wait > PROBE_BATCH_MIN_INTERVAL, "{wait:?}");
+        assert!(wait <= Duration::from_millis(PROBE_FAILURE_FRESH_MS as u64));
+        assert!(client.claim_probe(
+            &trusted.pairing_id,
+            crate::now_ms() + PROBE_FAILURE_FRESH_MS
+        ));
     }
 
     #[tokio::test]
@@ -527,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn observations_fail_closed_after_their_freshness_window() {
+    fn offline_survives_expiry_while_refresh_and_online_freshness_are_preserved() {
         let online = AuthenticatedReachability::online(Some(12), 100);
         assert_eq!(online.state_at(100), ProbeState::Online);
         assert!(!online.should_refresh_at(100));
@@ -541,10 +698,13 @@ mod tests {
         assert_eq!(offline.state_at(100), ProbeState::Offline);
         assert!(!offline.should_refresh_at(100));
         assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS));
+        assert!(!offline.is_current_at(100 + PROBE_FAILURE_FRESH_MS + 1));
+        assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS + 1));
         assert_eq!(
             offline.state_at(100 + PROBE_FAILURE_FRESH_MS + 1),
-            ProbeState::Unknown
+            ProbeState::Offline
         );
+        assert_eq!(offline.state_at(99), ProbeState::Unknown);
     }
 
     #[test]
@@ -883,6 +1043,19 @@ mod tests {
             shutdown_rx,
         ));
         let client = node(&client_dir);
+        client.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::offline(
+                crate::now_ms().saturating_sub(PROBE_FAILURE_FRESH_MS + 1),
+            ),
+        );
+        assert_eq!(
+            client
+                .authenticated_reachability(&trusted.pairing_id)
+                .unwrap()
+                .state_at(crate::now_ms()),
+            ProbeState::Offline
+        );
         let (complete_tx, complete_rx) = oneshot::channel();
         assert!(
             client.refresh_reachability([trusted.clone()], move |state_changed| {

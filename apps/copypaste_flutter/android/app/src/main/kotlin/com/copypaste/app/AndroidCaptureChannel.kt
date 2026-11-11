@@ -61,6 +61,29 @@ internal class AndroidCaptureSignalDispatcher(
     }
 }
 
+/** Samples a prerequisite that has no public listener while visible setup waits for it. */
+internal class AndroidSetupSampler(
+    private val handler: Handler,
+    private val needed: () -> Boolean,
+    private val signal: () -> Unit,
+    private val intervalMs: Long = 1_000L,
+) {
+    private val task = object : Runnable {
+        override fun run() {
+            if (!needed()) return
+            signal()
+            handler.postDelayed(this, intervalMs)
+        }
+    }
+
+    fun update() {
+        handler.removeCallbacks(task)
+        if (needed()) handler.postDelayed(task, intervalMs)
+    }
+
+    fun cancel() = handler.removeCallbacks(task)
+}
+
 internal class AndroidCaptureChannel(
     private val activity: MainActivity,
     messenger: BinaryMessenger,
@@ -96,13 +119,9 @@ internal class AndroidCaptureChannel(
         AndroidCaptureSignals.changed()
     }
     private var stateListening = false
-    private val setupSampler = object : Runnable {
-        override fun run() {
-            if (!needsSetupSampling()) return
-            AndroidCaptureSignals.changed()
-            main.postDelayed(this, setupSampleIntervalMs)
-        }
-    }
+    // READ_LOGS changes made through ADB have no public listener. Sample only
+    // while the visible setup stream is waiting for that prerequisite.
+    private val setupSampler = AndroidSetupSampler(main, ::needsSetupSampling, AndroidCaptureSignals::changed)
     private val shizuku = ShizukuCaptureSetup(activity.applicationContext) {
         AndroidCaptureSignals.changed()
     }
@@ -127,7 +146,7 @@ internal class AndroidCaptureChannel(
         AndroidCaptureSignals.add(stateChanged)
         stateObserver.start()
         statePublisher.listen(events)
-        updateSetupSampler()
+        setupSampler.update()
     }
 
     override fun onCancel(arguments: Any?) {
@@ -135,24 +154,19 @@ internal class AndroidCaptureChannel(
         stateObserver.stop()
         AndroidCaptureSignals.remove(stateChanged)
         stateDispatcher.cancel()
-        main.removeCallbacks(setupSampler)
+        setupSampler.cancel()
         statePublisher.cancel()
     }
 
     private fun publishState() {
         statePublisher.publish()
-        updateSetupSampler()
+        setupSampler.update()
     }
 
     private fun needsSetupSampling(): Boolean =
         stateListening &&
             activity.hasWindowFocus() &&
             !AndroidCaptureState.privilegedGrants(activity)
-
-    private fun updateSetupSampler() {
-        main.removeCallbacks(setupSampler)
-        if (needsSetupSampling()) main.postDelayed(setupSampler, setupSampleIntervalMs)
-    }
 
     private fun publishScreenshotState() {
         val listener = screenshotSink ?: return
@@ -273,9 +287,6 @@ internal class AndroidCaptureChannel(
 
     companion object {
         private const val channelName = "com.copypaste.app/android_capture"
-        // READ_LOGS changes made through ADB have no public listener. Poll only
-        // while the visible setup stream is waiting for that prerequisite.
-        private const val setupSampleIntervalMs = 1_000L
     }
 }
 

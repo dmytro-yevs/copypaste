@@ -5,6 +5,11 @@ use rusqlite::Connection;
 use super::model::StoreError;
 
 const CURRENT_TABLES: &[&str] = &[
+    "organization_records",
+    "sync_records",
+    "history_tags",
+    "history_clip_tags",
+    "history_pin_state",
     "clipboard_items",
     "clipboard_fts",
     "clipboard_live_count",

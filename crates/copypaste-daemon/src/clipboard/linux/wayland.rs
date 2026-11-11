@@ -35,7 +35,7 @@ use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_source_v1::ZwlrDataControlSourceV1,
 };
 
-use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
+use super::super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
 
 const MAX_MIMES: usize = 64;
 const MAX_MIME_BYTES: usize = 255;
@@ -55,6 +55,21 @@ struct PublicState {
     dirty: bool,
     sequence: u64,
     protocol_unsupported: bool,
+    signal: Arc<ChangeSignal>,
+}
+
+impl PublicState {
+    fn deactivate(&mut self) {
+        let was_active = self.active;
+        self.active = false;
+        self.dirty = false;
+        self.sequence = 0;
+        // Wake only on loss, so the capture loop resumes timed reconnects
+        // without a wakeup per failed reconnect attempt.
+        if was_active {
+            self.signal.notify.notify_one();
+        }
+    }
 }
 
 enum Command {
@@ -173,12 +188,15 @@ impl WaylandClipboard {
             })
     }
 
-    pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
+    pub(super) fn new(data_dir: &Path, signal: Arc<ChangeSignal>) -> std::io::Result<Self> {
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
         let (read, write) = UnixStream::pair()?;
         read.set_nonblocking(true)?;
         write.set_nonblocking(true)?;
-        let state = Arc::new(Mutex::new(PublicState::default()));
+        let state = Arc::new(Mutex::new(PublicState {
+            signal,
+            ..PublicState::default()
+        }));
         let worker_state = Arc::clone(&state);
         let sender = Arc::new(Sender {
             commands: Mutex::new(VecDeque::new()),
@@ -270,6 +288,11 @@ impl Drop for WaylandClipboard {
 }
 
 impl ClipboardSource for WaylandClipboard {
+    fn change_signal(&self) -> Option<Arc<ChangeSignal>> {
+        let state = self.state.lock().ok()?;
+        Some(Arc::clone(&state.signal))
+    }
+
     fn poll(&mut self) -> Option<Capture> {
         self.read(&copypaste_ipc::ConfigData::default())
     }
@@ -287,11 +310,11 @@ impl ClipboardSource for WaylandClipboard {
         self.active()
     }
 
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
-        self.write(HashMap::from([(
-            "text/plain;charset=utf-8".into(),
-            text.as_bytes().to_vec(),
-        )]))
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+        self.write(concealed_values(
+            HashMap::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]),
+            concealed,
+        ))
     }
 
     fn set_binary_contents(
@@ -300,6 +323,7 @@ impl ClipboardSource for WaylandClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (mime, _) = super::formats::write_format(content_type)
@@ -316,8 +340,11 @@ impl ClipboardSource for WaylandClipboard {
         } else {
             bytes.to_vec()
         };
-        self.write(HashMap::from([(mime.into(), bytes)]))
-            .map_err(|_| ClipboardWriteError::Failed)
+        self.write(concealed_values(
+            HashMap::from([(mime.into(), bytes)]),
+            concealed,
+        ))
+        .map_err(|_| ClipboardWriteError::Failed)
     }
 
     fn backend_name(&self) -> &'static str {
@@ -417,14 +444,15 @@ impl Worker {
             public.active = true;
             public.sequence = self.sequence;
             public.dirty = dirty;
+            if dirty {
+                public.signal.notify.notify_one();
+            }
         }
     }
 
     fn deactivate(&self) {
         if let Ok(mut public) = self.public.lock() {
-            public.active = false;
-            public.dirty = false;
-            public.sequence = 0;
+            public.deactivate();
         }
     }
 
@@ -502,14 +530,15 @@ impl Worker {
         if content_type == copypaste_ipc::content_type::FILE {
             return super::file_capture(bytes, privacy, None);
         }
+        let (content, binary_content) = if binary {
+            (String::new(), Some(bytes))
+        } else {
+            (crate::clipboard::format::text_from_utf8(bytes), None)
+        };
         Some(Capture {
             privacy,
-            content: if binary {
-                String::new()
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            },
-            binary_content: binary.then_some(bytes),
+            content,
+            binary_content,
             file_path: None,
             file_metadata: None,
             content_type: content_type.into(),
@@ -767,9 +796,7 @@ fn drain_wake(wake: &mut UnixStream) {
 
 fn deactivate(state: &Arc<Mutex<PublicState>>) {
     if let Ok(mut state) = state.lock() {
-        state.active = false;
-        state.dirty = false;
-        state.sequence = 0;
+        state.deactivate();
     }
 }
 
@@ -790,6 +817,17 @@ fn receive(
         .read_to_end(&mut bytes)
         .ok()?;
     (bytes.len() <= limit).then_some(bytes)
+}
+
+/// The KDE password-manager hint is what capture reads as a secret.
+fn concealed_values(
+    mut values: HashMap<String, Vec<u8>>,
+    concealed: bool,
+) -> HashMap<String, Vec<u8>> {
+    if concealed {
+        values.insert(SECRET_HINT.into(), b"secret".to_vec());
+    }
+    values
 }
 
 fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
@@ -1115,7 +1153,8 @@ mod tests {
     #[test]
     fn dropping_with_a_full_command_queue_unblocks_the_worker() {
         let dir = tempfile::tempdir().expect("staging directory");
-        let clipboard = WaylandClipboard::new(dir.path()).expect("Wayland adapter");
+        let clipboard =
+            WaylandClipboard::new(dir.path(), Default::default()).expect("Wayland adapter");
         let sender = Arc::clone(&clipboard.sender);
         let mut pending = sender.commands.lock().expect("command queue");
         for _ in 0..COMMAND_CAPACITY {
@@ -1161,7 +1200,8 @@ mod tests {
     #[ignore = "requires a running native Wayland data-control compositor and wl-clipboard"]
     fn data_control_interoperates_with_independent_wl_clipboard_clients() {
         let dir = tempfile::tempdir().expect("staging directory");
-        let mut clipboard = WaylandClipboard::new(dir.path()).expect("Wayland adapter");
+        let mut clipboard =
+            WaylandClipboard::new(dir.path(), Default::default()).expect("Wayland adapter");
         let settings = copypaste_ipc::ConfigData::default();
         wait_until_active(&clipboard);
 
@@ -1230,7 +1270,9 @@ mod tests {
             }
         }
 
-        clipboard.set_contents("owned text").expect("text write");
+        clipboard
+            .set_contents("owned text", false)
+            .expect("text write");
         assert_eq!(wl_paste("text/plain;charset=utf-8"), b"owned text");
         assert!(!clipboard.changed(), "our marker suppresses the self-write");
 
@@ -1240,6 +1282,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"outbound tiff",
                 None,
+                false,
             )
             .expect("TIFF write");
         assert_eq!(wl_paste("image/tiff"), b"outbound tiff");

@@ -49,4 +49,17 @@ void main() {
       expect(cancelled, isTrue);
     },
   );
+
+  test('refused clipboard intake reports false instead of failing', () async {
+    const channel = MethodChannel('test/android-capture');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+      channel,
+      (_) async => throw PlatformException(code: 'capture_admission_refused'),
+    );
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final gateway = MethodChannelAndroidCaptureSetupGateway(channel: channel);
+    expect(await gateway.setForegroundCaptureEnabled(true), isFalse);
+  });
 }

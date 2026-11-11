@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../capture/capture_control_state.dart';
@@ -20,11 +22,11 @@ enum DesktopWindowSetupIssue {
 extension DesktopWindowSetupIssueMessage on DesktopWindowSetupIssue {
   String get message => switch (this) {
     DesktopWindowSetupIssue.windowUnavailable =>
-      'Desktop window controls are unavailable. CopyPaste will stay visible.',
+      AppStrings.current.platformWindowControlsUnavailable,
     DesktopWindowSetupIssue.trayUnavailable =>
-      'The system tray is unavailable. Keep CopyPaste open, then retry or quit.',
+      AppStrings.current.platformTrayUnavailable,
     DesktopWindowSetupIssue.quitUnavailable =>
-      'CopyPaste could not quit. Please try again.',
+      AppStrings.current.platformQuitFailed,
   };
 }
 
@@ -70,6 +72,12 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
 
   Future<void> dispose();
 }
+
+/// macOS draws the app header in the native title bar once its window is ready.
+bool usesUnifiedMacosTitleBar(
+  DesktopWindowController? window, {
+  required bool windowReady,
+}) => Platform.isMacOS && window != null && windowReady;
 
 class DesktopWindowController {
   bool _changingFullScreen = false;

@@ -48,3 +48,32 @@ String formatSystemRecentTime(BuildContext context, DateTime value) {
     alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
   );
 }
+
+/// Compact, locale-aware inclusive calendar range with a single-date shortcut.
+String formatSystemDateRange(
+  BuildContext context,
+  DateTime? start,
+  DateTime? end,
+) {
+  final localizations = Localizations.of<MaterialLocalizations>(
+    context,
+    MaterialLocalizations,
+  );
+  String format(DateTime? value) {
+    if (value == null) return '…';
+    final local = value.toLocal();
+    return localizations?.formatCompactDate(local) ??
+        local.toIso8601String().split('T').first;
+  }
+
+  final from = start?.toLocal();
+  final through = end?.toLocal();
+  if (from != null &&
+      through != null &&
+      from.year == through.year &&
+      from.month == through.month &&
+      from.day == through.day) {
+    return format(from);
+  }
+  return '${format(from)} – ${format(through)}';
+}

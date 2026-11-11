@@ -18,10 +18,16 @@ use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
+use super::content_bytes::content_bytes_sql;
 use super::model::{stored_item_columns, StoreError};
 
 // The live counter is derived by the target database's item triggers.
 const RESTORED_TABLES: &[&str] = &[
+    "organization_records",
+    "history_tags",
+    "history_clip_tags",
+    "history_pin_state",
+    "file_references",
     "file_transfer_staging",
     "downloaded_files",
     "file_transfer_files",
@@ -184,6 +190,17 @@ impl super::Store {
                 ),
                 [],
             )?;
+            for table in [
+                "organization_records",
+                "history_tags",
+                "history_clip_tags",
+                "history_pin_state",
+            ] {
+                tx.execute(
+                    &format!("INSERT INTO {table} SELECT * FROM restore_src.{table}"),
+                    [],
+                )?;
+            }
             tx.execute("INSERT INTO shared_binary_payloads SELECT * FROM restore_src.shared_binary_payloads", [])?;
             tx.execute("INSERT INTO file_transfer_chunks SELECT c.* FROM restore_src.file_transfer_chunks c WHERE EXISTS (SELECT 1 FROM restore_src.file_transfer_files f WHERE f.blob_id=c.blob_id)", [])?;
             tx.execute(
@@ -194,12 +211,21 @@ impl super::Store {
                 "INSERT INTO downloaded_files SELECT * FROM restore_src.downloaded_files",
                 [],
             )?;
-            tx.execute("UPDATE clipboard_items SET content_bytes=content_bytes+COALESCE((SELECT SUM(LENGTH(c.ciphertext)+LENGTH(c.nonce)) FROM file_transfer_chunks c JOIN file_transfer_files f ON f.blob_id=c.blob_id WHERE f.item_id=clipboard_items.id),0)",[])?;
+            tx.execute(
+                "INSERT INTO file_references SELECT * FROM restore_src.file_references",
+                [],
+            )?;
             tx.execute(
                 "INSERT INTO history_file_payloads SELECT * FROM restore_src.history_file_payloads",
                 [],
             )?;
-            tx.execute("UPDATE clipboard_items SET content_bytes = content_bytes + COALESCE((SELECT LENGTH(p.ciphertext) FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), 0)", [])?;
+            tx.execute(
+                concat!(
+                    "UPDATE clipboard_items SET content_bytes = ",
+                    content_bytes_sql!("payload_metadata")
+                ),
+                [],
+            )?;
             tx.execute(
                 "INSERT INTO clipboard_fts (rowid, id, content_text) \
                  SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \

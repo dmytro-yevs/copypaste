@@ -99,12 +99,24 @@ class MethodChannelAndroidCaptureSetupGateway
   @override
   Future<AndroidCaptureSetupState> stopCapture() => _state('stopCapture');
 
+  // Android reports an unsettled intake change as an error, not a false result.
+  static const _intakeRefusals = {
+    'capture_admission_refused',
+    'capture_drain_failed',
+  };
+
   @override
-  Future<bool> setForegroundCaptureEnabled(bool enabled) async =>
-      await _channel.invokeMethod<bool>('setForegroundCaptureEnabled', {
-        'enabled': enabled,
-      }) ??
-      false;
+  Future<bool> setForegroundCaptureEnabled(bool enabled) async {
+    try {
+      return await _channel.invokeMethod<bool>('setForegroundCaptureEnabled', {
+            'enabled': enabled,
+          }) ??
+          false;
+    } on PlatformException catch (error) {
+      if (_intakeRefusals.contains(error.code)) return false;
+      rethrow;
+    }
+  }
 
   Future<AndroidCaptureSetupState> _state(String method) async {
     final raw = await _channel.invokeMapMethod<String, Object?>(method);

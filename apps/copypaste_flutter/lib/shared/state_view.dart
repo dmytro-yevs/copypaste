@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../app/theme/app_tokens.dart';
+import '../l10n/l10n.dart';
 
 enum StateViewKind { loading, empty, error }
 
@@ -9,7 +10,7 @@ enum StateViewKind { loading, empty, error }
 class StateView extends StatelessWidget {
   const StateView.loading({super.key, this.message})
     : kind = StateViewKind.loading,
-      title = 'Loading',
+      title = null,
       compact = false,
       icon = LucideIcons.inbox,
       actionLabel = null,
@@ -17,7 +18,7 @@ class StateView extends StatelessWidget {
 
   const StateView.empty({
     super.key,
-    required this.title,
+    required String this.title,
     this.message,
     this.compact = false,
     this.icon = LucideIcons.inbox,
@@ -28,7 +29,7 @@ class StateView extends StatelessWidget {
 
   const StateView.error({
     super.key,
-    required this.title,
+    required String this.title,
     this.message,
     this.actionLabel,
     this.onAction,
@@ -40,16 +41,17 @@ class StateView extends StatelessWidget {
   final StateViewKind kind;
   final bool compact;
   final IconData icon;
-  final String title;
+  final String? title;
   final String? message;
   final String? actionLabel;
   final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
+    final title = this.title ?? context.l10n.commonLoading;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final content = _contentFor(constraints.maxWidth);
+        final content = _contentFor(constraints.maxWidth, title);
         final child = ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
           child: content,
@@ -76,27 +78,33 @@ class StateView extends StatelessWidget {
     );
   }
 
-  Widget _contentFor(double availableWidth) {
+  Widget _contentFor(double availableWidth, String title) {
     return switch (kind) {
       StateViewKind.loading => _standardContent(
+        title: title,
         leading: const AppIconFrame(
           size: AppIconSize.sm,
           child: CircularProgressIndicator(),
         ),
       ),
       StateViewKind.empty => _standardContent(
+        title: title,
         leading: AppIconFrame(
           size: compact ? AppIconSize.lg : AppIconSize.state,
           child: Icon(icon, size: compact ? AppIconSize.lg : AppIconSize.state),
         ),
       ),
       StateViewKind.error => _errorContent(
+        title: title,
         showTrailingAction: availableWidth >= 420,
       ),
     };
   }
 
-  Widget _errorContent({required bool showTrailingAction}) {
+  Widget _errorContent({
+    required String title,
+    required bool showTrailingAction,
+  }) {
     final action = actionLabel == null
         ? null
         : Button.primary(
@@ -120,7 +128,7 @@ class StateView extends StatelessWidget {
     );
   }
 
-  Widget _standardContent({required Widget leading}) {
+  Widget _standardContent({required String title, required Widget leading}) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../features/devices/device_presentation.dart';
+import '../../l10n/l10n.dart';
 
 /// The destinations available in the application shell.
 enum AppDestination { history, devices, settings }
@@ -9,16 +10,20 @@ enum AppDestination { history, devices, settings }
 class AppNavigationDestination {
   const AppNavigationDestination({
     required this.destination,
-    required this.label,
     required this.icon,
   });
 
   final AppDestination destination;
-  final String label;
   final IconData icon;
 
+  String get label => switch (destination) {
+    AppDestination.history => AppStrings.current.appDestinationHistory,
+    AppDestination.devices => AppStrings.current.appDestinationDevices,
+    AppDestination.settings => AppStrings.current.appDestinationSettings,
+  };
+
   String semanticsLabel({required bool selected}) {
-    return selected ? '$label, selected' : label;
+    return selected ? AppStrings.current.appDestinationSelected(label) : label;
   }
 }
 
@@ -26,17 +31,14 @@ const List<AppNavigationDestination> appNavigationDestinations =
     <AppNavigationDestination>[
       AppNavigationDestination(
         destination: AppDestination.history,
-        label: 'History',
-        icon: LucideIcons.history,
+        icon: LucideIcons.clipboardList,
       ),
       AppNavigationDestination(
         destination: AppDestination.devices,
-        label: 'Devices',
         icon: DevicePresentation.collectionIcon,
       ),
       AppNavigationDestination(
         destination: AppDestination.settings,
-        label: 'Settings',
         icon: LucideIcons.settings,
       ),
     ];

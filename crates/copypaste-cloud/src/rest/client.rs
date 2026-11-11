@@ -10,9 +10,11 @@ use super::error::{classify, RestError};
 use super::item::{validate_item_id, CloudItem};
 use super::{CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, UPSERT_CHUNK};
 use crate::auth::transient_backoff;
-use crate::CloudConfig;
+use crate::{CloudConfig, HttpClient};
 use backon::{ExponentialBuilder, Retryable};
+use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
+use tokio_util::bytes::Bytes;
 
 /// PostgREST client for one Supabase project.
 #[derive(Clone)]
@@ -20,6 +22,25 @@ pub struct SupabaseRest {
     pub(super) config: CloudConfig,
     pub(super) http: Client,
     retry: ExponentialBuilder,
+}
+
+/// The rows as one JSON array, allocated once at its exact length.
+fn json_body(rows: &[CloudItem]) -> Result<Vec<u8>, RestError> {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, rows).map_err(|_| RestError::Malformed)?;
+    let mut body = Vec::with_capacity(count.0);
+    serde_json::to_writer(&mut body, rows).map_err(|_| RestError::Malformed)?;
+    Ok(body)
 }
 
 impl fmt::Debug for SupabaseRest {
@@ -32,9 +53,14 @@ impl fmt::Debug for SupabaseRest {
 
 impl SupabaseRest {
     pub fn new(config: CloudConfig) -> Self {
+        Self::with_client(config, HttpClient::default())
+    }
+
+    /// Build a client for `config` that shares `http` with other clients.
+    pub fn with_client(config: CloudConfig, http: HttpClient) -> Self {
         Self {
             config,
-            http: Client::new(),
+            http: http.0,
             retry: transient_backoff(),
         }
     }
@@ -153,13 +179,17 @@ impl SupabaseRest {
         let url = self.table_url();
         let mut written = 0usize;
         for chunk in items.chunks(UPSERT_CHUNK) {
-            let payload = serde_json::to_value(chunk).map_err(|_| RestError::Malformed)?;
+            // Serialized once at its exact size and shared by every attempt: a
+            // JSON tree or a growing buffer would copy each base64 ciphertext
+            // again.
+            let body = Bytes::from(json_body(chunk)?);
             self.send(token, || {
                 self.http
                     .post(url.clone())
                     .query(&[("on_conflict", CONFLICT_TARGET)])
                     .header("Prefer", "resolution=merge-duplicates,return=minimal")
-                    .json(&payload)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body.clone())
             })
             .await?;
             written += chunk.len();

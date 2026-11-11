@@ -9,15 +9,6 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use copypaste_core::FileMetadata;
-use widestring::U16CString;
-use win_security_identifier::{GetCurrentSid, SecurityIdentifier};
-use windows_sys::Win32::Foundation::LocalFree;
-use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
-};
-use windows_sys::Win32::Security::{
-    SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-};
 
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 const RECOVERY_RETRY: Duration = Duration::from_secs(60);
@@ -263,7 +254,7 @@ fn prepare_root(root: &Path) -> io::Result<()> {
         fs::remove_dir_all(root)?;
     }
     fs::create_dir_all(root)?;
-    protect_owner_only(root)
+    copypaste_fs::restrict_tree_to_owner(root)
 }
 
 fn prune_locked(entries: &mut Vec<Entry>) {
@@ -278,40 +269,6 @@ fn prune_locked(entries: &mut Vec<Entry>) {
         }
     }
     *entries = retained;
-}
-
-fn protect_owner_only(path: &Path) -> io::Result<()> {
-    let sid = SecurityIdentifier::get_current_user_sid()
-        .map_err(|_| io::Error::other("read account identifier"))?;
-    let sddl = U16CString::from_str(format!("D:P(A;OICI;GA;;;{sid})"))
-        .map_err(|_| io::Error::other("build access list"))?;
-    let mut descriptor = std::ptr::null_mut();
-    if unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl.as_ptr(),
-            SDDL_REVISION_1,
-            &mut descriptor,
-            std::ptr::null_mut(),
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let result = unsafe {
-        SetFileSecurityW(
-            wide.as_ptr(),
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            descriptor,
-        )
-    };
-    unsafe {
-        LocalFree(descriptor);
-    }
-    if result == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

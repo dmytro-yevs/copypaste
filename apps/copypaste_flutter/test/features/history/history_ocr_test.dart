@@ -364,8 +364,11 @@ void main() {
       // Advance the toast's normal auto-dismiss lifecycle before teardown.
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();
-      expect(controller.selectedId, 'screenshot');
-      expect(controller.selectedClip?.contentKind, HistoryClipKind.image);
+      expect(controller.selection.selectedId, 'screenshot');
+      expect(
+        controller.selection.selectedClip?.contentKind,
+        HistoryClipKind.image,
+      );
       expect(history.savedIds, isEmpty);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Close'));
@@ -389,7 +392,7 @@ void main() {
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select(_image.id);
+      await controller.selection.select(_image.id);
       Future<void> render(double width, double textScale) async {
         await tester.pumpWidget(
           ShadcnApp(
@@ -486,7 +489,7 @@ void main() {
         find.byKey(const ValueKey<String>('history-pin-screenshot')),
       );
       await tester.pumpAndSettle();
-      expect(controller.selectedClip?.pinned, isTrue);
+      expect(controller.selection.selectedClip?.pinned, isTrue);
       await render(220, 1);
       expect(find.bySemanticsLabel('Pinned'), findsOneWidget);
       await render(520, 2);

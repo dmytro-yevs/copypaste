@@ -1,98 +1,118 @@
-//! In-process composition of CopyPaste storage and peer-sync services.
+//! The CopyPaste runtime: storage, settings, peer sync and the request
+//! dispatch shared by the desktop daemon and the Android in-process host.
 //!
-//! Platform hosts own native clipboard capture and lifecycle. This crate owns
-//! no cryptography, merge rules, or handshake protocol; those remain in
-//! `copypaste-core` and `copypaste-p2p`.
+//! Platform hosts own native clipboard capture, lifecycle and the pieces in
+//! [`RuntimeHost`]. This crate owns no cryptography, merge rules, or handshake
+//! protocol; those remain in `copypaste-core` and `copypaste-p2p`.
 
-use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_core::{
-    now_ms, p2p_contract, ClipboardPayload, ClipboardWriteError, Keyring, Store, StoreSource,
-};
+use copypaste_core::{now_ms, p2p_contract, ClipboardPayload, Keyring, Store, StoreSource};
 use copypaste_ipc::{
-    ErrorCode, EventData, EventKind, Item, ItemPage, Method, Response, ResponseData,
+    CapabilityGuarantee, CapabilityState, CapabilityStatus, EventData, EventKind,
+    PlatformCapability,
 };
 use copypaste_p2p::discovery::Discovery;
-#[cfg(test)]
 use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::Node;
+use tokio::sync::{broadcast, watch};
 
 pub mod capture_admission;
+mod dispatch;
+pub mod host;
+pub mod messages;
+pub mod meta;
+pub mod p2p;
 mod peer_sync;
-mod settings;
+pub mod settings;
+
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
+pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
+pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost};
+pub use meta::{Meta, Origin};
+pub use p2p::P2p;
+pub use settings::{Settings, SettingsError, SettingsReadGuard, SettingsTransition};
 
-use settings::{RuntimeSettings, SettingsError};
+/// Change events buffered per subscriber before it is told it lagged. Small on
+/// purpose: the recovery for a lag is one extra re-read.
+pub const EVENT_BUFFER: usize = 256;
 
-/// Storage and direct peer networking shared by daemon and in-process hosts.
-pub struct Runtime {
-    file_downloads: Arc<copypaste_core::file_download::FileDownloads>,
-    peer_sync: Arc<peer_sync::PeerSyncDriver>,
-    modules: Arc<copypaste_modules::ModuleHost>,
+/// What a host opens before the runtime is composed over it. The host owns
+/// the keyring and the store so it can report their failures its own way.
+pub struct RuntimeParts {
+    pub data_dir: PathBuf,
     pub store: Store,
     pub keyring: Arc<Keyring>,
-    pub source: Arc<StoreSource>,
-    pub node: Arc<Node>,
-    pub device_id: String,
-    pub device_name: String,
-    pub device_class: copypaste_ipc::DeviceClass,
-    spoilers: copypaste_core::spoiler::Spoilers,
-    settings: Arc<RuntimeSettings>,
-    events: tokio::sync::broadcast::Sender<EventData>,
-    runtime_events: tokio::sync::broadcast::Sender<copypaste_ipc::RuntimeEventData>,
-    shutdown: tokio::sync::watch::Sender<bool>,
-    listener_started: AtomicBool,
-    capture_running: Arc<AtomicBool>,
-    capture_revision: Arc<AtomicU64>,
-    module_sync_started: AtomicBool,
-    clipboard: Arc<dyn ClipboardWriter>,
-    instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
+    pub meta: Meta,
+    pub settings: Arc<Settings>,
+    pub peers: PeerStore,
+    pub port: u16,
+    pub host: Arc<dyn RuntimeHost>,
 }
 
-fn capture_status_data(
-    settings: &RuntimeSettings,
-    node: &Node,
-    store: &Store,
-    device_name: &str,
-    device_id: &str,
-    capture_running: &AtomicBool,
-    capture_revision: &AtomicU64,
-) -> copypaste_ipc::StatusData {
-    let (revision, settings, running) = loop {
-        let revision = capture_revision.load(Ordering::Acquire);
-        let settings = settings.snapshot();
-        let running = capture_running.load(Ordering::Acquire);
-        if revision == capture_revision.load(Ordering::Acquire) {
-            break (revision, settings, running);
+/// Storage, settings and peer networking shared by every platform host.
+pub struct Runtime {
+    pub store: Store,
+    pub keyring: Arc<Keyring>,
+    pub meta: Meta,
+    pub p2p: P2p,
+    pub settings: Arc<Settings>,
+    pub modules: Arc<copypaste_modules::ModuleHost>,
+    pub spoilers: copypaste_core::spoiler::Spoilers,
+    pub instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
+    pub file_downloads: Arc<copypaste_core::file_download::FileDownloads>,
+    /// The sync view both transports read and write through. Its hooks hold
+    /// no reference back to the runtime, so it can be held here.
+    pub source: Arc<StoreSource>,
+    host: Arc<dyn RuntimeHost>,
+    changes: Arc<Changes>,
+    runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
+    shutdown: watch::Sender<bool>,
+    listener_started: AtomicBool,
+    module_sync_started: AtomicBool,
+    capture_running: AtomicBool,
+    capture_revision: AtomicU64,
+    last_published_sync_revision: AtomicU64,
+}
+
+/// Change publication shared by the runtime and the hooks it installs.
+struct Changes {
+    events: broadcast::Sender<EventData>,
+    store: Store,
+    modules: Weak<copypaste_modules::ModuleHost>,
+    host: Arc<dyn RuntimeHost>,
+}
+
+impl Changes {
+    fn publish(&self, event: EventKind, captured_item_id: Option<&str>) {
+        if event == EventKind::Items {
+            if let Some(modules) = self.modules.upgrade() {
+                modules.history_changed();
+            }
         }
-    };
-    copypaste_ipc::StatusData {
-        platform_capabilities: Default::default(),
-        runtime_watch: true,
-        capture_watch: true,
-        capture_revision: revision,
-        sync_status: node.sync_status(settings.config.sync_enabled),
-        device_details: Some(p2p_contract::local_device_details(
-            device_name,
-            node.listen_addr().as_deref(),
-        )),
-        device_name: device_name.to_owned(),
-        device_id: Some(device_id.to_owned()),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
-        listen_addr: node.listen_addr(),
-        item_count: store.count().unwrap_or(0),
-        capture_running: running,
-        clipboard_available: true,
-        clipboard_backend: "android".to_owned(),
-        private_mode: settings.config.private_mode,
-        private_mode_epoch: settings.private_mode_epoch,
-        counters: Default::default(),
-        settings_health: settings.health,
+        // No subscriber is the ordinary case, and `item_count` costs a
+        // `SELECT COUNT(*)`, so nothing is built for nobody.
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let _ = self.events.send(EventData {
+            sync_status: None,
+            event,
+            item_count: self.store.count().unwrap_or(0),
+            captured: captured_item_id.is_some(),
+            captured_item_id: captured_item_id.map(str::to_owned),
+        });
+    }
+
+    /// A received item reached the system clipboard: copy feedback without
+    /// treating the receive as local activity.
+    fn received_copy(&self, item_id: &str) {
+        self.publish(EventKind::Items, Some(item_id));
+        self.host.copy_feedback();
     }
 }
 
@@ -106,37 +126,11 @@ pub enum SmsCaptureOutcome {
     Retry,
 }
 
-pub trait ClipboardWriter: Send + Sync {
-    fn write(
-        &self,
-        payload: &ClipboardPayload,
-        content_type: &str,
-    ) -> Result<(), ClipboardWriteError>;
-
-    /// Write received content and acknowledge success through the native host,
-    /// including when no Flutter notification subscriber is running.
-    fn write_received(
-        &self,
-        payload: &ClipboardPayload,
-        content_type: &str,
-    ) -> Result<(), ClipboardWriteError> {
-        self.write(payload, content_type)
-    }
-}
-
 /// Optional application identity captured by a native host with the payload.
 pub struct CaptureSourceApp {
     pub bundle_id: String,
     pub name: Option<String>,
     pub icon: Option<copypaste_core::SourceAppIconMetadata>,
-}
-
-use copypaste_core::history_item::ItemOrigin;
-struct UnavailableClipboard;
-impl ClipboardWriter for UnavailableClipboard {
-    fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
-        Err(ClipboardWriteError::Failed)
-    }
 }
 
 impl Runtime {
@@ -146,11 +140,18 @@ impl Runtime {
     ) -> Result<(), copypaste_modules::ModuleError> {
         self.modules.set_inference_launcher(launcher)
     }
+
     /// Opens only application-owned paths. The platform host must initialize
     /// its keystore before calling this constructor.
     pub fn open(data_dir: &Path, device_name: &str, port: u16) -> Result<Self, RuntimeError> {
-        Self::open_with_clipboard(data_dir, device_name, port, Arc::new(UnavailableClipboard))
+        Self::open_with_clipboard(
+            data_dir,
+            device_name,
+            port,
+            Arc::new(host::UnavailableClipboard),
+        )
     }
+
     pub fn open_with_clipboard(
         data_dir: &Path,
         device_name: &str,
@@ -160,141 +161,250 @@ impl Runtime {
         std::fs::create_dir_all(data_dir).map_err(|_| RuntimeError::Storage)?;
         let keyring =
             Arc::new(Keyring::load_or_create(data_dir).map_err(|_| RuntimeError::Keyring)?);
-        Self::open_with_keyring(data_dir, device_name, port, clipboard, keyring)
+        Self::open_with_keyring(
+            data_dir,
+            device_name,
+            port,
+            Arc::new(host::InProcessHost(clipboard)),
+            keyring,
+        )
     }
 
-    /// Continues production runtime construction after the host has selected a
-    /// keyring. Keeping the remaining composition shared lets tests inject an
-    /// in-memory deterministic key without touching the platform keychain.
+    /// Continues construction after the host has selected a keyring, so tests
+    /// can inject a deterministic key without touching the platform keychain.
     fn open_with_keyring(
         data_dir: &Path,
         device_name: &str,
         port: u16,
-        clipboard: Arc<dyn ClipboardWriter>,
+        host: Arc<dyn RuntimeHost>,
         keyring: Arc<Keyring>,
     ) -> Result<Self, RuntimeError> {
         let store = Store::open(&data_dir.join("history.db"), &keyring.db_key())
             .map_err(|_| RuntimeError::Storage)?;
         copypaste_core::file_transfer::upgrade_legacy(&store, &keyring.item_key())
             .map_err(|_| RuntimeError::Storage)?;
-        let identity = store
-            .device_identity(device_name)
-            .map_err(|_| RuntimeError::Storage)?;
-        let settings = Arc::new(RuntimeSettings::load(&store));
+        let meta = Meta::open(&store, device_name).map_err(|_| RuntimeError::Storage)?;
+        let settings = Arc::new(Settings::load(&store));
         let peers = copypaste_core::peer_store::open(
             &store,
             &keyring,
             &data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
         )
         .map_err(|_| RuntimeError::PeerStore)?;
-        let discovery = Discovery::dormant(&identity.device_name, port).ok();
-        let node = Arc::new(Node::new(
+        Self::assemble(RuntimeParts {
+            data_dir: data_dir.to_path_buf(),
+            store,
+            keyring,
+            meta,
+            settings,
+            peers,
+            port,
+            host,
+        })
+    }
+
+    /// Compose the runtime over opened parts. Spawns nothing: the host starts
+    /// the listener and the background loops it wants.
+    pub fn assemble(parts: RuntimeParts) -> Result<Self, RuntimeError> {
+        let RuntimeParts {
+            data_dir,
+            store,
+            keyring,
+            meta,
+            settings,
+            peers,
+            port,
+            host,
+        } = parts;
+        let discovery = Discovery::dormant(&meta.device_name(), port)
+            .or_else(|error| {
+                tracing::warn!(%error, "could not start discovery; peers must be given an address");
+                Discovery::dormant("CopyPaste device", port)
+            })
+            .ok();
+        let p2p = P2p::new(Node::new(
             peers,
             discovery,
             port,
-            settings.config().lan_visibility,
+            settings.get().lan_visibility,
         ));
-        let modules = Arc::new(copypaste_modules::ModuleHost::new(data_dir));
-        let module_versions = Arc::downgrade(&modules);
-        let source_settings = Arc::clone(&settings);
+        let modules = Arc::new(copypaste_modules::ModuleHost::new(&data_dir));
+        let events = broadcast::channel(EVENT_BUFFER).0;
+        let changes = Arc::new(Changes {
+            events: events.clone(),
+            store: store.clone(),
+            modules: Arc::downgrade(&modules),
+            host: Arc::clone(&host),
+        });
         let instant_clipboard = Arc::new(copypaste_core::sync::InstantClipboard::default());
-        let clipboard_gate = Arc::clone(&instant_clipboard);
-        let clipboard_store = store.clone();
-        let clipboard_keyring = Arc::clone(&keyring);
-        let clipboard_settings = Arc::clone(&settings);
-        let clipboard_writer = Arc::clone(&clipboard);
-        let source = Arc::new(
-            StoreSource::with_retention_settings(
-                store.clone(),
-                Arc::clone(&keyring),
-                identity.device_id.clone(),
-                identity.device_name.clone(),
-                move || source_settings.config(),
-            )
-            .on_applied(move |stamp| {
-                if let Some(modules) = module_versions.upgrade() {
-                    modules.note_version(stamp);
-                }
-            })
-            .on_clip_received(move |row| {
-                let _ = clipboard_settings.with_clipboard_settings(|settings| {
-                    clipboard_gate.apply(
-                        &clipboard_store,
-                        &clipboard_keyring,
-                        row,
-                        || settings,
-                        |payload| clipboard_writer.write_received(payload, &row.content_type),
-                    );
-                });
-            }),
-        );
-        let (events, _) = tokio::sync::broadcast::channel(64);
-        node.prepare_group(source.as_ref())
+        let source = Arc::new(Self::source(
+            &store,
+            &keyring,
+            &meta,
+            &settings,
+            &modules,
+            &instant_clipboard,
+            &host,
+            &changes,
+        ));
+        p2p.node()
+            .prepare_group(source.as_ref())
             .map_err(|_| RuntimeError::Storage)?;
-        let modules = Arc::new(copypaste_modules::ModuleHost::new(data_dir));
-        let changed_events = events.clone();
-        let changed_store = store.clone();
+        let search_events = events.clone();
+        let search_store = store.clone();
         modules.bind_search(
             store.clone(),
             Arc::new(move || {
-                let _ = changed_events.send(EventData {
+                let _ = search_events.send(EventData {
                     sync_status: None,
                     event: EventKind::Items,
-                    item_count: changed_store.count().unwrap_or(0),
+                    item_count: search_store.count().unwrap_or(0),
                     captured: false,
                     captured_item_id: None,
                 });
             }),
         );
-        let (shutdown, _) = tokio::sync::watch::channel(false);
-        let module_shutdown = shutdown.subscribe();
-        let module_settings = Arc::clone(&settings);
-        let module_events = events.clone();
-        let module_store = store.clone();
-        let module_node = Arc::clone(&node);
-        let module_peers = peer_sync::PeerSyncDriver::new();
-        let module_relay = Arc::clone(&module_peers);
-        let group_export_node = Arc::clone(&node);
-        let group_export_source = Arc::clone(&source);
-        let group_import_node = Arc::clone(&node);
-        let group_enabled_node = Arc::clone(&node);
-        let group_revision_node = Arc::clone(&node);
-        let group_events = events.clone();
-        let group_store = store.clone();
-        let group_wake = Arc::clone(&module_peers);
+        let shutdown = watch::channel(false).0;
+        Self::install_module_services(
+            &store, &meta, &settings, &p2p, &modules, &source, &changes, &shutdown,
+        )?;
+        Ok(Self {
+            store,
+            keyring,
+            meta,
+            p2p,
+            settings,
+            modules,
+            spoilers: Default::default(),
+            instant_clipboard,
+            file_downloads: Default::default(),
+            source,
+            host,
+            changes,
+            runtime_events: broadcast::channel(EVENT_BUFFER).0,
+            shutdown,
+            listener_started: AtomicBool::new(false),
+            module_sync_started: AtomicBool::new(false),
+            capture_running: AtomicBool::new(false),
+            capture_revision: AtomicU64::new(0),
+            last_published_sync_revision: AtomicU64::new(u64::MAX),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn source(
+        store: &Store,
+        keyring: &Arc<Keyring>,
+        meta: &Meta,
+        settings: &Arc<Settings>,
+        modules: &Arc<copypaste_modules::ModuleHost>,
+        instant_clipboard: &Arc<copypaste_core::sync::InstantClipboard>,
+        host: &Arc<dyn RuntimeHost>,
+        changes: &Arc<Changes>,
+    ) -> StoreSource {
+        let source_settings = Arc::clone(settings);
+        let versions = Arc::downgrade(modules);
+        let (gate, clip_store, clip_keyring, clip_settings, writer, received) = (
+            Arc::clone(instant_clipboard),
+            store.clone(),
+            Arc::clone(keyring),
+            Arc::clone(settings),
+            Arc::clone(host),
+            Arc::clone(changes),
+        );
+        StoreSource::with_retention_settings(
+            store.clone(),
+            Arc::clone(keyring),
+            meta.device_id().to_owned(),
+            meta.device_name(),
+            move || source_settings.config(),
+        )
+        // A peer's row carries the sender's stamp, routinely older than the
+        // cloud upload floor; pull the floor back or it is never forwarded.
+        .on_applied(move |stamp| {
+            if let Some(modules) = versions.upgrade() {
+                modules.note_version(stamp);
+            }
+        })
+        // Shares the capture authority, so a settings change cannot race the
+        // native write.
+        .on_clip_received(move |row| {
+            clip_settings.with_capture_authority(|config, _| {
+                let applied = gate.apply(
+                    &clip_store,
+                    &clip_keyring,
+                    row,
+                    || config,
+                    |payload| {
+                        writer.write_received(
+                            &row.id,
+                            payload,
+                            &row.content_type,
+                            row.clipboard_privacy().secret,
+                        )
+                    },
+                );
+                if applied {
+                    received.received_copy(&row.id);
+                }
+            });
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn install_module_services(
+        store: &Store,
+        meta: &Meta,
+        settings: &Arc<Settings>,
+        p2p: &P2p,
+        modules: &copypaste_modules::ModuleHost,
+        source: &Arc<StoreSource>,
+        changes: &Arc<Changes>,
+        shutdown: &watch::Sender<bool>,
+    ) -> Result<(), RuntimeError> {
+        let running = shutdown.subscribe();
+        let (enabled_settings, enabled_node) = (Arc::clone(settings), Arc::clone(p2p.node()));
+        let (local_node, local_driver, local_changes) = (
+            Arc::clone(p2p.node()),
+            Arc::clone(&p2p.driver),
+            Arc::clone(changes),
+        );
+        let (export_node, export_source) = (Arc::clone(p2p.node()), Arc::clone(source));
+        let (import_node, import_driver, import_changes) = (
+            Arc::clone(p2p.node()),
+            Arc::clone(&p2p.driver),
+            Arc::clone(changes),
+        );
+        let revision_node = Arc::clone(p2p.node());
         modules
             .set_sync_services(Arc::new(
                 copypaste_modules::SyncServices::new(
                     store.clone(),
                     copypaste_sync::store::StoreView::new(
                         source.without_version_hook(),
-                        identity.device_id.clone(),
+                        meta.device_id().to_owned(),
                     ),
                     move || {
-                        !*module_shutdown.borrow()
-                            && module_settings.config().sync_enabled
-                            && group_enabled_node.peers().group_active()
+                        !*running.borrow()
+                            && enabled_settings.get().sync_enabled
+                            && enabled_node.peers().group_active()
                     },
+                    // A cloud row is remote to this device but local to its
+                    // peers: relay it without counting it as local activity.
                     move |stamp| {
-                        module_node.cursors().note_local(stamp);
-                        module_relay.wake();
-                        let _ = module_events.send(EventData {
-                            sync_status: None,
-                            event: EventKind::Items,
-                            item_count: module_store.count().unwrap_or(0),
-                            captured: false,
-                            captured_item_id: None,
-                        });
+                        local_node.cursors().note_local(stamp);
+                        local_driver.wake();
+                        local_changes.publish(EventKind::Items, None);
                     },
                 )
                 .with_group(
                     move || {
-                        group_export_node
-                            .export_group(group_export_source.as_ref())
+                        export_node
+                            .export_group(export_source.as_ref())
                             .map_err(|e| e.to_string())
                     },
                     move |device_id, json| {
-                        if group_import_node
+                        if import_node
                             .import_cloud_group(device_id, json)
                             .or_else(|error| match error {
                                 copypaste_p2p::group::GroupImportError::Rejected => Ok(false),
@@ -302,650 +412,109 @@ impl Runtime {
                             })
                             .map_err(|e| e.to_string())?
                         {
-                            group_wake.wake();
-                            let _ = group_events.send(EventData {
-                                sync_status: None,
-                                event: EventKind::Peers,
-                                item_count: group_store.count().unwrap_or(0),
-                                captured: false,
-                                captured_item_id: None,
-                            });
+                            import_driver.wake();
+                            import_changes.publish(EventKind::Peers, None);
                         }
                         Ok(())
                     },
-                    move || group_revision_node.peers().group_revision(),
+                    move || revision_node.peers().group_revision(),
                 ),
             ))
-            .map_err(|_| RuntimeError::Storage)?;
-        let device_class = copypaste_p2p::DeviceProfile::current().device_class;
-        Ok(Self {
-            file_downloads: Default::default(),
-            peer_sync: module_peers,
-            modules,
-            store,
-            keyring,
-            source,
-            node,
-            device_id: identity.device_id,
-            device_name: identity.device_name,
-            device_class,
-            settings,
-            events,
-            runtime_events: tokio::sync::broadcast::channel(256).0,
-            shutdown,
-            listener_started: AtomicBool::new(false),
-            capture_running: Arc::new(AtomicBool::new(false)),
-            capture_revision: Arc::new(AtomicU64::new(0)),
-            module_sync_started: AtomicBool::new(false),
-            spoilers: Default::default(),
-            clipboard,
-            instant_clipboard,
-        })
+            .map_err(|_| RuntimeError::Storage)
     }
 
-    pub fn status_data(&self) -> copypaste_ipc::StatusData {
-        capture_status_data(
-            &self.settings,
-            &self.node,
-            &self.store,
-            &self.device_name,
-            &self.device_id,
-            &self.capture_running,
-            &self.capture_revision,
-        )
-    }
-
-    /// Dispatches the stable desktop IPC contract in-process.
+    /// The runtime half of `status`, completed by the host's platform probes.
     ///
-    /// The platform host supplies clipboard writing, but history and P2P never
-    /// take a daemon shortcut: they use the same encrypted store, merge source
-    /// and Noise node as the desktop service.
-    pub async fn request(&self, id: u64, method: Method) -> Response {
-        self.start_module_sync();
-        if !self.settings.config().sync_enabled
-            && matches!(
-                &method,
-                Method::PairNearby { .. }
-                    | Method::PairCreateInvite
-                    | Method::PairJoin { .. }
-                    | Method::PairConfirm { accept: true }
-            )
-        {
-            if matches!(&method, Method::PairConfirm { accept: true }) {
-                self.node.pair_cancel();
-            }
-            return Response::err(id, ErrorCode::NotReady, "Sync is turned off.");
-        }
-        let item_mutation = matches!(
-            &method,
-            Method::Delete { .. }
-                | Method::DeleteAll { .. }
-                | Method::Pin { .. }
-                | Method::SetSecret { .. }
-                | Method::ReorderPinned { .. }
-                | Method::ImportFile { .. }
-                | Method::ImportFileReference { .. }
-        );
-        let peer_mutation = matches!(
-            &method,
-            Method::SetDeviceName { .. }
-                | Method::PairCreateInvite
-                | Method::PairConfirm { .. }
-                | Method::PairCancel
-                | Method::PairJoin { .. }
-                | Method::PairNearby { .. }
-                | Method::Unpair { .. }
-                | Method::Revoke { .. }
-        );
-        let response = match method {
-            Method::Modules { operation } => match self.modules.request(operation).await {
-                Ok(json) => Response::ok(id, ResponseData::Modules { json }),
-                Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-            },
-            Method::Status => Response::ok(id, ResponseData::Status(self.status_data())),
-            Method::List { limit, cursor } => self.list(id, limit, cursor),
-            Method::Search { query, limit } => self.search(id, &query, limit),
-            Method::HistoryFacets => match self.store.history_facets(
-                &self.device_id,
-                &self.device_name,
-                self.device_class,
-            ) {
-                Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
-                Err(_) => Response::err(
-                    id,
-                    ErrorCode::Internal,
-                    "The history filters are unavailable.",
-                ),
-            },
-            Method::HistoryQuery {
-                query,
-                limit,
-                cursor,
-            } => {
-                let cursor = match cursor
-                    .map(|token| copypaste_core::HistoryCursor::parse_for(&token, &query))
-                    .transpose()
-                {
-                    Ok(value) => value,
-                    Err(_) => {
-                        return Response::err(
-                            id,
-                            ErrorCode::InvalidRequest,
-                            "The history cursor is invalid.",
-                        );
-                    }
-                };
-                match self.modules.query_history_previews(
-                    &self.store,
-                    &query,
-                    cursor.as_ref(),
-                    limit.clamp(1, 1000),
-                    copypaste_ipc::MAX_CONTENT_BYTES,
-                    Some(&self.device_id),
-                    (&self.keyring.item_key(), &self.keyring.preview_key()),
-                ) {
-                    Ok(page) => Response::ok(
-                        id,
-                        ResponseData::Page(
-                            self.preview_page(page.items, page.next.map(|cursor| cursor.token())),
-                        ),
-                    ),
-                    Err(_) => Response::err(
-                        id,
-                        ErrorCode::InvalidRequest,
-                        "The history query is invalid.",
-                    ),
-                }
-            }
-            Method::Get { id: item_id } => self.item(id, &item_id),
-            Method::ImagePreview {
-                id: item_id,
-                max_edge,
-                bounds,
-            } => {
-                let _permit = copypaste_core::image_preview::acquire_preview_source().await;
-                self.image_preview(id, &item_id, max_edge, bounds)
-            }
-            Method::SourceAppIcon { id: item_id } => self.source_icon(id, &item_id),
-            Method::SaveFile {
-                id: item_id,
-                dest_path,
-                download_token,
-            } => {
-                let is_offer = self.store.get(&item_id).ok().flatten().is_some_and(|row| {
-                    copypaste_core::file_transfer::row_offer(&row, &self.keyring.item_key())
-                        .ok()
-                        .flatten()
-                        .is_some()
-                });
-                if is_offer {
-                    let sender = self.runtime_events.clone();
-                    let progress_token = download_token.clone();
-                    let last_percent = std::sync::atomic::AtomicU64::new(u64::MAX);
-                    match self
-                        .file_downloads
-                        .save_with_progress(
-                            &self.store,
-                            &self.keyring,
-                            &self.node,
-                            &self.device_id,
-                            &self.settings.config(),
-                            copypaste_core::file_download::FileDownloadRequest {
-                                id: &item_id,
-                                destination: Path::new(&dest_path),
-                                token: download_token.as_deref(),
-                            },
-                            Arc::new(move |written, total| {
-                                if progress_token.is_none() || sender.receiver_count() == 0 {
-                                    return;
-                                }
-                                let percent = if total == 0 {
-                                    100
-                                } else {
-                                    ((u128::from(written) * 100) / u128::from(total)).min(100)
-                                        as u64
-                                };
-                                if last_percent.swap(percent, std::sync::atomic::Ordering::Relaxed)
-                                    != percent
-                                {
-                                    if let Some(token) = progress_token.as_ref() {
-                                        let _ = sender.send(copypaste_ipc::RuntimeEventData {
-                                            file_operation: None,
-                                            change: None,
-                                            capture: None,
-                                            progress: Some(copypaste_ipc::FileProgress {
-                                                token: token.clone(),
-                                                written,
-                                                total,
-                                            }),
-                                        });
-                                    }
-                                }
-                            }),
-                        )
-                        .await
-                    {
-                        Ok(()) => Response::ok(id, ResponseData::Empty {}),
-                        Err(error) => {
-                            Response::err(id, ErrorCode::InvalidRequest, error.to_string())
-                        }
-                    }
-                } else {
-                    self.save_file(id, &item_id, &dest_path)
-                }
-            }
-            Method::FileOperations {
-                clear,
-                before,
-                id: operation_id,
-            } => match self
-                .store
-                .file_operations(clear, before.as_deref(), operation_id.as_deref())
-            {
-                Ok(records) => Response::ok(id, ResponseData::FileOperations(records)),
-                Err(_) => Response::err(
-                    id,
-                    ErrorCode::Internal,
-                    "File operations could not be loaded.",
-                ),
-            },
-            Method::DownloadedFile { id: item_id } => {
-                let path = self
-                    .store
-                    .downloaded_file(&item_id)
-                    .ok()
-                    .flatten()
-                    .filter(|path| std::path::Path::new(path).is_file());
-                Response::ok(id, ResponseData::DownloadedFile(path))
-            }
-            Method::ImportFileReference {
-                reference,
-                filename,
-                mime_type,
-                size_hint,
-            } => {
-                match copypaste_core::file_reference::import(
-                    &self.store,
-                    &self.keyring,
-                    &reference,
-                    &filename,
-                    &mime_type,
-                    &self.settings.config(),
-                    size_hint,
-                ) {
-                    Ok(_) => {
-                        self.node.note_local_version(now_ms());
-                        self.peer_sync.wake();
-                        Response::ok(id, ResponseData::Empty {})
-                    }
-                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-                }
-            }
-            Method::StartFileDownload {
-                id: item_id,
-                dest_path,
-                token,
-            } => {
-                if item_id.len() > 128 || token.len() > 128 || dest_path.len() > 4096 {
-                    return Response::err(
-                        id,
-                        ErrorCode::InvalidRequest,
-                        "The download request contains invalid file metadata.",
-                    );
-                }
-                let slot = match self.file_downloads.reserve_background() {
-                    Ok(slot) => slot,
-                    Err(error) => {
-                        return Response::err(id, ErrorCode::InvalidRequest, error.to_string())
-                    }
-                };
-
-                let downloads = Arc::clone(&self.file_downloads);
-                let store = self.store.clone();
-                let keyring = Arc::clone(&self.keyring);
-                let node = Arc::clone(&self.node);
-                let device = self.device_id.clone();
-                let settings = self.settings.config();
-                tokio::spawn(async move {
-                    let _slot = slot;
-                    let _ = downloads
-                        .save_with_progress(
-                            &store,
-                            &keyring,
-                            &node,
-                            &device,
-                            &settings,
-                            copypaste_core::file_download::FileDownloadRequest {
-                                id: &item_id,
-                                destination: Path::new(&dest_path),
-                                token: Some(&token),
-                            },
-                            Arc::new(|_, _| {}),
-                        )
-                        .await;
-                });
-                Response::ok(id, ResponseData::Empty {})
-            }
-            Method::CancelFileDownload { id: item_id } => {
-                self.file_downloads.cancel(&item_id);
-                Response::ok(id, ResponseData::Empty {})
-            }
-            Method::ImportFile {
-                path,
-                filename,
-                mime_type,
-                source_reference,
-            } => {
-                match copypaste_core::file_import::import_file(
-                    &self.store,
-                    &self.keyring,
-                    Path::new(&path),
-                    &filename,
-                    &mime_type,
-                    source_reference.as_deref(),
-                    &self.settings.config(),
-                ) {
-                    Ok(_) => {
-                        self.node.note_local_version(now_ms());
-                        self.peer_sync.wake();
-                        Response::ok(id, ResponseData::Empty {})
-                    }
-                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
-                }
-            }
-            Method::Delete { id: item_id } => match self.store.delete(&item_id) {
-                Ok(true) => Response::ok(id, ResponseData::Empty {}),
-                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
-                Err(_) => {
-                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
-                }
-            },
-            Method::Pin {
-                id: item_id,
-                pinned,
-            } => match self.store.set_pinned(&item_id, pinned) {
-                Ok(true) => self.item(id, &item_id),
-                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
-                Err(_) => {
-                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
-                }
-            },
-            Method::GetSpoilerState => {
-                let (revision, revealed_ids) = self.spoilers.snapshot();
-                Response::ok(
-                    id,
-                    ResponseData::SpoilerState {
-                        revision,
-                        revealed_ids,
-                    },
+    /// Never fails: an unreadable count is reported as zero, because a caller
+    /// may be probing precisely because the database is unhappy.
+    pub fn status_data(&self) -> copypaste_ipc::StatusData {
+        let item_count = self.store.count().unwrap_or_else(|error| {
+            tracing::warn!(?error, "could not count items for status");
+            0
+        });
+        let (revision, config, private_mode_epoch, settings_health, running, platform) = loop {
+            let revision = self.capture_revision.load(Ordering::Acquire);
+            let (config, epoch, health) = {
+                let settings = self.settings.get();
+                (
+                    settings.clone(),
+                    settings.private_mode_epoch(),
+                    settings.health().cloned(),
                 )
+            };
+            let running = self.capture_running.load(Ordering::Acquire);
+            let platform = self.host.platform_status();
+            if revision == self.capture_revision.load(Ordering::Acquire) {
+                break (revision, config, epoch, health, running, platform);
             }
-            Method::SetSpoilerRevealed {
-                id: item_id,
-                revealed,
-            } => {
-                if revealed
-                    && !item_id.as_deref().is_some_and(|id| {
-                        self.store
-                            .get(id)
-                            .ok()
-                            .flatten()
-                            .is_some_and(|item| item.clipboard_privacy().secret)
-                    })
-                {
-                    return Response::err(
-                        id,
-                        ErrorCode::NotFound,
-                        "The secret clip was not found.",
-                    );
-                }
-                let (revision, revealed_ids, changed) =
-                    self.spoilers.set_with_change(item_id.as_deref(), revealed);
-                if changed {
-                    self.emit(EventKind::Items);
-                }
-                Response::ok(
-                    id,
-                    ResponseData::SpoilerState {
-                        revision,
-                        revealed_ids,
-                    },
-                )
-            }
-            Method::SetSecret {
-                id: item_id,
-                secret,
-            } => match self.store.set_secret(&self.keyring, &item_id, secret) {
-                Ok(true) => {
-                    self.spoilers.set(Some(&item_id), false);
-                    if let Ok(Some(item)) = self.store.get(&item_id) {
-                        self.node.note_local_version(item.created_at);
-                        self.peer_sync.wake();
-                    }
-                    self.item(id, &item_id)
-                }
-                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
-                Err(_) => Response::err(
-                    id,
-                    ErrorCode::Internal,
-                    "The clip privacy could not be updated.",
-                ),
-            },
-            Method::DeleteAll { through } => match through {
-                Some(through) => self.store.delete_all_through(through),
-                None => self.store.delete_all(),
-            }
-            .map(|count| Response::ok(id, ResponseData::Count(count)))
-            .unwrap_or_else(|_| {
-                Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
-            }),
-            Method::ReorderPinned { ids } => match self.store.reorder_pinned(&ids) {
-                Ok(count) => Response::ok(id, ResponseData::Count(count)),
-                Err(_) => Response::err(
-                    id,
-                    ErrorCode::InvalidRequest,
-                    "The pinned order is invalid.",
-                ),
-            },
-            Method::SetDeviceName { name } => {
-                match self.store.set_device_name(&self.device_id, &name) {
-                    Ok(name) => {
-                        self.node.set_device_name(&name);
-                        Response::ok(id, ResponseData::Empty {})
-                    }
-                    Err(_) => {
-                        Response::err(id, ErrorCode::InvalidRequest, "The device name is invalid.")
-                    }
-                }
-            }
-            Method::Peers => {
-                let peers = self.node.peers().list();
-                Response::ok(
-                    id,
-                    ResponseData::Peers(
-                        peers
-                            .iter()
-                            .map(|peer| {
-                                let found = self.node.find(&peer.pairing_id);
-                                let authenticated =
-                                    self.node.authenticated_profile(&peer.pairing_id);
-                                let reachability =
-                                    self.node.authenticated_reachability(&peer.pairing_id);
-                                p2p_contract::peer_info(
-                                    peer,
-                                    found.as_ref(),
-                                    authenticated.as_ref(),
-                                    reachability.as_ref(),
-                                )
-                            })
-                            .collect(),
-                    ),
-                )
-            }
-            Method::Discovered | Method::Rescan => {
-                if matches!(method, Method::Rescan) {
-                    self.node.clear_discovery_candidate_cooldowns();
-                    self.node.republish();
-                }
-                Response::ok(
-                    id,
-                    ResponseData::Discovered(copypaste_ipc::DiscoveredData {
-                        devices: self
-                            .node
-                            .seen()
-                            .into_iter()
-                            .map(|found| {
-                                let paired = self.node.is_paired_discovery(&found);
-                                p2p_contract::discovered_device(found, paired)
-                            })
-                            .collect(),
-                    }),
-                )
-            }
-            Method::PairCreateInvite => match self.node.pair_create_invite() {
-                Ok(invite) => Response::ok(
-                    id,
-                    ResponseData::PairingInvite(copypaste_ipc::PairingInviteData {
-                        code: invite.code,
-                        pairing_id: invite.pairing_id,
-                        listen_addr: invite.listen_addr,
-                        expires_in_secs: invite.expires_in_secs,
-                    }),
-                ),
-                Err(error) => self.node_error(id, error),
-            },
-            Method::PairProgress => self.pair_progress(id, self.node.pair_progress()),
-            Method::PairConfirm { accept } => match self.node.pair_confirm(accept) {
-                Ok(status) => self.pair_progress(id, status),
-                Err(error) => self.node_error(id, error),
-            },
-            Method::PairCancel => self.pair_progress(id, self.node.pair_cancel()),
-            Method::Unpair { pairing_id } => match self.node.unpair(&pairing_id) {
-                Ok(true) => Response::ok(id, ResponseData::Empty {}),
-                Ok(false) => self.node_error(id, copypaste_p2p::NodeError::NoPeer),
-                Err(error) => self.node_error(id, error),
-            },
-            Method::Revoke { pairing_id } => match self.node.revoke(&pairing_id, now_ms()) {
-                Ok(_) => Response::ok(id, ResponseData::Empty {}),
-                Err(_) => Response::err(
-                    id,
-                    ErrorCode::PeerFailed,
-                    "The paired-device store is unavailable.",
-                ),
-            },
-            Method::SyncNow { pairing_id } => self.sync_now(id, pairing_id).await,
-            Method::PairNearby { addr } => {
-                match self.node.pair_nearby(&addr, self.source.as_ref()).await {
-                    Ok(status) => self.pair_progress(id, status),
-                    Err(error) => self.node_error(id, error),
-                }
-            }
-            Method::PairJoin { code, addr } => match self
-                .node
-                .pair_join(&code, &addr, self.source.as_ref())
-                .await
-            {
-                Ok(status) => self.pair_progress(id, status),
-                Err(error) => self.node_error(id, error),
-            },
-            Method::Copy { id: item_id } => self.copy(id, &item_id, false),
-            Method::CopyPlainText { id: item_id } => self.copy(id, &item_id, true),
-            Method::CopyText { id: item_id, text } => {
-                match copypaste_core::history_actions::copy_text(
-                    &self.store,
-                    &item_id,
-                    &text,
-                    |payload| {
-                        self.clipboard
-                            .write(payload, copypaste_ipc::content_type::TEXT)
-                    },
-                ) {
-                    Ok(stamp) => {
-                        self.instant_clipboard.note_local(&self.store, stamp);
-                        self.node.note_local_version(stamp);
-                        self.modules.note_version(stamp);
-                        self.peer_sync.wake();
-                        self.emit(EventKind::Items);
-                        Response::ok(id, ResponseData::Empty {})
-                    }
-                    Err(error) => error.response(id),
-                }
-            }
-            Method::HistoryCeiling => match self.store.max_rowid() {
-                Ok(value) => Response::ok(id, ResponseData::Count(value.max(0) as u64)),
-                Err(_) => {
-                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
-                }
-            },
-            Method::GetConfig => Response::ok(
-                id,
-                ResponseData::Config(copypaste_ipc::ConfigApplied {
-                    config: self.settings.config(),
-                    restart_required: Vec::new(),
-                }),
-            ),
-            Method::SetConfig { patch } => self.apply_config(id, patch).await,
-            Method::GetPrivateMode => {
-                let settings = self.settings.snapshot();
-                Response::ok(
-                    id,
-                    ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
-                        private_mode: settings.config.private_mode,
-                        private_mode_epoch: settings.private_mode_epoch,
-                    }),
-                )
-            }
-            Method::SetPrivateMode { enabled } => self.set_private_mode(id, enabled).await,
-            Method::Export { limit } => self.export(id, limit),
-            Method::Backup { dest_path } => self.backup(id, &dest_path),
-            Method::Restore { src_path, confirm } => self.restore(id, &src_path, confirm),
-            method @ (Method::CloudStatus
-            | Method::CloudSignIn { .. }
-            | Method::CloudSignUp { .. }
-            | Method::CloudSetEndpoint { .. }
-            | Method::CloudSignOut
-            | Method::CloudSyncNow) => self.modules.cloud_request(id, method).await,
-            _ => Response::err(
-                id,
-                ErrorCode::InvalidRequest,
-                "This in-process operation is not wired yet.",
-            ),
         };
-        if response.ok && item_mutation {
-            self.modules.note_version(0);
-            self.emit(EventKind::Items);
+        let mut capabilities = platform.capabilities;
+        apply_capture_policy_capabilities(&mut capabilities, &config);
+        if let Some(capture) = capabilities.get_mut(&PlatformCapability::ClipboardCapture) {
+            if !running {
+                capture.state = CapabilityState::Error;
+                capture.guarantee = CapabilityGuarantee::None;
+                capture.reason = Some("Capture loop is stopped.".into());
+            } else if config.private_mode {
+                capture.reason = Some("Capture is paused by private mode.".into());
+            }
         }
-        if response.ok && peer_mutation {
-            self.emit(EventKind::Peers);
+        let device_name = self.meta.device_name();
+        let listen_addr = self.p2p.listen_addr();
+        copypaste_ipc::StatusData {
+            platform_capabilities: capabilities,
+            runtime_watch: true,
+            capture_watch: true,
+            capture_revision: revision,
+            sync_status: self.p2p.node().sync_status(config.sync_enabled),
+            device_details: Some(p2p_contract::local_device_details(
+                &device_name,
+                listen_addr.as_deref(),
+            )),
+            device_name,
+            device_id: Some(self.meta.device_id().to_owned()),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+            listen_addr,
+            item_count,
+            capture_running: running,
+            clipboard_available: platform.clipboard_available,
+            clipboard_backend: platform.clipboard_backend,
+            private_mode: config.private_mode,
+            private_mode_epoch,
+            counters: platform.counters,
+            // Carried on `status` so a client cannot render the settings
+            // screen before it learns they are not the user's own values.
+            settings_health,
         }
-        response
     }
 
-    /// Module workers have their own lifecycle, independent of the peer TCP port.
-    pub fn start_module_sync(&self) {
+    /// Module workers have their own lifecycle, independent of the peer port.
+    /// Returns the worker the first time and `None` once it is running.
+    pub fn start_module_sync(&self) -> Option<tokio::task::JoinHandle<()>> {
         if self.module_sync_started.swap(true, Ordering::AcqRel) {
-            return;
+            return None;
         }
         let modules = Arc::clone(&self.modules);
         let shutdown = self.shutdown.subscribe();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             modules.run_sync(shutdown).await;
-        });
+        }))
     }
 
+    /// Bind the peer port and start serving, forwarding and scheduling peer
+    /// sync until [`Runtime::shutdown`]. Idempotent while the listener runs.
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
         self.start_module_sync();
         if self.listener_started.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        let listener = match self.node.bind_listener() {
-            Ok(listener) => listener,
-            Err(_) => {
-                self.listener_started.store(false, Ordering::Release);
-                return Err(RuntimeError::Listener);
-            }
-        };
-        let listener = match tokio::net::TcpListener::from_std(listener) {
+        let listener = match self
+            .p2p
+            .node()
+            .bind_listener()
+            .and_then(tokio::net::TcpListener::from_std)
+        {
             Ok(listener) => listener,
             Err(_) => {
                 self.listener_started.store(false, Ordering::Release);
@@ -953,83 +522,192 @@ impl Runtime {
             }
         };
         let runtime = Arc::clone(self);
-        let callback_runtime = Arc::clone(self);
-        let probe_callback_runtime = Arc::clone(self);
-        let pairing_changes = self.node.subscribe_pairing_changes();
-        let sync_changes = self.node.subscribe_sync_changes();
-        let group_changes = self.node.peers().subscribe_group_changes();
-        let listener_shutdown = self.shutdown.subscribe();
-        let node = Arc::clone(&self.node);
-        let source = Arc::clone(&self.source);
+        let shutdown = self.shutdown.subscribe();
         tokio::spawn(async move {
-            copypaste_p2p::node::listen(
-                node,
-                listener,
-                source,
-                move |_, outcome| {
-                    callback_runtime.remember_device(outcome);
-                    if outcome.stats.received > 0 {
-                        callback_runtime.emit(EventKind::Items);
-                    }
-                    callback_runtime.emit(EventKind::Peers);
-                },
-                move |sync_status_changed: bool| {
-                    if !sync_status_changed {
-                        probe_callback_runtime.emit(EventKind::Peers);
-                    }
-                },
-                listener_shutdown,
-            )
-            .await;
+            Arc::clone(&runtime).listen(listener, shutdown).await;
             runtime.listener_started.store(false, Ordering::Release);
         });
-        let runtime = Arc::clone(self);
-        let mut pairing_changes = pairing_changes;
-        let mut sync_changes = sync_changes;
-        let mut group_changes = group_changes;
-        let mut shutdown = self.shutdown.subscribe();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.changed() => return,
-                    changed = group_changes.changed() => if changed.is_err() { return } else {
-                        runtime.modules.wake_sync();
-                        runtime.peer_sync.wake();
-                        runtime.emit(EventKind::Peers);
-                    },
-                    changed = pairing_changes.changed() => if changed.is_err() { return } else {
-                        runtime.peer_sync.wake();
-                        runtime.emit(EventKind::Peers);
-                    },
-                    changed = sync_changes.changed() => if changed.is_err() { return } else {
-                        let _ = runtime.events.send(EventData {
-                            sync_status: Some(runtime.node.sync_status(runtime.settings.config().sync_enabled)),
-                            event: EventKind::Peers,
-                            item_count: runtime.store.count().unwrap_or(0),
-                            captured: false,
-                            captured_item_id: None,
-                        });
-                    },
-                }
-            }
-        });
-        self.peer_sync
-            .set_enabled(self.settings.config().sync_enabled);
-        tokio::spawn(peer_sync::run(Arc::clone(self)));
+        tokio::spawn(self.forward_changes(self.shutdown.subscribe()));
+        self.p2p
+            .sync_enabled_changed(self.settings.get().sync_enabled);
+        tokio::spawn(Arc::clone(self).run_peer_sync(self.shutdown.subscribe()));
         Ok(())
     }
 
-    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<EventData> {
-        self.events.subscribe()
+    /// Accept peer connections until shutdown, serving them from this history.
+    pub async fn listen(
+        self: Arc<Self>,
+        listener: tokio::net::TcpListener,
+        shutdown: watch::Receiver<bool>,
+    ) {
+        let node = Arc::clone(self.p2p.node());
+        let source = Arc::clone(&self.source);
+        let session = Arc::clone(&self);
+        let probe = self;
+        copypaste_p2p::node::listen(
+            node,
+            listener,
+            source,
+            move |_, outcome| {
+                session.remember_device(outcome);
+                if outcome.stats.received > 0 {
+                    session.note_remote_change();
+                }
+            },
+            move |sync_status_changed: bool| {
+                if sync_status_changed {
+                    probe.note_sync_status_changed();
+                } else {
+                    probe.note_peers_changed();
+                }
+            },
+            shutdown,
+        )
+        .await;
     }
 
-    pub fn subscribe_runtime_events(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<copypaste_ipc::RuntimeEventData> {
+    /// Forward pairing, sync-status and group transitions that originate in
+    /// the node, including an inbound handshake no request started. The
+    /// receivers are subscribed before this returns, so no transition between
+    /// spawning and the first poll is lost.
+    pub fn forward_changes(
+        self: &Arc<Self>,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> impl Future<Output = ()> + Send + 'static {
+        let mut pairing = self.p2p.node().subscribe_pairing_changes();
+        let mut sync = self.p2p.node().subscribe_sync_changes();
+        let mut group = self.p2p.peers().subscribe_group_changes();
+        let runtime = Arc::clone(self);
+        async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown.changed() => return,
+                    changed = group.changed() => {
+                        if changed.is_err() { return; }
+                        runtime.modules.wake_sync();
+                        runtime.p2p.wake();
+                        runtime.note_peers_changed();
+                    },
+                    changed = sync.changed() => {
+                        if changed.is_err() { return; }
+                        runtime.note_sync_status_changed();
+                    },
+                    changed = pairing.changed() => {
+                        if changed.is_err() { return; }
+                        runtime.note_peers_changed();
+                    },
+                }
+            }
+        }
+    }
+
+    /// Outgoing peer sync on the shared cadence until shutdown.
+    pub async fn run_peer_sync(self: Arc<Self>, shutdown: watch::Receiver<bool>) {
+        let driver = Arc::clone(&self.p2p.driver);
+        driver
+            .run(Arc::new(peer_sync::RuntimePeerHost(self)), shutdown)
+            .await;
+    }
+
+    /// One scheduled pass under an already held round permit.
+    #[cfg(test)]
+    async fn run_peer_round(
+        self: &Arc<Self>,
+        permit: copypaste_core::sync::RoundGuard,
+        shutdown: watch::Receiver<bool>,
+    ) {
+        self.p2p
+            .driver
+            .run_round(
+                Arc::new(peer_sync::RuntimePeerHost(Arc::clone(self))),
+                shutdown,
+                permit,
+            )
+            .await;
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<EventData> {
+        self.changes.events.subscribe()
+    }
+
+    pub fn subscribe_runtime_events(&self) -> broadcast::Receiver<copypaste_ipc::RuntimeEventData> {
         self.runtime_events.subscribe()
     }
 
-    fn note_capture_state_changed(&self) {
+    pub fn runtime_event_sender(&self) -> broadcast::Sender<copypaste_ipc::RuntimeEventData> {
+        self.runtime_events.clone()
+    }
+
+    /// History changed on this device since `floor_ms`. Pulls both transport
+    /// floors back to it and wakes them. The split from
+    /// [`Runtime::note_remote_change`] keeps a received row from ringing back.
+    pub fn note_local_change_since(&self, floor_ms: i64) {
+        self.p2p.node().note_local_version(floor_ms);
+        self.changes.publish(EventKind::Items, None);
+        self.p2p.wake();
+        self.modules.note_version(floor_ms);
+    }
+
+    pub fn note_local_change(&self) {
+        self.note_local_change_since(now_ms());
+    }
+
+    /// A local capture: a local change plus the bit that lets the surface
+    /// owning notifications tell it from a delete, a pin or an import.
+    pub fn note_capture(&self, floor_ms: i64, item_id: &str) {
+        self.instant_clipboard.note_local(&self.store, floor_ms);
+        self.p2p.node().note_local_version(floor_ms);
+        self.changes.publish(EventKind::Items, Some(item_id));
+        self.p2p.wake();
+        self.modules.note_version(floor_ms);
+    }
+
+    /// History changed because a peer or the cloud delivered something, or
+    /// only its presentation changed.
+    pub fn note_remote_change(&self) {
+        self.changes.publish(EventKind::Items, None);
+    }
+
+    pub fn note_peers_changed(&self) {
+        self.changes.publish(EventKind::Peers, None);
+    }
+
+    /// Publish the sync status once per revision, and only when subscribed.
+    pub fn note_sync_status_changed(&self) {
+        if self.changes.events.receiver_count() == 0 {
+            return;
+        }
+        let sync_status = self
+            .p2p
+            .node()
+            .sync_status(self.settings.get().sync_enabled);
+        if self
+            .last_published_sync_revision
+            .swap(sync_status.revision, Ordering::AcqRel)
+            == sync_status.revision
+        {
+            return;
+        }
+        let _ = self.changes.events.send(EventData {
+            sync_status: Some(sync_status),
+            event: EventKind::Peers,
+            item_count: self.store.count().unwrap_or(0),
+            captured: false,
+            captured_item_id: None,
+        });
+    }
+
+    pub fn capture_revision(&self) -> u64 {
+        self.capture_revision.load(Ordering::Acquire)
+    }
+
+    pub fn capture_running(&self) -> bool {
+        self.capture_running.load(Ordering::Acquire)
+    }
+
+    /// Advance the capture revision and publish status, only when subscribed.
+    /// Status includes no clipboard payload.
+    pub fn note_capture_state_changed(&self) {
         self.capture_revision.fetch_add(1, Ordering::AcqRel);
         if self.runtime_events.receiver_count() == 0 {
             return;
@@ -1070,7 +748,7 @@ impl Runtime {
             .begin(host, Arc::new(|| {}))
             .ok_or(RuntimeError::CaptureRefused)
             .and_then(|token| {
-                let result = self.capture_text_operation(token, content);
+                let result = self.capture_text_operation(token, content).map(|_| ());
                 self.capture_admission().abandon(token);
                 result
             });
@@ -1078,7 +756,29 @@ impl Runtime {
         result
     }
 
-    pub fn capture_text_operation(&self, token: u64, content: &str) -> Result<(), RuntimeError> {
+    /// Returns the privacy the capture was committed with, so a native host
+    /// can hide its own preview of a secret exactly as the app does.
+    pub fn capture_text_operation(
+        &self,
+        token: u64,
+        content: &str,
+    ) -> Result<copypaste_ipc::ClipboardPrivacy, RuntimeError> {
+        self.capture_text_item(token, content)
+            .map(|(_, privacy)| privacy)
+    }
+
+    fn capture_text_item(
+        &self,
+        token: u64,
+        content: &str,
+    ) -> Result<(String, copypaste_ipc::ClipboardPrivacy), RuntimeError> {
+        if let Some(privacy) =
+            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
+        {
+            if !self.capture_admission().classify(token, privacy) {
+                return Err(RuntimeError::CaptureRefused);
+            }
+        }
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
@@ -1104,9 +804,11 @@ impl Runtime {
                 || self.settings.config(),
             )
             .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(ingested.into_item());
+        let privacy = permit.privacy;
+        let item = ingested.into_item();
+        self.note_capture(item.created_at, &item.id);
         permit.committed();
-        Ok(())
+        Ok((item.id, privacy))
     }
 
     pub fn has_sms_module(&self) -> Result<bool, copypaste_modules::ModuleError> {
@@ -1148,15 +850,17 @@ impl Runtime {
     }
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
-        self.capture_text_operation(token, code)?;
-        let _completion = self
+        let (item_id, _) = self.capture_text_item(token, code)?;
+        let completion = self
             .capture_admission()
             .acquire(token, CaptureScope::Completion)
             .ok_or(RuntimeError::CaptureRefused)?;
-        self.clipboard
+        self.host
             .write(
+                &item_id,
                 &ClipboardPayload::Text(code.to_owned().into()),
                 copypaste_ipc::content_type::TEXT,
+                completion.privacy.secret,
             )
             .map_err(|_| RuntimeError::Capture)
     }
@@ -1244,6 +948,7 @@ impl Runtime {
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
         let metadata = copypaste_core::PayloadMetadata {
+            credentials: false,
             secret_override: None,
             privacy: permit.privacy,
             file: None,
@@ -1265,7 +970,8 @@ impl Runtime {
             settings,
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(ingested.into_item());
+        let item = ingested.into_item();
+        self.note_capture(item.created_at, &item.id);
         permit.committed();
         Ok(())
     }
@@ -1310,7 +1016,8 @@ impl Runtime {
                 false,
             )
             .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(row.into_item());
+        let item = row.into_item();
+        self.note_capture(item.created_at, &item.id);
         permit.committed();
         Ok(())
     }
@@ -1324,7 +1031,7 @@ impl Runtime {
     /// Returns a policy snapshot for status presentation, never read authority.
     #[must_use]
     pub fn implicit_capture_allowed(&self) -> bool {
-        let settings = self.settings.config();
+        let settings = self.settings.get();
         !settings.private_mode && settings.excluded_app_bundle_ids.is_empty()
     }
 
@@ -1334,631 +1041,52 @@ impl Runtime {
 
     #[must_use]
     pub fn notify_on_copy_enabled(&self) -> bool {
-        self.settings.config().notify_on_copy
+        self.settings.get().notify_on_copy
     }
 
     #[must_use]
     pub fn notification_preview_enabled(&self) -> bool {
-        self.settings.config().notification_preview
+        self.settings.get().notification_preview
     }
 
     #[must_use]
     pub fn sound_on_copy_enabled(&self) -> bool {
-        self.settings.config().sound_on_copy
+        self.settings.get().sound_on_copy
     }
 
-    /// Permanently closes capture. Call from a worker when scopes may be active.
+    /// Permanently closes capture and the runtime's own workers. Idempotent;
+    /// call from a worker when capture scopes may be active.
     pub fn shutdown(&self) {
         self.file_downloads.cancel_all();
         let _ = self.capture_admission().shutdown();
         let _ = self.shutdown.send(true);
     }
+}
 
-    fn emit(&self, event: EventKind) {
-        if event == EventKind::Items {
-            self.modules.history_changed();
-        }
-        let _ = self.events.send(EventData {
-            sync_status: None,
-            event,
-            item_count: self.store.count().unwrap_or(0),
-            captured: false,
-            captured_item_id: None,
-        });
+/// Source exclusions need authenticated attribution: without an active source
+/// adapter, capture stops rather than recording what it cannot attribute.
+fn apply_capture_policy_capabilities(
+    capabilities: &mut BTreeMap<PlatformCapability, CapabilityStatus>,
+    settings: &copypaste_ipc::ConfigData,
+) {
+    if settings.excluded_app_bundle_ids.is_empty() {
+        return;
     }
-
-    fn emit_capture(&self, item: copypaste_core::StoredItem) {
-        self.modules.history_changed();
-        self.instant_clipboard
-            .note_local(&self.store, item.created_at);
-        self.node.note_local_version(item.created_at);
-        self.modules.note_version(item.created_at);
-        self.peer_sync.wake();
-        let _ = self.events.send(EventData {
-            sync_status: None,
-            event: EventKind::Items,
-            item_count: self.store.count().unwrap_or(0),
-            captured: true,
-            captured_item_id: Some(item.id),
-        });
+    let source_is_unsupported = capabilities
+        .get(&PlatformCapability::SourceAttribution)
+        .is_some_and(|source| source.state == CapabilityState::Unsupported);
+    if !source_is_unsupported {
+        return;
     }
-
-    async fn apply_settings(
-        &self,
-        patch: copypaste_ipc::ConfigPatch,
-        reconcile_retention: bool,
-    ) -> Result<settings::SettingsApplied, SettingsError> {
-        let settings = Arc::clone(&self.settings);
-        let node = Arc::clone(&self.node);
-        let peer_sync = Arc::clone(&self.peer_sync);
-        let modules = Arc::clone(&self.modules);
-        let store = self.store.clone();
-        let events = self.events.clone();
-        let runtime_events = self.runtime_events.clone();
-        let capture_revision = Arc::clone(&self.capture_revision);
-        let capture_running = Arc::clone(&self.capture_running);
-        let device_name = self.device_name.clone();
-        let device_id = self.device_id.clone();
-        tokio::task::spawn_blocking(move || {
-            let before = settings.snapshot();
-            let applied = settings.apply_with_effects(&patch, |applied| {
-                let removed = if reconcile_retention {
-                    let enforce = applied.should_enforce_retention();
-                    copypaste_core::retention::reconcile_policy(
-                        &store,
-                        || settings.config(),
-                        enforce,
-                    )
-                } else {
-                    0
-                };
-                if applied.lan_visibility_changed() {
-                    node.set_lan_visibility(applied.config.lan_visibility);
-                }
-                if applied.sync_enabled_changed().is_some() {
-                    peer_sync.set_enabled(applied.config.sync_enabled);
-                    let _ = events.send(EventData {
-                        sync_status: Some(node.sync_status(applied.config.sync_enabled)),
-                        event: EventKind::Peers,
-                        item_count: store.count().unwrap_or(0),
-                        captured: false,
-                        captured_item_id: None,
-                    });
-                }
-                if removed > 0 {
-                    let _ = events.send(EventData {
-                        sync_status: None,
-                        event: EventKind::Items,
-                        item_count: store.count().unwrap_or(0),
-                        captured: false,
-                        captured_item_id: None,
-                    });
-                }
-            })?;
-            if applied.sync_enabled_changed().is_some() {
-                modules.sync_enabled_changed(applied.config.sync_enabled);
-            }
-            let after = settings.snapshot();
-            if before.private_mode_epoch != after.private_mode_epoch
-                || before.health != after.health
-            {
-                capture_revision.fetch_add(1, Ordering::AcqRel);
-                if runtime_events.receiver_count() > 0 {
-                    let status = capture_status_data(
-                        &settings,
-                        &node,
-                        &store,
-                        &device_name,
-                        &device_id,
-                        &capture_running,
-                        &capture_revision,
-                    );
-                    let _ = runtime_events.send(copypaste_ipc::RuntimeEventData {
-                        file_operation: None,
-                        change: None,
-                        progress: None,
-                        capture: Some(status),
-                    });
-                }
-            }
-            Ok(applied)
-        })
-        .await
-        .map_err(|_| SettingsError::Store)?
-    }
-
-    async fn apply_config(&self, request_id: u64, patch: copypaste_ipc::ConfigPatch) -> Response {
-        match self.apply_settings(patch, true).await {
-            Ok(applied) => Response::ok(
-                request_id,
-                ResponseData::Config(copypaste_ipc::ConfigApplied {
-                    config: applied.config,
-                    restart_required: Vec::new(),
-                }),
-            ),
-            Err(SettingsError::Invalid(error)) => {
-                Response::err(request_id, ErrorCode::InvalidRequest, error.to_string())
-            }
-            Err(SettingsError::Store) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The settings could not be saved.",
-            ),
-        }
-    }
-
-    async fn set_private_mode(&self, request_id: u64, enabled: bool) -> Response {
-        match self
-            .apply_settings(
-                copypaste_ipc::ConfigPatch {
-                    private_mode: Some(enabled),
-                    ..Default::default()
-                },
-                false,
-            )
-            .await
-        {
-            Ok(applied) => Response::ok(
-                request_id,
-                ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
-                    private_mode: applied.config.private_mode,
-                    private_mode_epoch: applied.private_mode_epoch,
-                }),
-            ),
-            Err(SettingsError::Invalid(error)) => {
-                Response::err(request_id, ErrorCode::InvalidRequest, error.to_string())
-            }
-            Err(SettingsError::Store) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The settings could not be saved.",
-            ),
-        }
-    }
-
-    fn export(&self, request_id: u64, limit: u32) -> Response {
-        match copypaste_core::transfer::export(&self.store, &self.keyring, limit) {
-            Ok(export) => Response::ok(request_id, ResponseData::Export(export)),
-            Err(copypaste_core::transfer::ExportError::ContentTooLarge) => Response::err(
-                request_id,
-                ErrorCode::ContentTooLarge,
-                "The text history is too large to export in one file.",
-            ),
-            Err(copypaste_core::transfer::ExportError::Store(_)) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The history store is unavailable.",
-            ),
-        }
-    }
-
-    fn backup(&self, request_id: u64, destination: &str) -> Response {
-        match copypaste_core::history_backup::backup(&self.store, destination) {
-            Ok(size_bytes) => Response::ok(
-                request_id,
-                ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
-            ),
-            Err(error) => error.response(request_id),
-        }
-    }
-
-    fn restore(&self, request_id: u64, source: &str, confirm: bool) -> Response {
-        match copypaste_core::history_backup::restore(
-            &self.store,
-            &self.keyring.db_key(),
-            source,
-            confirm,
-        ) {
-            Ok(floor) => {
-                if let Some(oldest) = floor {
-                    self.modules.note_version(oldest);
-                    self.node.note_local_version(oldest);
-                }
-                self.emit(EventKind::Items);
-                self.peer_sync.wake();
-                Response::ok(request_id, ResponseData::Empty {})
-            }
-            Err(error) => error.response(request_id),
-        }
-    }
-
-    fn list(&self, id: u64, limit: u32, cursor: Option<String>) -> Response {
-        let cursor = match cursor
-            .map(|value| copypaste_core::ItemCursor::parse(&value))
-            .transpose()
-        {
-            Ok(value) => value,
-            Err(_) => {
-                return Response::err(
-                    id,
-                    ErrorCode::InvalidRequest,
-                    "The history cursor is invalid.",
-                );
-            }
-        };
-        match self.store.list_previews_bounded(
-            cursor.as_ref(),
-            limit.clamp(1, 1000),
-            copypaste_ipc::MAX_CONTENT_BYTES,
-            &self.keyring.item_key(),
-            &self.keyring.preview_key(),
-        ) {
-            Ok(page) => Response::ok(
-                id,
-                ResponseData::Page(
-                    self.preview_page(page.items, page.next.map(|value| value.token())),
-                ),
-            ),
-            Err(_) => Response::err(id, ErrorCode::Internal, "The history store is unavailable."),
-        }
-    }
-
-    fn search(&self, id: u64, query: &str, limit: u32) -> Response {
-        match self.modules.search(
-            &self.store,
-            query,
-            limit.clamp(1, 1000),
-            copypaste_ipc::MAX_CONTENT_BYTES,
-        ) {
-            Ok(rows) => Response::ok(id, ResponseData::Page(self.page(rows, None))),
-            Err(_) => Response::err(
-                id,
-                ErrorCode::InvalidRequest,
-                "The history query is invalid.",
-            ),
-        }
-    }
-
-    fn preview_page(
-        &self,
-        entries: Vec<copypaste_core::HistoryPreviewRow>,
-        next_cursor: Option<String>,
-    ) -> ItemPage {
-        let (rows, previews): (Vec<_>, Vec<_>) = entries
-            .into_iter()
-            .map(|entry| (entry.row, entry.preview))
-            .unzip();
-        let origins = self.origins_for(&rows);
-        let mut page = ItemPage {
-            items: Vec::with_capacity(rows.len()),
-            skipped_undecryptable: 0,
-            next_cursor,
-        };
-        for (row, preview) in rows.into_iter().zip(previews) {
-            if let Some(preview) = preview {
-                let origin = origins
-                    .get(&row.id)
-                    .expect("every row has an origin resolved before presentation");
-                page.items
-                    .push(preview.into_item(&row, origin, &self.device_id));
-            } else {
-                page.skipped_undecryptable += 1;
-            }
-        }
-        page
-    }
-
-    fn page(&self, rows: Vec<copypaste_core::StoredItem>, next_cursor: Option<String>) -> ItemPage {
-        let origins = self.origins_for(&rows);
-        let mut page = ItemPage {
-            items: Vec::with_capacity(rows.len()),
-            skipped_undecryptable: 0,
-            next_cursor,
-        };
-        for row in rows {
-            let origin = origins
-                .get(&row.id)
-                .expect("every row has an origin resolved before decryption");
-            match self.item_value_with_origin(row, true, origin) {
-                Some(item) => page.items.push(item),
-                None => page.skipped_undecryptable += 1,
-            }
-        }
-        page
-    }
-
-    fn image_preview(
-        &self,
-        request_id: u64,
-        item_id: &str,
-        max_edge: Option<u32>,
-        bounds: Option<copypaste_ipc::ImagePreviewBounds>,
-    ) -> Response {
-        let Ok(Some(row)) = self.store.get(item_id) else {
-            return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
-        };
-        if !matches!(
-            copypaste_ipc::content_type::classify(&row.content_type),
-            copypaste_ipc::ContentClass::Image
-        ) {
-            return Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "This clip is not an image.",
+    if let Some(capture) = capabilities.get_mut(&PlatformCapability::ClipboardCapture) {
+        if capture.state == CapabilityState::Available {
+            capture.state = CapabilityState::NeedsCompanion;
+            capture.guarantee = CapabilityGuarantee::None;
+            capture.reason = Some(
+                "Source exclusions stop capture until an authenticated source adapter is active."
+                    .into(),
             );
         }
-        let Ok(payload) = ClipboardPayload::open(&row, &self.keyring.item_key()) else {
-            return Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The clip could not be decrypted.",
-            );
-        };
-        let ClipboardPayload::Image { bytes, .. } = payload else {
-            unreachable!("content class was checked")
-        };
-        match copypaste_core::thumbnail_png(
-            &bytes,
-            copypaste_ipc::ConfigData::default().max_decoded_image_mb,
-            max_edge,
-            bounds.map(|bounds| (bounds.width, bounds.height)),
-        ) {
-            Ok(image) => Response::ok(
-                request_id,
-                ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
-                    png_base64: STANDARD.encode(image.png),
-                    width: image.width,
-                    height: image.height,
-                }),
-            ),
-            Err(_) => Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "The image preview is unavailable.",
-            ),
-        }
-    }
-
-    fn source_icon(&self, request_id: u64, item_id: &str) -> Response {
-        match self.store.source_app_icon_by_id(item_id) {
-            Ok(Some(icon)) => Response::ok(
-                request_id,
-                ResponseData::SourceAppIcon(copypaste_ipc::ImagePreview {
-                    png_base64: icon.png_base64,
-                    width: icon.width,
-                    height: icon.height,
-                }),
-            ),
-            Ok(None) => Response::ok(request_id, ResponseData::Empty {}),
-            Err(_) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The history store is unavailable.",
-            ),
-        }
-    }
-
-    fn pair_progress(&self, request_id: u64, status: copypaste_p2p::PairingStatus) -> Response {
-        Response::ok(
-            request_id,
-            ResponseData::PairingProgress(p2p_contract::pairing_progress(status, None)),
-        )
-    }
-
-    fn node_error(&self, request_id: u64, error: copypaste_p2p::NodeError) -> Response {
-        Response::err(
-            request_id,
-            p2p_contract::node_error_code(&error),
-            error.to_string(),
-        )
-    }
-
-    async fn sync_now(&self, request_id: u64, pairing_id: Option<String>) -> Response {
-        if !self.settings.config().sync_enabled {
-            return Response::err(request_id, ErrorCode::NotReady, "Sync is turned off.");
-        }
-        let _round = self.peer_sync.rounds.enter().await;
-        if !self.settings.config().sync_enabled {
-            return Response::err(request_id, ErrorCode::NotReady, "Sync is turned off.");
-        }
-        let peers = match pairing_id {
-            Some(id) => match self.node.peers().get(&id) {
-                Some(peer) => vec![peer],
-                None => return self.node_error(request_id, copypaste_p2p::NodeError::NoPeer),
-            },
-            None => self.node.peers().list(),
-        };
-        let mut results = Vec::with_capacity(peers.len());
-        for peer in &peers {
-            let started = std::time::Instant::now();
-            let cancel = self.peer_sync.cycle.cancel_token();
-            let outcome = tokio::select! {
-                _ = cancel.cancelled() => Err(copypaste_p2p::NodeError::Session),
-                result = self.node.sync_one_in_cycle(peer, self.source.as_ref(), &self.peer_sync.cycle) => result,
-            };
-            if let Ok(outcome) = &outcome {
-                self.remember_device(outcome);
-                if outcome.stats.received > 0 {
-                    self.emit(EventKind::Items);
-                }
-            }
-            results.push(p2p_contract::sync_result(peer, outcome, started.elapsed()));
-        }
-        Response::ok(request_id, ResponseData::Sync(results))
-    }
-
-    /// Persist authenticated peer metadata separately from the item merge.
-    ///
-    /// The item origin remains immutable for merge ordering. Device labels and
-    /// form factors are cosmetic metadata, so a successful session may update
-    /// them without changing any version that arrived through it.
-    fn remember_device(&self, outcome: &copypaste_p2p::sync::SyncOutcome) {
-        if let Err(error) = self
-            .store
-            .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)
-        {
-            tracing::warn!(?error, "could not record a peer device name");
-        }
-        if let Some(profile) = &outcome.peer_profile {
-            if let Err(error) = self
-                .store
-                .record_device_class(&outcome.peer_device_id, profile.device_class)
-            {
-                tracing::warn!(?error, "could not record a peer device class");
-            }
-        }
-    }
-
-    fn item(&self, request_id: u64, item_id: &str) -> Response {
-        match copypaste_core::history_actions::open(&self.store, &self.keyring.item_key(), item_id)
-        {
-            Ok(opened) => {
-                let origins = self.origins_for(std::slice::from_ref(opened.row()));
-                let origin = origins
-                    .get(&opened.row().id)
-                    .expect("the row has a resolved origin");
-                Response::ok(
-                    request_id,
-                    ResponseData::Item(opened.into_item(origin, &self.device_id)),
-                )
-            }
-            Err(error) => error.response(request_id),
-        }
-    }
-
-    fn copy(&self, request_id: u64, item_id: &str, plain_text: bool) -> Response {
-        use copypaste_core::history_actions::{self, CopyOptions};
-        let key = self.keyring.item_key();
-        let result = (|| {
-            let opened = history_actions::open(&self.store, &key, item_id)?;
-            let origins = self.origins_for(std::slice::from_ref(opened.row()));
-            let origin = origins
-                .get(&opened.row().id)
-                .expect("the row has a resolved origin");
-            let prepared = history_actions::prepare_copy(
-                &self.store,
-                &key,
-                opened,
-                CopyOptions {
-                    origin,
-                    local_device_id: &self.device_id,
-                    plain_text,
-                    allow_content_uri: true,
-                    max_file_size_bytes: self.settings.config().max_file_size_bytes,
-                },
-            )?;
-            self.clipboard
-                .write(prepared.payload(), &prepared.content_type)
-                .map_err(copypaste_core::history_error::HistoryError::from)?;
-            let item = history_actions::finish_copy(&self.store, prepared)?;
-            self.instant_clipboard
-                .note_local(&self.store, item.created_at);
-            self.node.note_local_version(item.created_at);
-            self.modules.note_version(item.created_at);
-            self.peer_sync.wake();
-            self.emit(EventKind::Items);
-            Ok::<_, copypaste_core::history_error::HistoryError>(item)
-        })();
-        match result {
-            Ok(item) => Response::ok(request_id, ResponseData::Item(item)),
-            Err(error) => error.response(request_id),
-        }
-    }
-
-    fn save_file(&self, request_id: u64, item_id: &str, destination: &str) -> Response {
-        match copypaste_core::history_actions::save_file(
-            &self.store,
-            &self.keyring.item_key(),
-            item_id,
-            destination,
-            self.settings.config().max_file_size_bytes,
-        ) {
-            Ok(()) => Response::ok(request_id, ResponseData::Empty {}),
-            Err(error) => error.response(request_id),
-        }
-    }
-
-    #[cfg(test)]
-    fn item_value(&self, row: copypaste_core::StoredItem, preview: bool) -> Option<Item> {
-        let origins = self.origins_for(std::slice::from_ref(&row));
-        let origin = origins.get(&row.id).expect("the row has a resolved origin");
-        self.item_value_with_origin(row, preview, origin)
-    }
-
-    /// Resolve one immutable origin per row with two bounded metadata reads.
-    ///
-    /// A history page contains up to 1,000 rows. Looking up every name and
-    /// class while serialising each item would turn a list into an N+1 query.
-    fn origins_for(&self, rows: &[copypaste_core::StoredItem]) -> HashMap<String, ItemOrigin> {
-        let device_ids = rows
-            .iter()
-            .map(|row| {
-                if row.origin_device_id.is_empty() {
-                    self.device_id.clone()
-                } else {
-                    row.origin_device_id.clone()
-                }
-            })
-            .collect::<Vec<_>>();
-        let remote_device_ids = device_ids
-            .iter()
-            .filter(|device_id| device_id.as_str() != self.device_id.as_str())
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let names = if remote_device_ids.is_empty() {
-            HashMap::new()
-        } else {
-            match self.store.device_names(&remote_device_ids) {
-                Ok(names) => names,
-                Err(error) => {
-                    tracing::warn!(?error, "could not resolve origin device names");
-                    HashMap::new()
-                }
-            }
-        };
-        let classes = if remote_device_ids.is_empty() {
-            HashMap::new()
-        } else {
-            match self.store.device_classes(&remote_device_ids) {
-                Ok(classes) => classes,
-                Err(error) => {
-                    tracing::warn!(?error, "could not resolve origin device classes");
-                    HashMap::new()
-                }
-            }
-        };
-
-        rows.iter()
-            .zip(device_ids)
-            .map(|(row, device_id)| {
-                let origin = if device_id == self.device_id {
-                    ItemOrigin {
-                        device_id,
-                        device_name: Some(self.device_name.clone()),
-                        device_class: self.device_class,
-                    }
-                } else {
-                    ItemOrigin {
-                        device_name: names.get(&device_id).cloned(),
-                        device_class: classes
-                            .get(&device_id)
-                            .copied()
-                            .unwrap_or(copypaste_ipc::DeviceClass::Unknown),
-                        device_id,
-                    }
-                };
-                (row.id.clone(), origin)
-            })
-            .collect()
-    }
-
-    fn item_value_with_origin(
-        &self,
-        row: copypaste_core::StoredItem,
-        preview: bool,
-        origin: &ItemOrigin,
-    ) -> Option<Item> {
-        copypaste_core::history_item::open_item(
-            row,
-            origin,
-            &self.device_id,
-            &self.keyring.item_key(),
-            preview,
-        )
-        .ok()
-        .map(|(item, _)| item)
     }
 }
 
@@ -1981,6 +1109,9 @@ pub enum RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use copypaste_core::ClipboardWriteError;
+    use copypaste_ipc::{ErrorCode, Item, Method, Response, ResponseData};
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -2048,68 +1179,67 @@ mod tests {
         }
     }
 
-    fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
-        fixture_with(Arc::new(UnavailableClipboard))
+    impl Runtime {
+        fn item_value(&self, row: copypaste_core::StoredItem, preview: bool) -> Option<Item> {
+            let origin = self.meta.origin_of(&row);
+            copypaste_core::history_item::open_item(
+                row,
+                &origin,
+                self.meta.device_id(),
+                &self.keyring.item_key(),
+                preview,
+            )
+            .ok()
+            .map(|(item, _)| item)
+        }
+
+        fn page(
+            &self,
+            rows: Vec<copypaste_core::StoredItem>,
+            _: Option<String>,
+        ) -> copypaste_ipc::ItemPage {
+            self.decrypt_page(rows)
+        }
+
+        fn save_file(&self, id: u64, item_id: &str, destination: &str) -> Response {
+            self.request_blocking(
+                id,
+                Method::SaveFile {
+                    id: item_id.into(),
+                    dest_path: destination.into(),
+                    download_token: None,
+                },
+            )
+        }
+    }
+
+    pub(crate) fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
+        fixture_with(Arc::new(host::UnavailableClipboard))
     }
 
     fn fixture_with(clipboard: Arc<dyn ClipboardWriter>) -> (Arc<Runtime>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let keyring = Arc::new(Keyring::from_secret(&[7; 32]));
-        let store = Store::open(&dir.path().join("history.db"), &keyring.db_key()).unwrap();
-        let identity = store.device_identity("fixture phone").unwrap();
-        let settings = Arc::new(RuntimeSettings::load(&store));
-        let node = Arc::new(Node::new(
-            PeerStore::open(&dir.path().join("peers.json"), &keyring.peer_store_key()).unwrap(),
-            None,
+        let runtime = Runtime::open_with_keyring(
+            dir.path(),
+            "fixture phone",
             0,
-            true,
-        ));
-        let source_settings = Arc::clone(&settings);
-        let source = Arc::new(StoreSource::with_retention_settings(
-            store.clone(),
-            Arc::clone(&keyring),
-            identity.device_id.clone(),
-            identity.device_name.clone(),
-            move || source_settings.config(),
-        ));
-        let (events, _) = tokio::sync::broadcast::channel(8);
-        let (shutdown, _) = tokio::sync::watch::channel(false);
-        (
-            Arc::new(Runtime {
-                file_downloads: Default::default(),
-                peer_sync: peer_sync::PeerSyncDriver::new(),
-                modules: Arc::new(copypaste_modules::ModuleHost::new(dir.path())),
-                store,
-                keyring,
-                source,
-                node,
-                device_id: identity.device_id,
-                device_name: identity.device_name,
-                device_class: copypaste_p2p::DeviceProfile::current().device_class,
-                settings,
-                events,
-                runtime_events: tokio::sync::broadcast::channel(256).0,
-                shutdown,
-                listener_started: AtomicBool::new(false),
-                capture_running: Arc::new(AtomicBool::new(false)),
-                capture_revision: Arc::new(AtomicU64::new(0)),
-                module_sync_started: AtomicBool::new(false),
-                spoilers: Default::default(),
-                clipboard,
-                instant_clipboard: Arc::default(),
-            }),
-            dir,
+            Arc::new(host::InProcessHost(clipboard)),
+            Arc::new(Keyring::from_secret(&[7; 32])),
         )
+        .unwrap();
+        (Arc::new(runtime), dir)
     }
 
     #[derive(Default)]
-    struct RecordingClipboard(Mutex<Vec<String>>);
+    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<bool>>);
     impl ClipboardWriter for RecordingClipboard {
         fn write(
             &self,
             payload: &ClipboardPayload,
             _content_type: &str,
+            secret: bool,
         ) -> Result<(), ClipboardWriteError> {
+            self.1.lock().unwrap().push(secret);
             self.0.lock().unwrap().push(match payload {
                 ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
                 ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
@@ -2128,24 +1258,63 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn manual_and_derived_copies_preserve_native_sensitivity() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        seed_text(&runtime, "secret-source", "synthetic secret");
+        runtime
+            .store
+            .set_secret(&runtime.keyring, "secret-source", true)
+            .unwrap();
+        assert!(runtime.copy(1, "secret-source", false).ok);
+        assert!(runtime.copy(2, "secret-source", true).ok);
+        assert!(
+            runtime
+                .request(
+                    3,
+                    Method::CopyText {
+                        id: "secret-source".into(),
+                        text: "derived secret".into(),
+                    }
+                )
+                .await
+                .ok
+        );
+        runtime
+            .store
+            .set_secret(&runtime.keyring, "secret-source", false)
+            .unwrap();
+        assert!(runtime.copy(4, "secret-source", false).ok);
+        assert_eq!(*clipboard.1.lock().unwrap(), [true, true, true, false]);
+    }
+
     #[derive(Default)]
     struct ReceivingClipboard {
         writes: RecordingClipboard,
         acknowledgements: Mutex<usize>,
+        concealed: Mutex<Vec<bool>>,
     }
 
     impl ClipboardWriter for ReceivingClipboard {
-        fn write(&self, payload: &ClipboardPayload, kind: &str) -> Result<(), ClipboardWriteError> {
-            self.writes.write(payload, kind)
+        fn write(
+            &self,
+            payload: &ClipboardPayload,
+            kind: &str,
+            secret: bool,
+        ) -> Result<(), ClipboardWriteError> {
+            self.writes.write(payload, kind, secret)
         }
 
         fn write_received(
             &self,
             payload: &ClipboardPayload,
             kind: &str,
+            secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.write(payload, kind)?;
+            self.write(payload, kind, secret)?;
             *self.acknowledgements.lock().unwrap() += 1;
+            self.concealed.lock().unwrap().push(secret);
             Ok(())
         }
     }
@@ -2155,7 +1324,7 @@ mod tests {
         let (runtime, dir) = fixture();
         let source = dir.path().join("source.pdf");
         std::fs::write(&source, b"%PDF original").unwrap();
-        let mut events = runtime.events.subscribe();
+        let mut events = runtime.subscribe_events();
         for name in ["a.pdf", "b.pdf"] {
             let response = runtime
                 .request(
@@ -2308,7 +1477,7 @@ mod tests {
     async fn secret_choice_persists_and_publishes_an_item_event_without_copying() {
         let (runtime, _dir) = fixture();
         seed_text(&runtime, "privacy-toggle", "toggle text");
-        let mut events = runtime.events.subscribe();
+        let mut events = runtime.subscribe_events();
         for secret in [true, false] {
             let response = runtime
                 .request(
@@ -2351,6 +1520,47 @@ mod tests {
                 .error_code,
             Some(ErrorCode::NotFound)
         );
+    }
+
+    #[test]
+    fn detected_credentials_share_the_android_capture_gate_and_hidden_preview() {
+        let (runtime, _dir) = fixture();
+        let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic";
+        assert!(matches!(
+            runtime.capture_text(content),
+            Err(RuntimeError::CaptureRefused)
+        ));
+        assert_eq!(runtime.store.count().unwrap(), 0);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                skip_secret: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        runtime.capture_text(content).unwrap();
+        let row = runtime.store.list(10, 0).unwrap().pop().unwrap();
+        let preview = runtime.item_value(row, true).unwrap();
+        assert!(preview.privacy.secret);
+        assert!(preview.content.is_empty());
+        assert_eq!(
+            preview.semantic_kind,
+            Some(copypaste_ipc::SemanticKind::Credentials)
+        );
+
+        // A native host learns the detected secret so its own preview hides it.
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::Implicit)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        let privacy = runtime
+            .capture_text_operation(token, "-----BEGIN RSA PRIVATE KEY-----\nother")
+            .unwrap();
+        assert!(privacy.secret);
     }
 
     fn seed_text(runtime: &Runtime, id: &str, value: &str) {
@@ -2437,10 +1647,7 @@ mod tests {
 
         match response.data {
             Some(ResponseData::Status(status)) => {
-                assert_eq!(
-                    status.device_id.as_deref(),
-                    Some(runtime.device_id.as_str())
-                );
+                assert_eq!(status.device_id.as_deref(), Some(runtime.meta.device_id()));
                 assert!(status.clipboard_available);
             }
             other => panic!("expected status response, got {other:?}"),
@@ -2458,7 +1665,10 @@ mod tests {
             other => panic!("expected history facets, got {other:?}"),
         };
         assert_eq!(facets.origin_devices.len(), 1);
-        assert_eq!(facets.origin_devices[0].device_class, runtime.device_class);
+        assert_eq!(
+            facets.origin_devices[0].device_class,
+            runtime.meta.device_class()
+        );
     }
 
     #[tokio::test]
@@ -2486,7 +1696,7 @@ mod tests {
             Some(ResponseData::HistoryFacets(facets)) => facets
                 .origin_devices
                 .into_iter()
-                .find(|facet| facet.id == runtime.device_id)
+                .find(|facet| facet.id == runtime.meta.device_id())
                 .expect("the local device facet"),
             other => panic!("{other:?}"),
         };
@@ -2510,7 +1720,7 @@ mod tests {
         };
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, "local-item");
-        assert_eq!(page.items[0].origin_device_id, runtime.device_id);
+        assert_eq!(page.items[0].origin_device_id, runtime.meta.device_id());
     }
 
     #[test]
@@ -2522,9 +1732,9 @@ mod tests {
         let page = runtime.page(runtime.store.list(10, 0).unwrap(), None);
         assert_eq!(page.items.len(), 2);
         assert!(page.items.iter().all(|item| {
-            item.origin_device_id == runtime.device_id
-                && item.origin_device_name.as_deref() == Some(runtime.device_name.as_str())
-                && item.origin_device_class == runtime.device_class
+            item.origin_device_id == runtime.meta.device_id()
+                && item.origin_device_name.as_deref() == Some(runtime.meta.device_name().as_str())
+                && item.origin_device_class == runtime.meta.device_class()
         }));
     }
 
@@ -2562,7 +1772,7 @@ mod tests {
             applied_floor: None,
         });
 
-        let item = match runtime.item(1, "remote-item").data {
+        let item = match runtime.get(1, "remote-item").data {
             Some(ResponseData::Item(item)) => item,
             other => panic!("{other:?}"),
         };
@@ -2571,7 +1781,7 @@ mod tests {
         assert_eq!(item.origin_device_class, copypaste_ipc::DeviceClass::Phone);
         assert_ne!(
             item.origin_device_name.as_deref(),
-            Some(runtime.device_name.as_str())
+            Some(runtime.meta.device_name().as_str())
         );
 
         let page = runtime.page(runtime.store.list(10, 0).unwrap(), None);
@@ -2592,7 +1802,7 @@ mod tests {
             .expect("the local item is listed");
         assert_eq!(
             local.origin_device_name.as_deref(),
-            Some(runtime.device_name.as_str())
+            Some(runtime.meta.device_name().as_str())
         );
     }
 
@@ -2644,6 +1854,31 @@ mod tests {
             }
             other => panic!("expected status response, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn ordinary_configuration_changes_publish_one_watch_revision() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_runtime_events();
+        let patch = copypaste_ipc::ConfigPatch {
+            notify_on_copy: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            runtime
+                .request(
+                    1,
+                    Method::SetConfig {
+                        patch: patch.clone()
+                    }
+                )
+                .await
+                .ok
+        );
+        assert!(events.try_recv().unwrap().capture.is_some());
+        assert!(events.try_recv().is_err());
+        assert!(runtime.request(2, Method::SetConfig { patch }).await.ok);
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -2708,7 +1943,7 @@ mod tests {
         runtime.publish_sms_code(token, "007123").unwrap();
         let event = events.try_recv().unwrap();
         let id = event.captured_item_id.unwrap();
-        let item = match runtime.item(0, &id).data {
+        let item = match runtime.get(0, &id).data {
             Some(ResponseData::Item(item)) => item,
             other => panic!("{other:?}"),
         };
@@ -2791,7 +2026,7 @@ mod tests {
         let (runtime, _dir) = fixture_with(clipboard.clone());
         seed_text(&runtime, "text-item", "trusted text");
         seed_text(&runtime, "z-newer", "another clip");
-        let mut events = runtime.events.subscribe();
+        let mut events = runtime.subscribe_events();
         assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "z-newer");
         assert!(runtime.copy(1, "text-item", false).ok);
         assert_eq!(runtime.store.list(10, 0).unwrap()[0].id, "text-item");
@@ -2819,13 +2054,18 @@ mod tests {
     fn a_failed_copy_does_not_promote_history_or_emit_a_change() {
         struct RefusingClipboard;
         impl ClipboardWriter for RefusingClipboard {
-            fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: bool,
+            ) -> Result<(), ClipboardWriteError> {
                 Err(ClipboardWriteError::Failed)
             }
         }
         let (runtime, _dir) = fixture_with(Arc::new(RefusingClipboard));
         seed_text(&runtime, "text-item", "trusted text");
-        let mut events = runtime.events.subscribe();
+        let mut events = runtime.subscribe_events();
         assert!(!runtime.copy(1, "text-item", false).ok);
         assert_eq!(
             runtime.store.get("text-item").unwrap().unwrap().created_at,
@@ -2841,7 +2081,7 @@ mod tests {
         seed_text(&runtime, "source", "full original text");
         seed_text(&runtime, "z-newer", "newer text");
         let original = runtime.store.get("source").unwrap().unwrap();
-        let mut events = runtime.events.subscribe();
+        let mut events = runtime.subscribe_events();
         assert!(
             runtime
                 .request(
@@ -2896,7 +2136,7 @@ mod tests {
             dir.path(),
             "receiver",
             0,
-            clipboard.clone(),
+            Arc::new(host::InProcessHost(clipboard.clone())),
             Arc::new(Keyring::from_secret(&[7; 32])),
         )
         .unwrap();
@@ -2919,6 +2159,7 @@ mod tests {
             ["text:from another device"]
         );
         assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert_eq!(*clipboard.concealed.lock().unwrap(), [false]);
         assert!(!runtime.source.apply_version(&incoming).unwrap());
         assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
         runtime
@@ -2947,11 +2188,48 @@ mod tests {
     }
 
     #[test]
+    fn received_secrets_reach_the_clipboard_with_concealed_native_feedback() {
+        let dir = tempfile::tempdir().unwrap();
+        let clipboard = Arc::new(ReceivingClipboard::default());
+        let runtime = Runtime::open_with_keyring(
+            dir.path(),
+            "receiver",
+            0,
+            Arc::new(host::InProcessHost(clipboard.clone())),
+            Arc::new(Keyring::from_secret(&[7; 32])),
+        )
+        .unwrap();
+        let incoming = copypaste_core::RemoteVersion {
+            item_id: "secret-incoming",
+            content: "synthetic confidential text",
+            binary_content: None,
+            payload_metadata: Some(r#"{"privacy":{"secret":true}}"#),
+            content_type: "text",
+            created_at: 100,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "sender",
+            app_bundle_id: None,
+            app_name: None,
+        };
+        assert!(runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(
+            *clipboard.writes.0.lock().unwrap(),
+            ["text:synthetic confidential text"]
+        );
+        assert_eq!(*clipboard.concealed.lock().unwrap(), [true]);
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert!(!runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert!(runtime.store.search("confidential", 10).unwrap().is_empty());
+    }
+
+    #[test]
     fn item_response_carries_semantic_kind_and_color_swatch() {
         let (runtime, _dir) = fixture();
         seed_text(&runtime, "color-item", "oklch(50% 0.1 30)");
 
-        let item = match runtime.item(1, "color-item").data {
+        let item = match runtime.get(1, "color-item").data {
             Some(ResponseData::Item(item)) => item,
             other => panic!("{other:?}"),
         };
@@ -3055,7 +2333,7 @@ mod tests {
         assert!(listed.image_details.is_none());
 
         let detail = runtime.item_value(row, false).unwrap();
-        assert_eq!(detail.origin_device_class, runtime.device_class);
+        assert_eq!(detail.origin_device_class, runtime.meta.device_class());
         let metadata = detail.image_details.expect("selected image metadata");
         assert_eq!((metadata.width, metadata.height), (1, 1));
         assert_eq!(metadata.size_bytes, source.len() as u64);
@@ -3213,7 +2491,7 @@ mod tests {
                 source.as_ref().and_then(|source| source.name.as_deref())
             );
             assert_eq!(&*runtime.source.open_bytes(&row).unwrap(), &png);
-            let item = match runtime.item(1, &row.id).data {
+            let item = match runtime.get(1, &row.id).data {
                 Some(ResponseData::Item(item)) => item,
                 other => panic!("{other:?}"),
             };
@@ -3249,7 +2527,7 @@ mod tests {
             )
             .unwrap();
         let row = runtime.store.list(1, 0).unwrap().pop().unwrap();
-        let item = match runtime.item(1, &row.id).data {
+        let item = match runtime.get(1, &row.id).data {
             Some(ResponseData::Item(item)) => item,
             other => panic!("{other:?}"),
         };
@@ -3337,7 +2615,9 @@ mod tests {
                                 None,
                             )
                         } else {
-                            runtime.capture_text_operation(token, "barrier text")
+                            runtime
+                                .capture_text_operation(token, "barrier text")
+                                .map(|_| ())
                         }
                     };
                     let host = runtime.capture_admission().open_host(kind).unwrap();
@@ -3381,7 +2661,9 @@ mod tests {
                                 None,
                             )
                         } else {
-                            worker_runtime.capture_text_operation(token, "barrier text")
+                            worker_runtime
+                                .capture_text_operation(token, "barrier text")
+                                .map(|_| ())
                         }
                     });
                     entered.wait();
@@ -3574,13 +2856,14 @@ mod tests {
         receiver.start_listener().await.unwrap();
         sender.start_listener().await.unwrap();
         let receiver_address: std::net::SocketAddr =
-            receiver.node.listen_addr().unwrap().parse().unwrap();
+            receiver.p2p.node().listen_addr().unwrap().parse().unwrap();
         let sender_address: std::net::SocketAddr =
-            sender.node.listen_addr().unwrap().parse().unwrap();
+            sender.p2p.node().listen_addr().unwrap().parse().unwrap();
         let token = copypaste_p2p::PairingToken::generate();
         for (runtime, address) in [(&receiver, sender_address), (&sender, receiver_address)] {
             runtime
-                .node
+                .p2p
+                .node()
                 .peers()
                 .upsert(copypaste_p2p::Peer {
                     pairing_id: token.pairing_id(),
@@ -3594,7 +2877,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        let running_manual_round = sender.peer_sync.rounds.enter().await;
+        let running_manual_round = sender.p2p.driver.rounds.enter().await;
         sender.capture_text("automatic clipboard text").unwrap();
         let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=").unwrap();
         let source = CaptureSourceApp {
@@ -3656,12 +2939,12 @@ mod tests {
         let (sender, _sender_dir) = fixture();
         seed_text(&sender, "remote-item", "from peer");
         receiver.start_listener().await.unwrap();
-        receiver.peer_sync.cycle.set_enabled(false);
+        receiver.p2p.driver.cycle.set_enabled(false);
         sender.start_listener().await.unwrap();
-        sender.peer_sync.cycle.set_enabled(false);
+        sender.p2p.driver.cycle.set_enabled(false);
         let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                if let Some(address) = receiver.node.listen_addr() {
+                if let Some(address) = receiver.p2p.node().listen_addr() {
                     break address;
                 }
                 tokio::task::yield_now().await;
@@ -3673,7 +2956,8 @@ mod tests {
         let pairing_id = token.pairing_id();
         for (runtime, address) in [(&receiver, None), (&sender, remote_addr.parse().ok())] {
             runtime
-                .node
+                .p2p
+                .node()
                 .peers()
                 .upsert(copypaste_p2p::Peer {
                     pairing_id: pairing_id.clone(),
@@ -3688,9 +2972,10 @@ mod tests {
                 .unwrap();
         }
         let mut events = receiver.subscribe_events();
-        let peer = sender.node.peers().get(&pairing_id).unwrap();
+        let peer = sender.p2p.node().peers().get(&pairing_id).unwrap();
         sender
-            .node
+            .p2p
+            .node()
             .sync_one(&peer, sender.source.as_ref())
             .await
             .unwrap();
@@ -3719,10 +3004,10 @@ mod tests {
         let (receiver, _receiver_dir) = fixture();
         let (sender, _sender_dir) = fixture();
         receiver.start_listener().await.unwrap();
-        receiver.peer_sync.cycle.set_enabled(false);
+        receiver.p2p.driver.cycle.set_enabled(false);
         let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                if let Some(address) = receiver.node.listen_addr() {
+                if let Some(address) = receiver.p2p.node().listen_addr() {
                     break address;
                 }
                 tokio::task::yield_now().await;
@@ -3733,7 +3018,8 @@ mod tests {
         let token = copypaste_p2p::PairingToken::generate();
         let pairing_id = token.pairing_id();
         receiver
-            .node
+            .p2p
+            .node()
             .peers()
             .upsert(copypaste_p2p::Peer {
                 pairing_id: pairing_id.clone(),
@@ -3757,7 +3043,7 @@ mod tests {
             profile_observed_at_ms: 0,
         };
         let mut events = receiver.subscribe_events();
-        sender.node.probe_one(&peer).await.unwrap();
+        sender.p2p.node().probe_one(&peer).await.unwrap();
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), events.recv())
                 .await
@@ -3766,7 +3052,7 @@ mod tests {
                 .event,
             EventKind::Peers
         );
-        let observed = receiver.node.peers().get(&pairing_id).unwrap();
+        let observed = receiver.p2p.node().peers().get(&pairing_id).unwrap();
         assert!(observed.profile.is_some());
         assert!(observed.profile_observed_at_ms > 0);
         assert!(observed.last_seen_ms > 0);
@@ -3783,7 +3069,7 @@ mod tests {
         let (runtime, _dir) = fixture();
         runtime.start_listener().await.unwrap();
         tokio::time::timeout(Duration::from_secs(1), async {
-            while runtime.node.listen_addr().is_none() {
+            while runtime.p2p.listen_addr().is_none() {
                 tokio::task::yield_now().await;
             }
         })
@@ -3804,7 +3090,7 @@ mod tests {
         let (runtime, _dir) = fixture();
         let mut first = runtime.subscribe_events();
         let mut second = runtime.subscribe_events();
-        runtime.emit(EventKind::Items);
+        runtime.note_remote_change();
         assert!(matches!(
             first.recv().await.unwrap().event,
             EventKind::Items
@@ -3814,10 +3100,111 @@ mod tests {
             EventKind::Items
         ));
         drop(first);
-        runtime.emit(EventKind::Peers);
+        runtime.note_peers_changed();
         assert!(matches!(
             second.recv().await.unwrap().event,
             EventKind::Peers
         ));
+    }
+
+    #[test]
+    fn known_device_data_appears_only_after_confirmation() {
+        let (state, _dir) = fixture();
+        let token = copypaste_p2p::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        state
+            .p2p
+            .peers()
+            .upsert(copypaste_p2p::peers::Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let progress = |phase| {
+            state.pairing_progress(
+                1,
+                copypaste_p2p::PairingStatus {
+                    pairing_id: Some(pairing_id.clone()),
+                    role: Some(copypaste_p2p::PairingRole::Initiator),
+                    phase,
+                    sas: None,
+                    peer: None,
+                    error: None,
+                    expires_in_ms: None,
+                },
+            )
+        };
+
+        let awaiting = progress(copypaste_p2p::PairingPhase::AwaitingConfirmation);
+        assert!(matches!(
+            awaiting.data,
+            Some(ResponseData::PairingProgress(
+                copypaste_ipc::PairingProgressData {
+                    known_device: None,
+                    ..
+                }
+            ))
+        ));
+        let confirmed = progress(copypaste_p2p::PairingPhase::Confirmed);
+        assert!(matches!(
+            confirmed.data,
+            Some(ResponseData::PairingProgress(copypaste_ipc::PairingProgressData {
+                known_device: Some(copypaste_ipc::PeerInfo { pairing_id: id, .. }),
+                ..
+            })) if id == pairing_id
+        ));
+    }
+
+    #[test]
+    fn source_exclusions_report_capture_blocked_without_attribution() {
+        use copypaste_ipc::{
+            CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability,
+        };
+        use std::collections::BTreeMap;
+
+        let mut capabilities = BTreeMap::from([
+            (
+                PlatformCapability::ClipboardCapture,
+                CapabilityStatus {
+                    state: CapabilityState::Available,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::Verified,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+            (
+                PlatformCapability::SourceAttribution,
+                CapabilityStatus {
+                    state: CapabilityState::Unsupported,
+                    backend: Some("linux-wayland-data-control".into()),
+                    reason: None,
+                    permissions: Vec::new(),
+                    guarantee: CapabilityGuarantee::None,
+                    mime_types: Vec::new(),
+                    max_bytes: None,
+                },
+            ),
+        ]);
+        let settings = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Private".into()],
+            ..Default::default()
+        };
+        apply_capture_policy_capabilities(&mut capabilities, &settings);
+        let capture = &capabilities[&PlatformCapability::ClipboardCapture];
+        assert_eq!(capture.state, CapabilityState::NeedsCompanion);
+        assert_eq!(capture.guarantee, CapabilityGuarantee::None);
+        assert_eq!(
+            capture.backend.as_deref(),
+            Some("linux-wayland-data-control")
+        );
     }
 }

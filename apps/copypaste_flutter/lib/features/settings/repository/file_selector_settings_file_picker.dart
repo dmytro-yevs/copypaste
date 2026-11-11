@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:file_selector/file_selector.dart';
 
 import '../../../platform/files/platform_file_gateway.dart';
@@ -12,13 +13,13 @@ class FileSelectorSettingsFilePicker implements SettingsFilePicker {
 
   final PlatformFileGateway fileGateway;
 
-  static const _json = XTypeGroup(
-    label: 'CopyPaste text history',
-    extensions: <String>['json'],
+  static XTypeGroup get _json => XTypeGroup(
+    label: AppStrings.current.settingsRuntimeTextHistoryFileType,
+    extensions: const <String>['json'],
   );
-  static const _backup = XTypeGroup(
-    label: 'CopyPaste encrypted backup',
-    extensions: <String>['copypaste-backup'],
+  static XTypeGroup get _backup => XTypeGroup(
+    label: AppStrings.current.settingsRuntimeEncryptedBackupFileType,
+    extensions: const <String>['copypaste-backup'],
   );
   @override
   Future<String?> chooseTextExportPath() async {
@@ -27,7 +28,7 @@ class FileSelectorSettingsFilePicker implements SettingsFilePicker {
     }
     return (await getSaveLocation(
       suggestedName: 'copypaste-history.json',
-      acceptedTypeGroups: const [_json],
+      acceptedTypeGroups: [_json],
     ))?.path;
   }
 
@@ -38,13 +39,13 @@ class FileSelectorSettingsFilePicker implements SettingsFilePicker {
     }
     return (await getSaveLocation(
       suggestedName: 'copypaste-history.copypaste-backup',
-      acceptedTypeGroups: const [_backup],
+      acceptedTypeGroups: [_backup],
     ))?.path;
   }
 
   @override
   Future<String?> chooseRestorePath() async {
-    final selected = await openFile(acceptedTypeGroups: const [_backup]);
+    final selected = await openFile(acceptedTypeGroups: [_backup]);
     if (selected == null) return null;
     if (!Platform.isAndroid) return selected.path;
     final staged = await fileGateway.androidStagingPath(

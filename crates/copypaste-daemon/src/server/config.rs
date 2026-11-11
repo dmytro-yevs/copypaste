@@ -1,174 +1,35 @@
-//! Reading and changing the daemon's settings.
-//!
-//! Thin on purpose: validation, persistence and the "last good value survives a
-//! rejection" rule all live in [`crate::settings`], which is where a change to
-//! them belongs. What is here is the mapping onto the wire, and the side effects
-//! a changed value has on a running daemon.
+//! Settings dispatch through the daemon host.
 
-use copypaste_ipc::{
-    ConfigApplied, ConfigData, ConfigPatch, ErrorCode, PrivateModeData, Response, ResponseData,
-};
+#[allow(unused_imports)]
+use crate::testutil::calls::*;
 
-use crate::settings::{SettingsError, SettingsTransition};
-use crate::AppState;
-
-pub(super) fn get(state: &AppState, id: u64) -> Response {
-    Response::ok(
-        id,
-        ResponseData::Config(ConfigApplied {
-            config: state.settings.get().clone(),
-            restart_required: Vec::new(),
-        }),
-    )
-}
-
-pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
-    set_with_effects(state, id, patch, |transition| {
-        apply_runtime_effects(state, transition);
-    })
-}
-
-fn set_with_effects<F>(state: &AppState, id: u64, patch: &ConfigPatch, effects: F) -> Response
-where
-    F: FnOnce(&SettingsTransition),
-{
-    let before = {
-        let settings = state.settings.get();
-        (settings.private_mode_epoch(), settings.health().cloned())
-    };
-    match state
-        .settings
-        .apply_with_effects(&state.meta, patch, effects)
-    {
-        Ok(config) => {
-            let changed = {
-                let settings = state.settings.get();
-                (settings.private_mode_epoch(), settings.health().cloned()) != before
-            };
-            if changed {
-                state.note_capture_state_changed();
-            }
-            if patch.sync_enabled.is_some() {
-                state
-                    .modules
-                    .sync_enabled_changed(config.config.sync_enabled);
-            }
-            Response::ok(
-                id,
-                ResponseData::Config(ConfigApplied {
-                    config: config.config,
-                    restart_required: ConfigData::restart_required_by(patch)
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                }),
-            )
-        }
-        // `ConfigError`'s text names a field and a bound and can contain no
-        // path — the type is built that way, and `copypaste_ipc::config` has a
-        // test pinning it — so it is safe to pass through verbatim. That is
-        // worth doing: "poll_interval_ms must be between 100 and 60000" is the
-        // one message here a user can act on.
-        Err(e @ SettingsError::Invalid(_)) => {
-            Response::err(id, ErrorCode::InvalidRequest, e.to_string())
-        }
-        Err(e @ SettingsError::Store) => Response::err(id, ErrorCode::Internal, e.to_string()),
-    }
-}
-
-fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
-    advance_private_cursor(state, transition);
-    let removed = copypaste_core::retention::reconcile_policy(
-        &state.store,
-        || state.settings.get().clone(),
-        transition.should_enforce_retention(),
-    );
-    if removed > 0 {
-        // Retention is local housekeeping, not a sync deletion. This only
-        // wakes watchers; `note_local_change` would advance transport cursors
-        // for rows that must remain local to this device.
-        state.note_remote_change();
-    }
-    if transition.lan_visibility_changed() {
-        state
-            .p2p
-            .node()
-            .set_lan_visibility(transition.config().lan_visibility);
-    }
-    if let Some(enabled) = transition.sync_enabled_changed() {
-        state.p2p.sync_enabled_changed(enabled);
-    }
-}
-
-fn advance_private_cursor(state: &AppState, transition: &SettingsTransition) {
-    if !transition.resumes_capture() {
-        return;
-    }
-    // Settings retains capture authority throughout this effect.
-    // Advance the native cursor without reading or replacing private content.
-    let mut private_policy = transition.config().clone();
-    private_policy.private_mode = true;
-    state
-        .clipboard()
-        .poll_with_policy(crate::clipboard::CapturePolicy::new(&private_policy));
-}
-
-pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
-    let settings = state.settings.get();
-    Response::ok(
-        id,
-        ResponseData::PrivateMode(PrivateModeData {
-            private_mode: settings.private_mode,
-            private_mode_epoch: settings.private_mode_epoch(),
-        }),
-    )
-}
-
-pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Response {
-    let before = {
-        let settings = state.settings.get();
-        (settings.private_mode_epoch(), settings.health().cloned())
-    };
-    match state.settings.apply_with_effects(
-        &state.meta,
-        &ConfigPatch {
-            private_mode: Some(enabled),
-            ..Default::default()
-        },
-        |transition| advance_private_cursor(state, transition),
-    ) {
-        Ok(config) => {
-            let changed = {
-                let settings = state.settings.get();
-                (settings.private_mode_epoch(), settings.health().cloned()) != before
-            };
-            if changed {
-                state.note_capture_state_changed();
-            }
-            Response::ok(
-                id,
-                ResponseData::PrivateMode(PrivateModeData {
-                    private_mode: config.config.private_mode,
-                    private_mode_epoch: config.private_mode_epoch,
-                }),
-            )
-        }
-        Err(e @ SettingsError::Invalid(_)) => {
-            Response::err(id, ErrorCode::InvalidRequest, e.to_string())
-        }
-        Err(SettingsError::Store) => {
-            Response::err(id, ErrorCode::Internal, "the settings could not be saved")
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use std::sync::{mpsc, Arc, Mutex};
 
     use super::*;
     use crate::testutil::test_state;
     use copypaste_ipc::Method;
+
+    #[test]
+    fn ordinary_configuration_changes_publish_one_authoritative_watch_revision() {
+        let (state, _dir) = test_state("config-watch");
+        let mut events = state.subscribe_runtime_events();
+        let patch = ConfigPatch {
+            notify_on_copy: Some(true),
+            ..Default::default()
+        };
+        assert!(set(&state, 1, &patch).ok);
+        let event = events
+            .try_recv()
+            .expect("configuration changes wake subscribers");
+        assert!(event.capture.is_some());
+        assert!(events.try_recv().is_err());
+        assert!(set(&state, 2, &patch).ok);
+        assert!(
+            events.try_recv().is_err(),
+            "unchanged configuration stays quiet"
+        );
+    }
 
     fn call(state: &AppState, method: Method) -> Response {
         crate::server::dispatch::dispatch_store(state, 1, method)
@@ -191,7 +52,7 @@ mod tests {
     #[test]
     fn private_mode_change_publishes_authoritative_capture_state() {
         let (state, _dir) = test_state("private-mode-push");
-        let mut events = state.subscribe_runtime();
+        let mut events = state.subscribe_runtime_events();
         assert!(set_private_mode(&state, 1, true).ok);
         let capture = events.try_recv().unwrap().capture.unwrap();
         assert!(capture.private_mode);
@@ -248,7 +109,7 @@ mod tests {
             })
         }
 
-        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
             panic!("private mode must preserve the native clipboard")
         }
 
@@ -364,7 +225,7 @@ mod tests {
         for n in 0..51 {
             crate::testutil::add(&state, &format!("history item {n}"));
         }
-        let mut events = state.subscribe();
+        let mut events = state.subscribe_events();
 
         let result = applied(call(
             &state,
@@ -419,10 +280,10 @@ mod tests {
                         history_limit: Some(50),
                         ..Default::default()
                     },
-                    |transition| {
+                    // The runtime's own retention effect runs right after this one.
+                    |_| {
                         effect_ready_tx.send(()).unwrap();
                         release_effect_rx.recv().unwrap();
-                        apply_runtime_effects(&state, transition);
                     },
                 )
             })
@@ -487,6 +348,7 @@ mod tests {
         assert!(result.restart_required.is_empty());
         assert!(!state
             .p2p
+            .node()
             .discovery()
             .expect("a discovery handle")
             .is_running());

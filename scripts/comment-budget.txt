@@ -46,11 +46,8 @@ crates/copypaste-daemon/src/capture.rs
 crates/copypaste-daemon/src/clipboard/fake.rs
 crates/copypaste-daemon/src/clipboard/macos.rs
 crates/copypaste-daemon/src/clipboard/mod.rs
-crates/copypaste-daemon/src/p2p/handlers.rs
-crates/copypaste-daemon/src/p2p/mod.rs
 crates/copypaste-daemon/src/server/halted.rs
 crates/copypaste-daemon/src/server/listener.rs
-crates/copypaste-daemon/src/server/messages.rs
 crates/copypaste-daemon/src/server/mod.rs
 crates/copypaste-daemon/src/server/watch.rs
 crates/copypaste-ipc/src/config.rs

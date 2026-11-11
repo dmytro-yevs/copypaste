@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:pub_semver/pub_semver.dart';
@@ -36,6 +37,7 @@ class AppUpdateController extends ChangeNotifier {
   Version? _currentVersion;
   AppRelease? _release;
   DownloadedAppUpdate? _downloaded;
+  MacosAppUpdateInstallation? _macosInstallation;
   String? _message;
   double _downloadProgress = 0;
   bool _disposed = false;
@@ -77,7 +79,7 @@ class AppUpdateController extends ChangeNotifier {
     } on PlatformException catch (error) {
       _fail(_platformErrorMessage(error.code));
     } catch (_) {
-      _fail('CopyPaste could not restore the update installation.');
+      _fail(AppStrings.current.updateRestoreInstallationFailed);
     }
   }
 
@@ -111,8 +113,8 @@ class AppUpdateController extends ChangeNotifier {
         final installation = availability.linuxInstallation;
         final repository = _repository;
         if (installation == null || repository is! LinuxAppUpdateRepository) {
-          throw const AppUpdateException(
-            'This Linux installation cannot update automatically.',
+          throw AppUpdateException(
+            AppStrings.current.updateLinuxAutomaticUnsupported,
           );
         }
         release = await (repository as LinuxAppUpdateRepository)
@@ -131,6 +133,7 @@ class AppUpdateController extends ChangeNotifier {
       _release = release;
       _downloaded = null;
       _downloadProgress = 0;
+      _macosInstallation = null;
       if (release == null) {
         _setPhase(AppUpdatePhase.upToDate);
         return;
@@ -142,19 +145,26 @@ class AppUpdateController extends ChangeNotifier {
         _setPhase(AppUpdatePhase.unavailable);
         return;
       }
+      _macosInstallation = availability.macosInstallation;
+      if (_macosInstallation == MacosAppUpdateInstallation.bundle &&
+          release.asset == null) {
+        _message = AppStrings.current.updateMacosPackageMissing;
+        _setPhase(AppUpdatePhase.unavailable);
+        return;
+      }
       _setPhase(AppUpdatePhase.available);
     } on FormatException {
-      _fail('The installed CopyPaste version is invalid.');
+      _fail(AppStrings.current.updateInstalledVersionInvalid);
     } on AppUpdateException catch (error) {
       _fail(error.message);
     } on SocketException {
-      _fail('CopyPaste could not reach GitHub to check for updates.');
+      _fail(AppStrings.current.updateCheckUnreachable);
     } on TimeoutException {
-      _fail('The update check timed out.');
+      _fail(AppStrings.current.updateCheckTimedOut);
     } on PlatformException {
-      _fail('CopyPaste could not check for updates on this device.');
+      _fail(AppStrings.current.updateCheckDeviceFailed);
     } catch (_) {
-      _fail('CopyPaste could not check for updates.');
+      _fail(AppStrings.current.updateCheckFailed);
     }
   }
 
@@ -163,7 +173,10 @@ class AppUpdateController extends ChangeNotifier {
     if (release == null || busy || _disposed) return;
     try {
       var package = _downloaded;
-      if (_platform.target != AppUpdateTarget.macos && package == null) {
+      final downloads =
+          _platform.target != AppUpdateTarget.macos ||
+          _macosInstallation == MacosAppUpdateInstallation.bundle;
+      if (downloads && package == null) {
         _downloadProgress = 0;
         _setPhase(AppUpdatePhase.downloading);
         package = await _repository.download(
@@ -199,13 +212,13 @@ class AppUpdateController extends ChangeNotifier {
     } on AppUpdateException catch (error) {
       _fail(error.message);
     } on SocketException {
-      _fail('CopyPaste could not download the update.');
+      _fail(AppStrings.current.updateDownloadFailed);
     } on TimeoutException {
-      _fail('The update download timed out.');
+      _fail(AppStrings.current.updateDownloadTimedOut);
     } on PlatformException catch (error) {
       _fail(_platformErrorMessage(error.code));
     } catch (_) {
-      _fail('CopyPaste could not install the update.');
+      _fail(AppStrings.current.updateInstallFailed);
     }
   }
 
@@ -214,24 +227,25 @@ class AppUpdateController extends ChangeNotifier {
       case AppUpdateInstallResult.started:
         _message = switch (_platform.target) {
           AppUpdateTarget.android =>
-            'Continue in the Android system installer.',
-          AppUpdateTarget.linux => 'Continue in your system package manager.',
-          _ => 'The installer is starting.',
+            AppStrings.current.updateContinueInAndroidInstaller,
+          AppUpdateTarget.linux =>
+            AppStrings.current.updateContinueInPackageManager,
+          _ => AppStrings.current.updateInstallerStarting,
         };
         _setPhase(AppUpdatePhase.installing);
         break;
       case AppUpdateInstallResult.permissionRequired:
         _message = switch (_platform.target) {
           AppUpdateTarget.android =>
-            'Allow CopyPaste to install apps in Android settings, then continue.',
+            AppStrings.current.updatePermissionRequiredAndroid,
           AppUpdateTarget.linux =>
-            'Authenticate in your system package manager to install this update.',
-          _ => 'Allow CopyPaste to install this update, then continue.',
+            AppStrings.current.updatePermissionRequiredLinux,
+          _ => AppStrings.current.updatePermissionRequired,
         };
         _setPhase(AppUpdatePhase.permissionRequired);
         break;
       case AppUpdateInstallResult.restartRequired:
-        _message = 'The update is installed. Restart CopyPaste to use it.';
+        _message = AppStrings.current.updateRestartRequired;
         _setPhase(AppUpdatePhase.restartRequired);
         break;
       case AppUpdateInstallResult.installed:
@@ -250,12 +264,12 @@ class AppUpdateController extends ChangeNotifier {
       return;
     }
     _restarting = true;
-    _message = 'Restarting CopyPaste.';
+    _message = AppStrings.current.updateRestarting;
     notifyListeners();
     try {
       await restart();
     } catch (_) {
-      _message = 'CopyPaste could not restart. Try again.';
+      _message = AppStrings.current.updateRestartFailed;
     } finally {
       _restarting = false;
       if (!_disposed) notifyListeners();
@@ -268,37 +282,37 @@ class AppUpdateController extends ChangeNotifier {
         _release?.releaseUri ?? _releasePageFallback,
       );
     } on PlatformException {
-      _fail('CopyPaste could not open the release page.');
+      _fail(AppStrings.current.updateReleasePageOpenFailed);
     }
   }
 
   String _platformErrorMessage(String code) => switch (code) {
-    'package_invalid' =>
-      'The downloaded update is not a valid CopyPaste package.',
-    'signature_invalid' => 'The downloaded update has an invalid signature.',
-    'downgrade_refused' =>
-      'The downloaded package is not newer than this version.',
-    'homebrew_unavailable' =>
-      'Install CopyPaste with Homebrew to update it here.',
-    'installation_cancelled' => 'The update installation was cancelled.',
-    'installation_blocked' => 'Android blocked the update installation.',
-    'installation_conflict' => 'The update conflicts with the installed app.',
+    'package_invalid' => AppStrings.current.updatePackageInvalid,
+    'signature_invalid' => AppStrings.current.updateSignatureInvalid,
+    'downgrade_refused' => AppStrings.current.updateDowngradeRefused,
+    'homebrew_unavailable' => AppStrings.current.updateHomebrewRequired,
+    'installation_cancelled' => AppStrings.current.updateInstallationCancelled,
+    'installation_blocked' => AppStrings.current.updateInstallationBlocked,
+    'installation_conflict' => AppStrings.current.updateInstallationConflict,
     'installation_incompatible' =>
-      'The update is incompatible with this device.',
-    'installation_storage' => 'Free up storage to install the update.',
+      AppStrings.current.updateInstallationIncompatible,
+    'installation_storage' => AppStrings.current.updateInstallationStorage,
     'installation_interrupted' =>
-      'The update installation was interrupted. Try again.',
-    'installation_busy' => 'An update installation is already in progress.',
-    'invalid_arguments' => 'The update package details are invalid.',
+      AppStrings.current.updateInstallationInterrupted,
+    'installation_busy' => AppStrings.current.updateInstallationBusy,
+    'invalid_arguments' => AppStrings.current.updatePackageDetailsInvalid,
     'unsupported_installation' =>
-      'This Linux installation cannot update automatically.',
-    'verification_failed' =>
-      'The downloaded update failed its integrity check.',
-    'installer_launch_failed' =>
-      'CopyPaste could not start the system installer.',
-    'update_busy' => 'An update installation is already in progress.',
-    'open_failed' => 'CopyPaste could not open the release page.',
-    _ => 'CopyPaste could not install the update.',
+      AppStrings.current.updateLinuxAutomaticUnsupported,
+    'verification_failed' => AppStrings.current.updateIntegrityCheckFailed,
+    'installer_launch_failed' => AppStrings.current.updateInstallerLaunchFailed,
+    'update_busy' => AppStrings.current.updateInstallationBusy,
+    'install_location_translocated' =>
+      AppStrings.current.updateInstallLocationTranslocated,
+    'install_location_unwritable' =>
+      AppStrings.current.updateInstallLocationUnwritable,
+    'replacement_blocked' => AppStrings.current.updateReplacementBlocked,
+    'open_failed' => AppStrings.current.updateReleasePageOpenFailed,
+    _ => AppStrings.current.updateInstallFailed,
   };
 
   void _fail(String message) {

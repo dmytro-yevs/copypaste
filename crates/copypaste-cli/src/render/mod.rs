@@ -342,6 +342,7 @@ mod tests {
             color_rgba: None,
             created_at: 1_000_000,
             pinned: false,
+            tag_ids: Vec::new(),
             file_details: None,
             image_details: None,
             origin_device_id: "9e1d0000-0000-4000-8000-00000000000a".into(),

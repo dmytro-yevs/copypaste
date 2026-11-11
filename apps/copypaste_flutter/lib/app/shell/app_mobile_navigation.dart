@@ -30,11 +30,9 @@ class _AppMobileNavigationState extends State<AppMobileNavigation>
   bool _settling = false;
   int _gestureEpoch = 0;
   int? _lastPreview;
-  Timer? _restoreSelector;
 
   @override
   void dispose() {
-    _restoreSelector?.cancel();
     _motion.dispose();
     super.dispose();
   }
@@ -63,7 +61,6 @@ class _AppMobileNavigationState extends State<AppMobileNavigation>
 
   void _startHold(LongPressStartDetails details) {
     ++_gestureEpoch;
-    _restoreSelector?.cancel();
     _motion.selector.stop();
     _lastPreview = widget.controller.selectedDestination.index;
     setState(() {
@@ -101,9 +98,8 @@ class _AppMobileNavigationState extends State<AppMobileNavigation>
       _motion.selector.value = target.toDouble();
       setState(() => _settling = false);
     } else {
-      _motion.settleSelector(target.toDouble());
-      _restoreSelector?.cancel();
-      _restoreSelector = Timer(AppMotion.navigationSettle, () {
+      // A new hold stops the spring; the epoch then ignores its completion.
+      _motion.settleSelector(target.toDouble()).whenCompleteOrCancel(() {
         if (mounted && epoch == _gestureEpoch) {
           setState(() => _settling = false);
         }

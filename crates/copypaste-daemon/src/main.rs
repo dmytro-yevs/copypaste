@@ -3,25 +3,26 @@
 //! `clipboard` uses `unsafe` for NSPasteboard through `objc2`, so this crate
 //! cannot forbid it globally.
 
-mod cadence;
 mod capture;
 mod cli;
 mod clipboard;
+mod host;
 #[cfg(target_os = "macos")]
 mod macos_allocator;
 #[cfg(target_os = "macos")]
 mod macos_workspace;
 mod meta;
 mod notify;
+#[cfg(test)]
 mod p2p;
 mod runtime;
 #[cfg(test)]
 mod runtime_tests;
 mod server;
-mod settings;
 mod shutdown;
 mod startup;
 mod state;
+#[cfg(test)]
 mod sync;
 
 #[cfg(test)]
@@ -32,16 +33,15 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::Parser;
 use copypaste_core::{Keyring, Store};
-use copypaste_p2p::discovery::Discovery;
+use copypaste_runtime::{Meta, Settings};
 use tracing::{info, warn};
 
 use crate::cli::Args;
-use crate::meta::Meta;
-use crate::p2p::P2p;
 #[cfg(not(target_os = "macos"))]
 use crate::runtime::run_with_bounded_shutdown;
-use crate::settings::Settings;
-use crate::startup::{halt_or_fail, relocate, wait_for_shutdown, watch_app_parent};
+use crate::startup::{
+    announce_listening, halt_or_fail, relocate, wait_for_shutdown, watch_app_parent,
+};
 
 pub use crate::state::AppState;
 
@@ -140,40 +140,28 @@ async fn run() -> anyhow::Result<()> {
     if let Some(name) = args.device_name.as_deref() {
         meta.set_device_name(name).context("set the device name")?;
     }
-    let settings = Settings::load(&meta);
+    let settings = Arc::new(Settings::load(&store));
     let source = clipboard::new_source_for_settings(&data_dir, &settings.get())
         .context("initialize the clipboard backend")?;
     let peers = copypaste_core::peer_store::open(&store, &keyring, &peers_path)
         .context("open the paired-device list")?;
     let device_name = meta.device_name();
-    let discovery = match Discovery::dormant(&device_name, args.port) {
-        Ok(discovery) => Some(discovery),
-        Err(e) => {
-            warn!(error = %e, "could not start discovery; peers must be given an address");
-            Some(
-                Discovery::dormant("CopyPaste device", args.port)
-                    .context("start discovery with a fallback name")?,
-            )
-        }
-    };
-    let lan_visibility = settings.get().lan_visibility;
-    if !lan_visibility {
+    if !settings.get().lan_visibility {
         info!("LAN visibility is off; not advertising and not browsing");
     }
     let device_id = meta.device_id().to_string();
-    let p2p = P2p::new(peers, discovery, args.port, lan_visibility);
 
-    let state = Arc::new(AppState::new(
+    let state = Arc::new(AppState::open(state::Opened {
+        db_path: db_path.clone(),
         store,
         keyring,
-        source,
         meta,
-        p2p,
         settings,
-        db_path.clone(),
-    ));
+        peers,
+        port: args.port,
+        clipboard: source,
+    })?);
     state.set_ready(true);
-    sync::install_module_services(&state)?;
     info!(
         version = DAEMON_VERSION,
         backend = state.backend_name(),
@@ -200,32 +188,18 @@ async fn run() -> anyhow::Result<()> {
         shutdown_rx.clone(),
     ));
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
-    let pairing_changes = state.p2p.node().subscribe_pairing_changes();
-    let sync_changes = state.p2p.node().subscribe_sync_changes();
-    let group_changes = state.p2p.peers().subscribe_group_changes();
-    let pairing_events = tokio::spawn(p2p::forward_pairing_changes(
-        Arc::clone(&state),
-        pairing_changes,
-        sync_changes,
-        group_changes,
-        shutdown_rx.clone(),
-    ));
+    let pairing_events = tokio::spawn(state.runtime.forward_changes(shutdown_rx.clone()));
     let peers_task = peer_listener.map(|listener| {
-        tokio::spawn(p2p::listen(
-            listener,
-            Arc::clone(&state),
-            shutdown_rx.clone(),
-        ))
+        tokio::spawn(Arc::clone(&state.runtime).listen(listener, shutdown_rx.clone()))
     });
-    let modules = Arc::clone(&state.modules);
-    let module_shutdown = shutdown_rx.clone();
-    let module_sync = tokio::spawn(async move {
-        modules.run_sync(module_shutdown).await;
-    });
+    let module_sync = state
+        .start_module_sync()
+        .context("start module sync once")?;
     // Peer sync on a cadence. Without it a paired device only ever syncs when
     // the *other* side dials in or a human runs `copypaste sync`.
-    let peer_sync = tokio::spawn(p2p::poll::run(Arc::clone(&state), shutdown_rx.clone()));
+    let peer_sync = tokio::spawn(Arc::clone(&state.runtime).run_peer_sync(shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
+    announce_listening();
 
     // Either a signal or a client asking. One path out, so the IPC verb
     // unwinds exactly as SIGTERM does rather than through a second teardown

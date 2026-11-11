@@ -3,6 +3,8 @@ package com.copypaste.app
 import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Context
+import androidx.core.content.FileProvider
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -15,6 +17,47 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class AndroidClipboardWriterTest {
     @Before fun initializeProvider() = initializeClipboardTestProvider()
+
+    @Test fun sensitivitySurvivesNativeWritesWithoutLosingOwnershipOrRepresentations() {
+        val context = RuntimeEnvironment.getApplication()
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        fun assertSensitive(expected: Boolean) {
+            val description = clipboard.primaryClipDescription!!
+            assertEquals(expected, description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
+            assertTrue(AndroidClipboardWriter.isOwned(context, description))
+        }
+        assertTrue(AndroidClipboardWriter.writeText(context, "<b>synthetic secret</b>", "text/html", secret = true))
+        assertSensitive(true)
+        assertEquals("<b>synthetic secret</b>", clipboard.primaryClip!!.getItemAt(0).htmlText)
+        assertTrue(AndroidClipboardWriter.writeBinary(context, byteArrayOf(1, 2), "secret.png", "image/png", secret = true))
+        assertSensitive(true)
+        val original = File(context.filesDir, "copypaste-downloads/secret.pdf")
+        original.parentFile!!.mkdirs()
+        original.writeBytes(byteArrayOf(3, 4))
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.clipboard", original)
+        assertTrue(AndroidClipboardWriter.writeFile(context, uri.toString(), "secret.pdf", "application/pdf", secret = true))
+        assertSensitive(true)
+        assertEquals(uri, clipboard.primaryClip!!.getItemAt(0).uri)
+        assertTrue(AndroidClipboardWriter.writeText(context, "ordinary", "text"))
+        assertSensitive(false)
+    }
+
+    @Test fun fileCopyPublishesTheOriginalReferenceWithoutMaterializingAnotherBody() {
+        val context = RuntimeEnvironment.getApplication()
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val original = File(context.filesDir, "copypaste-downloads/original.pdf")
+        original.parentFile!!.mkdirs()
+        original.writeBytes(byteArrayOf(1, 2, 3, 4))
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.clipboard", original)
+        assertTrue(AndroidClipboardWriter.writeFile(context, uri.toString(), "original.pdf", "application/pdf"))
+        assertEquals(uri, clipboard.primaryClip!!.getItemAt(0).uri)
+        assertNull(clipboard.primaryClip!!.getItemAt(0).text)
+        assertTrue(clipboard.primaryClipDescription!!.hasMimeType("application/pdf"))
+        assertTrue(File(context.cacheDir, "clipboard").listFiles().orEmpty().none { it.isDirectory })
+        assertTrue(AndroidClipboardWriter.writeFile(context, original.absolutePath, "original.pdf", "application/pdf"))
+        assertArrayEquals(original.readBytes(), context.contentResolver.openInputStream(clipboard.primaryClip!!.getItemAt(0).uri)!!.use { it.readBytes() })
+        assertTrue(File(context.cacheDir, "clipboard").listFiles().orEmpty().none { it.isDirectory })
+    }
 
     private object FailingReceiptStore : ClipboardOwnerReceiptStore {
         override fun read(context: Context): String? = null

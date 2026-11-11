@@ -96,6 +96,7 @@ mod tests {
 
     fn item(content: String) -> ExportItem {
         ExportItem {
+            privacy: Default::default(),
             content,
             content_type: "text/plain".into(),
             created_at: i64::MAX,

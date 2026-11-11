@@ -11,13 +11,11 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
-
-use tokio::time::sleep;
 
 use crate::api::RuntimeError;
 
 struct RunningRuntime {
+    #[cfg(not(target_os = "android"))]
     socket_path: PathBuf,
     #[allow(dead_code)]
     child: Child,
@@ -82,6 +80,7 @@ pub(crate) fn cancel_all_watches() {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 pub(crate) fn socket_path() -> Result<PathBuf, RuntimeError> {
     slot()
         .lock()
@@ -189,7 +188,7 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
     if let Some(child) = exited_child {
         reap(child);
     }
-    {
+    let ready = {
         let mut guard = slot()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -203,7 +202,7 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
-        let child = command
+        let mut child = command
             .args([
                 "--data-dir",
                 data_dir.to_string_lossy().as_ref(),
@@ -220,7 +219,7 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
             .env_remove("COPYPASTE_CLOUD_ANON_KEY")
             .env("COPYPASTE_SOCKET", &socket_path)
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(startup_log)
             .spawn()
             .map_err(|error| {
@@ -228,33 +227,61 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
                 let _ = writeln!(startup_diagnostic, "spawn failed: {error}");
                 RuntimeError::daemon_spawn_failed()
             })?;
+        let Some(ready) = child.stdout.take() else {
+            let _ = child.kill();
+            reap(child);
+            return Err(RuntimeError::daemon_start_failed());
+        };
         *guard = Some(RuntimeSlot::Owned(RunningRuntime {
+            #[cfg(not(target_os = "android"))]
             socket_path: socket_path.clone(),
             child,
         }));
-    }
+        ready
+    };
 
     // Keychain access on macOS is user-mediated and may legitimately take much
     // longer than an arbitrary startup deadline. The Flutter shell remains
-    // available while this future waits, so keep observing the owned child until
-    // it either exposes its socket, exits, or the application stops it.
-    loop {
-        if copypaste_ipc::transport::connect(&socket_path)
+    // available while this future waits for the daemon's readiness line; EOF
+    // instead means the child exited or the application stopped it.
+    let announced = tokio::task::spawn_blocking(move || read_ready_line(ready))
+        .await
+        .unwrap_or(false);
+    if announced
+        && copypaste_ipc::transport::connect(&socket_path)
             .await
             .is_ok()
-        {
-            return Ok(());
+    {
+        return Ok(());
+    }
+    match owned_child_state() {
+        OwnedChildState::Stopped => Err(RuntimeError::daemon_start_failed()),
+        OwnedChildState::Running if announced => {
+            append_startup_diagnostic(&data_dir, "endpoint", "not reachable after readiness");
+            stop();
+            Err(RuntimeError::daemon_start_failed())
         }
-        match owned_child_state() {
-            OwnedChildState::Running => sleep(Duration::from_millis(100)).await,
-            OwnedChildState::Exited(status) => {
-                append_startup_diagnostic(&data_dir, "child exited", status);
-                stop();
-                return Err(RuntimeError::daemon_exited_early());
-            }
-            OwnedChildState::Stopped => return Err(RuntimeError::daemon_start_failed()),
+        OwnedChildState::Running => {
+            append_startup_diagnostic(&data_dir, "child exited", "closed stdout before readiness");
+            stop();
+            Err(RuntimeError::daemon_exited_early())
+        }
+        OwnedChildState::Exited(status) => {
+            append_startup_diagnostic(&data_dir, "child exited", status);
+            stop();
+            Err(RuntimeError::daemon_exited_early())
         }
     }
+}
+
+/// Blocks until the daemon's bounded readiness line or its stdout EOF.
+fn read_ready_line(stdout: std::process::ChildStdout) -> bool {
+    use std::io::{BufRead as _, Read as _};
+    let limit = copypaste_ipc::APP_PARENT_READY_LINE.len() as u64 + 2;
+    let mut line = String::new();
+    std::io::BufReader::new(stdout.take(limit))
+        .read_line(&mut line)
+        .is_ok_and(|_| line.trim_end() == copypaste_ipc::APP_PARENT_READY_LINE)
 }
 
 /// A macOS application-support path can exceed the Unix socket pathname limit.
@@ -265,7 +292,14 @@ fn isolated_socket_path(_data_dir: &Path) -> Result<PathBuf, RuntimeError> {
     {
         use std::os::unix::ffi::OsStrExt;
 
-        let path = std::env::temp_dir().join(format!("cp-{}.sock", std::process::id()));
+        // Linux's temp dir is the shared /tmp; macOS's is already per-user.
+        #[cfg(target_os = "linux")]
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| _data_dir.to_path_buf());
+        #[cfg(not(target_os = "linux"))]
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("cp-{}.sock", std::process::id()));
         if path.as_os_str().as_bytes().len() >= 104 {
             return Err(RuntimeError::daemon_start_failed());
         }
@@ -316,13 +350,9 @@ fn open_startup_log(data_dir: &Path) -> Result<std::fs::File, RuntimeError> {
         .create(true)
         .truncate(true)
         .write(true)
-        .open(path)
+        .open(&path)
         .map_err(|_| RuntimeError::daemon_start_failed())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
-    }
+    let _ = copypaste_fs::restrict_to_owner(&path);
     Ok(file)
 }
 
@@ -451,6 +481,8 @@ fn is_isolated_from(candidate: &Path, production: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     static TEST_RUNTIME_SERIAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();

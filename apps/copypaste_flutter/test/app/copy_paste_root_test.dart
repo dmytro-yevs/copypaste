@@ -8,20 +8,18 @@ import 'package:copypaste_flutter/main.dart';
 import 'package:copypaste_flutter/app/app.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
-import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
-import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
 import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
-import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../features/onboarding/onboarding_test_support.dart';
 import 'package:flutter/services.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -99,10 +97,8 @@ void main() {
       addTearDown(onboarding.dispose);
       await tester.pumpWidget(
         CopyPasteRoot(
-          windowsOnboardingController: _completedWindowsOnboarding(),
-          linuxOnboardingController: _completedLinuxOnboarding(),
           desktopWindow: desktopWindow,
-          macosOnboardingController: onboarding,
+          onboardingController: onboarding,
           runtimeEnabled: false,
         ),
       );
@@ -169,20 +165,13 @@ void main() {
   testWidgets('Windows onboarding finishes on the main History screen', (
     tester,
   ) async {
-    final windows = WindowsOnboardingController(
+    final windows = windowsOnboarding(
       store: MemoryOnboardingStore(),
       startup: _UnavailableStartup(),
     );
-    final macos = _completedOnboarding();
     addTearDown(windows.dispose);
-    addTearDown(macos.dispose);
     await tester.pumpWidget(
-      CopyPasteRoot(
-        runtimeEnabled: false,
-        macosOnboardingController: macos,
-        linuxOnboardingController: _completedLinuxOnboarding(),
-        windowsOnboardingController: windows,
-      ),
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: windows),
     );
     await tester.pumpAndSettle();
     expect(find.text('Welcome to CopyPaste'), findsOneWidget);
@@ -206,10 +195,8 @@ void main() {
       addTearDown(onboarding.dispose);
       await tester.pumpWidget(
         CopyPasteRoot(
-          windowsOnboardingController: _completedWindowsOnboarding(),
-          linuxOnboardingController: _completedLinuxOnboarding(),
           desktopWindow: desktop,
-          macosOnboardingController: onboarding,
+          onboardingController: onboarding,
           runtimeEnabled: false,
         ),
       );
@@ -221,19 +208,14 @@ void main() {
   testWidgets('shows the injected macOS onboarding before the app shell', (
     tester,
   ) async {
-    final onboarding = MacosOnboardingController(
+    final onboarding = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: _GrantedMacosSetupGateway(),
     );
     addTearDown(onboarding.dispose);
 
     await tester.pumpWidget(
-      CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
-        runtimeEnabled: false,
-        macosOnboardingController: onboarding,
-      ),
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: onboarding),
     );
     await tester.pump();
 
@@ -244,22 +226,14 @@ void main() {
   testWidgets('shows the injected Android onboarding before the app shell', (
     tester,
   ) async {
-    final onboarding = AndroidOnboardingController(
+    final onboarding = androidOnboarding(
       store: MemoryAndroidOnboardingStore(),
       setup: _AndroidSetupGateway(),
     );
-    final macosOnboarding = _completedOnboarding();
     addTearDown(onboarding.dispose);
-    addTearDown(macosOnboarding.dispose);
 
     await tester.pumpWidget(
-      CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
-        runtimeEnabled: false,
-        androidOnboardingController: onboarding,
-        macosOnboardingController: macosOnboarding,
-      ),
+      CopyPasteRoot(runtimeEnabled: false, onboardingController: onboarding),
     );
     await tester.pump();
 
@@ -278,10 +252,8 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
-        macosOnboardingController: onboarding,
+        onboardingController: onboarding,
         runtimeEnabled: false,
       ),
     );
@@ -305,10 +277,8 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
-        macosOnboardingController: onboarding,
+        onboardingController: onboarding,
         runtimeEnabled: false,
       ),
     );
@@ -334,7 +304,7 @@ void main() {
     tester,
   ) async {
     final host = _FakeDesktopWindowHost();
-    final onboarding = MacosOnboardingController(
+    final onboarding = macosOnboarding(
       store: MemoryOnboardingStore(),
       setup: _GrantedMacosSetupGateway(),
     );
@@ -346,10 +316,8 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
-        macosOnboardingController: onboarding,
+        onboardingController: onboarding,
         runtimeEnabled: false,
       ),
     );
@@ -379,10 +347,8 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
-        windowsOnboardingController: _completedWindowsOnboarding(),
-        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
-        macosOnboardingController: onboarding,
+        onboardingController: onboarding,
         runtimeEnabled: false,
       ),
     );
@@ -394,8 +360,8 @@ void main() {
   });
 }
 
-MacosOnboardingController _completedOnboarding() {
-  return MacosOnboardingController(
+OnboardingController _completedOnboarding() {
+  return macosOnboarding(
     store: MemoryOnboardingStore(complete: true),
     setup: _GrantedMacosSetupGateway(),
   );
@@ -605,46 +571,4 @@ class _UnavailableStartup implements LaunchAtLoginGateway {
 
   @override
   Future<void> openSystemSettings() async {}
-}
-
-WindowsOnboardingController _completedWindowsOnboarding() {
-  final controller = WindowsOnboardingController(
-    store: MemoryOnboardingStore(complete: true),
-  );
-  addTearDown(controller.dispose);
-  return controller;
-}
-
-LinuxOnboardingController _completedLinuxOnboarding() {
-  final controller = LinuxOnboardingController(
-    store: MemoryOnboardingStore(complete: true),
-    integration: _ReadyLinuxIntegration(),
-  );
-  addTearDown(controller.dispose);
-  return controller;
-}
-
-class _ReadyLinuxIntegration implements LinuxIntegrationPort {
-  @override
-  Future<bool> registerCopypasteUri() async => true;
-
-  @override
-  Future<bool> openCompanionSetup() async => true;
-
-  @override
-  Future<bool> requestRemoteDesktop() async => true;
-
-  @override
-  Future<bool> setStartAtLogin(bool enabled) async => true;
-
-  @override
-  Future<LinuxIntegrationStatus> status() async => const LinuxIntegrationStatus(
-    session: LinuxDesktopSession.x11,
-    globalShortcuts: true,
-    remoteDesktop: LinuxRemoteDesktopState.unsupported,
-    companion: LinuxCompanionState.unavailable,
-    clipboard: true,
-    quickPaste: true,
-    screenshotProtection: false,
-  );
 }

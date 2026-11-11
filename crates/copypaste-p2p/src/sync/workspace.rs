@@ -30,10 +30,7 @@ pub trait SummaryWorkspace: Send {
     fn remote_wins(&mut self, item: &ItemSummary) -> Result<bool, SyncError> {
         Ok(match self.comparison(&item.item_id)? {
             None => true,
-            Some(local) => {
-                super::merge_decision_by_summary(&local, item) == super::MergeDecision::TakeRemote
-                    || super::pin_state_wins(&local, item)
-            }
+            Some(local) => super::merge::remote_version_wins(&local, item),
         })
     }
     fn consider_wanted(&mut self, item: &ItemSummary) -> Result<bool, SyncError> {
@@ -107,10 +104,7 @@ impl SummaryWorkspace for MemorySummaryWorkspace {
     fn remote_wins(&mut self, item: &ItemSummary) -> Result<bool, SyncError> {
         Ok(match self.comparison.get(&item.item_id) {
             None => true,
-            Some(local) => {
-                super::merge_decision_by_summary(local, item) == super::MergeDecision::TakeRemote
-                    || super::pin_state_wins(local, item)
-            }
+            Some(local) => super::merge::remote_version_wins(local, item),
         })
     }
     fn consider_wanted(&mut self, item: &ItemSummary) -> Result<bool, SyncError> {
@@ -235,6 +229,28 @@ mod tests {
         fn finish_plan(&mut self, l: usize) -> Result<(Vec<ItemSummary>, usize), SyncError> {
             self.1.finish_plan(l)
         }
+    }
+
+    /// A delete keeps the pinned row's `pin_updated_at` on the sender's
+    /// tombstone, while a receiver stores a remote tombstone with no pin stamp.
+    /// Planning must not want that tombstone for its pin stamp: apply declines
+    /// it, so the peer would send it every session.
+    #[test]
+    fn a_tombstone_pin_stamp_does_not_make_it_a_winner() {
+        let stored = crate::sync::testutil::summary("deleted", 500, "h", true);
+        let mut sent = stored.clone();
+        sent.pin_updated_at = 400;
+        let mut workspace = MemorySummaryWorkspace::default();
+        workspace.add_comparison(&[stored]).unwrap();
+        assert!(!workspace.remote_wins(&sent).unwrap());
+
+        let live = crate::sync::testutil::summary("live", 500, "h", false);
+        let mut pinned = live.clone();
+        pinned.pinned = true;
+        pinned.pin_order = Some(1.0);
+        pinned.pin_updated_at = 400;
+        workspace.add_comparison(&[live]).unwrap();
+        assert!(workspace.remote_wins(&pinned).unwrap());
     }
 
     async fn cancelled_io_keeps_ownership() {

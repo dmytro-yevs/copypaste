@@ -127,13 +127,12 @@ class _DownloadApi implements RustLibApi {
 class _CommittedHistory extends _FailedHistory
     implements HistoryFileProgressRepository {
   @override
-  Future<bool> saveFileWithProgress(
+  Future<void> saveFileWithProgress(
     String id,
     String path,
     void Function(int written, int total) onProgress,
   ) async {
     await File(path).writeAsBytes([1, 2, 3, 4]);
     onProgress(4, 4);
-    return true;
   }
 }

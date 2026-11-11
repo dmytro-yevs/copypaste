@@ -112,7 +112,7 @@ jobs:
     if: needs.changes.outputs.native == 'true'
     needs: changes
     name: macOS Rust capabilities
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -225,7 +225,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macos, platform: macos, runner: macos-14 }
+          - { name: macos, platform: macos, runner: macos-15 }
           - { name: windows, platform: windows, runner: windows-2022 }
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04 }
     steps:
@@ -287,7 +287,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macos, platform: macos, runner: macos-14, target: macos }
+          - { name: macos, platform: macos, runner: macos-15, target: macos }
           - { name: android, platform: android, runner: ubuntu-24.04, target: apk }
           - { name: windows, platform: windows, runner: windows-2022, target: windows }
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04, target: linux }
@@ -419,8 +419,8 @@ jobs:
         include:
           - architecture: x86_64
             runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+            appimagetool_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

@@ -47,11 +47,7 @@ impl InstantClipboard {
         if row.content_type == copypaste_ipc::content_type::FILE {
             return false;
         }
-        if !config.sync_enabled
-            || !config.instant_clipboard
-            || row.deleted
-            || row.clipboard_privacy().secret
-        {
+        if !config.sync_enabled || !config.instant_clipboard || row.deleted {
             return false;
         }
         // A secrecy action publishes metadata, not a new clipboard capture.

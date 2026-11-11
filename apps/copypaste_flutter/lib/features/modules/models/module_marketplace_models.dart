@@ -1,4 +1,5 @@
 import '../../../shared/format_bytes.dart';
+import '../../../l10n/l10n.dart';
 
 import 'package:pub_semver/pub_semver.dart';
 
@@ -69,10 +70,7 @@ class MarketplaceModule {
     }
     if (availability == ModuleAvailability.appVersion &&
         appRequirement != null &&
-        (unavailableReason?.startsWith(
-              'This module does not support CopyPaste ',
-            ) ??
-            false)) {
+        unavailableReason != AppStrings.current.modulesAppVersionUnverified) {
       return null;
     }
     return unavailableReason;

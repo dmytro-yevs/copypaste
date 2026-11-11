@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/capture/capture_service_control.dart';
@@ -78,6 +79,12 @@ class SettingsController extends ChangeNotifier {
   bool _captureEpochReset = false;
   bool _syncRevisionReset = false;
   Future<void> _notificationQueue = Future<void>.value();
+  Future<void>? _settingsRefresh;
+  bool _settingsConfirmed = false;
+  static String get _settingsRefreshError =>
+      AppStrings.current.settingsRuntimeRefreshFailed;
+  bool _settingsRefreshRequested = false;
+  int _settingsMutationEpoch = 0;
 
   SettingsLoadState get loadState => _loadState;
   RuntimeSettings? get settings => _settings;
@@ -126,6 +133,7 @@ class SettingsController extends ChangeNotifier {
       ]);
       if (_disposed) return;
       _settings = values[0] as RuntimeSettings;
+      _settingsConfirmed = true;
       _setCapture(values[1] as CaptureSettingsState);
       _acceptSyncStatus(_capture!.syncStatus);
       _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
@@ -170,7 +178,10 @@ class SettingsController extends ChangeNotifier {
       );
     } catch (error) {
       _loadState = SettingsLoadState.error;
-      _errorMessage = _message(error, 'Settings could not be loaded.');
+      _errorMessage = _message(
+        error,
+        AppStrings.current.settingsRuntimeLoadFailed,
+      );
     }
     _notify();
   }
@@ -235,7 +246,7 @@ class SettingsController extends ChangeNotifier {
     final settings = _settings;
     if (settings == null || value.isEmpty) return false;
     if (settings.excludedAppIds.contains(value)) {
-      _errorMessage = 'That application is already excluded.';
+      _errorMessage = AppStrings.current.settingsRuntimeAppAlreadyExcluded;
       _notify();
       return false;
     }
@@ -275,6 +286,7 @@ class SettingsController extends ChangeNotifier {
       _settings = await _repository.updateSettings(
         RuntimeSettingsChange(notifyOnCopy: value),
       );
+      _settingsConfirmed = true;
       _settingsHealthNotice = null;
     });
   }
@@ -286,7 +298,14 @@ class SettingsController extends ChangeNotifier {
       _update(RuntimeSettingsChange(notificationPreview: value));
 
   Future<void> _showCaptureNotification(String? id) async {
-    if (_disposed || !(_settings?.notifyOnCopy ?? false)) return;
+    // Configuration events precede subsequent capture events on the shared
+    // watch. Honor that configuration before deciding how to display content.
+    if (_settingsRefresh case final pending?) await pending;
+    if (_disposed ||
+        !_settingsConfirmed ||
+        !(_settings?.notifyOnCopy ?? false)) {
+      return;
+    }
     CaptureNotificationPreview? preview;
     try {
       if ((_settings?.notificationPreview ?? false) && id != null) {
@@ -295,7 +314,12 @@ class SettingsController extends ChangeNotifier {
     } catch (_) {
       // Deleted clips and unavailable previews still allow generic feedback.
     }
-    if (_disposed || !(_settings?.notifyOnCopy ?? false)) return;
+    if (_settingsRefresh case final pending?) await pending;
+    if (_disposed ||
+        !_settingsConfirmed ||
+        !(_settings?.notifyOnCopy ?? false)) {
+      return;
+    }
     try {
       await _notifications.showCaptured(
         preview: (_settings?.notificationPreview ?? false) ? preview : null,
@@ -359,12 +383,14 @@ class SettingsController extends ChangeNotifier {
   Future<bool> _update(RuntimeSettingsChange change) {
     return _run(() async {
       _settings = await _repository.updateSettings(change);
+      _settingsConfirmed = true;
       _settingsHealthNotice = null;
     });
   }
 
   Future<bool> _run(Future<void> Function() action) async {
     if (_busy || _disposed) return false;
+    _settingsMutationEpoch++;
     _busy = true;
     _errorMessage = null;
     _notify();
@@ -374,12 +400,13 @@ class SettingsController extends ChangeNotifier {
     } catch (error) {
       final message = _message(
         error,
-        'The requested change could not be completed.',
+        AppStrings.current.settingsRuntimeChangeFailed,
       );
       _errorMessage = message;
       return false;
     } finally {
       _busy = false;
+      if (_settingsRefreshRequested) unawaited(_refreshSettings());
       _notify();
     }
   }
@@ -389,6 +416,7 @@ class SettingsController extends ChangeNotifier {
   void setPresentationActive(bool active) {
     if (_disposed || active == _presentationActive) return;
     _presentationActive = active;
+    if (active) unawaited(_refreshSettings());
     _presentationEpoch++;
     _updateCapturePush();
     _startCaptureRefresh();
@@ -423,6 +451,7 @@ class SettingsController extends ChangeNotifier {
       _syncRevisionReset = true;
       _captureStreamConnected = true;
       _captureWatchReady = false;
+      unawaited(_refreshSettings());
       _updateCapturePush();
       unawaited(_refreshCapture());
       return;
@@ -433,7 +462,9 @@ class SettingsController extends ChangeNotifier {
             next.epoch < (_capture?.epoch ?? 0))) {
       return;
     }
+    final revisionChanged = next.captureRevision != _captureRevision;
     _captureRevision = next.captureRevision;
+    if (revisionChanged) unawaited(_refreshSettings());
     final previousCapture = _captureSnapshot;
     final previousSync = _syncSnapshot;
     final previousNotice = _settingsHealthNotice;
@@ -447,6 +478,54 @@ class SettingsController extends ChangeNotifier {
         !_sameSync(previousSync, _syncSnapshot) ||
         previousNotice != _settingsHealthNotice) {
       _notify();
+    }
+  }
+
+  /// Coalesce authoritative reads on runtime changes and reconnects. A read
+  /// started before a local mutation or reconnect cannot overwrite newer state.
+  Future<void> _refreshSettings() {
+    if (_disposed) return Future.value();
+    _settingsConfirmed = false;
+    _settingsRefreshRequested = true;
+    if (_busy) return Future.value();
+    if (_settingsRefresh case final pending?) return pending;
+    late final Future<void> pending;
+    pending = _readSettings().whenComplete(() {
+      if (identical(_settingsRefresh, pending)) _settingsRefresh = null;
+      if (_settingsRefreshRequested && !_busy && !_disposed) {
+        unawaited(_refreshSettings());
+      }
+    });
+    _settingsRefresh = pending;
+    return pending;
+  }
+
+  Future<void> _readSettings() async {
+    while (_settingsRefreshRequested && !_busy && !_disposed) {
+      _settingsRefreshRequested = false;
+      final epoch = _settingsMutationEpoch;
+      final generation = _captureWatchGeneration;
+      try {
+        final next = await _repository.settings();
+        if (_disposed) return;
+        if (_busy ||
+            _settingsRefreshRequested ||
+            epoch != _settingsMutationEpoch ||
+            generation != _captureWatchGeneration) {
+          _settingsRefreshRequested = true;
+          continue;
+        }
+        _settings = next;
+        _settingsConfirmed = true;
+        if (_errorMessage == _settingsRefreshError) _errorMessage = null;
+        _notify();
+      } catch (_) {
+        if (!_disposed) {
+          _errorMessage = _settingsRefreshError;
+          _notify();
+        }
+        return;
+      }
     }
   }
 
@@ -536,7 +615,9 @@ class SettingsController extends ChangeNotifier {
       if (screenshotGeneration == _screenshotEventGeneration) {
         _screenshotStatus = screenshotStatus;
       }
+      final revisionChanged = next.captureRevision != _captureRevision;
       _captureRevision = next.captureRevision;
+      if (revisionChanged) unawaited(_refreshSettings());
       _setCapture(next);
       _captureEpochReset = false;
       _captureWatchReady = _captureStreamConnected && next.captureWatch;
@@ -704,18 +785,18 @@ class SettingsController extends ChangeNotifier {
       error is runtime.RuntimeError
       ? _runtimeMessage(error) ?? error.message
       : error is CaptureServiceUnavailable
-      ? 'Clipboard capture permissions must be completed before capture can resume.'
+      ? AppStrings.current.settingsRuntimeCapturePermissionsIncomplete
       : error is CaptureServiceStopFailed
-      ? 'Clipboard capture is paused. The Android capture service did not confirm that it stopped.'
+      ? AppStrings.current.settingsRuntimeCaptureStopUnconfirmed
       : error is NotificationPermissionDenied
-      ? 'Notification permission is required to enable capture notifications.'
+      ? AppStrings.current.settingsRuntimeNotificationPermissionRequired
       : fallback;
 
   String? _settingsHealthMessage(RuntimeSettingsHealth? health) {
     if (health == null || !health.degraded) return null;
     return health.recordUnreadable
-        ? 'CopyPaste could not read saved settings. Protective values are active; review and save your preferences to repair them.'
-        : 'CopyPaste recovered unreadable settings with protective values. Review and save your preferences to repair them.';
+        ? AppStrings.current.settingsRuntimeSavedSettingsUnreadable
+        : AppStrings.current.settingsRuntimeSettingsRecovered;
   }
 
   String? _runtimeMessage(runtime.RuntimeError error) {
@@ -723,9 +804,9 @@ class SettingsController extends ChangeNotifier {
 
     return switch (error.message) {
       'excluded_app_bundle_ids contains an entry that is empty or too long' =>
-        'Application identifiers must be non-empty and 256 bytes or fewer.',
+        AppStrings.current.settingsRuntimeExcludedAppIdInvalid,
       'excluded_app_bundle_ids has too many entries; at most 256 are allowed' =>
-        'You can exclude up to 256 applications.',
+        AppStrings.current.settingsRuntimeExcludedAppsLimit,
       _ => null,
     };
   }

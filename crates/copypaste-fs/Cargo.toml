@@ -10,3 +10,15 @@ tempfile.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 rustix.workspace = true
+
+# The owner-only access list, built the way the daemon pipe builds its own.
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true
+widestring.workspace = true
+win-security-identifier.workspace = true
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+] }

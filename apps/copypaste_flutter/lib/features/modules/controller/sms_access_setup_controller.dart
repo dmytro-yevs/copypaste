@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/clipboard/clipboard_writer.dart';
+import '../../../l10n/l10n.dart';
 import '../models/module_models.dart';
 import '../repository/module_access_repository.dart';
 
@@ -31,7 +32,7 @@ class SmsAccessSetupController extends ChangeNotifier {
   bool _refreshFailed = false;
   bool _automaticGrantsAttempted = false;
   int _revision = 0;
-  Timer? _monitor;
+  StreamSubscription<SmsModuleAccessState>? _monitor;
 
   void selectMethod(int index) {
     if (_busy || _disposed || index == _methodIndex) return;
@@ -44,15 +45,27 @@ class SmsAccessSetupController extends ChangeNotifier {
   void setMonitoring(bool enabled) {
     if (_disposed) return;
     if (!enabled) {
-      _monitor?.cancel();
+      unawaited(_monitor?.cancel());
       _monitor = null;
       return;
     }
     if (_monitor != null) return;
-    // ADB can change grants without a Shizuku callback or an app resume.
-    _monitor = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(refresh());
-    });
+    // The native stream owns change detection, including ADB grants.
+    _monitor = _access.smsChanges.listen(
+      (state) {
+        if (_disposed) return;
+        _acceptState(state);
+        _loading = false;
+        notifyListeners();
+        _applyAuthorizedSetup();
+      },
+      onError: (Object _) {
+        if (_disposed) return;
+        _refreshFailed = true;
+        _errorMessage = AppStrings.current.modulesSmsVerifyFailed;
+        notifyListeners();
+      },
+    );
     unawaited(refresh());
   }
 
@@ -66,7 +79,7 @@ class SmsAccessSetupController extends ChangeNotifier {
     } catch (_) {
       if (!_disposed && revision == _revision) {
         _refreshFailed = true;
-        _errorMessage = 'SMS access could not be verified.';
+        _errorMessage = AppStrings.current.modulesSmsVerifyFailed;
       }
     } finally {
       _reading = false;
@@ -81,15 +94,13 @@ class SmsAccessSetupController extends ChangeNotifier {
   Future<void> requestNotifications() => _run(() async {
     _acceptState(await _access.requestSmsNotifications());
     if (_state?.notificationGranted != true) {
-      throw const ModulesException(
-        'Allow notifications to keep SMS Codes active in the background.',
-      );
+      throw ModulesException(AppStrings.current.modulesSmsAllowNotifications);
     }
   });
 
   Future<void> openShizuku() => _run(() async {
     if (!await _access.openShizuku()) {
-      throw const ModulesException('Shizuku could not be opened.');
+      throw ModulesException(AppStrings.current.sharedShizukuOpenFailed);
     }
   });
 
@@ -97,7 +108,7 @@ class SmsAccessSetupController extends ChangeNotifier {
     _automaticGrantsAttempted = true;
     _acceptState(await _access.configureSms());
     if (_state?.granted != true) {
-      throw const ModulesException('SMS access was not granted.');
+      throw ModulesException(AppStrings.current.modulesSmsNotGranted);
     }
   });
 
@@ -109,7 +120,7 @@ class SmsAccessSetupController extends ChangeNotifier {
       return true;
     } catch (_) {
       if (!_disposed) {
-        _errorMessage = 'Setup commands could not be copied.';
+        _errorMessage = AppStrings.current.sharedSetupCommandsCopyFailed;
         notifyListeners();
       }
       return false;
@@ -157,7 +168,7 @@ class SmsAccessSetupController extends ChangeNotifier {
       if (!_disposed) {
         _errorMessage = error is ModulesException
             ? error.message
-            : 'SMS access could not be configured.';
+            : AppStrings.current.modulesSmsConfigureFailed;
       }
     } finally {
       if (!_disposed) {
@@ -170,7 +181,7 @@ class SmsAccessSetupController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _monitor?.cancel();
+    unawaited(_monitor?.cancel());
     super.dispose();
   }
 }

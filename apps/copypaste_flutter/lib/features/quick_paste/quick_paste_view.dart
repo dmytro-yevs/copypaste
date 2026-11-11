@@ -10,8 +10,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
+
 import '../history/presentation/secret_spoiler.dart';
 
+import '../../app/theme/app_brand_logo.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
@@ -19,7 +22,7 @@ import '../../app/theme/app_toast.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
 import '../../platform/desktop/desktop_shortcuts.dart';
-import '../history/controller/history_controller.dart';
+import '../history/controller/history_window_controller.dart';
 import '../history/models/history_models.dart';
 import '../history/view/history_inspector.dart';
 import '../history/presentation/history_clip_presentation.dart';
@@ -45,7 +48,8 @@ class QuickPasteView extends StatefulWidget {
   State<QuickPasteView> createState() => _QuickPasteViewState();
 }
 
-class _QuickPasteViewState extends State<QuickPasteView> {
+class _QuickPasteViewState extends State<QuickPasteView>
+    with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _scroll = ScrollController();
@@ -91,7 +95,15 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted || controller.renderablePresentationId != id) return;
         attempted = true;
-        if (await controller.presentFrame(id)) _presentedFrame = id;
+        final presented = await controller.presentFrame(id);
+        if (!presented ||
+            !mounted ||
+            controller.renderablePresentationId != id) {
+          return;
+        }
+        _presentedFrame = id;
+        // Native window activation can displace autofocus on the prepared frame.
+        _searchFocus.requestFocus();
       } finally {
         if (_preparingFrame == id) _preparingFrame = null;
         if (!attempted && mounted) _preparePresentationFrame();
@@ -101,12 +113,14 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   Future<void> _prepareClipMedia(HistoryClip clip) async {
     try {
-      if (clip.secret) clip = await controller.history.spoilerContent(clip.id);
+      if (clip.secret) {
+        clip = await controller.history.media.spoilerContent(clip.id);
+      }
       final loads = <Future<void>>[];
       if (clip.contentKind == HistoryClipKind.image) {
         loads.add(() async {
           final bounds = _quickPastePreviewBounds(context);
-          final preview = await controller.history.requestImagePreview(
+          final preview = await controller.history.media.requestImagePreview(
             clip.id,
             maxEdge: 480,
             bounds: bounds,
@@ -126,12 +140,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
       }
       if (clip.sourceAppIconId != null) {
         loads.add(() async {
-          final icon = await controller.history.requestSourceIcon(
+          final icon = await controller.history.media.requestSourceIcon(
             clip.sourceAppIconId,
           );
           if (mounted && icon != null) {
             await precacheImage(
-              MemoryImage(icon.bytes),
+              SourceAppLabel.iconImage(context, icon),
               context,
               onError: (_, _) {},
             );
@@ -150,27 +164,45 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   void initState() {
     super.initState();
     _generation = controller.presentationGeneration;
-    _operationErrorRevision = controller.history.operationErrorRevision;
-    _query = controller.history.query;
+    _operationErrorRevision = controller.history.errors.operationErrorRevision;
+    _query = controller.history.window.query;
     controller.addListener(_presentationChanged);
     _scroll.addListener(_recentScrolled);
     _pinnedScroll.addListener(_pinnedScrolled);
-    controller.history.beforeWindowChange = _captureWindowAnchors;
-    controller.history.afterWindowChange = _restoreWindowAnchors;
+    controller.history.window.beforeWindowChange = _captureWindowAnchors;
+    controller.history.window.afterWindowChange = _restoreWindowAnchors;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The key nonactivating popup leaves the application inactive, and the
+    // desktop FocusManager suspends keyboard focus on that transition.
+    if (state != AppLifecycleState.inactive) return;
+    scheduleMicrotask(() {
+      if (!mounted ||
+          _presentedFrame == null ||
+          _presentedFrame != controller.renderablePresentationId ||
+          FocusManager.instance.primaryFocus !=
+              FocusManager.instance.rootScope) {
+        return;
+      }
+      _searchFocus.requestFocus();
+    });
   }
 
   void _presentationChanged() {
-    final revision = controller.history.operationErrorRevision;
+    final revision = controller.history.errors.operationErrorRevision;
     if (_operationErrorRevision != revision) {
       _operationErrorRevision = revision;
-      final message = controller.history.operationError;
+      final message = controller.history.errors.operationError;
       final presentation = controller.presentationGeneration;
       if (message != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && controller.presentationGeneration == presentation) {
             AppToast.show(
               context,
-              title: 'Action failed',
+              title: context.l10n.quickPasteActionFailedTitle,
               message: message,
               tone: AppToastTone.error,
             );
@@ -180,10 +212,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     }
     final presentationChanged =
         _generation != controller.presentationGeneration;
-    final queryChanged = !identical(_query, controller.history.query);
+    final queryChanged = !identical(_query, controller.history.window.query);
     if (!presentationChanged && !queryChanged) return;
     _generation = controller.presentationGeneration;
-    _query = controller.history.query;
+    _query = controller.history.window.query;
     if (presentationChanged) {
       _search.clear();
       _searchFocus.requestFocus();
@@ -206,8 +238,8 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     final viewport = _viewportRect(scroll);
     if (viewport == null) return null;
     final ids = pinned
-        ? controller.history.visitedPinnedIds
-        : controller.history.visitedRecentIds;
+        ? controller.history.window.visitedPinnedIds
+        : controller.history.window.visitedRecentIds;
     _QuickPastePaneAnchor? result;
     for (final (index, id) in ids.indexed) {
       final render = _rowKeys[id]?.currentContext?.findRenderObject();
@@ -255,14 +287,14 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   }) async {
     if (!mounted || anchor == null || !scroll.hasClients) return;
     final ids = pinned
-        ? controller.history.visitedPinnedIds
-        : controller.history.visitedRecentIds;
+        ? controller.history.window.visitedPinnedIds
+        : controller.history.window.visitedRecentIds;
     if (ids.isEmpty) return;
     final id = ids.contains(anchor.id)
         ? anchor.id
         : ids[anchor.index.clamp(0, ids.length - 1)];
     if (_rowKeys[id]?.currentContext == null) {
-      await controller.history.materializeId(id);
+      await controller.history.window.materializeId(id);
       if (!mounted || !scroll.hasClients) return;
       await WidgetsBinding.instance.endOfFrame;
     }
@@ -283,9 +315,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_presentationChanged);
-    controller.history.beforeWindowChange = null;
-    controller.history.afterWindowChange = null;
+    controller.history.window.beforeWindowChange = null;
+    controller.history.window.afterWindowChange = null;
     _search.dispose();
     _searchFocus.dispose();
     _scroll.dispose();
@@ -364,12 +397,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             key: const ValueKey('quick-paste-home'),
             style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
             onPressed: controller.openMainWindow,
-            child: const Image(
-              key: ValueKey('quick-paste-logo'),
-              image: AssetImage('assets/brand/copypaste.png'),
-              width: AppIconSize.sm,
-              height: AppIconSize.sm,
-              semanticLabel: 'Open CopyPaste',
+            child: AppBrandLogo(
+              key: const ValueKey('quick-paste-logo'),
+              size: AppIconSize.sm,
+              semanticLabel: context.l10n.quickPasteOpenAppSemantics,
             ),
           ),
           const Gap(AppSpacing.xs),
@@ -387,7 +418,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   autofocus: true,
                   style: AppTheme.clipboardMenuTextStyle(context),
                   placeholder: Text(
-                    'Type to search…',
+                    context.l10n.quickPasteSearchPlaceholder,
                     style: AppTheme.clipboardMenuTextStyle(context),
                   ),
                   features: const [
@@ -404,7 +435,8 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             ),
           ),
           const Gap(AppSpacing.xs),
-          if (controller.history.fileOperations case final transfers?) ...[
+          if (controller.history.transfers.fileOperations
+              case final transfers?) ...[
             FileOperationsHeaderAction(controller: transfers),
             const Gap(AppSpacing.xs),
           ],
@@ -445,20 +477,21 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   void _loadMoreWhenNeeded() {
     final history = controller.history;
-    if (history.isLoadingMore || history.state != HistoryLoadState.ready) {
+    if (history.window.isLoadingMore ||
+        history.window.state != HistoryLoadState.ready) {
       return;
     }
     if (_pinnedIsActive &&
         _pinnedScroll.hasClients &&
         _pinnedScroll.position.hasContentDimensions) {
       final position = _pinnedScroll.position;
-      if (position.extentBefore <= 1 && history.canLoadPinnedPrevious) {
-        unawaited(history.loadPinnedPrevious());
+      if (position.extentBefore <= 1 && history.window.canLoadPinnedPrevious) {
+        unawaited(history.window.loadPinnedPrevious());
         return;
       }
       if (position.extentAfter <= position.viewportDimension &&
-          history.canLoadPinnedMore) {
-        unawaited(history.loadPinnedMore());
+          history.window.canLoadPinnedMore) {
+        unawaited(history.window.loadPinnedMore());
         return;
       }
     }
@@ -466,12 +499,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         _scroll.hasClients &&
         _scroll.position.hasContentDimensions &&
         _scroll.position.extentBefore <= 1 &&
-        history.canLoadPrevious) {
-      unawaited(history.loadPrevious());
+        history.window.canLoadPrevious) {
+      unawaited(history.window.loadPrevious());
       return;
     }
-    if (!history.canLoadMore || controller.paginationFailed) return;
-    final scroll = history.items.any((clip) => !clip.pinned)
+    if (!history.window.canLoadMore || controller.paginationFailed) return;
+    final scroll = history.window.items.any((clip) => !clip.pinned)
         ? _scroll
         : _pinnedScroll;
     if (!scroll.hasClients || !scroll.position.hasContentDimensions) return;
@@ -493,20 +526,21 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   Widget _history(BuildContext context) {
     final history = controller.history;
-    if (history.state == HistoryLoadState.loading && controller.items.isEmpty) {
-      return const StateView.loading(message: 'Loading clipboard history.');
+    if (history.window.state == HistoryLoadState.loading &&
+        controller.items.isEmpty) {
+      return StateView.loading(message: context.l10n.quickPasteLoadingHistory);
     }
-    if (history.state == HistoryLoadState.error) {
+    if (history.window.state == HistoryLoadState.error) {
       return StateView.error(
-        title: 'History is unavailable',
-        message: history.errorMessage,
+        title: context.l10n.quickPasteHistoryUnavailable,
+        message: history.errors.message,
       );
     }
     final items = controller.items;
-    final recentIds = history.visitedRecentIds;
-    final pinnedIds = history.visitedPinnedIds;
+    final recentIds = history.window.visitedRecentIds;
+    final pinnedIds = history.window.visitedPinnedIds;
     if (recentIds.isEmpty && pinnedIds.isEmpty) {
-      return const StateView.empty(title: 'No clips found');
+      return StateView.empty(title: context.l10n.quickPasteNoClipsFound);
     }
     final retainedIds = {...recentIds, ...pinnedIds};
     _rowKeys.removeWhere((id, _) => !retainedIds.contains(id));
@@ -531,7 +565,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           if (pinnedIds.isNotEmpty) ...[
             if (recentIds.isNotEmpty) ...[
               const Gap(AppSpacing.xs),
-              const Divider(),
+              Divider(color: AppTheme.popupBorder(context)),
               const Gap(AppSpacing.xs),
             ],
             ConstrainedBox(
@@ -576,10 +610,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
       padding: EdgeInsets.zero,
       shrinkWrap: shrinkWrap,
       findChildIndexCallback: (key) => indices[key],
-      itemCount: ids.length + (showPagination && history.canLoadMore ? 1 : 0),
+      itemCount:
+          ids.length + (showPagination && history.window.canLoadMore ? 1 : 0),
       itemBuilder: (context, index) {
         if (index >= ids.length) {
-          if (history.isLoadingMore) {
+          if (history.window.isLoadingMore) {
             return const Padding(
               padding: EdgeInsets.all(AppSpacing.sm),
               child: Center(
@@ -595,7 +630,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             style: AppTheme.clipboardMenuButtonStyle(),
             onPressed: controller.loadMore,
             child: Text(
-              controller.paginationFailed ? 'Try again' : 'Load more',
+              controller.paginationFailed
+                  ? context.l10n.commonTryAgain
+                  : context.l10n.quickPasteLoadMore,
             ),
           );
         }
@@ -606,15 +643,15 @@ class _QuickPasteViewState extends State<QuickPasteView> {
             key: ValueKey('quick-paste-row-$id'),
             child: _QuickPasteRowPlaceholder(
               id: id,
-              extent: history.quickPasteRowExtent(id, pinned: pinned),
-              onVisible: () => unawaited(history.materializeId(id)),
+              extent: history.window.quickPasteRowExtent(id, pinned: pinned),
+              onVisible: () => unawaited(history.window.materializeId(id)),
             ),
           );
         }
         return KeyedSubtree(
           key: ValueKey('quick-paste-row-$id'),
           child: QuickPasteRowGeometry(
-            onExtent: (extent) => history.reportQuickPasteRowExtent(
+            onExtent: (extent) => history.window.reportQuickPasteRowExtent(
               id,
               pinned: pinned,
               extent: extent,
@@ -628,11 +665,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   void _moveFocus(int offset) {
     final generation = controller.presentationGeneration;
-    final query = controller.history.query;
+    final query = controller.history.window.query;
     _focusTraversal = _focusTraversal.then((_) async {
       if (!mounted ||
           generation != controller.presentationGeneration ||
-          !identical(query, controller.history.query)) {
+          !identical(query, controller.history.window.query)) {
         return;
       }
       await controller.moveFocus(offset);
@@ -651,7 +688,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     final scroll = clip.pinned ? _pinnedScroll : _scroll;
     while (mounted &&
         generation == controller.presentationGeneration &&
-        identical(query, controller.history.query) &&
+        identical(query, controller.history.window.query) &&
         controller.focusedClip?.id == clip.id &&
         scroll.hasClients) {
       final rowContext = _rowKeys[clip.id]?.currentContext;
@@ -660,8 +697,8 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         return;
       }
       final clips = clip.pinned
-          ? controller.history.visitedPinnedIds
-          : controller.history.visitedRecentIds;
+          ? controller.history.window.visitedPinnedIds
+          : controller.history.window.visitedRecentIds;
       final target = clips.indexOf(clip.id);
       final firstMounted = clips.indexWhere(
         (id) => _rowKeys[id]?.currentContext != null,
@@ -684,8 +721,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         onQuit: controller.quit,
       ),
       desktopShortcut(LogicalKeyboardKey.keyF): _find,
-      desktopShortcut(LogicalKeyboardKey.keyR): () =>
-          unawaited(controller.history.reload()),
+      ...desktopRefreshBindings(
+        () => unawaited(controller.history.window.reload()),
+      ),
       if (defaultTargetPlatform != TargetPlatform.macOS) ...{
         const SingleActivator(
           LogicalKeyboardKey.f4,
@@ -693,11 +731,6 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           includeRepeats: false,
         ): () =>
             unawaited(controller.close()),
-        const SingleActivator(
-          LogicalKeyboardKey.f5,
-          includeRepeats: false,
-        ): () =>
-            unawaited(controller.history.reload()),
       },
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(controller.close()),
@@ -720,9 +753,10 @@ class _QuickPasteViewState extends State<QuickPasteView> {
       ),
       const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () =>
           unawaited(controller.toggleFocusedPin()),
-      const SingleActivator(LogicalKeyboardKey.backspace, alt: true): () =>
+      // Word and line deletion stay with the search field; Shift deletes a clip.
+      desktopShortcut(LogicalKeyboardKey.backspace, shift: true): () =>
           unawaited(controller.deleteFocused()),
-      const SingleActivator(LogicalKeyboardKey.delete, alt: true): () =>
+      desktopShortcut(LogicalKeyboardKey.delete, shift: true): () =>
           unawaited(controller.deleteFocused()),
       desktopShortcut(LogicalKeyboardKey.comma): () =>
           unawaited(controller.openSettings()),
@@ -781,7 +815,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   child: clip.sourceApp != null
                       ? SourceAppLabel(
                           name: clip.sourceApp!,
-                          icon: controller.history.requestSourceIcon(
+                          icon: controller.history.media.requestSourceIcon(
                             clip.sourceAppIconId,
                           ),
                           showName: false,
@@ -800,7 +834,8 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                 ),
                 const Gap(AppSpacing.sm),
                 ListenableBuilder(
-                  listenable: controller.history.downloadProgressChanges,
+                  listenable:
+                      controller.history.transfers.downloadProgressChanges,
                   builder: (context, _) {
                     final progress = controller.transferProgressFor(clip.id);
                     final status = progress != null
@@ -821,13 +856,17 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                                   ),
                                 ),
                                 const Gap(AppSpacing.xs),
-                                Text('${(progress * 100).floor()}%'),
+                                Text(
+                                  context.l10n.transfersProgressPercent(
+                                    (progress * 100).floor(),
+                                  ),
+                                ),
                               ],
                             ),
                           )
                         : controller.transferFailedFor(clip.id)
                         ? Text(
-                            'Failed',
+                            context.l10n.quickPasteTransferFailed,
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.destructive,
                             ),
@@ -920,7 +959,7 @@ class _ClipContent extends StatelessWidget {
   Widget build(BuildContext context) {
     if (clip.secret && !revealed) {
       return FutureBuilder<HistoryClip>(
-        future: controller.history.spoilerContent(clip.id),
+        future: controller.history.media.spoilerContent(clip.id),
         builder: (context, snapshot) => Align(
           alignment: Alignment.centerLeft,
           child: SecretSpoiler(
@@ -930,7 +969,7 @@ class _ClipContent extends StatelessWidget {
               'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
             ),
             child: snapshot.hasError
-                ? const StateView.error(title: 'Clip unavailable')
+                ? StateView.error(title: context.l10n.quickPasteClipUnavailable)
                 : _ClipContent(
                     clip: snapshot.data ?? clip,
                     controller: controller,
@@ -960,14 +999,16 @@ class _ClipContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            filename.isEmpty ? 'File' : filename,
+            filename.isEmpty
+                ? context.l10n.quickPasteFileFallbackName
+                : filename,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           LayoutBuilder(
             builder: (context, constraints) => Text(
               path.isEmpty
-                  ? 'Path unavailable'
+                  ? context.l10n.quickPastePathUnavailable
                   : middleEllipsis(
                       path,
                       maxWidth: constraints.maxWidth,
@@ -987,13 +1028,13 @@ class _ClipContent extends StatelessWidget {
     if (clip.contentKind != HistoryClipKind.image) {
       return Text(
         clip.preview.isEmpty ? clip.contentKind.label : clip.preview,
-        maxLines: 1,
+        maxLines: 4,
         overflow: TextOverflow.ellipsis,
       );
     }
     final bounds = _quickPastePreviewBounds(context);
     return FutureBuilder<HistoryImagePreview?>(
-      future: controller.history.requestImagePreview(
+      future: controller.history.media.requestImagePreview(
         clip.id,
         maxEdge: 480,
         bounds: bounds,
@@ -1047,7 +1088,7 @@ class _Footer extends StatelessWidget {
           style: style,
           alignment: Alignment.centerLeft,
           onPressed: () => confirmClear(context, controller),
-          child: const Text('Clear'),
+          child: Text(context.l10n.commonClear),
         ),
         Button.ghost(
           style: style,
@@ -1055,7 +1096,7 @@ class _Footer extends StatelessWidget {
           onPressed: controller.openSettings,
           child: Row(
             children: [
-              const Expanded(child: Text('Preferences…')),
+              Expanded(child: Text(context.l10n.quickPastePreferences)),
               MenuShortcut(
                 activator: desktopShortcut(LogicalKeyboardKey.comma),
                 combiner: const SizedBox.shrink(),
@@ -1067,7 +1108,7 @@ class _Footer extends StatelessWidget {
           style: style,
           alignment: Alignment.centerLeft,
           onPressed: () => showAbout(context),
-          child: const Text('About'),
+          child: Text(context.l10n.quickPasteAbout),
         ),
         Button.ghost(
           style: style,
@@ -1075,7 +1116,7 @@ class _Footer extends StatelessWidget {
           onPressed: controller.quit,
           child: Row(
             children: [
-              const Expanded(child: Text('Quit')),
+              Expanded(child: Text(context.l10n.quickPasteQuit)),
               MenuShortcut(
                 activator: desktopShortcut(LogicalKeyboardKey.keyQ),
                 combiner: const SizedBox.shrink(),
@@ -1094,12 +1135,13 @@ class _Footer extends StatelessWidget {
     await AppOverlays.showActionDialog(
       context,
       icon: LucideIcons.trash2,
-      title: const Text('Clear history?'),
-      content: const Text('Pinned clips will stay in your history.'),
-      actionLabel: 'Clear',
+      title: Text(context.l10n.quickPasteClearHistoryTitle),
+      content: Text(context.l10n.quickPasteClearHistoryMessage),
+      actionLabel: context.l10n.commonClear,
       onConfirm: controller.clearUnpinned,
       failureMessage: () =>
-          controller.history.errorMessage ?? 'History could not be deleted.',
+          controller.history.errors.message ??
+          AppStrings.current.quickPasteClearHistoryFailed,
     );
   }
 
@@ -1109,14 +1151,12 @@ class _Footer extends StatelessWidget {
       builder: (dialogContext) => AppOverlays.alertDialog(
         icon: LucideIcons.info,
         title: const Text('CopyPaste'),
-        content: const Text(
-          'Private clipboard history across macOS, Android, Windows, and Linux.',
-        ),
+        content: Text(dialogContext.l10n.quickPasteAboutDescription),
         actions: [
           Button.primary(
             style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Done'),
+            child: Text(dialogContext.l10n.commonDone),
           ),
         ],
       ),

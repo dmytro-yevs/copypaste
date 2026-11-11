@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../../generated/api.dart' as runtime;
+import '../../../l10n/l10n.dart';
 import '../models/module_models.dart';
 import 'modules_repository.dart';
 
@@ -46,8 +47,8 @@ class RuntimeModulesRepository implements ModulesRepository {
             (module['events'] as List<dynamic>? ?? const []).map(
               (event) => switch (event) {
                 'sms_received' => ModuleEventKind.smsReceived,
-                _ => throw const ModulesException(
-                  'The module uses an unsupported event.',
+                _ => throw ModulesException(
+                  AppStrings.current.modulesUnsupportedEvent,
                 ),
               },
             ),
@@ -108,9 +109,7 @@ class RuntimeModulesRepository implements ModulesRepository {
           when result['data'] is Map &&
               (result['data'] as Map)['message'] is String =>
         ModuleResult((result['data'] as Map)['message'] as String),
-      _ => throw const ModulesException(
-        'The module returned an unsupported result.',
-      ),
+      _ => throw ModulesException(AppStrings.current.modulesUnsupportedResult),
     };
   });
 }
@@ -123,9 +122,7 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
       'boolean' => ModuleFieldKind.boolean,
       'file' => ModuleFieldKind.file,
       'choices' => ModuleFieldKind.choices,
-      _ => throw const ModulesException(
-        'The module uses an unsupported field.',
-      ),
+      _ => throw ModulesException(AppStrings.current.modulesUnsupportedField),
     };
     return ModuleField(
       id: field['id'] as String,
@@ -160,8 +157,8 @@ Future<T> _guard<T>(Future<T> Function() operation) async {
   } on runtime.RuntimeError catch (error) {
     throw ModulesException(error.message);
   } on FormatException {
-    throw const ModulesException('The module response is invalid.');
+    throw ModulesException(AppStrings.current.modulesResponseInvalid);
   } on TypeError {
-    throw const ModulesException('The module response is invalid.');
+    throw ModulesException(AppStrings.current.modulesResponseInvalid);
   }
 }

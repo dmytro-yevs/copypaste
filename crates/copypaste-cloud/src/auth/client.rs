@@ -12,7 +12,7 @@ use super::error::{classify, AuthError, GrantKind};
 use super::http::{now_ms, redact_email, transient_backoff};
 use super::session::Session;
 use super::token::TokenBody;
-use crate::CloudConfig;
+use crate::{CloudConfig, HttpClient};
 use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
 use serde_json::json;
@@ -47,9 +47,14 @@ impl fmt::Debug for SupabaseAuth {
 impl SupabaseAuth {
     /// Build a client for `config`.
     pub fn new(config: CloudConfig) -> Self {
+        Self::with_client(config, HttpClient::default())
+    }
+
+    /// Build a client for `config` that shares `http` with other clients.
+    pub fn with_client(config: CloudConfig, http: HttpClient) -> Self {
         Self {
             config,
-            http: Client::new(),
+            http: http.0,
             retry: transient_backoff(),
         }
     }

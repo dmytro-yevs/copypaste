@@ -65,6 +65,41 @@ fn resolve_from_roots(app_id: &str, roots: &[PathBuf]) -> Option<AppIcon> {
         })
 }
 
+/// Maps an owner-supplied X11 `WM_CLASS` or compositor desktop ID to the
+/// installed desktop entry ID and its display label. A file named after the
+/// class wins; otherwise a bounded scan matches `StartupWMClass`.
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn desktop_application(class: &str) -> Option<(String, SourceAppLabel)> {
+    desktop_application_from_roots(class, &data_roots())
+}
+
+fn desktop_application_from_roots(
+    class: &str,
+    roots: &[PathBuf],
+) -> Option<(String, SourceAppLabel)> {
+    valid_linux_app_id(class).then_some(())?;
+    roots.iter().find_map(|root| {
+        let applications = root.join("applications");
+        desktop_value_from_path(&applications.join(format!("{class}.desktop")), "Name")
+            .map(|name| (class.to_owned(), SourceAppLabel(name)))
+            .or_else(|| {
+                std::fs::read_dir(applications)
+                    .ok()?
+                    .take(512)
+                    .find_map(|entry| {
+                        let path = entry.ok()?.path();
+                        let id = path.file_stem()?.to_str()?;
+                        valid_linux_app_id(id).then_some(())?;
+                        (desktop_value_from_path(&path, "StartupWMClass").as_deref()
+                            == Some(class))
+                        .then_some(())?;
+                        let name = desktop_value_from_path(&path, "Name")?;
+                        Some((id.to_owned(), SourceAppLabel(name)))
+                    })
+            })
+    })
+}
+
 fn source_label_from_roots(app_id: &str, roots: &[PathBuf]) -> Option<SourceAppLabel> {
     valid_linux_app_id(app_id).then_some(())?;
     Some(SourceAppLabel(
@@ -448,5 +483,31 @@ mod tests {
                 .map(SourceAppLabel::as_str),
             Some("org.example.Writer")
         );
+    }
+
+    #[test]
+    fn desktop_applications_match_file_names_then_startup_classes() {
+        let root = tempfile::tempdir().unwrap();
+        let roots = [root.path().into()];
+        desktop(root.path(), "writer", "Writer");
+        std::fs::write(
+            root.path().join("applications/org.example.Editor.desktop"),
+            "Name=bad\nStartupWMClass=editor\n[Desktop Entry]\nName=Editor\nStartupWMClass=editor\n",
+        )
+        .unwrap();
+        let resolve = |class| {
+            desktop_application_from_roots(class, &roots)
+                .map(|(id, label)| (id, label.into_inner()))
+        };
+        assert_eq!(
+            resolve("org.example.Writer"),
+            Some(("org.example.Writer".into(), "Writer".into()))
+        );
+        assert_eq!(
+            resolve("editor"),
+            Some(("org.example.Editor".into(), "Editor".into()))
+        );
+        assert_eq!(resolve("bad"), None);
+        assert_eq!(resolve("../editor"), None);
     }
 }

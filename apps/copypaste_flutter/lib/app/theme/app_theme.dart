@@ -4,11 +4,64 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'app_motion.dart';
 import 'app_overlays.dart';
 import 'app_tokens.dart';
+import '../../shared/adaptive_breakpoints.dart';
 
-enum AppSelectVariant { field, toolbar, compactToolbar, primaryAction }
+enum AppSelectVariant {
+  field,
+  toolbar,
+  compactToolbar,
+  primaryAction,
+  inlineAction,
+}
 
 abstract final class AppTheme {
   static const mode = ThemeMode.system;
+
+  static Color popupBorder(BuildContext context) =>
+      Theme.of(context).colorScheme.foreground.withValues(alpha: 0.18);
+
+  static ThemeData popupTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () =>
+          theme.colorScheme.copyWith(border: () => popupBorder(context)),
+    );
+  }
+
+  static Widget popupSurface(BuildContext context, {required Widget child}) =>
+      Theme(
+        data: popupTheme(context),
+        child: ComponentTheme<OutlinedContainerTheme>(
+          data: popupSurfaceTheme(context),
+          child: child,
+        ),
+      );
+
+  static OutlinedContainerTheme popupSurfaceTheme(BuildContext context) =>
+      OutlinedContainerTheme(
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x66000000),
+            blurRadius: AppSpacing.xxl,
+            offset: const Offset(0, AppSpacing.sm),
+          ),
+        ],
+      );
+
+  static double historyToolbarScale(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < AdaptiveBreakpoints.compactOverlay
+      ? AppControlSize.compact / AppControlSize.large
+      : 1;
+
+  static ThemeData calendarTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () => theme.colorScheme.copyWith(
+        secondary: () => theme.colorScheme.primary.withValues(alpha: 0.22),
+        secondaryForeground: () => theme.colorScheme.foreground,
+      ),
+    );
+  }
 
   static Color statusColor(BuildContext context, AppStatusTone tone) {
     final theme = Theme.of(context);
@@ -195,6 +248,11 @@ abstract final class AppTheme {
       const ButtonStyle.destructiveIcon().copyWith(
         padding: _historyToolbarIconPadding,
       );
+
+  static final AbstractButtonStyle inlineIconButtonStyle =
+      const ButtonStyle.ghostIcon(
+        density: ButtonDensity.iconDense,
+      ).withPadding(padding: const EdgeInsets.all(AppSpacing.xs));
 
   static final AbstractButtonStyle inputFeatureButtonStyle =
       const ButtonStyle.ghostIcon().withPadding(padding: EdgeInsets.zero);
@@ -453,14 +511,16 @@ abstract final class AppTheme {
     BuildContext context, {
     AppSelectVariant variant = AppSelectVariant.field,
     Iterable<String> labels = const [],
+    Anchor? anchor,
   }) {
     final toolbar =
         variant == AppSelectVariant.toolbar ||
         variant == AppSelectVariant.compactToolbar;
     final compact = variant == AppSelectVariant.compactToolbar;
     final action = variant == AppSelectVariant.primaryAction;
+    final inline = variant == AppSelectVariant.inlineAction;
     double? popupWidth;
-    if (toolbar) {
+    if (toolbar || inline) {
       final theme = Theme.of(context);
       final textStyle = DefaultTextStyle.of(context).style
           .merge(theme.typography.sans)
@@ -483,7 +543,9 @@ abstract final class AppTheme {
           AppSpacing.xxxl +
           AppSpacing.massive * theme.scaling;
     }
-    final actionStyle = actionButtonStyle(const ButtonStyle.primaryIcon());
+    final actionStyle = inline
+        ? inlineIconButtonStyle
+        : actionButtonStyle(const ButtonStyle.primaryIcon());
     return SelectTheme(
       adaptiveOverlay: false,
       borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
@@ -494,13 +556,14 @@ abstract final class AppTheme {
       ),
       overlayConfiguration: AppOverlays.selectPopoverConfiguration(
         context,
-        widthConstraint: action
+        anchor: anchor,
+        widthConstraint: action || inline
             ? PopoverConstraint.intrinsic
             : toolbar
             ? PopoverConstraint.anchorMinSize
             : PopoverConstraint.anchorFixedSize,
       ),
-      padding: action
+      padding: action || inline
           ? actionStyle.padding(context, const {})
           : controlFieldPadding(
               context,
@@ -511,7 +574,7 @@ abstract final class AppTheme {
                   : AppSpacing.md,
               minimum: toolbar ? AppControlSize.large : AppControlSize.regular,
             ),
-      decoration: action
+      decoration: action || inline
           ? (context, states, value) => actionStyle.decoration(context, states)
           : softSelectDecoration,
     );
@@ -550,7 +613,6 @@ abstract final class AppTheme {
     padding: settingsRowPadding,
   );
 
-  /// The shared ChatGPT application light palette.
   static const _lightColors = ColorScheme(
     brightness: Brightness.light,
     background: Color(0xFFFFFFFF),
@@ -578,7 +640,6 @@ abstract final class AppTheme {
     chart5: navigationAccent,
   );
 
-  /// The shared ChatGPT application dark palette.
   static const _darkColors = ColorScheme(
     brightness: Brightness.dark,
     background: Color(0xFF181818),

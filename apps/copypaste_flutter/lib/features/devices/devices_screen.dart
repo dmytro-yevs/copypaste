@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import 'dart:async';
 
@@ -86,13 +87,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
       builder: (context, _) {
         final controller = widget.controller;
         return switch (controller.loadState) {
-          DevicesLoadState.loading => const StateView.loading(
-            message: 'Loading devices…',
+          DevicesLoadState.loading => StateView.loading(
+            message: context.l10n.devicesLoading,
           ),
           DevicesLoadState.error => StateView.error(
-            title: 'Devices are unavailable',
+            title: context.l10n.devicesUnavailableTitle,
             message: controller.errorMessage,
-            actionLabel: 'Try again',
+            actionLabel: context.l10n.commonTryAgain,
             onAction: controller.refresh,
           ),
           DevicesLoadState.ready => _readyContent(context, controller),
@@ -227,7 +228,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 child: Semantics(
                   container: true,
                   header: true,
-                  child: const Text('Nearby devices').large().medium(),
+                  child: Text(context.l10n.devicesNearbyTitle).large().medium(),
                 ),
               ),
               const Gap(AppSpacing.md),
@@ -239,7 +240,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     ? null
                     : controller.rescan,
                 leading: const AppIconFrame(child: Icon(LucideIcons.radar)),
-                child: Text(controller.rescanInFlight ? 'Scanning…' : 'Scan'),
+                child: Text(
+                  controller.rescanInFlight
+                      ? context.l10n.devicesScanning
+                      : context.l10n.devicesScan,
+                ),
               ),
             ],
           ),
@@ -249,8 +254,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
               constraints: const BoxConstraints(
                 minHeight: AppControlSize.touch * 4,
               ),
-              child: const StateView.empty(
-                title: 'No devices nearby',
+              child: StateView.empty(
+                title: context.l10n.devicesNoneNearby,
                 compact: true,
                 icon: DevicePresentation.collectionIcon,
               ),
@@ -452,7 +457,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
       key: const ValueKey<String>('this-device-card'),
       name: device.name,
       details: device.details,
-      statusLabel: 'This device',
+      statusLabel: context.l10n.devicesThisDevice,
       selected:
           controller.deviceDetailsTarget ==
           const DeviceDetailsTarget.thisDevice(),
@@ -506,7 +511,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
             !controller.pairingInspectorOpen && controller.canChangePairingMode
             ? () => controller.connectNearby(device)
             : null,
-        child: const Text('Connect'),
+        child: Text(context.l10n.devicesConnect),
       ),
     );
   }
@@ -597,7 +602,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 if (ping != null) ...[
                   const Gap(AppSpacing.md),
                   Text(
-                    stackedPing ? 'Ping:\n$ping' : 'Ping: $ping',
+                    stackedPing
+                        ? context.l10n.devicesCardPingStacked(ping)
+                        : context.l10n.devicesCardPing(ping),
                     style: AppTheme.deviceCardTextStyle(context, muted: true),
                     maxLines: 2,
                     textAlign: TextAlign.end,
@@ -645,27 +652,28 @@ class _DevicesScreenState extends State<DevicesScreen> {
     DevicesController controller,
     String currentName,
   ) async {
+    final l10n = context.l10n;
     final nameController = TextEditingController(text: currentName);
     try {
       await AppOverlays.showActionDialog(
         context,
         icon: LucideIcons.pencil,
-        title: const Text('Rename this device'),
-        actionLabel: 'Save',
+        title: Text(l10n.devicesRenameDialogTitle),
+        actionLabel: l10n.commonSave,
         destructive: false,
         changes: nameController,
         canConfirm: () =>
             nameController.text.trim().isNotEmpty && !controller.actionInFlight,
         content: TextField(
           controller: nameController,
-          placeholder: const Text('Device name'),
+          placeholder: Text(l10n.devicesNamePlaceholder),
           autofocus: true,
           decoration: AppOverlays.dialogFieldDecoration(context),
         ),
         onConfirm: () =>
             controller.setThisDeviceName(nameController.text.trim()),
         failureMessage: () =>
-            controller.errorMessage ?? 'The device name could not be saved.',
+            controller.errorMessage ?? l10n.devicesRenameFailed,
       );
     } finally {
       nameController.dispose();
@@ -678,23 +686,27 @@ class _DevicesScreenState extends State<DevicesScreen> {
     DevicePeer peer, {
     required bool revoke,
   }) async {
+    final l10n = context.l10n;
     await AppOverlays.showActionDialog(
       context,
       icon: revoke ? LucideIcons.ban : LucideIcons.unlink,
-      title: Text(revoke ? 'Revoke ${peer.name}?' : 'Unpair ${peer.name}?'),
+      title: Text(
+        revoke
+            ? l10n.devicesRevokeDialogTitle(peer.name)
+            : l10n.devicesUnpairDialogTitle(peer.name),
+      ),
       content: Text(
         revoke
-            ? 'This removes the device from your group and permanently blocks this pairing. Other devices apply the removal when they reconnect.'
-            : 'This removes the device from your group. Other devices apply the removal when they reconnect. Adding it again requires a new confirmation.',
+            ? l10n.devicesRevokeDialogMessage
+            : l10n.devicesUnpairDialogMessage,
       ),
-      actionLabel: revoke ? 'Revoke' : 'Unpair',
+      actionLabel: revoke ? l10n.devicesRevoke : l10n.devicesUnpair,
       changes: controller,
       canConfirm: () => !controller.actionInFlight,
       onConfirm: () =>
           revoke ? controller.revoke(peer.id) : controller.unpair(peer.id),
       failureMessage: () =>
-          controller.errorMessage ??
-          'The device action could not be completed.',
+          controller.errorMessage ?? l10n.devicesActionFailedMessage,
     );
   }
 }
@@ -720,7 +732,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final target = controller.deviceDetailsTarget;
-    final device = _selectedDevice(target);
+    final device = _selectedDevice(context.l10n, target);
     if (device == null) return const SizedBox.shrink();
     final content = Card(
       key: ValueKey<String>(
@@ -758,10 +770,11 @@ class _DeviceDetailsInspector extends StatelessWidget {
               ),
               Tooltip(
                 showDuration: AppMotion.resolve(context, AppMotion.standard),
-                tooltip: (context) =>
-                    const TooltipContainer(child: Text('Close device details')),
+                tooltip: (context) => TooltipContainer(
+                  child: Text(context.l10n.devicesCloseDetails),
+                ),
                 child: Semantics(
-                  label: 'Close device details',
+                  label: context.l10n.devicesCloseDetails,
                   button: true,
                   child: Button.ghost(
                     key: const ValueKey<String>('close-device-details'),
@@ -806,7 +819,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
             ),
           ),
           const Gap(AppSpacing.xxl),
-          _actions(device),
+          _actions(context, device),
         ],
       ),
     );
@@ -822,15 +835,19 @@ class _DeviceDetailsInspector extends StatelessWidget {
     );
   }
 
-  _DetailsDevice? _selectedDevice(DeviceDetailsTarget? target) {
+  _DetailsDevice? _selectedDevice(
+    AppLocalizations l10n,
+    DeviceDetailsTarget? target,
+  ) {
     if (target == null) return null;
     if (target.isThisDevice) {
       final device = snapshot.thisDevice;
-      return _DetailsDevice.thisDevice(device);
+      return _DetailsDevice.thisDevice(l10n, device);
     }
     for (final peer in snapshot.peers) {
       if (peer.id == target.id) {
         return _DetailsDevice.peer(
+          l10n,
           peer,
           state: controller.peerStateLabel(peer),
           latency: controller.peerLatencyLabel(peer),
@@ -847,50 +864,60 @@ class _DeviceDetailsInspector extends StatelessWidget {
     BuildContext context,
     _DetailsDevice device,
   ) {
+    final l10n = context.l10n;
     return [
       (
-        label: 'Device type',
+        label: l10n.devicesDetailType,
         value: DevicePresentation.classLabel(
           device.details?.profile?.deviceClass,
         ),
       ),
       (
-        label: 'Operating system',
+        label: l10n.devicesDetailOperatingSystem,
         value: DevicePresentation.osLabel(device.details?.profile),
       ),
       if (device.details?.profile?.model case final model?)
-        (label: 'Model', value: model),
+        (label: l10n.devicesDetailModel, value: model),
       if (device.appVersion case final appVersion?)
-        (label: 'CopyPaste version', value: appVersion),
+        (label: l10n.devicesDetailAppVersion, value: appVersion),
       if (device.protocolVersion case final protocolVersion?)
-        (label: 'Protocol version', value: '$protocolVersion'),
-      if (!device.isThisDevice) (label: 'Status', value: device.state),
-      if (!device.isThisDevice) (label: 'Ping', value: device.latency),
+        (label: l10n.devicesDetailProtocolVersion, value: '$protocolVersion'),
+      if (!device.isThisDevice)
+        (label: l10n.devicesDetailStatus, value: device.state),
+      if (!device.isThisDevice)
+        (label: l10n.devicesDetailPing, value: device.latency),
       if (device.latencyObservedAt case final measuredAt?)
-        (label: 'Measured', value: formatSystemDateTime(context, measuredAt)),
+        (
+          label: l10n.devicesDetailMeasured,
+          value: formatSystemDateTime(context, measuredAt),
+        ),
       if (device.lastSeen case final lastSeen?)
-        (label: 'Last seen', value: formatSystemDateTime(context, lastSeen)),
+        (
+          label: l10n.devicesDetailLastSeen,
+          value: formatSystemDateTime(context, lastSeen),
+        ),
       if (device.endpoint case final endpoint?)
-        (label: 'LAN endpoint', value: endpoint),
-      (label: device.idLabel, value: device.id ?? 'Unavailable'),
+        (label: l10n.devicesDetailLanEndpoint, value: endpoint),
+      (label: device.idLabel, value: device.id ?? l10n.devicesValueUnavailable),
       (
-        label: 'Profile provenance',
-        value: _provenanceLabel(device.details?.profile?.provenance),
+        label: l10n.devicesDetailProfileProvenance,
+        value: _provenanceLabel(l10n, device.details?.profile?.provenance),
       ),
       if (!device.isThisDevice)
         (
-          label: 'Profile trust',
-          value: _trustLabel(device.details?.profile?.trust),
+          label: l10n.devicesDetailProfileTrust,
+          value: _trustLabel(l10n, device.details?.profile?.trust),
         ),
       if (device.details?.profile?.observedAt case final observedAt?)
         (
-          label: 'Profile updated',
+          label: l10n.devicesDetailProfileUpdated,
           value: formatSystemDateTime(context, observedAt),
         ),
     ];
   }
 
-  Widget _actions(_DetailsDevice device) {
+  Widget _actions(BuildContext context, _DetailsDevice device) {
+    final l10n = context.l10n;
     return Wrap(
       key: const ValueKey<String>('device-details-actions'),
       alignment: WrapAlignment.center,
@@ -908,7 +935,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                     ? null
                     : () => onRename(device.name),
                 leading: const AppIconFrame(child: Icon(LucideIcons.pencil)),
-                child: const Text('Rename device'),
+                child: Text(l10n.devicesRenameDevice),
               ),
             ]
           : [
@@ -920,7 +947,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                     ? null
                     : () => controller.sync(peerId: device.id),
                 leading: const AppIconFrame(child: Icon(LucideIcons.refreshCw)),
-                child: const Text('Sync now'),
+                child: Text(l10n.devicesSyncNow),
               ),
               Button.secondary(
                 style: AppTheme.actionButtonStyle(
@@ -930,7 +957,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
                     ? null
                     : () => onRemove(device.peer!, false),
                 leading: const AppIconFrame(child: Icon(LucideIcons.unlink)),
-                child: const Text('Unpair'),
+                child: Text(l10n.devicesUnpair),
               ),
               Button.destructive(
                 style: AppTheme.actionButtonStyle(
@@ -940,26 +967,32 @@ class _DeviceDetailsInspector extends StatelessWidget {
                     ? null
                     : () => onRemove(device.peer!, true),
                 leading: const AppIconFrame(child: Icon(LucideIcons.ban)),
-                child: const Text('Revoke pairing'),
+                child: Text(l10n.devicesRevokePairing),
               ),
             ],
     );
   }
 
-  static String _trustLabel(DeviceObservationTrust? trust) => switch (trust) {
-    DeviceObservationTrust.local => 'Local',
-    DeviceObservationTrust.authenticated => 'Authenticated',
-    DeviceObservationTrust.unverified => 'Unverified',
-    null => 'Unavailable',
+  static String _trustLabel(
+    AppLocalizations l10n,
+    DeviceObservationTrust? trust,
+  ) => switch (trust) {
+    DeviceObservationTrust.local => l10n.devicesLocal,
+    DeviceObservationTrust.authenticated => l10n.devicesTrustAuthenticated,
+    DeviceObservationTrust.unverified => l10n.devicesTrustUnverified,
+    null => l10n.devicesValueUnavailable,
   };
 
-  static String _provenanceLabel(DeviceObservationProvenance? provenance) =>
-      switch (provenance) {
-        DeviceObservationProvenance.selfReported => 'Self-reported',
-        DeviceObservationProvenance.observed => 'Observed',
-        DeviceObservationProvenance.measured => 'Measured',
-        null => 'Unavailable',
-      };
+  static String _provenanceLabel(
+    AppLocalizations l10n,
+    DeviceObservationProvenance? provenance,
+  ) => switch (provenance) {
+    DeviceObservationProvenance.selfReported =>
+      l10n.devicesProvenanceSelfReported,
+    DeviceObservationProvenance.observed => l10n.devicesProvenanceObserved,
+    DeviceObservationProvenance.measured => l10n.devicesProvenanceMeasured,
+    null => l10n.devicesValueUnavailable,
+  };
 }
 
 typedef _DeviceDetailRow = ({String label, String value});
@@ -999,34 +1032,36 @@ class _DetailsDevice {
     this.protocolVersion,
   });
 
-  factory _DetailsDevice.thisDevice(ThisDevice device) => _DetailsDevice(
-    name: device.name,
-    relationship: 'This device',
-    state: 'Local',
-    latency: 'Local',
-    details: device.details,
-    id: device.id,
-    idLabel: 'Device ID',
-    isThisDevice: true,
-    endpoint: device.details?.endpoint?.lanEndpoint ?? device.listenAddress,
-    appVersion: device.details?.profile?.appVersion ?? device.appVersion,
-    protocolVersion:
-        device.details?.profile?.protocolVersion ?? device.protocolVersion,
-  );
+  factory _DetailsDevice.thisDevice(AppLocalizations l10n, ThisDevice device) =>
+      _DetailsDevice(
+        name: device.name,
+        relationship: l10n.devicesThisDevice,
+        state: l10n.devicesLocal,
+        latency: l10n.devicesLocal,
+        details: device.details,
+        id: device.id,
+        idLabel: l10n.devicesDetailDeviceId,
+        isThisDevice: true,
+        endpoint: device.details?.endpoint?.lanEndpoint ?? device.listenAddress,
+        appVersion: device.details?.profile?.appVersion ?? device.appVersion,
+        protocolVersion:
+            device.details?.profile?.protocolVersion ?? device.protocolVersion,
+      );
 
   factory _DetailsDevice.peer(
+    AppLocalizations l10n,
     DevicePeer peer, {
     required String state,
     required String latency,
     required DateTime? latencyObservedAt,
   }) => _DetailsDevice(
     name: peer.name,
-    relationship: 'Trusted',
+    relationship: l10n.devicesTrusted,
     state: state,
     latency: latency,
     details: peer.details,
     id: peer.id,
-    idLabel: 'Pairing ID',
+    idLabel: l10n.devicesDetailPairingId,
     isThisDevice: false,
     endpoint: peer.details?.endpoint?.lanEndpoint,
     peer: peer,
@@ -1133,15 +1168,15 @@ class _PairingInspectorState extends State<_PairingInspector> {
                   widget.controller.pairing != null
                       ? _pairingProgress(widget.controller.pairing!)
                       : widget.controller.pairingInFlight
-                      ? const StateView.loading(
-                          message: 'Sending connection request…',
+                      ? StateView.loading(
+                          message: context.l10n.pairingSendingRequest,
                         )
                       : _pairingError(),
                 PairingEntryMode.scanQr => _scannerContent(),
                 PairingEntryMode.enterCode => _codeContent(),
-                null => const StateView.empty(
-                  title: 'Choose a pairing action',
-                  message: 'Pairing controls appear here.',
+                null => StateView.empty(
+                  title: context.l10n.pairingEmptyTitle,
+                  message: context.l10n.pairingEmptyMessage,
                 ),
               },
             ),
@@ -1167,7 +1202,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
 
   Widget _invitationContent() {
     if (widget.controller.pairingInFlight) {
-      return const StateView.loading(message: 'Creating a pairing invitation.');
+      return StateView.loading(message: context.l10n.pairingCreatingInvitation);
     }
     final ceremony = widget.controller.pairing;
     if (ceremony == null) return _pairingError();
@@ -1177,17 +1212,16 @@ class _PairingInspectorState extends State<_PairingInspector> {
   Widget _codeContent() {
     final ceremony = widget.controller.pairing;
     if (ceremony != null) return _pairingProgress(ceremony);
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Pairing code').semiBold(),
+        Text(l10n.pairingCode).semiBold(),
         const Gap(AppSpacing.xs),
-        const Text(
-          'Enter the 8-character code shown on the other device.',
-        ).muted(),
+        Text(l10n.pairingCodeHint).muted(),
         const Gap(AppSpacing.md),
         Semantics(
-          label: 'Pairing code',
+          label: l10n.pairingCode,
           textField: true,
           child: SingleChildScrollView(
             key: const ValueKey<String>('pairing-code-scroll'),
@@ -1212,11 +1246,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
           ),
         ),
         const Gap(AppSpacing.xl),
-        const Text('Device address').semiBold(),
+        Text(l10n.pairingDeviceAddress).semiBold(),
         const Gap(AppSpacing.xs),
-        const Text(
-          'Use the host:port address reported by the other device.',
-        ).muted(),
+        Text(l10n.pairingDeviceAddressHint).muted(),
         const Gap(AppSpacing.sm),
         TextField(
           key: const ValueKey<String>('pairing-address-input'),
@@ -1231,7 +1263,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.md),
           Alert.destructive(
             leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: const Text('Check pairing details'),
+            title: Text(l10n.pairingCheckDetailsTitle),
             content: Text(_validationMessage!),
           ),
         ],
@@ -1249,11 +1281,11 @@ class _PairingInspectorState extends State<_PairingInspector> {
     if (widget.controller.usesSystemScanner) {
       if (widget.controller.errorMessage case final message?) {
         return StateView.error(
-          title: 'Pairing action failed',
+          title: context.l10n.pairingActionFailed,
           message: message,
         );
       }
-      return const StateView.loading(message: 'Connecting device…');
+      return StateView.loading(message: context.l10n.pairingConnectingDevice);
     }
     final scanner = _scanner;
     return Column(
@@ -1283,9 +1315,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
                       ),
                     ),
                     const Gap(AppSpacing.md),
-                    const Text('QR scanner').h4(),
+                    Text(context.l10n.pairingQrScannerTitle).h4(),
                     const Gap(AppSpacing.xs),
-                    const Text('The camera preview appears here.').muted(),
+                    Text(context.l10n.pairingCameraPreviewPlaceholder).muted(),
                   ],
                 ),
               ),
@@ -1295,7 +1327,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.md),
           Alert.destructive(
             leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-            title: const Text('Scanner needs attention'),
+            title: Text(context.l10n.pairingScannerNeedsAttention),
             content: Text(_validationMessage!),
           ),
         ],
@@ -1326,8 +1358,8 @@ class _PairingInspectorState extends State<_PairingInspector> {
     if (_pairingCode.length != _pairingCodeLength || address.isEmpty) {
       setState(() {
         _validationMessage = _pairingCode.length != _pairingCodeLength
-            ? 'Enter the complete 8-character pairing code.'
-            : 'Enter the device host:port address.';
+            ? context.l10n.pairingCodeIncomplete
+            : context.l10n.pairingAddressMissing;
       });
       return;
     }
@@ -1356,60 +1388,62 @@ class _PairingInspectorState extends State<_PairingInspector> {
   }
 
   Widget _pairingProgress(PairingCeremony ceremony) {
+    final l10n = context.l10n;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_pairingTitle(ceremony.state) case final title?) ...[
+        if (ceremony.state != PairingState.waitingForPeer) ...[
           Row(
             children: [
-              AppIconFrame(child: Icon(_pairingIcon(ceremony.state))),
+              AppIconFrame(
+                child: Icon(
+                  DevicePresentation.pairingStateIcon(ceremony.state),
+                ),
+              ),
               const Gap(AppSpacing.md),
               Expanded(
                 child: Text(
                   widget.controller.locallyConfirmed &&
                           ceremony.state == PairingState.awaitingConfirmation
-                      ? 'Waiting for the other device'
-                      : title,
+                      ? l10n.pairingWaitingForOtherDevice
+                      : DevicePresentation.pairingStateTitle(ceremony.state),
                 ).h4(),
               ),
             ],
           ),
-          if (ceremony.failureMessage ??
-                  ceremony.peerName ??
-                  _pairingDescription(ceremony.state)
-              case final description?) ...[
-            const Gap(AppSpacing.sm),
-            Text(description).muted(),
-          ],
+          const Gap(AppSpacing.sm),
+          Text(
+            ceremony.failureMessage ??
+                ceremony.peerName ??
+                DevicePresentation.pairingStateDescription(ceremony.state),
+          ).muted(),
         ],
         if (widget.controller.invitation case final invitation?) ...[
           if (ceremony.state != PairingState.waitingForPeer)
             const Gap(AppSpacing.lg),
-          const Text(
-            'On the other device, choose Add device → Enter code, or scan the QR code.',
-          ).muted(),
+          Text(l10n.pairingInviteInstructions).muted(),
           const Gap(AppSpacing.lg),
           const Divider(key: ValueKey('pairing-invite-divider')),
           const Gap(AppSpacing.lg),
-          const AppBar(
-            title: Text('Pairing details'),
-            leading: [AppIconFrame(child: Icon(LucideIcons.info))],
+          AppBar(
+            title: Text(l10n.pairingDetailsTitle),
+            leading: const [AppIconFrame(child: Icon(LucideIcons.info))],
           ),
           const Gap(AppSpacing.md),
           InspectorTable(
             tableKey: const ValueKey<String>('pairing-invite-details'),
             rows: [
               (
-                label: 'Pairing code',
+                label: l10n.pairingCode,
                 value: SelectableText(
                   invitation.code,
                   key: const ValueKey<String>('pairing-invite-code'),
                 ),
               ),
               (
-                label: 'Address',
+                label: l10n.pairingAddress,
                 value: SelectableText(
-                  invitation.address ?? 'Unavailable',
+                  invitation.address ?? l10n.devicesValueUnavailable,
                   key: const ValueKey<String>('pairing-invite-address'),
                 ),
               ),
@@ -1439,11 +1473,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
             key: const ValueKey<String>('pairing-verification-code'),
             child: Column(
               children: [
-                const Text('Verification code').semiBold(),
+                Text(l10n.pairingVerificationCode).semiBold(),
                 const Gap(AppSpacing.sm),
-                const Text(
-                  'Confirm only if this code matches on both devices.',
-                ).muted(),
+                Text(l10n.pairingVerificationCodeHint).muted(),
                 const Gap(AppSpacing.sm),
                 Text(
                   verificationCode,
@@ -1465,6 +1497,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
   }
 
   Widget? _pairingActions() {
+    final l10n = context.l10n;
     final ceremony = widget.controller.pairing;
     if (ceremony != null) {
       final terminal = ceremony.state.isTerminal;
@@ -1487,7 +1520,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
                       !widget.controller.canConfirmPairing
                   ? null
                   : () => widget.controller.confirmPairing(accept: false),
-              child: const Text('Reject'),
+              child: Text(l10n.pairingReject),
             ),
           if (awaitingConfirmation)
             Button.primary(
@@ -1497,13 +1530,13 @@ class _PairingInspectorState extends State<_PairingInspector> {
                       !widget.controller.canConfirmPairing
                   ? null
                   : () => widget.controller.confirmPairing(accept: true),
-              child: const Text('Confirm'),
+              child: Text(l10n.pairingConfirm),
             ),
           if (terminal)
             Button.primary(
               style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
               onPressed: widget.onClose,
-              child: const Text('Done'),
+              child: Text(l10n.commonDone),
             ),
         ],
       );
@@ -1525,7 +1558,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
                     ),
                   )
                 : const AppIconFrame(child: Icon(LucideIcons.link)),
-            child: const Text('Join device'),
+            child: Text(l10n.pairingJoinDevice),
           ),
         );
       case PairingEntryMode.scanQr:
@@ -1537,7 +1570,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
             key: const ValueKey<String>('start-pairing-scanner'),
             onPressed: _startScanner,
             leading: const AppIconFrame(child: Icon(LucideIcons.camera)),
-            child: const Text('Start scanner'),
+            child: Text(l10n.pairingStartScanner),
           ),
         );
       case PairingEntryMode.invite:
@@ -1549,57 +1582,22 @@ class _PairingInspectorState extends State<_PairingInspector> {
 
   Widget _pairingError() => Alert.destructive(
     leading: const AppIconFrame(child: Icon(LucideIcons.circleAlert)),
-    title: const Text('Pairing action failed'),
+    title: Text(context.l10n.pairingActionFailed),
     content: Text(
-      widget.controller.errorMessage ??
-          'The pairing action could not be started.',
+      widget.controller.errorMessage ?? context.l10n.pairingActionNotStarted,
     ),
   );
 
-  String _modeTitle(PairingEntryMode? mode) => switch (mode) {
-    PairingEntryMode.invite => 'Pair a device',
-    PairingEntryMode.scanQr => 'Scan QR code',
-    PairingEntryMode.enterCode => 'Enter pairing code',
-    PairingEntryMode.nearby => 'Connect nearby device',
-    null => 'Pairing',
-  };
-
-  IconData _pairingIcon(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => LucideIcons.qrCode,
-    PairingState.handshaking => LucideIcons.loaderCircle,
-    PairingState.awaitingConfirmation => LucideIcons.shieldQuestion,
-    PairingState.confirmed => LucideIcons.badgeCheck,
-    PairingState.rejected || PairingState.failed => LucideIcons.circleX,
-    PairingState.cancelled || PairingState.timedOut => LucideIcons.clockAlert,
-    PairingState.idle => LucideIcons.link,
-  };
-
-  String? _pairingTitle(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => null,
-    PairingState.handshaking => 'Verifying device',
-    PairingState.awaitingConfirmation => 'Confirm on both devices',
-    PairingState.confirmed => 'Device paired',
-    PairingState.rejected => 'Pairing rejected',
-    PairingState.cancelled => 'Pairing cancelled',
-    PairingState.timedOut => 'Pairing timed out',
-    PairingState.failed => 'Pairing failed',
-    PairingState.idle => 'Pairing',
-  };
-
-  String? _pairingDescription(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => null,
-    PairingState.handshaking =>
-      'The devices are establishing a secure channel.',
-    PairingState.awaitingConfirmation =>
-      'Compare the protected verification code, then confirm on both devices.',
-    PairingState.confirmed =>
-      'The device is connected. Your group membership will sync automatically.',
-    PairingState.rejected ||
-    PairingState.cancelled ||
-    PairingState.failed => 'No device was added.',
-    PairingState.timedOut => 'Start a new pairing attempt to continue.',
-    PairingState.idle => 'Start a pairing attempt to connect a device.',
-  };
+  String _modeTitle(PairingEntryMode? mode) {
+    final l10n = context.l10n;
+    return switch (mode) {
+      PairingEntryMode.invite => l10n.pairingPairDevice,
+      PairingEntryMode.scanQr => l10n.pairingScanQrCode,
+      PairingEntryMode.enterCode => l10n.pairingEnterPairingCode,
+      PairingEntryMode.nearby => l10n.pairingConnectNearbyDevice,
+      null => l10n.pairingTitle,
+    };
+  }
 }
 
 class _DevicesQrPayloadSink implements PairingQrPayloadSink {

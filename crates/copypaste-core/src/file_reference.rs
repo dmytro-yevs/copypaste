@@ -483,4 +483,39 @@ mod tests {
         assert!(source(&store, &row.id).is_err());
         assert_eq!(store.count().unwrap(), 2);
     }
+    #[test]
+    fn local_selection_accepts_only_bounded_regular_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let prepare = |path: &std::path::Path, limit| {
+            FileReference::prepare(path.to_str().unwrap(), limit, None).map(|_| ())
+        };
+        assert!(matches!(
+            prepare(&directory.path().join("absent"), 4),
+            Err(FileTransferError::SourceMissing)
+        ));
+        assert!(matches!(
+            prepare(directory.path(), 4),
+            Err(FileTransferError::NotFile)
+        ));
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            use rustix::fs::{mkfifoat, Mode, CWD};
+            let fifo = directory.path().join("fifo");
+            mkfifoat(CWD, &fifo, Mode::RUSR | Mode::WUSR).unwrap();
+            assert!(matches!(prepare(&fifo, 4), Err(FileTransferError::NotFile)));
+        }
+        let regular = directory.path().join("regular");
+        std::fs::write(&regular, b"1234").unwrap();
+        assert!(prepare(&regular, 4).is_ok());
+        assert!(matches!(
+            prepare(&regular, 3),
+            Err(FileTransferError::TooLarge { size: 4, limit: 3 })
+        ));
+        #[cfg(unix)]
+        {
+            let link = directory.path().join("link");
+            std::os::unix::fs::symlink(&regular, &link).unwrap();
+            assert!(prepare(&link, 4).is_ok());
+        }
+    }
 }

@@ -6,13 +6,15 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::collections::HashSet;
 
+use super::summary::summary_key;
 #[cfg(test)]
-use super::{merge_decision_by_summary, pin_state_wins, MergeDecision};
+use super::{merge_decision_by_summary, MergeDecision};
 use super::{SummaryWorkspace, SyncError, SyncStats};
 use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 
-/// How far into the future a peer's `created_at` may be before we refuse that
-/// version. The lower bound is clamped at the decode boundary; this upper bound
+/// How far into the future a peer's `created_at`/`pin_updated_at` stamp may be
+/// before we refuse that version. The lower bound is clamped at the decode
+/// boundary; this upper bound
 /// needs the local clock. Without it a peer — hostile or merely wrong-clocked —
 /// stamps `i64::MAX` on one `item_id` and wins every future comparison for it,
 /// censoring that item on every device. A day is far more than any real skew,
@@ -42,9 +44,9 @@ pub(super) fn plan_workspace(
         }
         for (next, r) in page {
             cursor = next;
-            if r.created_at > ceiling {
+            if summary_key(&r) > ceiling {
                 tracing::warn!(
-                    skew_ms = r.created_at.saturating_sub(now),
+                    skew_ms = summary_key(&r).saturating_sub(now),
                     "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
                 );
                 stats.skipped += 1;
@@ -100,9 +102,9 @@ pub(super) fn plan(
     let mut deferred: HashSet<String> = HashSet::new();
 
     for r in remote {
-        if r.created_at > ceiling {
+        if summary_key(r) > ceiling {
             tracing::warn!(
-                skew_ms = r.created_at.saturating_sub(now),
+                skew_ms = summary_key(r).saturating_sub(now),
                 "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
             );
             stats.skipped += 1;
@@ -113,9 +115,7 @@ pub(super) fn plan(
 
         let take = match local.get(&r.item_id) {
             None => true,
-            Some(l) => {
-                merge_decision_by_summary(l, r) == MergeDecision::TakeRemote || pin_state_wins(l, r)
-            }
+            Some(l) => super::merge::remote_version_wins(l, r),
         };
 
         if !take {
@@ -223,6 +223,23 @@ mod tests {
         assert!(wanted.contains_key("sane"));
         assert!(!wanted.contains_key("forged"));
         assert_eq!(stats.skipped, 1);
+    }
+
+    #[test]
+    fn a_pin_stamp_beyond_the_skew_ceiling_is_skipped() {
+        // `summary_key` folds in `pin_updated_at`, so a forged pin stamp has to
+        // be refused for the same reason a forged `created_at` is: otherwise it
+        // drags the session watermark to `i64::MAX` while `created_at` looks sane.
+        let local = HashMap::new();
+        let now = 1_000_000;
+        let mut forged = summary("forged", now, "h", false);
+        forged.pin_updated_at = i64::MAX;
+        let remote = vec![summary("sane", now, "h", false), forged];
+        let mut stats = SyncStats::default();
+        let wanted = plan(&local, &remote, now, &mut stats).wanted;
+        assert!(wanted.contains_key("sane"));
+        assert!(!wanted.contains_key("forged"));
+        assert_eq!(stats.skipped_future, 1);
     }
 
     #[test]

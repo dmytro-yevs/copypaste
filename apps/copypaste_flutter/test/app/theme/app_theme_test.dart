@@ -184,7 +184,7 @@ void main() {
     expect(AppTheme.dark.colorScheme.brightness, Brightness.dark);
   });
 
-  test('uses the ChatGPT application surface palette and no focus ring', () {
+  test('uses the shared surface palette and no focus ring', () {
     final light = AppTheme.light.colorScheme;
     final dark = AppTheme.dark.colorScheme;
 

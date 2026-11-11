@@ -2,12 +2,14 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../controller/history_controller.dart';
 import 'history_delete_dialog.dart';
+import 'history_tags_dialog.dart';
 
 /// Actions over the explicit History selection, including pinned clips.
 class HistoryBulkToolbar extends StatelessWidget {
@@ -17,9 +19,10 @@ class HistoryBulkToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busy = controller.isBulkMutating;
-    final hasSelection = controller.bulkSelectedIds.isNotEmpty;
-    final canApply = hasSelection && !busy && !controller.isBulkDragSelecting;
+    final busy = controller.bulk.isBulkMutating;
+    final hasSelection = controller.bulk.bulkSelectedIds.isNotEmpty;
+    final canApply =
+        hasSelection && !busy && !controller.bulk.isBulkDragSelecting;
     final actions = Wrap(
       alignment: WrapAlignment.end,
       spacing: AppSpacing.sm,
@@ -27,14 +30,34 @@ class HistoryBulkToolbar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Exit selection')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkTagTooltip)),
+          child: Button.secondary(
+            key: const ValueKey('history-bulk-tags'),
+            style: AppTheme.historyToolbarIconStyle,
+            onPressed: canApply && controller.bulk.canTagBulkSelection
+                ? () => showHistoryTagsDialog(
+                    context,
+                    controller: controller,
+                    clipIds: controller.bulk.bulkSelectedIds.toList(),
+                  )
+                : null,
+            child: const AppIconFrame(
+              size: AppIconSize.md,
+              child: Icon(LucideIcons.tags, size: AppIconSize.md),
+            ),
+          ),
+        ),
+        Tooltip(
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkExit)),
           child: Semantics(
-            label: 'Exit selection',
+            label: context.l10n.historyBulkExit,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-close'),
               style: AppTheme.historyToolbarIconStyle,
-              onPressed: busy ? null : controller.endBulkSelection,
+              onPressed: busy ? null : controller.bulk.endBulkSelection,
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.x, size: AppIconSize.md),
@@ -43,16 +66,17 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Pin selected')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkPin)),
           child: Semantics(
-            label: 'Pin selected',
+            label: context.l10n.historyBulkPin,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-pin'),
               style: AppTheme.historyToolbarIconStyle,
               onPressed: !canApply
                   ? null
-                  : () => unawaited(controller.setBulkPinned(true)),
+                  : () => unawaited(controller.bulk.setBulkPinned(true)),
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.pin, size: AppIconSize.md),
@@ -61,16 +85,17 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
         Tooltip(
-          tooltip: (_) => const TooltipContainer(child: Text('Unpin selected')),
+          tooltip: (_) =>
+              TooltipContainer(child: Text(context.l10n.historyBulkUnpin)),
           child: Semantics(
-            label: 'Unpin selected',
+            label: context.l10n.historyBulkUnpin,
             button: true,
             child: Button.secondary(
               key: const ValueKey('history-bulk-unpin'),
               style: AppTheme.historyToolbarIconStyle,
               onPressed: !canApply
                   ? null
-                  : () => unawaited(controller.setBulkPinned(false)),
+                  : () => unawaited(controller.bulk.setBulkPinned(false)),
               child: const AppIconFrame(
                 size: AppIconSize.md,
                 child: Icon(LucideIcons.pinOff, size: AppIconSize.md),
@@ -80,9 +105,9 @@ class HistoryBulkToolbar extends StatelessWidget {
         ),
         Tooltip(
           tooltip: (_) =>
-              const TooltipContainer(child: Text('Delete selected')),
+              TooltipContainer(child: Text(context.l10n.historyBulkDelete)),
           child: Semantics(
-            label: 'Delete selected',
+            label: context.l10n.historyBulkDelete,
             button: true,
             child: Button.destructive(
               key: const ValueKey('history-bulk-delete'),
@@ -107,7 +132,9 @@ class HistoryBulkToolbar extends StatelessWidget {
         ),
       ],
     );
-    final label = '${controller.bulkSelectedIds.length} selected';
+    final label = context.l10n.historyBulkSelectedCount(
+      controller.bulk.bulkSelectedIds.length,
+    );
     final count = Semantics(liveRegion: true, child: Text(label));
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -123,7 +150,7 @@ class HistoryBulkToolbar extends StatelessWidget {
           context,
           minimum: AppControlSize.large,
         );
-        final minimumWidth = text.width + extent * 4 + AppSpacing.sm * 4;
+        final minimumWidth = text.width + extent * 5 + AppSpacing.sm * 5;
         text.dispose();
         if (constraints.maxWidth >= minimumWidth) {
           return Row(

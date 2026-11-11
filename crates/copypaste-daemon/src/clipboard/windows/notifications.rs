@@ -33,7 +33,7 @@ impl ClipboardNotifications {
             return Err(std::io::Error::last_os_error());
         }
         let stop_event = stop_event as usize;
-        let signal = Arc::new(ChangeSignal::new());
+        let signal = Arc::new(ChangeSignal::default());
         let worker_signal = Arc::clone(&signal);
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = Arc::clone(&stopping);

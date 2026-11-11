@@ -369,7 +369,7 @@ jobs:
   macos:
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -393,6 +393,14 @@ jobs:
           chmod +x packaging/macos/selfsign.sh scripts/release/*.sh
           scripts/release/build-macos-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}"
           python3 scripts/ci/timed.py packaging scripts/release/build-cli-tarball.sh "${{ needs.preflight.outputs.version }}" arm64 --reuse-build
+      - name: Sign updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg"
+          # Use the VM directly; signature verification has no native assets.
+          (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg.sig")
       - name: Install and run exact macOS artifact
         run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
       - name: Write exact-artifact receipt
@@ -407,6 +415,7 @@ jobs:
           if-no-files-found: error
           path: |
             dist/*.dmg
+            dist/*.dmg.sig
             dist/*.dmg.sha256
             dist/*.tar.gz
             dist/*.tar.gz.sha256
@@ -416,7 +425,7 @@ jobs:
     name: macos-regression
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

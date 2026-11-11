@@ -12,6 +12,7 @@ crate-type = ["cdylib", "staticlib"]
 base64.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-core = { path = "../copypaste-core" }
+copypaste-fs = { path = "../copypaste-fs" }
 copypaste-runtime = { path = "../copypaste-runtime" }
 copypaste-modules = { path = "../copypaste-modules" }
 copypaste-p2p = { path = "../copypaste-p2p" }

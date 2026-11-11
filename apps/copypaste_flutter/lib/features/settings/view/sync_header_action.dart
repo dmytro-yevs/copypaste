@@ -1,4 +1,5 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import 'dart:async';
 
@@ -62,7 +63,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
               ? null
               : _open,
           child: Semantics(
-            label: 'Synchronization: ${_status.label}',
+            label: context.l10n.syncHeaderSemanticsLabel(_status.label),
             child: AppIconFrame(
               child: Icon(
                 LucideIcons.network,
@@ -150,18 +151,17 @@ class _SyncDetails extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     headers: [
       AppBar(
-        title: const Text('Synchronization'),
+        title: Text(context.l10n.syncDetailsTitle),
         subtitle: Text(
           status.label,
           style: AppTheme.deviceMetadataTextStyle(context),
         ),
         trailing: [
           Tooltip(
-            tooltip: (context) => const TooltipContainer(
-              child: Text('Close synchronization details'),
-            ),
+            tooltip: (context) =>
+                TooltipContainer(child: Text(context.l10n.syncDetailsClose)),
             child: Semantics(
-              label: 'Close synchronization details',
+              label: context.l10n.syncDetailsClose,
               button: true,
               child: Button.ghost(
                 key: const ValueKey<String>('close-sync-details'),
@@ -179,10 +179,10 @@ class _SyncDetails extends StatelessWidget {
     ],
     child: status.peers.isEmpty
         ? status.phase == SyncPhase.unavailable
-              ? const StateView.error(title: 'Sync state unavailable')
-              : const StateView.empty(
-                  title: 'No paired devices',
-                  message: 'Pair a device to synchronize clipboard history.',
+              ? StateView.error(title: context.l10n.syncStatusUnavailable)
+              : StateView.empty(
+                  title: context.l10n.syncStatusNoPairedDevices,
+                  message: context.l10n.syncNoPairedDevicesMessage,
                 )
         : ListView.builder(
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -193,12 +193,12 @@ class _SyncDetails extends StatelessWidget {
             itemBuilder: (context, index) {
               if (!status.diagnosticsAvailable) {
                 if (index == 0) {
-                  return const Padding(
-                    padding: EdgeInsets.only(bottom: AppSpacing.lg),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.lg),
                     child: Alert(
-                      title: Text('Activity log unavailable'),
+                      title: Text(context.l10n.syncActivityLogUnavailableTitle),
                       content: Text(
-                        'Sync activity could not be read or saved.',
+                        context.l10n.syncActivityLogUnavailableMessage,
                       ),
                     ),
                   );
@@ -207,7 +207,7 @@ class _SyncDetails extends StatelessWidget {
               }
               if (index == 0) {
                 return Text(
-                  'Devices',
+                  context.l10n.syncDetailsDevicesHeading,
                   style: AppTheme.deviceCardTextStyle(context, muted: true),
                 ).semiBold();
               }
@@ -219,7 +219,7 @@ class _SyncDetails extends StatelessWidget {
                     bottom: AppSpacing.md,
                   ),
                   child: Text(
-                    'Activity',
+                    context.l10n.syncDetailsActivityHeading,
                     style: AppTheme.deviceCardTextStyle(context, muted: true),
                   ).semiBold(),
                 );
@@ -227,7 +227,7 @@ class _SyncDetails extends StatelessWidget {
               if (index > status.peers.length) {
                 if (status.log.isEmpty) {
                   return Text(
-                    'No recent synchronization problems',
+                    context.l10n.syncDetailsNoRecentProblems,
                     style: AppTheme.deviceMetadataTextStyle(context),
                   );
                 }
@@ -239,7 +239,7 @@ class _SyncDetails extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: AppSpacing.lg),
                   child: _SyncLogRow(
                     entry: entry,
-                    name: peer?.name ?? 'Paired device',
+                    name: peer?.name ?? context.l10n.syncDetailsUnknownPeer,
                   ),
                 );
               }
@@ -257,7 +257,7 @@ class _SyncDetails extends StatelessWidget {
                     ? SyncPhase.unavailable
                     : peer.phase,
                 ping: device == null
-                    ? '— ms'
+                    ? context.l10n.devicesPingUnavailable
                     : devices!.peerLatencyLabel(device),
                 presence: peer.connectionLabel,
                 endpoint: device?.details?.endpoint?.lanEndpoint,
@@ -290,13 +290,15 @@ class _SyncPeerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final rows = <({String label, String value})>[
-      (label: 'Connection', value: presence),
-      (label: 'Ping', value: ping),
-      if (endpoint case final value?) (label: 'LAN endpoint', value: value),
+      (label: l10n.syncPeerConnection, value: presence),
+      (label: l10n.devicesDetailPing, value: ping),
+      if (endpoint case final value?)
+        (label: l10n.devicesDetailLanEndpoint, value: value),
       if (peer.startedAt case final value?)
         (
-          label: 'Last check started',
+          label: l10n.syncPeerLastCheckStarted,
           value: formatSystemDateTime(context, value),
         ),
       for (final issue in peer.issues)
@@ -306,7 +308,10 @@ class _SyncPeerRow extends StatelessWidget {
               '${issue.code} · ${formatSystemDateTime(context, issue.since)}',
         ),
       if (peer.skippedTooLarge > 0)
-        (label: 'Items over the size limit', value: '${peer.skippedTooLarge}'),
+        (
+          label: l10n.syncPeerItemsOverSizeLimit,
+          value: '${peer.skippedTooLarge}',
+        ),
     ];
     final statusLabel = peer.blocker != null
         ? peer.connectionLabel
@@ -316,13 +321,17 @@ class _SyncPeerRow extends StatelessWidget {
     final time = peer.offline
         ? lastSeen == null
               ? null
-              : 'Last seen ${formatSystemRecentTime(context, lastSeen!)}'
+              : l10n.syncPeerLastSeen(
+                  formatSystemRecentTime(context, lastSeen!),
+                )
         : peer.lastSuccess == null
         ? null
-        : 'Last synced ${formatSystemRecentTime(context, peer.lastSuccess!)}';
+        : l10n.syncPeerLastSynced(
+            formatSystemRecentTime(context, peer.lastSuccess!),
+          );
     if (peer.lastSuccess case final success?) {
       rows.add((
-        label: 'Last successful sync',
+        label: l10n.syncPeerLastSuccessfulSync,
         value: formatSystemDateTime(context, success),
       ));
     }
@@ -377,11 +386,11 @@ class _SyncPeerRow extends StatelessWidget {
                       ),
                       const Gap(AppSpacing.sm),
                       Tooltip(
-                        tooltip: (context) => const TooltipContainer(
-                          child: Text('Connection details'),
+                        tooltip: (context) => TooltipContainer(
+                          child: Text(l10n.syncPeerConnectionDetails),
                         ),
                         child: Semantics(
-                          label: 'Connection details for ${peer.name}',
+                          label: l10n.syncPeerConnectionDetailsFor(peer.name),
                           button: true,
                           expanded: expanded.isExpanded,
                           child: Button.ghost(

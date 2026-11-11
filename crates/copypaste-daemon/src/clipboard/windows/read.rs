@@ -194,7 +194,7 @@ fn text(policy: CapturePolicy<'_>, clipboard: Clipboard) -> Reading {
     // `WideCharToMultiByte` already substitutes for unpaired surrogates; §3.6's
     // precedent is lossy conversion rather than dropping the user's copy, and
     // I-37 forbids panicking on a malformed payload.
-    let text = String::from_utf8_lossy(&bytes).into_owned();
+    let text = crate::clipboard::format::text_from_utf8(bytes);
     if text.is_empty() {
         return Reading::Nothing;
     }
@@ -350,9 +350,8 @@ mod text_tests {
 }
 
 fn normalized_text(bytes: Vec<u8>, content_type: &'static str, cap: u64) -> Reading {
-    let content = String::from_utf8_lossy(&bytes)
-        .trim_end_matches('\0')
-        .to_owned();
+    let mut content = crate::clipboard::format::text_from_utf8(bytes);
+    content.truncate(content.trim_end_matches('\0').len());
     if content.is_empty() {
         return Reading::Nothing;
     }

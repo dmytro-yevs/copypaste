@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Área de transferência salva</string>
+    <string name="capture_channel_description">Confirma que o CopyPaste salvou uma alteração da área de transferência.</string>
+    <string name="capture_title">Área de transferência salva</string>
+    <string name="capture_body_default">Um novo item foi adicionado ao CopyPaste.</string>
+    <string name="capture_image">Imagem</string>
+    <string name="capture_image_size">Imagem · %1$d × %2$d</string>
+    <string name="background_channel_name">Atividade em segundo plano</string>
+    <string name="background_channel_description">Mantém os recursos ativados do CopyPaste funcionando em segundo plano.</string>
+    <string name="background_title">O CopyPaste está ativo</string>
+    <string name="background_text">Os recursos ativados estão em execução em segundo plano.</string>
+    <string name="share_saved">Salvo no CopyPaste</string>
+    <string name="share_failed">O CopyPaste não pôde salvar este item</string>
+    <string name="chooser_open_file">Abrir arquivo do CopyPaste</string>
+    <string name="chooser_save_file">Salvar arquivo do CopyPaste</string>
+    <string name="pairing_invalid_qr">Escaneie um código QR de pareamento do CopyPaste.</string>
+    <string name="pairing_scanner_unavailable">Não foi possível abrir o leitor do Google. Insira o código de pareamento.</string>
+    <string name="files_read_failed">Não foi possível ler o arquivo selecionado. Verifique o acesso ao arquivo e o espaço disponível em disco.</string>
+    <string name="files_picker_closed">O seletor de arquivos foi fechado.</string>
+</resources>

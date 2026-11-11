@@ -5,7 +5,7 @@
       {
         "platform": "macos",
         "architecture": "aarch64",
-        "runner": "macos-14",
+        "runner": "macos-15",
         "prefix": "lib",
         "suffix": "dylib",
         "runtime": "libonnxruntime.dylib",
@@ -34,7 +34,7 @@
       {
         "platform": "macos",
         "architecture": "aarch64",
-        "runner": "macos-14",
+        "runner": "macos-15",
         "library": "libcopypaste_module_ocr.dylib",
         "program": "copypaste-module-qualification"
       },

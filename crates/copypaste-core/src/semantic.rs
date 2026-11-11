@@ -14,6 +14,7 @@ pub struct SemanticClassification {
 ///
 /// Recognition is intentionally whole-value and conservative: prose that
 /// merely contains a link, address, number, or code fragment stays plain text.
+/// Credential markers also match inside larger text to protect embedded secrets.
 #[must_use]
 pub fn classify_semantic(content_type: &str, content: &str) -> Option<SemanticClassification> {
     if !copypaste_ipc::content_type::is_text(content_type) {
@@ -21,6 +22,9 @@ pub fn classify_semantic(content_type: &str, content: &str) -> Option<SemanticCl
     }
 
     let value = content.trim();
+    if crate::classify_credentials(content_type, value).is_some() {
+        return Some(classification(SemanticKind::Credentials));
+    }
     if !is_plain_text_representation(content_type) || value.is_empty() {
         return Some(classification(SemanticKind::PlainText));
     }

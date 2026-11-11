@@ -308,6 +308,7 @@ pub enum ResponseData {
     RuntimeEvent(RuntimeEventData),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
+    HistoryTags(crate::HistoryTags),
     SpoilerState {
         revision: u64,
         revealed_ids: Vec<String>,

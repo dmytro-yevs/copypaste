@@ -1,7 +1,9 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/shell/macos_window_header.dart';
+import '../../../app/theme/app_brand_logo.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 
 /// Shared Focus layout and adaptive navigation for every onboarding platform.
@@ -46,7 +48,10 @@ class OnboardingScaffold extends StatelessWidget {
           builder: (context, constraints) {
             final back = onBack == null
                 ? null
-                : Button.ghost(onPressed: onBack, child: const Text('Back'));
+                : Button.ghost(
+                    onPressed: onBack,
+                    child: Text(context.l10n.commonBack),
+                  );
             if (constraints.maxWidth <
                 AppLayoutSize.onboardingContentMaxWidth) {
               return Column(
@@ -98,7 +103,11 @@ class OnboardingScaffold extends StatelessWidget {
                     ),
                     const Gap(AppSpacing.xxxl),
                     Text(
-                      'STEP ${stepIndex + 1} OF $stepCount · ${platform.toUpperCase()}',
+                      context.l10n.onboardingStepProgress(
+                        stepIndex + 1,
+                        stepCount,
+                        platform.toUpperCase(),
+                      ),
                       style: Theme.of(context).typography.xSmall.copyWith(
                         color: Theme.of(context).colorScheme.mutedForeground,
                       ),
@@ -108,7 +117,7 @@ class OnboardingScaffold extends StatelessWidget {
                     if (errorMessage != null) ...[
                       const Gap(AppSpacing.lg),
                       StateView.error(
-                        title: 'Setup needs attention',
+                        title: context.l10n.onboardingSetupErrorTitle,
                         message: errorMessage,
                       ),
                     ],
@@ -130,15 +139,11 @@ class _OnboardingTitle extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const Image(
-        image: AssetImage('assets/brand/copypaste.png'),
-        width: AppIconSize.md,
-        height: AppIconSize.md,
-      ),
+      const AppBrandLogo(size: AppIconSize.md),
       const Gap(AppSpacing.sm),
-      const Flexible(
+      Flexible(
         child: Text(
-          'Set up CopyPaste',
+          context.l10n.onboardingTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

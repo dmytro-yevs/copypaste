@@ -1,6 +1,7 @@
 #include "startup_channel.h"
 
 #include <windows.h>
+#include <shellapi.h>
 #include <flutter/standard_method_codec.h>
 #include <optional>
 #include <string>
@@ -8,6 +9,8 @@
 
 namespace {
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kApprovedKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
 constexpr wchar_t kRunValue[] = L"CopyPaste";
 
 std::optional<std::wstring> StartupCommand() {
@@ -17,7 +20,7 @@ std::optional<std::wstring> StartupCommand() {
   return L"\"" + std::wstring(path.data(), length) + L"\"";
 }
 
-std::optional<bool> Enabled() {
+std::optional<bool> Registered() {
   const auto command = StartupCommand();
   if (!command) return std::nullopt;
   DWORD bytes = 0;
@@ -32,15 +35,49 @@ std::optional<bool> Enabled() {
   return std::wstring(value.data()) == *command;
 }
 
+// Task Manager records its startup toggle as a 12-byte REG_BINARY whose first
+// byte is even (0x02, 0x06) when enabled and odd (0x03, 0x07) when disabled.
+// The format is undocumented; a missing value means the entry is enabled.
+std::optional<bool> ApprovedByUser() {
+  BYTE data[64] = {};
+  DWORD bytes = sizeof(data);
+  const LSTATUS status = RegGetValueW(HKEY_CURRENT_USER, kApprovedKey, kRunValue,
+      RRF_RT_REG_BINARY, nullptr, data, &bytes);
+  if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) return true;
+  if (status != ERROR_SUCCESS || bytes == 0) return std::nullopt;
+  return (data[0] & 0x01) == 0;
+}
+
+std::optional<std::string> Status() {
+  const auto registered = Registered();
+  if (!registered) return std::nullopt;
+  if (!*registered) return "disabled";
+  const auto approved = ApprovedByUser();
+  if (!approved) return std::nullopt;
+  return *approved ? "enabled" : "requires_approval";
+}
+
 bool SetEnabled(bool enabled) {
   const auto command = StartupCommand();
   if (!command) return false;
   if (!enabled) {
-    const LSTATUS status = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue);
+    LSTATUS status = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue);
+    if (status != ERROR_SUCCESS && status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) {
+      return false;
+    }
+    // Removing the registration also forgets its Task Manager toggle, so a
+    // later opt-in from CopyPaste starts enabled.
+    status = RegDeleteKeyValueW(HKEY_CURRENT_USER, kApprovedKey, kRunValue);
     return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND;
   }
   return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, REG_SZ,
       command->c_str(), static_cast<DWORD>((command->size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}
+
+bool OpenStartupSettings() {
+  const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
+      nullptr, L"open", L"ms-settings:startupapps", nullptr, nullptr, SW_SHOWNORMAL));
+  return result > 32;
 }
 }
 
@@ -48,9 +85,9 @@ StartupChannel::StartupChannel(flutter::BinaryMessenger* messenger) {
   channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       messenger, "com.copypaste.app/startup", &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler([](const auto& call, auto result) {
-    if (call.method_name() == "getEnabled") {
-      const auto enabled = Enabled();
-      if (enabled) result->Success(flutter::EncodableValue(*enabled));
+    if (call.method_name() == "getStatus") {
+      const auto status = Status();
+      if (status) result->Success(flutter::EncodableValue(*status));
       else result->Error("startup_unavailable", "Startup registration could not be read.");
     } else if (call.method_name() == "setEnabled") {
       const auto* arguments = call.arguments() == nullptr ? nullptr
@@ -62,6 +99,9 @@ StartupChannel::StartupChannel(flutter::BinaryMessenger* messenger) {
       if (enabled == nullptr) result->Error("invalid_arguments");
       else if (!SetEnabled(*enabled)) result->Error("startup_update_failed");
       else result->Success(flutter::EncodableValue(true));
+    } else if (call.method_name() == "openSettings") {
+      if (OpenStartupSettings()) result->Success();
+      else result->Error("startup_settings_unavailable");
     } else {
       result->NotImplemented();
     }

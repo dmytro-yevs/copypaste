@@ -1,6 +1,7 @@
 //! The typed daemon wire contract and local transport.
 
-#![forbid(unsafe_code)]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+#![cfg_attr(windows, deny(unsafe_code))]
 
 mod clipboard_privacy;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod error;
 mod file_operations;
 pub mod health;
 pub mod limits;
+mod organization;
 pub mod paths;
 pub mod payload;
 pub mod redact;
@@ -23,6 +25,7 @@ mod response;
 pub use file_operations::{
     FileOperation, FileOperationKind, FileOperationPhase, FileOperationUpdate,
 };
+pub use organization::*;
 pub mod transport;
 
 pub use paths::{data_dir, database_path, socket_path};
@@ -60,6 +63,9 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
 pub const PROTOCOL_VERSION: u32 = 6;
+
+/// The one stdout line an `--app-parent` daemon writes once it is listening.
+pub const APP_PARENT_READY_LINE: &str = "copypaste-daemon-listening";
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +155,12 @@ pub enum Method {
     },
     /// Filter labels available across the complete retained history.
     HistoryFacets,
+    HistoryTags {
+        clip_ids: Vec<String>,
+    },
+    MutateHistoryTags {
+        mutation: HistoryTagMutation,
+    },
     /// Put an item's content back on the system clipboard.
     Copy {
         id: String,
@@ -261,9 +273,8 @@ pub enum Method {
     /// may have deleted one since. Pinned items the list does not name keep
     /// their relative order and sort after the ones it does.
     ///
-    /// The order is local. Nothing about a pin travels on either transport
-    /// (`Store::upsert` preserves the local `pinned` and `pin_order` across an
-    /// incoming version), so reordering here does not reorder anywhere else.
+    /// Pin state and ordering also publish encrypted organization versions to
+    /// P2P and cloud without changing the clip's capture timestamp.
     ReorderPinned {
         ids: Vec<String>,
     },

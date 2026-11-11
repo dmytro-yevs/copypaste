@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:pub_semver/pub_semver.dart';
 
 import '../../../shared/security/minisign_verifier.dart';
+import '../../../l10n/l10n.dart';
 import '../models/module_marketplace_models.dart';
 import '../models/module_models.dart';
 import 'module_marketplace_repository.dart';
@@ -70,8 +71,8 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         encodedSignature: await signature.readAsString(),
         expectedFileName: moduleCatalogName,
       )) {
-        throw const ModulesException(
-          'The module catalog signature is invalid.',
+        throw ModulesException(
+          AppStrings.current.modulesCatalogSignatureInvalid,
         );
       }
       return const ModuleCatalogParser().parse(
@@ -79,11 +80,11 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         await _currentTarget(),
       );
     } on SocketException {
-      throw const ModulesException(
-        'Could not connect to the module marketplace.',
+      throw ModulesException(
+        AppStrings.current.modulesMarketplaceConnectFailed,
       );
     } on TimeoutException {
-      throw const ModulesException('The module marketplace did not respond.');
+      throw ModulesException(AppStrings.current.modulesMarketplaceTimeout);
     } finally {
       await lease.dispose();
     }
@@ -96,14 +97,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
   }) async {
     final artifact = module.artifact;
     if (artifact == null || !module.canInstall) {
-      throw const ModulesException(
-        'This module is not compatible with this device.',
-      );
+      throw ModulesException(AppStrings.current.modulesIncompatible);
     }
     validateModuleAssetUri(artifact.downloadUri);
     if (artifact.sizeBytes <= 0 ||
         artifact.sizeBytes > maximumModulePackageBytes) {
-      throw const ModulesException('The module package size is invalid.');
+      throw ModulesException(AppStrings.current.modulesPackageSizeInvalid);
     }
     final directory = await _createStagingDirectory('module-download-');
     final lease = await TemporaryDirectoryLease.acquire(directory);
@@ -121,10 +120,10 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
     } catch (error) {
       await lease.dispose();
       if (error is SocketException) {
-        throw const ModulesException('The module download was interrupted.');
+        throw ModulesException(AppStrings.current.modulesDownloadInterrupted);
       }
       if (error is TimeoutException) {
-        throw const ModulesException('The module download did not respond.');
+        throw ModulesException(AppStrings.current.modulesDownloadTimeout);
       }
       rethrow;
     }
@@ -158,20 +157,21 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         allowMissing: allowMissing,
       );
     } on ArtifactDownloadException catch (error) {
+      final strings = AppStrings.current;
       throw ModulesException(switch (error.failure) {
         ArtifactDownloadFailure.untrustedUrl =>
-          'The module package URL is not trusted.',
+          strings.modulesPackageUrlUntrusted,
         ArtifactDownloadFailure.untrustedRedirect =>
-          'The module download left GitHub.',
+          strings.modulesDownloadLeftGithub,
         ArtifactDownloadFailure.redirects =>
-          'The module download used too many redirects.',
-        ArtifactDownloadFailure.tooLarge => 'The module download is too large.',
+          strings.modulesDownloadTooManyRedirects,
+        ArtifactDownloadFailure.tooLarge => strings.modulesDownloadTooLarge,
         ArtifactDownloadFailure.integrity =>
-          'The module package failed its integrity check.',
+          strings.modulesPackageIntegrityFailed,
         ArtifactDownloadFailure.unavailable =>
           error.statusCode == HttpStatus.notFound
-              ? 'This module download is currently unavailable.'
-              : 'The module marketplace is unavailable. Try again.',
+              ? strings.modulesDownloadUnavailable
+              : strings.modulesMarketplaceUnavailableRetry,
       });
     }
   }
@@ -184,7 +184,7 @@ void validateModuleAssetUri(Uri uri) {
   try {
     GitHubArtifactDownloader.validateAssetUri(uri);
   } on ArtifactDownloadException {
-    throw const ModulesException('The module package URL is not trusted.');
+    throw ModulesException(AppStrings.current.modulesPackageUrlUntrusted);
   }
 }
 
@@ -274,33 +274,39 @@ class ModuleCatalogParser {
         var availability = ModuleAvailability.available;
         String? reason;
         final minimum = selected?.minimumSystemVersion;
+        final strings = AppStrings.current;
         final systemName = switch (target.platform) {
           'macos' => 'macOS',
           'windows' => 'Windows',
           'android' => 'Android',
           'linux' => 'glibc',
-          _ => 'this system',
+          _ => strings.modulesThisSystem,
         };
         final systemRequirement = minimum == null
             ? null
-            : '$systemName ${minimum.patch != 0
-                  ? minimum.toString()
-                  : minimum.minor != 0
-                  ? '${minimum.major}.${minimum.minor}'
-                  : minimum.major.toString()} or newer';
+            : strings.modulesSystemRequirement(
+                systemName,
+                minimum.patch != 0
+                    ? minimum.toString()
+                    : minimum.minor != 0
+                    ? '${minimum.major}.${minimum.minor}'
+                    : minimum.major.toString(),
+              );
         if (selected == null) {
           availability = ModuleAvailability.platform;
-          reason = 'Not available for this device.';
+          reason = strings.modulesNotAvailableForDevice;
         } else if (target.appVersion == null ||
             !compatibility.allows(target.appVersion!)) {
           availability = ModuleAvailability.appVersion;
           reason = target.appVersion == null
-              ? 'The installed CopyPaste version could not be verified.'
-              : 'This module does not support CopyPaste ${target.appVersion}.';
+              ? strings.modulesAppVersionUnverified
+              : strings.modulesAppVersionUnsupported(
+                  target.appVersion.toString(),
+                );
         } else if (minimum != null &&
             (target.systemVersion == null || target.systemVersion! < minimum)) {
           availability = ModuleAvailability.systemVersion;
-          reason = 'Requires $systemRequirement.';
+          reason = strings.modulesRequires(systemRequirement!);
         }
         modules.add(
           MarketplaceModule(
@@ -324,11 +330,11 @@ class ModuleCatalogParser {
     } on ModulesException {
       rethrow;
     } on FormatException {
-      throw const ModulesException('The module catalog is invalid.');
+      throw ModulesException(AppStrings.current.modulesCatalogInvalid);
     } on TypeError {
-      throw const ModulesException('The module catalog is invalid.');
+      throw ModulesException(AppStrings.current.modulesCatalogInvalid);
     } on ArgumentError {
-      throw const ModulesException('The module catalog is invalid.');
+      throw ModulesException(AppStrings.current.modulesCatalogInvalid);
     }
   }
 }

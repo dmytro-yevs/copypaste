@@ -1,3 +1,4 @@
+import 'history_tags_dialog.dart';
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import '../../transfers/file_operations_view.dart';
@@ -15,10 +16,12 @@ import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_transfer_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_code_highlighter.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:copypaste_flutter/shared/inspector_table.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
@@ -68,21 +71,21 @@ class _HistoryInspectorState extends State<HistoryInspector> {
 
   @override
   Widget build(BuildContext context) {
-    final clip = controller.selectedClip;
+    final clip = controller.selection.selectedClip;
     if (clip?.id != _highlightClipId) {
       _highlightMemo.clear();
       _highlightClipId = clip?.id;
     }
     if (clip == null) {
       _highlightMemo.clear();
-      return const StateView.empty(
-        title: 'Select a clip',
-        message: 'Its full content and actions appear here.',
+      return StateView.empty(
+        title: context.l10n.historyInspectorEmptyTitle,
+        message: context.l10n.historyInspectorEmptyMessage,
       );
     }
     final theme = Theme.of(context);
     final body = (clip.body ?? clip.preview).isEmpty
-        ? 'No preview is available.'
+        ? context.l10n.historyNoPreview
         : clip.body ?? clip.preview;
     final highlighted = switch (clip.contentKind) {
       HistoryClipKind.code => _highlightMemo.highlight(body, theme),
@@ -154,11 +157,11 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                       context,
                       AppMotion.standard,
                     ),
-                    tooltip: (context) => const TooltipContainer(
-                      child: Text('Close clip details'),
+                    tooltip: (context) => TooltipContainer(
+                      child: Text(context.l10n.historyCloseClipDetails),
                     ),
                     child: Semantics(
-                      label: 'Close clip details',
+                      label: context.l10n.historyCloseClipDetails,
                       button: true,
                       child: Button.ghost(
                         key: const ValueKey<String>(
@@ -167,7 +170,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         style: AppTheme.actionButtonStyle(
                           const ButtonStyle.ghostIcon(),
                         ),
-                        onPressed: onClose ?? controller.clearSelection,
+                        onPressed:
+                            onClose ?? controller.selection.clearSelection,
                         child: const AppIconFrame(child: Icon(LucideIcons.x)),
                       ),
                     ),
@@ -222,10 +226,11 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                     ButtonGroup(
                       children: [
                         Tooltip(
-                          tooltip: (_) =>
-                              const TooltipContainer(child: Text('Copy')),
+                          tooltip: (_) => TooltipContainer(
+                            child: Text(context.l10n.commonCopy),
+                          ),
                           child: Semantics(
-                            label: iconOnly ? 'Copy' : null,
+                            label: iconOnly ? context.l10n.commonCopy : null,
                             button: true,
                             child: Button.primary(
                               key: const ValueKey<String>(
@@ -246,13 +251,13 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                   ? const AppIconFrame(
                                       child: Icon(LucideIcons.copy),
                                     )
-                                  : const Text('Copy'),
+                                  : Text(context.l10n.commonCopy),
                             ),
                           ),
                         ),
                         if (clip.contentKind.isTextual)
                           Semantics(
-                            label: 'Copy options',
+                            label: context.l10n.historyCopyOptions,
                             button: true,
                             child: ComponentTheme<SelectTheme>(
                               data: AppTheme.selectTheme(
@@ -278,7 +283,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                     unawaited(_copy(context, plainText: true));
                                   }
                                 },
-                                popup: const SelectPopup<bool>.noVirtualization(
+                                popup: SelectPopup<bool>.noVirtualization(
                                   items: SelectItemList(
                                     children: [
                                       SelectItemButton<bool>(
@@ -286,15 +291,17 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            AppIconFrame(
+                                            const AppIconFrame(
                                               size: AppIconSize.sm,
                                               child: Icon(
                                                 LucideIcons.alignLeft,
                                                 size: AppIconSize.sm,
                                               ),
                                             ),
-                                            Gap(AppSpacing.sm),
-                                            Text('Copy plain text'),
+                                            const Gap(AppSpacing.sm),
+                                            Text(
+                                              context.l10n.historyCopyPlainText,
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -306,7 +313,40 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                           ),
                       ],
                     ),
-                    if (controller.canDownloadSelected)
+                    if (clip.pinned && controller.tags.available)
+                      Tooltip(
+                        tooltip: (_) => TooltipContainer(
+                          child: Text(context.l10n.historyManageClipTags),
+                        ),
+                        child: Button.outline(
+                          key: const ValueKey('history-inspector-tags'),
+                          style: AppTheme.actionButtonStyle(
+                            ButtonStyle.outline(
+                              density: iconOnly
+                                  ? ButtonDensity.icon
+                                  : ButtonDensity.normal,
+                            ),
+                          ),
+                          onPressed: () => showHistoryTagsDialog(
+                            context,
+                            controller: controller,
+                            clipIds: [clip.id],
+                          ),
+                          leading: iconOnly
+                              ? null
+                              : const Icon(
+                                  LucideIcons.tags,
+                                  size: AppIconSize.sm,
+                                ),
+                          child: iconOnly
+                              ? const Icon(
+                                  LucideIcons.tags,
+                                  size: AppIconSize.sm,
+                                )
+                              : Text(context.l10n.historyTags),
+                        ),
+                      ),
+                    if (controller.transfers.canDownloadSelected)
                       _DownloadButton(
                         controller: controller,
                         clip: clip,
@@ -315,11 +355,17 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                       ),
                     Tooltip(
                       tooltip: (_) => TooltipContainer(
-                        child: Text(clip.pinned ? 'Pinned' : 'Pin'),
+                        child: Text(
+                          clip.pinned
+                              ? context.l10n.historyPinnedButton
+                              : context.l10n.commonPin,
+                        ),
                       ),
                       child: Semantics(
                         label: iconOnly
-                            ? (clip.pinned ? 'Pinned' : 'Pin')
+                            ? (clip.pinned
+                                  ? context.l10n.historyPinnedButton
+                                  : context.l10n.commonPin)
                             : null,
                         toggled: clip.pinned,
                         child: Button(
@@ -334,24 +380,32 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                   : ButtonDensity.normal,
                             ),
                           ),
-                          onPressed: controller.isPinPending(clip.id)
+                          onPressed: controller.mutations.isPinPending(clip.id)
                               ? null
-                              : () => controller.togglePin(clip),
+                              : () => controller.mutations.togglePin(clip),
                           leading: iconOnly ? null : pinIcon,
                           child: iconOnly
                               ? pinIcon
-                              : Text(clip.pinned ? 'Pinned' : 'Pin'),
+                              : Text(
+                                  clip.pinned
+                                      ? context.l10n.historyPinnedButton
+                                      : context.l10n.commonPin,
+                                ),
                         ),
                       ),
                     ),
                     Tooltip(
                       tooltip: (_) => TooltipContainer(
                         child: Text(
-                          clip.secret ? 'Remove spoiler' : 'Add spoiler',
+                          clip.secret
+                              ? context.l10n.historyRemoveSpoiler
+                              : context.l10n.historyAddSpoiler,
                         ),
                       ),
                       child: Semantics(
-                        label: clip.secret ? 'Remove spoiler' : 'Add spoiler',
+                        label: clip.secret
+                            ? context.l10n.historyRemoveSpoiler
+                            : context.l10n.historyAddSpoiler,
                         toggled: clip.secret,
                         child: Button.outline(
                           key: const ValueKey('history-detail-secret'),
@@ -360,18 +414,20 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 ? const ButtonStyle.outlineIcon()
                                 : const ButtonStyle.outline(),
                           ),
-                          onPressed: controller.isSecretPending(clip.id)
+                          onPressed:
+                              controller.mutations.isSecretPending(clip.id)
                               ? null
                               : () async {
-                                  final changed = await controller.toggleSecret(
-                                    clip,
-                                  );
+                                  final changed = await controller.mutations
+                                      .toggleSecret(clip);
                                   if (!changed && context.mounted) {
                                     AppToast.show(
                                       context,
-                                      title: 'Update failed',
-                                      message:
-                                          'The clip secrecy could not be updated.',
+                                      title:
+                                          context.l10n.historyUpdateFailedTitle,
+                                      message: context
+                                          .l10n
+                                          .historyErrorSecrecyUpdate,
                                       tone: AppToastTone.error,
                                     );
                                   }
@@ -395,8 +451,8 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                                 )
                               : Text(
                                   clip.secret
-                                      ? 'Remove spoiler'
-                                      : 'Add spoiler',
+                                      ? context.l10n.historyRemoveSpoiler
+                                      : context.l10n.historyAddSpoiler,
                                 ),
                         ),
                       ),
@@ -404,11 +460,11 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                     if (clip.contentKind == HistoryClipKind.image &&
                         controller.ocr?.available == true)
                       Tooltip(
-                        tooltip: (_) => const TooltipContainer(
-                          child: Text('Recognize image text'),
+                        tooltip: (_) => TooltipContainer(
+                          child: Text(context.l10n.historyRecognizeImageText),
                         ),
                         child: Semantics(
-                          label: 'Recognize image text',
+                          label: context.l10n.historyRecognizeImageText,
                           button: true,
                           child: Button.secondary(
                             key: const ValueKey<String>('history-ocr'),
@@ -429,10 +485,11 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         ),
                       ),
                     Tooltip(
-                      tooltip: (_) =>
-                          const TooltipContainer(child: Text('Delete')),
+                      tooltip: (_) => TooltipContainer(
+                        child: Text(context.l10n.commonDelete),
+                      ),
                       child: Semantics(
-                        label: iconOnly ? 'Delete' : null,
+                        label: iconOnly ? context.l10n.commonDelete : null,
                         button: true,
                         child: Button.destructive(
                           key: const ValueKey<String>('history-detail-delete'),
@@ -455,7 +512,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                               ? const AppIconFrame(
                                   child: Icon(LucideIcons.trash2),
                                 )
-                              : const Text('Delete'),
+                              : Text(context.l10n.commonDelete),
                         ),
                       ),
                     ),
@@ -538,11 +595,11 @@ class _HistoryInspectorState extends State<HistoryInspector> {
         includeSpoilerLabel
             ? const ButtonStyle.outline()
             : const ButtonStyle.outlineIcon(),
-        includeSpoilerLabel ? 'Remove spoiler' : null,
+        includeSpoilerLabel ? context.l10n.historyRemoveSpoiler : null,
       ),
-      (const ButtonStyle.primary(), 'Copy'),
-      (const ButtonStyle.secondary(), 'Pinned'),
-      (const ButtonStyle.destructive(), 'Delete'),
+      (const ButtonStyle.primary(), context.l10n.commonCopy),
+      (const ButtonStyle.secondary(), context.l10n.historyPinnedButton),
+      (const ButtonStyle.destructive(), context.l10n.commonDelete),
     ];
     final theme = Theme.of(context);
     double widthOf(ButtonStyle buttonStyle, String? label) {
@@ -581,23 +638,27 @@ class _HistoryInspectorState extends State<HistoryInspector> {
   }
 
   Future<void> _copy(BuildContext context, {required bool plainText}) async {
-    final copied = await controller.copySelected(plainText: plainText);
+    final copied = await controller.transfers.copySelected(
+      plainText: plainText,
+    );
     if (!copied || !context.mounted) return;
     AppToast.show(
       context,
-      title: 'Copied',
-      message: plainText ? 'Plain text copied.' : 'Clip copied.',
+      title: context.l10n.historyCopiedTitle,
+      message: plainText
+          ? context.l10n.historyPlainTextCopied
+          : context.l10n.historyClipCopied,
       tone: AppToastTone.success,
     );
   }
 
   Future<void> _download(BuildContext context) async {
-    final result = await controller.downloadSelected();
+    final result = await controller.transfers.downloadSelected();
     if (result != HistoryFileDownloadResult.saved || !context.mounted) return;
     AppToast.show(
       context,
-      title: 'Downloaded',
-      message: 'File saved.',
+      title: context.l10n.historyDownloadedTitle,
+      message: context.l10n.historyFileSaved,
       tone: AppToastTone.success,
     );
   }
@@ -625,35 +686,36 @@ class _DownloadButtonState extends State<_DownloadButton> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller.downloadProgressChanges,
+    listenable: widget.controller.transfers.downloadProgressChanges,
     builder: (context, _) => _buildButton(context),
   );
 
   Widget _buildButton(BuildContext context) {
     final controller = widget.controller;
     final id = widget.clip.id;
-    final pending = controller.isDownloadPending(id);
-    final failed = controller.downloadFailedFor(id);
-    final cancelling = controller.isDownloadCancelling(id);
-    final progress = controller.downloadProgressFor(id);
-    final operation = controller.fileOperations?.forClip(id);
+    final pending = controller.transfers.isDownloadPending(id);
+    final failed = controller.transfers.downloadFailedFor(id);
+    final cancelling = controller.transfers.isDownloadCancelling(id);
+    final progress = controller.transfers.downloadProgressFor(id);
+    final operation = controller.transfers.fileOperations?.forClip(id);
     final saved =
         operation?.phase == 'completed' && operation?.localPath != null;
     final percentage = ((progress ?? 0) * 100).floor();
     final showCancel = pending && _hovered && !cancelling;
+    final strings = context.l10n;
     final label = cancelling
-        ? 'Cancelling…'
+        ? strings.historyDownloadCancelling
         : showCancel
-        ? 'Cancel'
+        ? strings.commonCancel
         : pending && progress != null
-        ? '$percentage%'
+        ? strings.historyDownloadProgressPercent(percentage)
         : pending
-        ? 'Downloading…'
+        ? strings.historyDownloading
         : saved
-        ? 'Show file'
+        ? strings.historyShowFile
         : failed
-        ? 'Retry'
-        : 'Download';
+        ? strings.commonRetry
+        : strings.historyDownload;
     final indicator = AppIconFrame(
       size: AppIconSize.sm,
       child: CircularProgressIndicator(
@@ -669,22 +731,22 @@ class _DownloadButtonState extends State<_DownloadButton> {
         tooltip: (_) => TooltipContainer(
           child: Text(
             cancelling
-                ? 'Cancelling download'
+                ? strings.historyDownloadCancellingTooltip
                 : pending
-                ? 'Downloading $percentage% · Click to cancel'
+                ? strings.historyDownloadingCancelTooltip(percentage)
                 : failed
-                ? controller.downloadErrorFor(id) ??
-                      'Download failed · Click to retry'
-                : 'Download',
+                ? controller.transfers.downloadErrorFor(id) ??
+                      strings.historyDownloadFailedRetryTooltip
+                : strings.historyDownload,
           ),
         ),
         child: Semantics(
           label: widget.iconOnly
               ? pending
-                    ? 'Cancel download, $percentage% complete'
+                    ? strings.historyCancelDownloadSemantics(percentage)
                     : failed
-                    ? 'Retry download'
-                    : 'Download'
+                    ? strings.historyRetryDownload
+                    : strings.historyDownload
               : null,
           button: true,
           child: SizedBox(
@@ -700,9 +762,11 @@ class _DownloadButtonState extends State<_DownloadButton> {
               onPressed: cancelling
                   ? null
                   : pending
-                  ? () => controller.cancelDownload(id)
+                  ? () => controller.transfers.cancelDownload(id)
                   : saved
-                  ? () => controller.fileOperations!.openFile(operation!)
+                  ? () => controller.transfers.fileOperations!.openFile(
+                      operation!,
+                    )
                   : widget.onDownload,
               leading: widget.iconOnly
                   ? null
@@ -735,7 +799,13 @@ class _DownloadButtonState extends State<_DownloadButton> {
                               if (progress != null)
                                 SizedBox(
                                   width: AppIconSize.lg,
-                                  child: FittedBox(child: Text('$percentage%')),
+                                  child: FittedBox(
+                                    child: Text(
+                                      strings.historyDownloadProgressPercent(
+                                        percentage,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                             ],
                           )
@@ -884,7 +954,8 @@ class _HistoryDetailContent extends StatelessWidget {
           Expanded(
             child: HistorySelectableText(
               body,
-              onCopy: (text) => controller.copyTextFrom(clip.id, text),
+              onCopy: (text) =>
+                  controller.transfers.copyTextFrom(clip.id, text),
               style: Theme.of(context).typography.mono,
             ),
           ),
@@ -894,13 +965,13 @@ class _HistoryDetailContent extends StatelessWidget {
     if (highlighted != null) {
       return HistorySelectableText.rich(
         highlighted!.span,
-        onCopy: (text) => controller.copyTextFrom(clip.id, text),
+        onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
       );
     }
     if (clip.contentKind != HistoryClipKind.image) {
       return HistorySelectableText(
         body,
-        onCopy: (text) => controller.copyTextFrom(clip.id, text),
+        onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
         style:
             clip.contentKind == HistoryClipKind.path ||
                 clip.contentKind == HistoryClipKind.file
@@ -915,7 +986,7 @@ class _HistoryDetailContent extends StatelessWidget {
         const Gap(AppSpacing.lg),
         HistorySelectableText(
           body,
-          onCopy: (text) => controller.copyTextFrom(clip.id, text),
+          onCopy: (text) => controller.transfers.copyTextFrom(clip.id, text),
         ),
       ],
     );
@@ -951,8 +1022,9 @@ class _HistoryMetadataTable extends StatelessWidget {
         for (final row in rows)
           (
             label: row.label,
-            value: _historyMetadataHasIdentity(row)
+            value: _historyMetadataHasIdentity(context, row)
                 ? _historyMetadataIdentityLabel(
+                    context,
                     row: row,
                     clip: clip,
                     controller: controller,
@@ -960,7 +1032,8 @@ class _HistoryMetadataTable extends StatelessWidget {
                   )
                 : HistorySelectableText(
                     row.value,
-                    onCopy: (text) => controller.copyTextFrom(clip.id, text),
+                    onCopy: (text) =>
+                        controller.transfers.copyTextFrom(clip.id, text),
                     style: textStyle.copyWith(
                       color: row.warning ? theme.colorScheme.destructive : null,
                     ),
@@ -970,12 +1043,12 @@ class _HistoryMetadataTable extends StatelessWidget {
     );
     if (clip.contentKind != HistoryClipKind.file) return table;
     return ListenableBuilder(
-      listenable: controller.downloadProgressChanges,
+      listenable: controller.transfers.downloadProgressChanges,
       child: table,
       builder: (context, child) {
-        final operation = controller.fileOperations?.forClip(clip.id);
-        final error = controller.downloadErrorFor(clip.id);
-        final progress = controller.downloadProgressFor(clip.id);
+        final operation = controller.transfers.fileOperations?.forClip(clip.id);
+        final error = controller.transfers.downloadErrorFor(clip.id);
+        final progress = controller.transfers.downloadProgressFor(clip.id);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -983,13 +1056,18 @@ class _HistoryMetadataTable extends StatelessWidget {
               FileOperationStatus(operation: operation),
               const Gap(AppSpacing.md),
             ] else if (error != null) ...[
-              StateView.error(title: 'Download failed', message: error),
+              StateView.error(
+                title: context.l10n.historyDownloadFailedTitle,
+                message: error,
+              ),
               const Gap(AppSpacing.md),
-            ] else if (controller.isDownloadPending(clip.id)) ...[
+            ] else if (controller.transfers.isDownloadPending(clip.id)) ...[
               Text(
                 progress == null
-                    ? 'Downloading…'
-                    : 'Downloading ${(progress * 100).floor()}%',
+                    ? context.l10n.historyDownloading
+                    : context.l10n.historyDownloadingPercent(
+                        (progress * 100).floor(),
+                      ),
               ),
               const Gap(AppSpacing.md),
             ],
@@ -1003,30 +1081,38 @@ class _HistoryMetadataTable extends StatelessWidget {
 
 typedef _HistoryMetadataRow = ({String label, String value, bool warning});
 
-bool _historyMetadataHasIdentity(_HistoryMetadataRow row) =>
-    row.label == 'Observed app' || row.label == 'Device';
+bool _historyMetadataHasIdentity(
+  BuildContext context,
+  _HistoryMetadataRow row,
+) =>
+    row.label == context.l10n.historyMetadataObservedApp ||
+    row.label == context.l10n.historyMetadataDevice;
 
-Widget _historyMetadataIdentityLabel({
+Widget _historyMetadataIdentityLabel(
+  BuildContext context, {
   required _HistoryMetadataRow row,
   required HistoryClip clip,
   required HistoryController controller,
   required TextStyle style,
 }) {
-  return switch (row.label) {
-    'Observed app' => SourceAppLabel(
+  final strings = context.l10n;
+  if (row.label == strings.historyMetadataObservedApp) {
+    return SourceAppLabel(
       key: const ValueKey<String>('history-detail-source-app'),
       name: row.value,
-      icon: controller.requestSourceIcon(clip.sourceAppIconId),
+      icon: controller.media.requestSourceIcon(clip.sourceAppIconId),
       style: style,
-    ),
-    'Device' => DeviceLabel(
+    );
+  }
+  if (row.label == strings.historyMetadataDevice) {
+    return DeviceLabel(
       key: const ValueKey<String>('history-detail-device'),
       name: row.value,
       deviceClass: clip.originDeviceClass,
       style: style,
-    ),
-    _ => throw StateError('Metadata row has no identity presentation.'),
-  };
+    );
+  }
+  throw StateError('Metadata row has no identity presentation.');
 }
 
 List<_HistoryMetadataRow> _historyMetadataRows(
@@ -1034,45 +1120,80 @@ List<_HistoryMetadataRow> _historyMetadataRows(
   HistoryClip clip, {
   bool revealConfidential = false,
 }) {
+  final strings = context.l10n;
   if (clip.secret && !revealConfidential) {
-    return [(label: 'Privacy', value: 'Confidential', warning: false)];
+    return [
+      (
+        label: strings.historyMetadataPrivacy,
+        value: strings.historyMetadataConfidential,
+        warning: false,
+      ),
+    ];
   }
   final type = clip.file?.mimeType ?? clip.contentType;
   final sizeBytes = clip.image?.sizeBytes ?? clip.file?.sizeBytes;
   return [
     (
-      label: 'Captured',
+      label: strings.historyMetadataCaptured,
       value: formatSystemDateTime(context, clip.createdAt),
       warning: false,
     ),
     if (clip.sourceApp != null)
-      (label: 'Observed app', value: clip.sourceApp!, warning: false),
+      (
+        label: strings.historyMetadataObservedApp,
+        value: clip.sourceApp!,
+        warning: false,
+      ),
     if (clip.origin != null)
-      (label: 'Device', value: clip.origin!, warning: false),
-    (label: 'Clip type', value: clip.contentKind.label, warning: false),
-    (label: 'Type', value: type, warning: false),
+      (
+        label: strings.historyMetadataDevice,
+        value: clip.origin!,
+        warning: false,
+      ),
+    (
+      label: strings.historyMetadataClipType,
+      value: clip.contentKind.label,
+      warning: false,
+    ),
+    (label: strings.historyMetadataType, value: type, warning: false),
     if (clip.file?.sourceReference != null)
       (
         label: clip.file!.sourceReference!.startsWith('content://')
             ? 'URI'
-            : 'Path',
+            : strings.historyMetadataPath,
         value: clip.file!.sourceReference!,
         warning: false,
       ),
     if (clip.file?.name != null)
-      (label: 'File', value: clip.file!.name!, warning: false),
+      (
+        label: strings.historyMetadataFile,
+        value: clip.file!.name!,
+        warning: false,
+      ),
     if (clip.image != null)
       (
-        label: 'Resolution',
+        label: strings.historyMetadataResolution,
         value: '${clip.image!.width} × ${clip.image!.height}',
         warning: false,
       ),
     if (sizeBytes != null)
-      (label: 'Size', value: formatBytes(sizeBytes), warning: false),
+      (
+        label: strings.historyMetadataSize,
+        value: formatBytes(sizeBytes),
+        warning: false,
+      ),
     if ((clip.file?.fileCount ?? 0) > 1)
-      (label: 'Files', value: '${clip.file!.fileCount}', warning: false),
+      (
+        label: strings.historyMetadataFiles,
+        value: '${clip.file!.fileCount}',
+        warning: false,
+      ),
     if (clip.tooLargeToSync)
-      (label: 'Sync', value: 'Too large to sync', warning: true),
+      (
+        label: strings.historyMetadataSync,
+        value: strings.historyMetadataTooLargeToSync,
+        warning: true,
+      ),
   ];
 }
 
@@ -1091,7 +1212,7 @@ class _DetailImagePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) => FutureBuilder<HistoryImagePreview?>(
-        future: controller.requestImagePreview(clip.id, maxEdge: 1024),
+        future: controller.media.requestImagePreview(clip.id, maxEdge: 1024),
         builder: (context, snapshot) {
           final preview = snapshot.data;
           if (preview == null) {

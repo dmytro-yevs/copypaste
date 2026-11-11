@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import '../../devices/flutter_rust_devices_gateway.dart';
@@ -21,38 +22,20 @@ import 'history_file_importer.dart';
 class RuntimeHistoryRepository
     implements
         HistoryRepository,
+        HistoryTagsRepository,
         HistorySpoilerRepository,
         HistoryFileDownloadCancellation,
         HistoryFileProgressRepository,
         HistoryDownloadedFileRepository {
-  RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
-    : _watchLease = watchLease;
-
-  final RuntimeWatchLease? _watchLease;
   bool _disposed = false;
   final _downloadTokens = <String, String>{};
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
     _ensureActive();
-    if (_watchLease == null) {
-      return RuntimeEventService.instance.events
-          .where((event) => event.kind == 'items' || event.kind == 'ready')
-          .map((_) => HistoryRuntimeEvent.itemsChanged);
-    }
-    return _watch();
-  }
-
-  Stream<HistoryRuntimeEvent> _watch() async* {
-    final lease = _watchLease!;
-    final watchId = await lease.watchId;
-    try {
-      await for (final event in runtime.watchRuntime(watchId: watchId)) {
-        if (event.kind == 'items') yield HistoryRuntimeEvent.itemsChanged;
-      }
-    } finally {
-      await lease.release(watchId);
-    }
+    return RuntimeEventService.instance.events
+        .where((event) => event.kind == 'items' || event.kind == 'ready')
+        .map((_) => HistoryRuntimeEvent.itemsChanged);
   }
 
   @override
@@ -64,6 +47,9 @@ class RuntimeHistoryRepository
   /// Maps only Rust-provided labels and opaque IDs for server-side filters.
   static HistoryFacets mapFacets(runtime.HistoryFacets facets) {
     return HistoryFacets(
+      tags: facets.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
       originDevices: facets.originDevices
           .map(
             (facet) => HistoryDeviceFacet(
@@ -101,6 +87,18 @@ class RuntimeHistoryRepository
         originDeviceId: query.origin,
         sourceAppBundleId: query.sourceApp,
         sort: _toRuntimeSort(query.sort),
+        capturedFromMs: query.capturedFrom == null
+            ? null
+            : PlatformInt64Util.from(
+                query.capturedFrom!.millisecondsSinceEpoch,
+              ),
+        capturedBeforeMs: query.capturedBefore == null
+            ? null
+            : PlatformInt64Util.from(
+                query.capturedBefore!.millisecondsSinceEpoch,
+              ),
+        tagIds: query.tagIds,
+        untaggedOnly: query.untaggedOnly,
       ),
       limit: limit,
       cursor: cursor,
@@ -111,6 +109,36 @@ class RuntimeHistoryRepository
       skippedUndecryptable: page.skippedUndecryptable,
     );
   }
+
+  @override
+  Future<HistoryTags> tags(List<String> clipIds) async {
+    _ensureActive();
+    final data = await runtime.historyTags(clipIds: clipIds);
+    return HistoryTags(
+      tags: data.tags
+          .map((tag) => HistoryTag(id: tag.id, name: tag.name))
+          .toList(growable: false),
+      assignments: {
+        for (final entry in data.assignments) entry.clipId: entry.tagIds,
+      },
+    );
+  }
+
+  @override
+  Future<void> saveTag({String? id, required String name}) =>
+      runtime.saveHistoryTag(id: id, name: name);
+  @override
+  Future<void> deleteTag(String id) => runtime.deleteHistoryTag(id: id);
+  @override
+  Future<void> changeTags({
+    required List<String> clipIds,
+    required List<String> tagIds,
+    required bool assigned,
+  }) => runtime.changeClipTags(
+    clipIds: clipIds,
+    tagIds: tagIds,
+    assigned: assigned,
+  );
 
   @override
   Future<HistoryClip> get(String id) async {
@@ -144,7 +172,11 @@ class RuntimeHistoryRepository
     _ensureActive();
     final preview = await runtime.sourceAppIcon(id: id);
     if (preview == null) return null;
-    return HistorySourceAppIcon(preview.pngBytes);
+    return HistorySourceAppIcon(
+      preview.pngBytes,
+      width: preview.width,
+      height: preview.height,
+    );
   }
 
   @override
@@ -191,7 +223,7 @@ class RuntimeHistoryRepository
       runtime.downloadedClipFile(id: id);
 
   @override
-  Future<bool> saveFileWithProgress(
+  Future<void> saveFileWithProgress(
     String id,
     String destinationPath,
     void Function(int written, int total) onProgress,
@@ -227,7 +259,7 @@ class RuntimeHistoryRepository
             finished.completeError(
               HistoryFileOperationException(
                 record['error'] as String? ??
-                    'The file download was cancelled.',
+                    AppStrings.current.historyDownloadErrorCancelled,
               ),
             );
           }
@@ -256,13 +288,13 @@ class RuntimeHistoryRepository
     try {
       try {
         if (!await service.ready.timeout(const Duration(seconds: 5))) {
-          throw const HistoryFileOperationException(
-            'The download service is unavailable. Reopen CopyPaste and try again.',
+          throw HistoryFileOperationException(
+            AppStrings.current.historyDownloadErrorServiceUnavailable,
           );
         }
       } on TimeoutException {
-        throw const HistoryFileOperationException(
-          'The download service did not connect. Try again.',
+        throw HistoryFileOperationException(
+          AppStrings.current.historyDownloadErrorServiceTimeout,
         );
       }
       await _fileOperation(
@@ -274,7 +306,6 @@ class RuntimeHistoryRepository
       );
       await reconcile();
       await finished.future;
-      return true;
     } finally {
       if (_downloadTokens[id] == token) _downloadTokens.remove(id);
       await subscription.cancel();
@@ -294,7 +325,7 @@ class RuntimeHistoryRepository
       throw HistoryFileOperationException(error.message);
     } on PlatformException catch (error) {
       throw HistoryFileOperationException(
-        error.message ?? 'The selected file could not be accessed.',
+        error.message ?? AppStrings.current.historyFileErrorAccess,
       );
     }
   }
@@ -387,7 +418,6 @@ class RuntimeHistoryRepository
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    await _watchLease?.dispose();
   }
 
   void _ensureActive() {
@@ -404,57 +434,6 @@ class RuntimeHistoryRepository
   static HistoryImagePreview mapImagePreview(
     runtime.ClipImagePreview preview,
   ) => _fromRuntimeImagePreview(preview);
-}
-
-/// Owns one generated runtime Watch handle without affecting other features.
-class RuntimeWatchLease {
-  RuntimeWatchLease({required this.allocate, required this.cancel});
-
-  final Future<BigInt> Function() allocate;
-  final Future<void> Function(BigInt watchId) cancel;
-  Future<BigInt>? _watchId;
-  bool _disposed = false;
-
-  Future<BigInt> get watchId {
-    if (_disposed) {
-      return Future<BigInt>.error(
-        StateError('Runtime Watch lease is disposed.'),
-      );
-    }
-    final active = _watchId;
-    if (active != null) return active;
-    final allocated = allocate();
-    _watchId = allocated;
-    unawaited(_clearFailedAllocation(allocated));
-    return allocated;
-  }
-
-  Future<void> _clearFailedAllocation(Future<BigInt> allocation) async {
-    try {
-      await allocation;
-    } catch (_) {
-      if (identical(_watchId, allocation)) _watchId = null;
-    }
-  }
-
-  Future<void> release(BigInt watchId) async {
-    final active = _watchId;
-    if (active == null ||
-        await active != watchId ||
-        !identical(_watchId, active)) {
-      return;
-    }
-    _watchId = null;
-    await cancel(watchId);
-  }
-
-  Future<void> dispose() async {
-    if (_disposed) return;
-    _disposed = true;
-    final watchId = _watchId;
-    _watchId = null;
-    if (watchId != null) await cancel(await watchId);
-  }
 }
 
 HistoryClip _fromRuntimeListClip(runtime.Clip clip) =>
@@ -478,6 +457,7 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
       isUtc: true,
     ),
     pinned: clip.pinned,
+    tagIds: clip.tagIds,
     kind: _fromRuntimeKind(clip.contentClass, clip.semanticKind),
     origin: clip.originDeviceName,
     originDeviceClass: mapRuntimeDeviceClass(clip.originDeviceClass),
@@ -535,6 +515,7 @@ HistoryClipKind _fromRuntimeKind(
     runtime.ClipSemanticKind.code => HistoryClipKind.code,
     runtime.ClipSemanticKind.json => HistoryClipKind.json,
     runtime.ClipSemanticKind.path => HistoryClipKind.path,
+    runtime.ClipSemanticKind.credentials => HistoryClipKind.credentials,
   };
 }
 
@@ -552,7 +533,8 @@ List<runtime.ClipContentClass> _toRuntimeContentClasses(
   HistoryClipKind.phone ||
   HistoryClipKind.code ||
   HistoryClipKind.json ||
-  HistoryClipKind.path => const [],
+  HistoryClipKind.path ||
+  HistoryClipKind.credentials => const [],
 };
 
 List<runtime.ClipSemanticKind> _toRuntimeSemanticKinds(HistoryClipKind? kind) =>
@@ -565,6 +547,9 @@ List<runtime.ClipSemanticKind> _toRuntimeSemanticKinds(HistoryClipKind? kind) =>
       HistoryClipKind.code => const [runtime.ClipSemanticKind.code],
       HistoryClipKind.json => const [runtime.ClipSemanticKind.json],
       HistoryClipKind.path => const [runtime.ClipSemanticKind.path],
+      HistoryClipKind.credentials => const [
+        runtime.ClipSemanticKind.credentials,
+      ],
       null ||
       HistoryClipKind.image ||
       HistoryClipKind.file ||

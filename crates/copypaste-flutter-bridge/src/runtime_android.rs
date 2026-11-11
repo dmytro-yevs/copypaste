@@ -201,6 +201,19 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
     }
 }
 
+/// Returns the runtime's cached history pages to the allocator when Android
+/// reports memory pressure. A runtime that is not open yet holds none.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_MainActivity_releaseRuntimeMemory(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    if let Some(Err(error)) = RUNTIME.get().map(|runtime| runtime.store.release_memory()) {
+        tracing::warn!(%error, "could not release cached history pages");
+    }
+}
+
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_openHost(
@@ -261,7 +274,7 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_drainHost(
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_begin(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
     host: jlong,
     cancellation: JObject,
@@ -387,28 +400,32 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
     _class: JClass,
     token: jlong,
     text: JObject,
-) -> jboolean {
+) -> jint {
+    // Mirrors NativeRuntimeCapture.INGEST_* in Kotlin.
+    const REFUSED: jint = 0;
+    const SAVED: jint = 1;
+    const SAVED_SECRET: jint = 2;
     if token <= 0 {
-        return JNI_FALSE;
+        return REFUSED;
     }
     let Some(runtime) = RUNTIME.get() else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let Some(read) = runtime.capture_admission().acquire(
         token as u64,
         copypaste_runtime::capture_admission::CaptureScope::Read,
     ) else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let Ok(text) = env.get_string((&text).into()) else {
-        return JNI_FALSE;
+        return REFUSED;
     };
     let text = text.to_string_lossy().into_owned();
     drop(read);
-    if runtime.capture_text_operation(token as u64, &text).is_ok() {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
+    match runtime.capture_text_operation(token as u64, &text) {
+        Ok(privacy) if privacy.secret => SAVED_SECRET,
+        Ok(_) => SAVED,
+        Err(_) => REFUSED,
     }
 }
 
@@ -749,16 +766,18 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         &self,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
+        secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, false)
+        self.write_native(payload, content_type, false, secret)
     }
 
     fn write_received(
         &self,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
+        secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, true)
+        self.write_native(payload, content_type, true, secret)
     }
 }
 
@@ -768,6 +787,7 @@ impl AndroidClipboard {
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
         received: bool,
+        secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let vm = JAVA_VM
             .get()
@@ -777,7 +797,7 @@ impl AndroidClipboard {
             .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
         let ok = match payload {
             copypaste_core::ClipboardPayload::Text(text) => {
-                call_text(&mut env, text, content_type, received)
+                call_text(&mut env, text, content_type, received, secret)
             }
             copypaste_core::ClipboardPayload::Image {
                 content_type,
@@ -792,9 +812,13 @@ impl AndroidClipboard {
                 },
                 content_type,
                 received,
+                secret,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
-                if let Some(file) = metadata.as_ref().filter(|file| file.transfer.is_some()) {
+                if let Some(file) = metadata
+                    .as_ref()
+                    .filter(|file| file.source_reference.is_some())
+                {
                     let path = file
                         .source_reference
                         .as_deref()
@@ -808,12 +832,20 @@ impl AndroidClipboard {
                     let mime = env
                         .new_string(&file.mime_type)
                         .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    let class = CLIPBOARD_HOST_CLASS
+                        .get()
+                        .ok_or(copypaste_core::ClipboardWriteError::Failed)?;
                     return env
                         .call_static_method(
-                            "com/copypaste/app/MainActivity",
+                            class,
                             "writeClipboardFile",
-                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-                            &[(&path).into(), (&name).into(), (&mime).into()],
+                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+                            &[
+                                (&path).into(),
+                                (&name).into(),
+                                (&mime).into(),
+                                JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+                            ],
                         )
                         .ok()
                         .and_then(|value| value.z().ok())
@@ -821,24 +853,18 @@ impl AndroidClipboard {
                         .map(|_| ())
                         .ok_or(copypaste_core::ClipboardWriteError::Failed);
                 }
-                if let Some(source_reference) = metadata
-                    .as_ref()
-                    .and_then(|file| file.source_reference.as_deref())
-                {
-                    call_text(&mut env, source_reference, "text/plain", received)
-                } else {
-                    call_binary(
-                        &mut env,
-                        bytes,
-                        metadata
-                            .as_ref()
-                            .map_or("copypaste-file", |file| file.filename.as_str()),
-                        metadata
-                            .as_ref()
-                            .map_or("application/octet-stream", |file| file.mime_type.as_str()),
-                        received,
-                    )
-                }
+                call_binary(
+                    &mut env,
+                    bytes,
+                    metadata
+                        .as_ref()
+                        .map_or("copypaste-file", |file| file.filename.as_str()),
+                    metadata
+                        .as_ref()
+                        .map_or("application/octet-stream", |file| file.mime_type.as_str()),
+                    received,
+                    secret,
+                )
             }
             copypaste_core::ClipboardPayload::Unsupported { .. } => {
                 return Err(copypaste_core::ClipboardWriteError::UnsupportedContent);
@@ -849,7 +875,13 @@ impl AndroidClipboard {
     }
 }
 
-fn call_text(env: &mut JNIEnv, text: &str, content_type: &str, received: bool) -> bool {
+fn call_text(
+    env: &mut JNIEnv,
+    text: &str,
+    content_type: &str,
+    received: bool,
+    secret: bool,
+) -> bool {
     let (Ok(text), Ok(content_type)) = (env.new_string(text), env.new_string(content_type)) else {
         return false;
     };
@@ -859,11 +891,12 @@ fn call_text(env: &mut JNIEnv, text: &str, content_type: &str, received: bool) -
     env.call_static_method(
         class,
         "writeClipboardText",
-        "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+        "(Ljava/lang/String;Ljava/lang/String;ZZ)Z",
         &[
             JValue::Object(&text.into()),
             JValue::Object(&content_type.into()),
             JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
+            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
         ],
     )
     .ok()
@@ -877,6 +910,7 @@ fn call_binary(
     filename: &str,
     mime_type: &str,
     received: bool,
+    secret: bool,
 ) -> bool {
     let (Ok(bytes), Ok(filename), Ok(mime_type)) = (
         env.byte_array_from_slice(bytes),
@@ -891,12 +925,13 @@ fn call_binary(
     env.call_static_method(
         class,
         "writeClipboardBinary",
-        "([BLjava/lang/String;Ljava/lang/String;Z)Z",
+        "([BLjava/lang/String;Ljava/lang/String;ZZ)Z",
         &[
             JValue::Object(&JObject::from(bytes)),
             JValue::Object(&filename.into()),
             JValue::Object(&mime_type.into()),
             JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
+            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
         ],
     )
     .ok()
@@ -951,7 +986,7 @@ pub(crate) async fn watch(
     let mut events = runtime.subscribe_events();
     let mut runtime_events = runtime.subscribe_runtime_events();
     let mut transfers = runtime.store.subscribe_file_operations();
-    if sink.add(crate::client::runtime_ready(true)).is_err() {
+    if sink.add(crate::client::runtime_ready()).is_err() {
         return Ok(());
     }
     if !push_capture_snapshot(runtime, &sink).await? {
@@ -967,7 +1002,7 @@ pub(crate) async fn watch(
             event = events.recv() => match event {
                 Ok(event) => crate::client::typed_runtime_event(copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(event), capture: None, progress: None }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if sink.add(crate::client::runtime_ready()).is_err() { return Ok(()); }
                     if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
                     continue;
                 },
@@ -977,7 +1012,7 @@ pub(crate) async fn watch(
             event = runtime_events.recv() => match event {
                 Ok(event) => crate::client::typed_runtime_event(event),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    if sink.add(crate::client::runtime_ready(true)).is_err() { return Ok(()); }
+                    if sink.add(crate::client::runtime_ready()).is_err() { return Ok(()); }
                     if !push_capture_snapshot(runtime, &sink).await? { return Ok(()); }
                     continue;
                 },

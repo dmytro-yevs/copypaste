@@ -1,10 +1,14 @@
 package com.copypaste.app
 
 import android.Manifest
+import android.app.LocaleManager
+import android.os.LocaleList
 import android.net.Uri
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import androidx.core.content.FileProvider
 import java.io.File
 import android.content.Intent
@@ -58,34 +62,54 @@ class MainActivity : FlutterActivity() {
 
         @Keep
         @JvmStatic
-        fun writeClipboardText(text: String, contentType: String, received: Boolean): Boolean {
+        fun writeClipboardText(
+            text: String,
+            contentType: String,
+            received: Boolean,
+            secret: Boolean,
+        ): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeText(context, text, contentType).also { written ->
-                if (written && received) runCatching {
-                    AndroidCaptureFeedback.onCaptured(
-                        context, CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(text)),
-                    )
+            return AndroidClipboardWriter.writeText(context, text, contentType, secret = secret).also { written ->
+                if (written) runCatching {
+                    if (received) {
+                        AndroidCaptureFeedback.onCaptured(
+                            context,
+                            if (secret) null else CaptureFeedbackPreview(
+                                AndroidCaptureFeedback.textPreview(text),
+                            ),
+                        )
+                    } else AndroidCaptureFeedback.onCopied()
                 }
             }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardFile(path: String, filename: String, mimeType: String): Boolean {
-            val context=instance ?: return false
-            return AndroidClipboardWriter.writeFile(context,path,filename,mimeType)
+        fun writeClipboardFile(path: String, filename: String, mimeType: String, secret: Boolean): Boolean {
+            val context = instance ?: return false
+            return AndroidClipboardWriter.writeFile(context, path, filename, mimeType, secret).also { written ->
+                if (written) runCatching { AndroidCaptureFeedback.onCopied() }
+            }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String, received: Boolean): Boolean {
+        fun writeClipboardBinary(
+            bytes: ByteArray,
+            filename: String,
+            mimeType: String,
+            received: Boolean,
+            secret: Boolean,
+        ): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType).also { written ->
-                if (written && received) {
-                    val preview = runCatching {
-                        AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
-                    }.getOrNull()
-                    runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
+            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType, secret).also { written ->
+                if (written) {
+                    if (received) {
+                        val preview = if (secret) null else runCatching {
+                            AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
+                        }.getOrNull()
+                        runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
+                    } else runCatching { AndroidCaptureFeedback.onCopied() }
                 }
             }
         }
@@ -93,9 +117,28 @@ class MainActivity : FlutterActivity() {
         @Volatile
         private var instance: Context? = null
 
+        @JvmStatic
+        private external fun releaseRuntimeMemory()
+
+        // Registered on the application context: capture services keep the
+        // process-wide runtime open after this activity is gone.
+        private val runtimeMemoryTrim = object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) = releaseRuntimeMemory()
+
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+            @Deprecated("Deprecated in Java")
+            override fun onLowMemory() = releaseRuntimeMemory()
+        }
+        private var runtimeMemoryTrimRegistered = false
+
         @Synchronized
         internal fun ensureRuntime(context: Context) {
             instance = context.applicationContext
+            if (!runtimeMemoryTrimRegistered) {
+                context.applicationContext.registerComponentCallbacks(runtimeMemoryTrim)
+                runtimeMemoryTrimRegistered = true
+            }
             InferenceWorkerHost.initialize(context)
             applicationContextForSources = context.applicationContext
             initializeNdkContext(context.applicationContext)
@@ -150,7 +193,9 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/startup")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "getEnabled" -> result.success(StartupPreferences.enabled(this))
+                    "getStatus" -> result.success(
+                        if (StartupPreferences.enabled(this)) "enabled" else "disabled",
+                    )
                     "setEnabled" -> {
                         val enabled = call.argument<Boolean>("enabled")
                         if (enabled == null) result.error("invalid_arguments", null, null)
@@ -160,6 +205,29 @@ class MainActivity : FlutterActivity() {
                 }
             }
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/app_language")
+            .setMethodCallHandler { call, result ->
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    result.success(mapOf("supported" to false))
+                    return@setMethodCallHandler
+                }
+                val locales = getSystemService(LocaleManager::class.java)
+                when (call.method) {
+                    "getApplicationLocale" -> result.success(
+                        mapOf(
+                            "supported" to true,
+                            "tag" to locales.applicationLocales.toLanguageTags().ifEmpty { null },
+                        ),
+                    )
+                    "setApplicationLocale" -> {
+                        val tag = call.argument<String>("tag")
+                        locales.applicationLocales =
+                            if (tag == null) LocaleList.getEmptyLocaleList() else LocaleList.forLanguageTags(tag)
+                        result.success(mapOf("supported" to true))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
             .setMethodCallHandler { call, result ->
                 if (call.method == "restart") {
@@ -289,7 +357,9 @@ class MainActivity : FlutterActivity() {
                                 putExtra(Intent.EXTRA_STREAM, uri)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             },
-                            if (call.method == "openFile") "Open CopyPaste file" else "Save CopyPaste file",
+                            getString(
+                                if (call.method == "openFile") R.string.chooser_open_file else R.string.chooser_save_file,
+                            ),
                         ),
                     )
                 }.onSuccess {
@@ -418,12 +488,12 @@ class MainActivity : FlutterActivity() {
                 explicitCaptureHosts.remove(host)
                 if (!isDestroyed) Toast.makeText(
                     this,
-                    if (captured) "Saved to CopyPaste" else "CopyPaste could not save this item",
+                    getString(if (captured) R.string.share_saved else R.string.share_failed),
                     Toast.LENGTH_SHORT,
                 ).show()
             }
         } else {
-            Toast.makeText(this, "CopyPaste could not save this item", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.share_failed, Toast.LENGTH_SHORT).show()
         }
         setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         return true

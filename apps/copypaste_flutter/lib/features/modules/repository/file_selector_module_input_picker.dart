@@ -1,4 +1,5 @@
 import '../../../platform/files/temporary_artifacts.dart';
+import '../../../l10n/l10n.dart';
 
 import 'dart:io';
 
@@ -21,7 +22,9 @@ class FileSelectorModuleInputPicker implements ModuleInputPicker {
     final extension = selected.name.split('.').last.toLowerCase();
     if (!field.acceptedExtensions.contains(extension) ||
         await selected.length() > field.maxBytes) {
-      throw ModulesException('${field.title} is not an accepted file.');
+      throw ModulesException(
+        AppStrings.current.modulesFileNotAccepted(field.title),
+      );
     }
     final root = await getTemporaryDirectory();
     final lease = await TemporaryDirectoryLease.create(

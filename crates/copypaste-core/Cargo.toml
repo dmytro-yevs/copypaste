@@ -46,6 +46,8 @@ image = { workspace = true, features = ["jpeg", "gif", "webp", "bmp"] }
 png.workspace = true
 url.workspace = true
 csscolorparser.workspace = true
+html2text.workspace = true
+rclip-rtf.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.
 tempfile.workspace = true
@@ -99,6 +101,7 @@ sha2 = { workspace = true, features = ["asm"] }
 # was never passed by any release script — so every shipped macOS binary wrote
 # the secret to a 0600 file instead.
 [target.'cfg(target_os = "macos")'.dependencies]
+copypaste-process = { path = "../copypaste-process" }
 core-foundation = "0.10"
 objc2.workspace = true
 security-framework.workspace = true

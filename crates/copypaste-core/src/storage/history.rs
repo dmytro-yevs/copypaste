@@ -103,6 +103,10 @@ struct FingerprintQuery<'a> {
     pinned_only: bool,
     origin_device_id: &'a Option<String>,
     source_app_bundle_id: &'a Option<String>,
+    captured_from_ms: Option<i64>,
+    captured_before_ms: Option<i64>,
+    tag_ids: Vec<String>,
+    untagged_only: bool,
     sort: HistorySort,
 }
 
@@ -157,6 +161,15 @@ fn query_fingerprint(query: &HistoryQuery) -> String {
         pinned_only: query.pinned_only,
         origin_device_id: &query.origin_device_id,
         source_app_bundle_id: &query.source_app_bundle_id,
+        captured_from_ms: query.captured_from_ms,
+        captured_before_ms: query.captured_before_ms,
+        tag_ids: {
+            let mut ids = query.tag_ids.clone();
+            ids.sort();
+            ids.dedup();
+            ids
+        },
+        untagged_only: query.untagged_only,
         sort: query.sort,
     };
     let bytes = serde_json::to_vec(&normalized).unwrap_or_default();
@@ -366,12 +379,21 @@ impl Store {
         let facets = HistoryFacets {
             origin_devices: origins,
             source_apps,
+            tags: super::organization::catalogue(&conn)?,
         };
-        let bytes: usize = facets
-            .origin_devices
+        let tag_bytes: usize = facets
+            .tags
             .iter()
-            .map(|v| v.id.capacity() + v.label.capacity())
-            .sum::<usize>()
+            .map(|tag| {
+                tag.id.len() + tag.name.len() + std::mem::size_of::<copypaste_ipc::HistoryTag>()
+            })
+            .sum();
+        let bytes: usize = tag_bytes
+            + facets
+                .origin_devices
+                .iter()
+                .map(|v| v.id.capacity() + v.label.capacity())
+                .sum::<usize>()
             + facets.origin_devices.capacity() * std::mem::size_of::<HistoryDeviceFacet>()
             + facets
                 .source_apps
@@ -498,6 +520,15 @@ impl Store {
         semantic: Option<&super::SemanticMatches>,
         preview_keys: Option<(&crate::ItemKey, &crate::crypto::PreviewKey)>,
     ) -> Result<QueryPage, StoreError> {
+        if query
+            .captured_from_ms
+            .zip(query.captured_before_ms)
+            .is_some_and(|(from, before)| from >= before)
+            || query.tag_ids.len() > copypaste_ipc::MAX_HISTORY_TAGS
+            || (query.untagged_only && !query.tag_ids.is_empty())
+        {
+            return Err(StoreError::InvalidHistoryQuery);
+        }
         if limit == 0 {
             return Ok(QueryPage {
                 items: Vec::new(),
@@ -558,9 +589,14 @@ impl Store {
         };
         push_class_clause(&mut filters, &classes);
         if !semantic_kinds.is_empty() {
-            filters.push_str(
-                " AND copypaste_semantic_kind(ci.content_type, clipboard_fts.content_text) IN (",
-            );
+            // Confidential credentials have no FTS row. Their content-free
+            // type marker is sufficient for filtering before pagination.
+            filters.push_str(concat!(
+                " AND CASE WHEN CASE WHEN json_valid(ci.payload_metadata) ",
+                "THEN json_extract(ci.payload_metadata, '$.credentials') ELSE 0 END = 1 ",
+                "THEN 'credentials' ELSE copypaste_semantic_kind(",
+                "ci.content_type, clipboard_fts.content_text) END IN (",
+            ));
             for (index, kind) in semantic_kinds.iter().enumerate() {
                 if index != 0 {
                     filters.push_str(", ");
@@ -569,6 +605,27 @@ impl Store {
                 filters.push_str(&format!("?{}", values.len()));
             }
             filters.push(')');
+        }
+        if let Some(from) = query.captured_from_ms {
+            values.push(Value::Integer(from));
+            filters.push_str(&format!(" AND ci.created_at >= ?{}", values.len()));
+        }
+        if let Some(before) = query.captured_before_ms {
+            values.push(Value::Integer(before));
+            filters.push_str(&format!(" AND ci.created_at < ?{}", values.len()));
+        }
+        if query.untagged_only {
+            filters.push_str(" AND ci.pinned = 1 AND NOT EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0)");
+        } else if !query.tag_ids.is_empty() {
+            filters.push_str(" AND ci.pinned = 1 AND EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0 AND ct.tag_id IN (");
+            for (index, id) in query.tag_ids.iter().enumerate() {
+                if index > 0 {
+                    filters.push(',');
+                }
+                values.push(Value::Text(id.clone()));
+                filters.push_str(&format!("?{}", values.len()));
+            }
+            filters.push_str("))");
         }
         if query.pinned_only {
             filters.push_str(" AND ci.pinned = 1");
@@ -664,8 +721,10 @@ impl Store {
             sql.push_str("SELECT ");
             sql.push_str(&projection);
             sql.push_str(" FROM clipboard_items ci");
-            if search.is_some() || !semantic_kinds.is_empty() {
+            if search.is_some() {
                 sql.push_str(" JOIN clipboard_fts ON ci.id = clipboard_fts.id");
+            } else if !semantic_kinds.is_empty() {
+                sql.push_str(" LEFT JOIN clipboard_fts ON ci.id = clipboard_fts.id");
             }
             sql.push_str(" WHERE ");
             sql.push_str(&filters);
@@ -1008,6 +1067,9 @@ mod tests {
     #[test]
     fn filters_existing_text_rows_by_semantic_kind_before_paging() {
         let store = store();
+        let mut image = item("binary image", T0 + 5);
+        image.content_type = "image/png".into();
+        store.insert(image).unwrap();
         let plain = store.insert(item("meeting notes", T0)).unwrap();
         let link = store
             .insert(item("https://example.com/docs", T0 + 1))

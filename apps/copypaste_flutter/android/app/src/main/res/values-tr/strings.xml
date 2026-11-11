@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_channel_name">Pano kaydedildi</string>
+    <string name="capture_channel_description">CopyPaste\'in bir pano değişikliğini kaydettiğini onaylar.</string>
+    <string name="capture_title">Pano kaydedildi</string>
+    <string name="capture_body_default">CopyPaste\'e yeni bir öğe eklendi.</string>
+    <string name="capture_image">Görüntü</string>
+    <string name="capture_image_size">Görüntü · %1$d × %2$d</string>
+    <string name="background_channel_name">Arka plan etkinliği</string>
+    <string name="background_channel_description">Etkin CopyPaste özelliklerini arka planda çalışır durumda tutar.</string>
+    <string name="background_title">CopyPaste etkin</string>
+    <string name="background_text">Etkin özellikler arka planda çalışıyor.</string>
+    <string name="share_saved">CopyPaste\'e kaydedildi</string>
+    <string name="share_failed">CopyPaste bu öğeyi kaydedemedi</string>
+    <string name="chooser_open_file">CopyPaste dosyasını aç</string>
+    <string name="chooser_save_file">CopyPaste dosyasını kaydet</string>
+    <string name="pairing_invalid_qr">Bir CopyPaste eşleme QR kodu tarayın.</string>
+    <string name="pairing_scanner_unavailable">Google tarayıcı açılamadı. Bunun yerine eşleme kodunu girin.</string>
+    <string name="files_read_failed">Seçilen dosya okunamadı. Dosya erişimini ve kullanılabilir disk alanını kontrol edin.</string>
+    <string name="files_picker_closed">Dosya seçici kapatıldı.</string>
+</resources>

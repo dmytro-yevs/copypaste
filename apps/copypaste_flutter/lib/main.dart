@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'app/localization/app_language.dart';
+import 'l10n/l10n.dart';
+
 import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
@@ -40,16 +43,9 @@ import 'platform/files/history_file_picker.dart';
 import 'platform/files/temporary_artifacts.dart';
 import 'features/history/repository/runtime_history_repository.dart';
 import 'features/history/repository/temporary_history_image_input.dart';
-import 'features/onboarding/controller/android_onboarding_controller.dart';
-import 'features/onboarding/controller/linux_onboarding_controller.dart';
-import 'features/onboarding/controller/macos_onboarding_controller.dart';
-import 'features/onboarding/controller/windows_onboarding_controller.dart';
-import 'features/onboarding/repository/android_onboarding_store.dart';
-import 'features/onboarding/repository/onboarding_store.dart';
-import 'features/onboarding/view/android_onboarding_screen.dart';
-import 'features/onboarding/view/linux_onboarding_screen.dart';
-import 'features/onboarding/view/macos_onboarding_screen.dart';
-import 'features/onboarding/view/windows_onboarding_screen.dart';
+import 'features/onboarding/controller/onboarding_controller.dart';
+import 'features/onboarding/controller/platform_onboarding_setup.dart';
+import 'features/onboarding/view/onboarding_screen.dart';
 import 'features/quick_paste/quick_paste_app.dart';
 import 'features/quick_paste/quick_paste_controller.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
@@ -66,8 +62,6 @@ import 'platform/desktop/desktop_window_bootstrap.dart';
 import 'platform/desktop/desktop_window_controller.dart';
 import 'platform/desktop/global_shortcut.dart';
 import 'platform/desktop/quick_paste_host.dart';
-import 'platform/android/android_capture_setup_gateway.dart';
-import 'platform/macos/macos_setup_gateway.dart';
 import 'platform/pairing/pairing_presentation.dart';
 import 'platform/permissions/linux_integration.dart';
 import 'platform/update/app_update_platform.dart';
@@ -83,9 +77,11 @@ Future<void> main([List<String> arguments = const []]) async {
   AppMotion.configureLibrary();
   await RustLib.init();
   final desktopWindow = await initializeDesktopWindow();
+  final language = await _initializeLanguage();
   runApp(
     CopyPasteRoot(
       desktopWindow: desktopWindow,
+      language: language,
       appUpdateController: AppUpdateController(
         repository: GitHubAppUpdateRepository(
           temporaryDirectory: getTemporaryDirectory,
@@ -143,15 +139,20 @@ Future<void> quickPasteMain() async {
         imageInput: TemporaryHistoryImageInput(repository: repository),
       ),
       initializeInspector: modules.initialize,
-      ownsHostLifecycle: !Platform.isWindows,
     );
   }
 
-  runApp(
-    Platform.isWindows
-        ? QuickPasteApp.retained(createController: createController, host: host)
-        : QuickPasteApp(controller: createController()),
+  final language = await _initializeLanguage();
+  runApp(QuickPasteApp(controller: createController(), language: language));
+}
+
+Future<AppLanguageController> _initializeLanguage() async {
+  final language = AppLanguageController(
+    store: SharedPreferencesAppLanguageStore(),
+    platform: const MethodChannelAppLanguagePlatform(),
   );
+  await language.initialize();
+  return language;
 }
 
 const _pairingLinksChannel = MethodChannel('com.copypaste.app/pairing_links');
@@ -187,19 +188,15 @@ class CopyPasteRoot extends StatefulWidget {
   const CopyPasteRoot({
     super.key,
     this.desktopWindow,
-    this.macosOnboardingController,
-    this.androidOnboardingController,
-    this.linuxOnboardingController,
-    this.windowsOnboardingController,
+    this.onboardingController,
     this.appUpdateController,
     this.runtimeEnabled = true,
+    this.language,
   });
 
   final DesktopWindowController? desktopWindow;
-  final MacosOnboardingController? macosOnboardingController;
-  final AndroidOnboardingController? androidOnboardingController;
-  final LinuxOnboardingController? linuxOnboardingController;
-  final WindowsOnboardingController? windowsOnboardingController;
+  final AppLanguageController? language;
+  final OnboardingController? onboardingController;
   final AppUpdateController? appUpdateController;
   final bool runtimeEnabled;
 
@@ -208,9 +205,8 @@ class CopyPasteRoot extends StatefulWidget {
 }
 
 class _CopyPasteRootState extends State<CopyPasteRoot> {
-  final _launchAtLogin = LaunchAtLoginController(
-    MethodChannelLaunchAtLoginGateway(),
-  );
+  final _startupGateway = platformLaunchAtLoginGateway();
+  late final _launchAtLogin = LaunchAtLoginController(_startupGateway);
   late final AppNavigationController _navigation = AppNavigationController();
   late final DesktopWindowController? _desktopWindow = widget.desktopWindow;
   late final AppUpdateController? _appUpdateController =
@@ -223,18 +219,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   QuickPasteSettingsController? _quickPasteSettings;
   SettingsController? _settingsController;
   ModulesController? _modulesController;
-  MacosOnboardingController? _macosOnboarding;
-  AndroidOnboardingController? _androidOnboarding;
-  LinuxOnboardingController? _linuxOnboarding;
-  WindowsOnboardingController? _windowsOnboarding;
-  bool _ownsMacosOnboarding = false;
-  bool _ownsAndroidOnboarding = false;
-  bool _ownsLinuxOnboarding = false;
-  bool _ownsWindowsOnboarding = false;
-  bool _macosOnboardingReady = false;
-  bool _androidOnboardingReady = false;
-  bool _linuxOnboardingReady = false;
-  bool _windowsOnboardingReady = false;
+  OnboardingController? _onboarding;
+  bool _ownsOnboarding = false;
+  bool _onboardingReady = false;
   _RuntimeState _runtimeState = _RuntimeState.idle;
   String? _runtimeFailureMessage;
   String? _pendingPairingUri;
@@ -244,12 +231,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   late final SettingsPresentationLifecycle _settingsPresentation;
   late final UiMemoryController _uiMemory;
 
-  bool _usesUnifiedMacosTitleBar(bool windowReady) =>
-      Platform.isMacOS && _desktopWindow != null && windowReady;
-
   @override
   void initState() {
     super.initState();
+    widget.language?.addListener(_languageChanged);
     unawaited(_launchAtLogin.refresh());
     if (widget.runtimeEnabled) unawaited(_temporaryArtifacts.run());
     _visibility = ApplicationVisibility(
@@ -273,10 +258,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _desktopWindow?.setOpenSettings(() {
       _navigation.selectDestination(AppDestination.settings);
     });
-    _configureMacosOnboarding();
-    _configureAndroidOnboarding();
-    _configureLinuxOnboarding();
-    _configureWindowsOnboarding();
+    _configureOnboarding();
     unawaited(_appUpdateController?.initialize());
     if (widget.runtimeEnabled) {
       unawaited(_startRuntime());
@@ -293,22 +275,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       'CopyPasteRoot cannot replace its process-wide desktop window controller.',
     );
     assert(
-      oldWidget.macosOnboardingController == widget.macosOnboardingController,
-      'CopyPasteRoot cannot replace its macOS onboarding controller.',
-    );
-    assert(
-      oldWidget.androidOnboardingController ==
-          widget.androidOnboardingController,
-      'CopyPasteRoot cannot replace its Android onboarding controller.',
-    );
-    assert(
-      oldWidget.linuxOnboardingController == widget.linuxOnboardingController,
-      'CopyPasteRoot cannot replace its Linux onboarding controller.',
-    );
-    assert(
-      oldWidget.windowsOnboardingController ==
-          widget.windowsOnboardingController,
-      'CopyPasteRoot cannot replace its Windows onboarding controller.',
+      oldWidget.onboardingController == widget.onboardingController,
+      'CopyPasteRoot cannot replace its onboarding controller.',
     );
     assert(
       oldWidget.appUpdateController == widget.appUpdateController,
@@ -318,6 +286,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   @override
   void dispose() {
+    widget.language?.removeListener(_languageChanged);
     _uiMemory.removeListener(_memoryStateChanged);
     _uiMemory.dispose();
     _visibility.removeListener(_settingsVisibilityChanged);
@@ -326,18 +295,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _launchAtLogin.dispose();
     _pairingLinksChannel.setMethodCallHandler(null);
     _desktopWindow?.setOpenSettings(null);
-    if (_ownsMacosOnboarding) {
-      _macosOnboarding?.dispose();
-    }
-    if (_ownsAndroidOnboarding) {
-      _androidOnboarding?.dispose();
-    }
-    if (_ownsLinuxOnboarding) {
-      _linuxOnboarding?.dispose();
-    }
-    if (_ownsWindowsOnboarding) {
-      _windowsOnboarding?.dispose();
-    }
+    if (_ownsOnboarding) _onboarding?.dispose();
     _navigation.dispose();
     _appUpdateController?.dispose();
     unawaited(_prepareForTermination());
@@ -347,14 +305,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   bool _canSuspendPresentation() =>
       _runtimeState == _RuntimeState.ready &&
-      _macosOnboardingReady &&
-      _androidOnboardingReady &&
-      _linuxOnboardingReady &&
-      _windowsOnboardingReady &&
-      (_macosOnboarding?.complete ?? true) &&
-      (_androidOnboarding?.complete ?? true) &&
-      (_linuxOnboarding?.complete ?? true) &&
-      (_windowsOnboarding?.complete ?? true) &&
+      _onboardingReady &&
+      (_onboarding?.complete ?? true) &&
       (_historyController?.canSuspend ?? true) &&
       _devicesController?.pairingEntryMode == null &&
       !(_devicesController?.systemScanInFlight ?? false) &&
@@ -372,16 +324,23 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     }
   }
 
+  void _languageChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _memoryStateChanged() {
     if (!mounted) return;
-    if (_uiMemory.suspended) _historyController?.suspend();
+    if (_uiMemory.suspended) {
+      _historyController?.suspend();
+    } else {
+      unawaited(AppResourcePolicy.resumePresentation());
+    }
     setState(() {});
     if (_uiMemory.suspended) {
-      // Dispose image listeners before clearing the shared decoded-image cache.
+      // Dispose image listeners before releasing the shared caches.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _uiMemory.suspended) {
-          PaintingBinding.instance.imageCache.clear();
-          PaintingBinding.instance.imageCache.clearLiveImages();
+          unawaited(AppResourcePolicy.suspendPresentation());
         }
       });
       // Hidden/paused lifecycle states disable ordinary frames. One warm-up
@@ -495,7 +454,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         _runtimeState = _RuntimeState.failed;
         _runtimeFailureMessage = error is runtime.RuntimeError
             ? error.message
-            : 'CopyPaste could not start its runtime.';
+            : AppStrings.current.appRuntimeStartFailed;
       });
     }
   }
@@ -534,10 +493,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (controller == null ||
         uri == null ||
         _runtimeState != _RuntimeState.ready ||
-        !(_macosOnboarding?.complete ?? true) ||
-        !(_androidOnboarding?.complete ?? true) ||
-        !(_linuxOnboarding?.complete ?? true) ||
-        !(_windowsOnboarding?.complete ?? true)) {
+        !(_onboarding?.complete ?? true)) {
       return;
     }
     _pendingPairingUri = null;
@@ -559,46 +515,23 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   /// Releases feature state during widget disposal and before Windows Quit.
   /// macOS committed process exit closes the owned daemon's app-parent pipe.
   Future<void> _prepareForTermination() async {
-    final historyController = _historyController;
-    final devicesController = _devicesController;
-    final historyRepository = _historyRepository;
-    final devicesGateway = _devicesGateway;
-    final quickPasteSettings = _quickPasteSettings;
-    final settingsController = _settingsController;
-    _historyController = null;
-    _devicesController = null;
-    _historyRepository = null;
-    _devicesGateway = null;
-    _quickPasteSettings = null;
-    _settingsController = null;
-    historyController?.dispose();
-    _modulesController?.dispose();
-    _modulesController = null;
-    _notifications?.dispose();
-    _notifications = null;
-    devicesController?.dispose();
-    quickPasteSettings?.dispose();
-    settingsController?.removeListener(_syncCaptureControls);
-    settingsController?.dispose();
-    _desktopWindow?.setCaptureToggle(null);
-    unawaited(
-      _desktopWindow?.updateCaptureState(
-        state: CaptureControlState.unavailable,
-      ),
-    );
-    if (widget.runtimeEnabled &&
-        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
-      await runtime.stopDesktopRuntime();
-    }
-    if (historyRepository != null) {
-      unawaited(historyRepository.dispose().catchError((Object _) {}));
-    }
-    if (devicesGateway != null) {
-      unawaited(devicesGateway.dispose().catchError((Object _) {}));
-    }
+    final connections = _releaseFeatureState();
+    await _stopDesktopRuntime();
+    unawaited(connections.history?.dispose().catchError((Object _) {}));
+    unawaited(connections.devices?.dispose().catchError((Object _) {}));
   }
 
   Future<void> _stopRuntime() async {
+    final connections = _releaseFeatureState();
+    await connections.history?.dispose();
+    await connections.devices?.dispose();
+    await _stopDesktopRuntime();
+  }
+
+  /// Disposes feature controllers and hands back the runtime connections,
+  /// which each teardown path closes in its own order.
+  ({RuntimeHistoryRepository? history, FlutterRustDevicesGateway? devices})
+  _releaseFeatureState() {
     final historyController = _historyController;
     final devicesController = _devicesController;
     final historyRepository = _historyRepository;
@@ -626,8 +559,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         state: CaptureControlState.unavailable,
       ),
     );
-    await historyRepository?.dispose();
-    await devicesGateway?.dispose();
+    return (history: historyRepository, devices: devicesGateway);
+  }
+
+  Future<void> _stopDesktopRuntime() async {
     if (widget.runtimeEnabled &&
         (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await runtime.stopDesktopRuntime();
@@ -639,119 +574,26 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     unawaited(desktopWindow.dispose().catchError((Object _) {}));
   }
 
-  void _configureMacosOnboarding() {
-    final injected = widget.macosOnboardingController;
+  void _configureOnboarding() {
+    final injected = widget.onboardingController;
     if (injected != null) {
-      _macosOnboarding = injected;
-    } else if (Platform.isMacOS) {
-      _macosOnboarding = MacosOnboardingController(
-        store: SharedPreferencesOnboardingStore(
-          platform: OnboardingPlatform.macos,
-        ),
-        setup: MethodChannelMacosSetupGateway(),
-      );
-      _ownsMacosOnboarding = true;
+      _onboarding = injected;
+    } else if (platformOnboardingSetup(startup: _startupGateway)
+        case final setup?) {
+      _onboarding = OnboardingController(setup: setup);
+      _ownsOnboarding = true;
     }
-    final controller = _macosOnboarding;
+    final controller = _onboarding;
     if (controller == null) {
-      _macosOnboardingReady = true;
+      _onboardingReady = true;
       return;
     }
-    unawaited(_initializeMacosOnboarding(controller));
+    unawaited(_initializeOnboarding(controller));
   }
 
-  Future<void> _initializeMacosOnboarding(
-    MacosOnboardingController controller,
-  ) async {
+  Future<void> _initializeOnboarding(OnboardingController controller) async {
     await controller.initialize();
-    if (!mounted) return;
-    setState(() => _macosOnboardingReady = true);
-  }
-
-  void _configureAndroidOnboarding() {
-    final injected = widget.androidOnboardingController;
-    if (injected != null) {
-      _androidOnboarding = injected;
-    } else if (Platform.isAndroid) {
-      _androidOnboarding = AndroidOnboardingController(
-        store: SharedPreferencesAndroidOnboardingStore(),
-        setup: MethodChannelAndroidCaptureSetupGateway(),
-      );
-      _ownsAndroidOnboarding = true;
-    }
-    final controller = _androidOnboarding;
-    if (controller == null) {
-      _androidOnboardingReady = true;
-      return;
-    }
-    unawaited(_initializeAndroidOnboarding(controller));
-  }
-
-  Future<void> _initializeAndroidOnboarding(
-    AndroidOnboardingController controller,
-  ) async {
-    await controller.initialize();
-    if (!mounted) return;
-    setState(() => _androidOnboardingReady = true);
-  }
-
-  void _configureWindowsOnboarding() {
-    final injected = widget.windowsOnboardingController;
-    if (injected != null) {
-      _windowsOnboarding = injected;
-    } else if (Platform.isWindows) {
-      _windowsOnboarding = WindowsOnboardingController(
-        store: SharedPreferencesOnboardingStore(
-          platform: OnboardingPlatform.windows,
-        ),
-      );
-      _ownsWindowsOnboarding = true;
-    }
-    final controller = _windowsOnboarding;
-    if (controller == null) {
-      _windowsOnboardingReady = true;
-      return;
-    }
-    unawaited(_initializeWindowsOnboarding(controller));
-  }
-
-  Future<void> _initializeWindowsOnboarding(
-    WindowsOnboardingController controller,
-  ) async {
-    await controller.initialize();
-    if (mounted) setState(() => _windowsOnboardingReady = true);
-  }
-
-  void _configureLinuxOnboarding() {
-    final injected = widget.linuxOnboardingController;
-    if (!Platform.isLinux && injected == null) {
-      _linuxOnboardingReady = true;
-      return;
-    }
-    if (injected != null) {
-      _linuxOnboarding = injected;
-    } else {
-      _linuxOnboarding = LinuxOnboardingController(
-        store: SharedPreferencesOnboardingStore(
-          platform: OnboardingPlatform.linux,
-        ),
-        integration: MethodChannelLinuxIntegrationPort(),
-      );
-      _ownsLinuxOnboarding = true;
-    }
-    final controller = _linuxOnboarding;
-    if (controller == null) {
-      _linuxOnboardingReady = true;
-      return;
-    }
-    unawaited(_initializeLinuxOnboarding(controller));
-  }
-
-  Future<void> _initializeLinuxOnboarding(
-    LinuxOnboardingController controller,
-  ) async {
-    await controller.initialize();
-    if (mounted) setState(() => _linuxOnboardingReady = true);
+    if (mounted) setState(() => _onboardingReady = true);
   }
 
   Future<void> _finishOnboarding() async {
@@ -762,9 +604,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     await _activatePendingPairingLink();
   }
 
-  Future<void> _openAndroidCaptureSetup() async {
-    final controller = _androidOnboarding;
-    if (controller == null || !await controller.reopenCaptureSetup()) return;
+  Future<void> _reopenOnboardingSetup() async {
+    final controller = _onboarding;
+    if (controller == null || !await controller.reopenSetup()) return;
     if (mounted) setState(() {});
   }
 
@@ -830,85 +672,59 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   Widget _buildPresentation({required bool windowReady}) {
     if (_uiMemory.suspended) return const SizedBox.expand();
-    final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
-    if (!_macosOnboardingReady ||
-        !_androidOnboardingReady ||
-        !_linuxOnboardingReady ||
-        !_windowsOnboardingReady) {
+    final unifiedTitleBar = usesUnifiedMacosTitleBar(
+      _desktopWindow,
+      windowReady: windowReady,
+    );
+    if (!_onboardingReady) {
       return ShadcnApp(
         title: 'CopyPaste',
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,
         builder: AppTheme.builder,
-        home: Scaffold(
-          headers: unifiedTitleBar
-              ? const [MacosWindowHeader(title: Text('CopyPaste'))]
-              : const [AppBar(title: Text('CopyPaste')), Divider()],
-          child: const StateView.loading(message: 'Preparing CopyPaste.'),
+        locale: widget.language?.locale,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        localeListResolutionCallback: AppLocalization.resolve,
+        home: AppStringsLocale(
+          child: Scaffold(
+            headers: unifiedTitleBar
+                ? const [MacosWindowHeader(title: Text('CopyPaste'))]
+                : const [AppBar(title: Text('CopyPaste')), Divider()],
+            child: Builder(
+              builder: (context) =>
+                  StateView.loading(message: context.l10n.appPreparing),
+            ),
+          ),
         ),
       );
     }
-    final onboarding = _macosOnboarding;
+    final onboarding = _onboarding;
     if (onboarding != null && !onboarding.complete) {
       return ShadcnApp(
-        title: 'Set up CopyPaste',
+        onGenerateTitle: (context) => context.l10n.onboardingTitle,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,
         builder: AppTheme.builder,
-        home: MacosOnboardingScreen(
-          controller: onboarding,
-          onFinished: _finishOnboarding,
-          unifiedTitleBar: unifiedTitleBar,
-        ),
-      );
-    }
-    final androidOnboarding = _androidOnboarding;
-    if (androidOnboarding != null && !androidOnboarding.complete) {
-      return ShadcnApp(
-        title: 'Set up CopyPaste',
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: AppTheme.mode,
-        builder: AppTheme.builder,
-        home: AndroidOnboardingScreen(
-          controller: androidOnboarding,
-          onFinished: _finishOnboarding,
-        ),
-      );
-    }
-    final windowsOnboarding = _windowsOnboarding;
-    if (windowsOnboarding != null && !windowsOnboarding.complete) {
-      return ShadcnApp(
-        title: 'Set up CopyPaste',
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: AppTheme.mode,
-        builder: AppTheme.builder,
-        home: WindowsOnboardingScreen(
-          controller: windowsOnboarding,
-          onFinished: _finishOnboarding,
-        ),
-      );
-    }
-    final linuxOnboarding = _linuxOnboarding;
-    if (linuxOnboarding != null && !linuxOnboarding.complete) {
-      return ShadcnApp(
-        title: 'Set up CopyPaste',
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: AppTheme.mode,
-        builder: AppTheme.builder,
-        home: LinuxOnboardingScreen(
-          controller: linuxOnboarding,
-          onFinished: _finishOnboarding,
+        locale: widget.language?.locale,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        localeListResolutionCallback: AppLocalization.resolve,
+        home: AppStringsLocale(
+          child: OnboardingScreen(
+            controller: onboarding,
+            onFinished: _finishOnboarding,
+            unifiedTitleBar: unifiedTitleBar,
+          ),
         ),
       );
     }
     return CopyPasteApp(
       navigatorKey: _rootNavigatorKey,
       navigation: _navigation,
+      language: widget.language,
       historyController: _historyController,
       devicesController: _devicesController,
       notifications: _notifications,
@@ -919,17 +735,16 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {
-        _RuntimeState.starting =>
-          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.starting => AppStrings.current.appRuntimeWaiting,
         _RuntimeState.failed => _runtimeFailureMessage,
         _RuntimeState.idle || _RuntimeState.ready => null,
       },
       onRetryRuntime: _runtimeState == _RuntimeState.failed
           ? _retryRuntime
           : null,
-      onOpenAndroidCaptureSetup: _androidOnboarding == null
-          ? null
-          : _openAndroidCaptureSetup,
+      onOpenAndroidCaptureSetup: _onboarding?.setup.reopenable == true
+          ? _reopenOnboardingSetup
+          : null,
     );
   }
 }

@@ -19,6 +19,7 @@ void main() {
         contentClass: runtime.ClipContentClass.file,
         createdAtMs: 1704067200000,
         pinned: true,
+        tagIds: const ['tag-work'],
         originDeviceName: 'Work laptop',
         originDeviceClass: runtime.DeviceClass.laptop,
         sourceAppName: 'Editor',
@@ -40,6 +41,7 @@ void main() {
 
       expect(listed.contentKind, HistoryClipKind.file);
       expect(listed.body, isNull);
+      expect(listed.tagIds, ['tag-work']);
       expect(detail.body, 'The complete clip body');
       expect(detail.file?.name, 'report.pdf');
       expect(detail.file?.mimeType, 'application/pdf');
@@ -69,6 +71,7 @@ void main() {
         contentClass: runtime.ClipContentClass.image,
         createdAtMs: 0,
         pinned: false,
+        tagIds: const [],
         originDeviceName: 'Phone',
         originDeviceClass: runtime.DeviceClass.phone,
         truncated: false,
@@ -100,6 +103,7 @@ void main() {
       runtime.ClipSemanticKind.code: HistoryClipKind.code,
       runtime.ClipSemanticKind.json: HistoryClipKind.json,
       runtime.ClipSemanticKind.path: HistoryClipKind.path,
+      runtime.ClipSemanticKind.credentials: HistoryClipKind.credentials,
     };
 
     for (final entry in expected.entries) {
@@ -117,6 +121,7 @@ void main() {
               : null,
           createdAtMs: 0,
           pinned: false,
+          tagIds: const [],
           originDeviceClass: runtime.DeviceClass.unknown,
           truncated: false,
           tooLargeToSync: false,
@@ -147,6 +152,7 @@ void main() {
   test('maps opaque filter IDs separately from display labels', () {
     final facets = RuntimeHistoryRepository.mapFacets(
       const runtime.HistoryFacets(
+        tags: [],
         originDevices: [
           runtime.HistoryDeviceFacet(
             id: 'device-1',

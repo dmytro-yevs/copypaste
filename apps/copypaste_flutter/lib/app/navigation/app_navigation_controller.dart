@@ -65,6 +65,7 @@ class AppNavigationController extends ChangeNotifier {
 
   AppDestination _selectedDestination;
   bool _bottomOverlayOpen = false;
+  int _visibleDrawers = 0;
 
   AppDestination get selectedDestination => _selectedDestination;
 
@@ -73,7 +74,18 @@ class AppNavigationController extends ChangeNotifier {
     historyFindRequests.value = true;
   }
 
-  bool get bottomOverlayOpen => _bottomOverlayOpen;
+  bool get bottomOverlayOpen => _bottomOverlayOpen || _visibleDrawers > 0;
+
+  void handleDrawerVisibilityChanged(bool visible) {
+    final wasOpen = bottomOverlayOpen;
+    if (visible) {
+      _visibleDrawers++;
+    } else if (_visibleDrawers > 0) {
+      _visibleDrawers--;
+    }
+    // A replaced drawer completes after its successor has already opened.
+    if (wasOpen != bottomOverlayOpen) notifyListeners();
+  }
 
   void setBottomOverlayOpen(bool open) {
     if (_bottomOverlayOpen == open) return;

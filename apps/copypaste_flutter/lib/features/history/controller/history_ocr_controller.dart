@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/clipboard/clipboard_writer.dart';
@@ -58,7 +59,7 @@ class HistoryOcrController extends ChangeNotifier {
       if (!available) {
         _error =
             _modules.errorMessage ??
-            'OCR is unavailable. Check the module in Settings and try again.';
+            AppStrings.current.historyOcrErrorUnavailable;
         return;
       }
       final input = await _imageInput.prepare(clip);
@@ -72,7 +73,7 @@ class HistoryOcrController extends ChangeNotifier {
         if (_disposed) return;
         if (result == null) {
           _error =
-              _modules.errorMessage ?? 'OCR could not be started. Try again.';
+              _modules.errorMessage ?? AppStrings.current.historyOcrErrorStart;
         } else {
           _text = result.text;
         }
@@ -80,7 +81,7 @@ class HistoryOcrController extends ChangeNotifier {
         await input.dispose();
       }
     } catch (_) {
-      if (!_disposed) _error = 'Image text could not be recognized. Try again.';
+      if (!_disposed) _error = AppStrings.current.historyOcrErrorRecognize;
     } finally {
       _busy = false;
       if (!_disposed) notifyListeners();

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as frb;
+import 'package:copypaste_flutter/l10n/l10n.dart';
 
 import '../../shared/runtime_event_service.dart';
 import 'devices_gateway.dart';
@@ -95,7 +96,7 @@ class FlutterRustDevicesGateway
   Future<DevicesPairingSession> requestNearbyPairing(String address) async {
     final api = _api;
     if (api is! GeneratedNearbyPairingApi) {
-      throw StateError('Nearby pairing is unavailable.');
+      throw StateError(AppStrings.current.devicesNearbyPairingUnavailable);
     }
     final ceremony = await (api as GeneratedNearbyPairingApi)
         .requestNearbyPairing(address);
@@ -480,7 +481,7 @@ class DevicesVerificationCodeRequiredException implements Exception {
   const DevicesVerificationCodeRequiredException();
 
   @override
-  String toString() => 'Reveal and compare the verification code first.';
+  String toString() => AppStrings.current.pairingVerificationCodeRequired;
 }
 
 /// Opaque generated ceremony state exposed to the ordinary Devices page.

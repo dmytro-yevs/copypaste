@@ -26,6 +26,7 @@ constexpr size_t kMaximumArtifactBytes = 16 * 1024 * 1024;
 constexpr UINT kRetireQuickPaste = WM_APP + 42;
 constexpr UINT kFinishQuickPasteRetirement = WM_APP + 43;
 constexpr UINT kFailQuickPasteOpen = WM_APP + 44;
+constexpr UINT kMemoryPressure = WM_APP + 45;
 constexpr UINT_PTR kQuickPasteShutdownTimer = 1;
 constexpr char kQuickPasteHostChannel[] =
     "com.copypaste.app/quick_paste_host";
@@ -176,6 +177,8 @@ bool FlutterWindow::OnCreate() {
         flutter_controller_->engine()->messenger(), GetHandle());
     startup_channel_ = std::make_unique<StartupChannel>(
         flutter_controller_->engine()->messenger());
+    memory_pressure_monitor_ =
+        std::make_unique<MemoryPressureMonitor>(GetHandle(), kMemoryPressure);
   }
   if (is_quick_paste_context_) {
     quick_paste_channel_ =
@@ -218,13 +221,12 @@ bool FlutterWindow::OnCreate() {
             const bool pasted = PasteIntoPreviousWindow(id);
             result->Success(flutter::EncodableValue(
                 pasted));
-            if (!::IsWindowVisible(GetHandle())) NotifyQuickPasteHidden(id);
+            ScheduleQuickPasteRetirement();
           } else if (call.method_name() == "close") {
             const auto id = QuickPastePresentationId(call.arguments());
-            const bool current = quick_paste_session_.id() == id;
             quick_paste_session_.Close(id, GetHandle());
             result->Success(flutter::EncodableValue(true));
-            if (current) NotifyQuickPasteHidden(id);
+            ScheduleQuickPasteRetirement();
           } else if (call.method_name() == "openMain") {
             ShowMainWindow(false);
             result->Success(flutter::EncodableValue(true));
@@ -447,6 +449,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  memory_pressure_monitor_.reset();
   quick_paste_session_.Invalidate();
   CloseProtectedPairingContext(pairing_context_id_);
   CloseQuickPasteContext();
@@ -557,6 +560,18 @@ bool FlutterWindow::OpenQuickPasteContext(const std::optional<RECT>& tray_anchor
   const bool shown = quick_paste_window_->ShowQuickPaste(sampled_foreground, tray_anchor);
   if (!shown) quick_paste_window_->ScheduleQuickPasteRetirement();
   return shown;
+}
+
+void FlutterWindow::NotifyMemoryPressure() {
+  // The Windows embedder does not forward OS memory pressure to the framework.
+  static constexpr char kMessage[] = "{\"type\":\"memoryPressure\"}";
+  for (FlutterWindow* window : {this, quick_paste_window_.get(),
+                                protected_pairing_window_.get()}) {
+    if (!window || !window->flutter_controller_) continue;
+    window->flutter_controller_->engine()->messenger()->Send(
+        "flutter/system", reinterpret_cast<const uint8_t*>(kMessage),
+        sizeof(kMessage) - 1);
+  }
 }
 
 void FlutterWindow::CloseQuickPasteContext() {
@@ -748,7 +763,7 @@ bool PresentQuickPaste(
   MONITORINFO monitor_info{sizeof(MONITORINFO)};
   if (!api.get_monitor_info(monitor, &monitor_info) || !owns()) return fail();
   // Move first so GetDpiForWindow resolves the display at the presentation anchor rather
-  // than the display where this pre-warmed hidden window was created.
+  // than the display where this hidden window was created.
   if (!api.set_window_pos(window, HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
                       SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
   const UINT dpi = api.get_dpi_for_window(window);
@@ -858,13 +873,6 @@ void FlutterWindow::NotifyQuickPasteOpened() {
           nullptr, [failed](const auto&, const auto&, const auto*) { failed(); }, failed));
 }
 
-void FlutterWindow::NotifyQuickPasteHidden(int64_t presentation_id) {
-  if (presentation_id <= 0 || !quick_paste_channel_) return;
-  quick_paste_channel_->InvokeMethod(
-      "hidden", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
-          {flutter::EncodableValue("presentationId"), flutter::EncodableValue(presentation_id)}}));
-}
-
 void FlutterWindow::ScheduleQuickPasteRetirement() {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
   ::PostMessage(main_window_handle_, kRetireQuickPaste,
@@ -939,10 +947,9 @@ bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
 
 void FlutterWindow::ShowMainWindow(bool open_settings) {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
-  const auto id = quick_paste_session_.id();
   quick_paste_session_.Invalidate();
   ::ShowWindow(GetHandle(), SW_HIDE);
-  NotifyQuickPasteHidden(id);
+  ScheduleQuickPasteRetirement();
   ::ShowWindow(main_window_handle_, SW_SHOW);
   ::SetForegroundWindow(main_window_handle_);
   if (quick_paste_channel_) {
@@ -1005,10 +1012,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
     if (message == WM_SIZE) UpdateQuickPasteWindowCorners();
     if (message == WM_CLOSE) {
-      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      NotifyQuickPasteHidden(id);
+      ScheduleQuickPasteRetirement();
       return 0;
     }
     if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
@@ -1016,10 +1022,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       // A save dialog owns focus until the inspector's download completes.
       const auto activated_window = reinterpret_cast<HWND>(lparam);
       if (activated_window && ::GetAncestor(activated_window, GA_ROOTOWNER) == hwnd) return 0;
-      const auto id = quick_paste_session_.id();
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
-      NotifyQuickPasteHidden(id);
+      ScheduleQuickPasteRetirement();
       return 0;
     }
   } else if (!is_protected_pairing_context_ && message == kFailQuickPasteOpen) {
@@ -1028,8 +1033,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         quick_paste_window_->quick_paste_session_.id(), quick_paste_window_->quick_paste_retiring_)) {
       auto* context = quick_paste_window_.get();
       context->quick_paste_session_.Close(static_cast<int64_t>(lparam), context->GetHandle());
-      context->NotifyQuickPasteHidden(static_cast<int64_t>(lparam));
       context->ScheduleQuickPasteRetirement();
+    }
+    return 0;
+  } else if (!is_protected_pairing_context_ && message == kMemoryPressure) {
+    if (memory_pressure_monitor_ && memory_pressure_monitor_->HandleSignal(wparam)) {
+      NotifyMemoryPressure();
     }
     return 0;
   } else if (!is_protected_pairing_context_ && message == kRetireQuickPaste) {

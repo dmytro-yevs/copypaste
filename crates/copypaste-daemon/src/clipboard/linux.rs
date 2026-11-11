@@ -21,7 +21,7 @@ use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
-use super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
+use super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
 use copypaste_ipc::{CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability};
 
 mod formats;
@@ -97,6 +97,7 @@ enum Command {
 struct OwnedSelection {
     target: Atom,
     bytes: Vec<u8>,
+    concealed: bool,
 }
 
 /// Ownership metadata is sufficient to keep a policy-dropped value private
@@ -176,33 +177,53 @@ impl Sender {
 
 pub(super) struct X11Clipboard {
     sender: Arc<Sender>,
-    changed: Arc<AtomicBool>,
+    changed: Arc<ChangeFlag>,
     available: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     staging: super::file_materialize::StagingArea,
 }
 
-struct WorkerAvailability(Arc<AtomicBool>);
+/// The pending-change bit. Setting it wakes the capture loop.
+struct ChangeFlag {
+    pending: AtomicBool,
+    signal: Arc<ChangeSignal>,
+}
+
+impl ChangeFlag {
+    fn store(&self, pending: bool) {
+        self.pending.store(pending, Ordering::Release);
+        if pending {
+            self.signal.notify.notify_one();
+        }
+    }
+}
+
+struct WorkerAvailability {
+    available: Arc<AtomicBool>,
+    signal: Arc<ChangeSignal>,
+}
 
 impl WorkerAvailability {
-    fn new(available: Arc<AtomicBool>) -> Self {
+    fn new(available: Arc<AtomicBool>, signal: Arc<ChangeSignal>) -> Self {
         available.store(false, Ordering::Release);
-        Self(available)
+        Self { available, signal }
     }
 
     fn mark_ready(&self) {
-        self.0.store(true, Ordering::Release);
+        self.available.store(true, Ordering::Release);
     }
 }
 
 impl Drop for WorkerAvailability {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        self.available.store(false, Ordering::Release);
+        // The capture loop re-reads availability and resumes timed retries.
+        self.signal.notify.notify_one();
     }
 }
 
 impl X11Clipboard {
-    pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
+    pub(super) fn new(data_dir: &Path, signal: Arc<ChangeSignal>) -> std::io::Result<Self> {
         // Create the cleanup owner before exposing a worker which can accept a
         // file payload. A spawned worker must never outlive unowned plaintext.
         let staging = super::file_materialize::StagingArea::new(data_dir)?;
@@ -210,7 +231,10 @@ impl X11Clipboard {
         let (read, write) = UnixStream::pair()?;
         read.set_nonblocking(true)?;
         write.set_nonblocking(true)?;
-        let changed = Arc::new(AtomicBool::new(true));
+        let changed = Arc::new(ChangeFlag {
+            pending: AtomicBool::new(true),
+            signal,
+        });
         let thread_changed = Arc::clone(&changed);
         let available = Arc::new(AtomicBool::new(false));
         let thread_available = Arc::clone(&available);
@@ -229,7 +253,7 @@ impl X11Clipboard {
         })
     }
     fn read(&mut self, settings: &copypaste_ipc::ConfigData) -> Option<Capture> {
-        if !self.changed.swap(false, Ordering::AcqRel) && !settings.private_mode {
+        if !self.changed.pending.swap(false, Ordering::AcqRel) && !settings.private_mode {
             return None;
         }
         let (tx, rx) = mpsc::channel();
@@ -269,6 +293,9 @@ pub(in crate::clipboard) struct AdaptiveClipboard {
     data_dir: PathBuf,
     last_probe: Instant,
     inactive_since: Option<Instant>,
+    // Shared by every adapter generation; the capture loop holds it once.
+    signal: Arc<ChangeSignal>,
+    source_attribution_required: bool,
 }
 
 impl AdaptiveClipboard {
@@ -305,10 +332,11 @@ impl AdaptiveClipboard {
             self.inactive_since.get_or_insert_with(Instant::now);
         }
         let replacement = if matches!(self.active, LinuxClipboard::Wayland(_)) {
+            let signal = Arc::clone(&self.signal);
             if gnome::GnomeClipboard::probe_gnome() {
-                gnome::GnomeClipboard::new(&self.data_dir).map(LinuxClipboard::Gnome)
+                gnome::GnomeClipboard::new(&self.data_dir, signal).map(LinuxClipboard::Gnome)
             } else if gnome::GnomeClipboard::probe_kwin() {
-                gnome::GnomeClipboard::new_kwin(&self.data_dir).map(LinuxClipboard::Kwin)
+                gnome::GnomeClipboard::new_kwin(&self.data_dir, signal).map(LinuxClipboard::Kwin)
             } else {
                 return;
             }
@@ -317,7 +345,8 @@ impl AdaptiveClipboard {
             .is_some_and(|since| since.elapsed() >= ADAPTER_REPROBE_INTERVAL)
             && wayland::WaylandClipboard::probe_data_control()
         {
-            wayland::WaylandClipboard::new(&self.data_dir).map(LinuxClipboard::Wayland)
+            wayland::WaylandClipboard::new(&self.data_dir, Arc::clone(&self.signal))
+                .map(LinuxClipboard::Wayland)
         } else {
             return;
         };
@@ -333,6 +362,20 @@ impl AdaptiveClipboard {
 }
 
 impl LinuxClipboard {
+    fn pending_change(&mut self, source_attribution_required: bool) -> bool {
+        match self {
+            Self::X11(source) => source.changed(),
+            Self::Gnome(source) => source.changed(),
+            Self::Kwin(source) => source.changed(),
+            Self::Wayland(source) => source.changed(),
+            Self::Adaptive(source) => {
+                source.active.changed()
+                    || source.should_probe_requirement(source_attribution_required)
+                        && source.last_probe.elapsed() >= ADAPTER_REPROBE_INTERVAL
+            }
+        }
+    }
+
     pub(super) fn new_with_requirements(
         data_dir: &Path,
         source_attribution_required: bool,
@@ -353,17 +396,25 @@ impl LinuxClipboard {
             kwin,
             source_attribution_required,
         );
+        let signal = Arc::new(ChangeSignal::default());
+        let adapter_signal = Arc::clone(&signal);
         let active = match selected {
-            Adapter::X11 => X11Clipboard::new(data_dir).map(Self::X11),
-            Adapter::Gnome => gnome::GnomeClipboard::new(data_dir).map(Self::Gnome),
-            Adapter::Kwin => gnome::GnomeClipboard::new_kwin(data_dir).map(Self::Kwin),
-            Adapter::Wayland => wayland::WaylandClipboard::new(data_dir).map(Self::Wayland),
+            Adapter::X11 => X11Clipboard::new(data_dir, adapter_signal).map(Self::X11),
+            Adapter::Gnome => gnome::GnomeClipboard::new(data_dir, adapter_signal).map(Self::Gnome),
+            Adapter::Kwin => {
+                gnome::GnomeClipboard::new_kwin(data_dir, adapter_signal).map(Self::Kwin)
+            }
+            Adapter::Wayland => {
+                wayland::WaylandClipboard::new(data_dir, adapter_signal).map(Self::Wayland)
+            }
         }?;
         Ok(Self::Adaptive(Box::new(AdaptiveClipboard {
             active,
             data_dir: data_dir.to_path_buf(),
             last_probe: Instant::now(),
             inactive_since: None,
+            signal,
+            source_attribution_required,
         })))
     }
 }
@@ -510,6 +561,9 @@ impl Drop for X11Clipboard {
 }
 
 impl ClipboardSource for X11Clipboard {
+    fn change_signal(&self) -> Option<Arc<ChangeSignal>> {
+        Some(Arc::clone(&self.changed.signal))
+    }
     fn poll(&mut self) -> Option<Capture> {
         self.read(&copypaste_ipc::ConfigData::default())
     }
@@ -517,15 +571,16 @@ impl ClipboardSource for X11Clipboard {
         self.read(policy.settings)
     }
     fn changed(&mut self) -> bool {
-        self.changed.load(Ordering::Acquire)
+        self.changed.pending.load(Ordering::Acquire)
     }
     fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
         self.write(OwnedSelection {
             target: 0,
             bytes: text.as_bytes().to_vec(),
+            concealed,
         })
     }
     fn set_binary_contents(
@@ -534,6 +589,7 @@ impl ClipboardSource for X11Clipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (_, target) =
@@ -550,8 +606,12 @@ impl ClipboardSource for X11Clipboard {
         } else {
             bytes.to_vec()
         };
-        self.write(OwnedSelection { target, bytes })
-            .map_err(|_| ClipboardWriteError::Failed)
+        self.write(OwnedSelection {
+            target,
+            bytes,
+            concealed,
+        })
+        .map_err(|_| ClipboardWriteError::Failed)
     }
     fn backend_name(&self) -> &'static str {
         "linux-x11-system-clipboard"
@@ -559,6 +619,14 @@ impl ClipboardSource for X11Clipboard {
 }
 
 impl ClipboardSource for LinuxClipboard {
+    fn change_signal(&self) -> Option<Arc<ChangeSignal>> {
+        match self {
+            Self::X11(source) => source.change_signal(),
+            Self::Gnome(source) | Self::Kwin(source) => source.change_signal(),
+            Self::Wayland(source) => source.change_signal(),
+            Self::Adaptive(source) => Some(Arc::clone(&source.signal)),
+        }
+    }
     fn platform_capabilities(&self) -> BTreeMap<PlatformCapability, CapabilityStatus> {
         if let Self::Adaptive(source) = self {
             return source.active.platform_capabilities();
@@ -609,19 +677,23 @@ impl ClipboardSource for LinuxClipboard {
         }
     }
     fn changed(&mut self) -> bool {
-        self.changed_with_requirements(false)
+        self.pending_change(false)
     }
     fn changed_with_requirements(&mut self, source_attribution_required: bool) -> bool {
+        if let Self::Adaptive(source) = self {
+            source.source_attribution_required = source_attribution_required;
+        }
+        self.pending_change(source_attribution_required)
+    }
+    /// Unavailable transports and pending reprobes keep the timed wait, so an
+    /// event-driven idle wait never strands a reconnect or a missed change.
+    fn retry_required(&mut self) -> bool {
         match self {
-            Self::X11(source) => source.changed(),
-            Self::Gnome(source) => source.changed(),
-            Self::Kwin(source) => source.changed(),
-            Self::Wayland(source) => source.changed(),
             Self::Adaptive(source) => {
-                source.active.changed()
-                    || source.should_probe_requirement(source_attribution_required)
-                        && source.last_probe.elapsed() >= ADAPTER_REPROBE_INTERVAL
+                let required = source.source_attribution_required;
+                source.active.retry_required() || source.should_probe_requirement(required)
             }
+            _ => self.changed() || !self.is_available(),
         }
     }
     fn is_available(&self) -> bool {
@@ -633,13 +705,13 @@ impl ClipboardSource for LinuxClipboard {
             Self::Adaptive(source) => source.active.is_available(),
         }
     }
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
         match self {
-            Self::X11(source) => source.set_contents(text),
-            Self::Gnome(source) => source.set_contents(text),
-            Self::Kwin(source) => source.set_contents(text),
-            Self::Wayland(source) => source.set_contents(text),
-            Self::Adaptive(source) => source.active.set_contents(text),
+            Self::X11(source) => source.set_contents(text, concealed),
+            Self::Gnome(source) => source.set_contents(text, concealed),
+            Self::Kwin(source) => source.set_contents(text, concealed),
+            Self::Wayland(source) => source.set_contents(text, concealed),
+            Self::Adaptive(source) => source.active.set_contents(text, concealed),
         }
     }
     fn set_binary_contents(
@@ -648,22 +720,25 @@ impl ClipboardSource for LinuxClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         match self {
-            Self::X11(source) => source.set_binary_contents(item_id, content_type, bytes, metadata),
+            Self::X11(source) => {
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+            }
             Self::Gnome(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Kwin(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Wayland(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
             Self::Adaptive(source) => {
                 source
                     .active
-                    .set_binary_contents(item_id, content_type, bytes, metadata)
+                    .set_binary_contents(item_id, content_type, bytes, metadata, concealed)
             }
         }
     }
@@ -774,10 +849,10 @@ fn capability(
 fn worker(
     commands: mpsc::Receiver<Command>,
     mut wake: UnixStream,
-    changed: Arc<AtomicBool>,
+    changed: Arc<ChangeFlag>,
     available: Arc<AtomicBool>,
 ) {
-    let availability = WorkerAvailability::new(available);
+    let availability = WorkerAvailability::new(available, Arc::clone(&changed.signal));
     let Ok((connection, screen)) = x11rb::connect(None) else {
         return;
     };
@@ -892,7 +967,7 @@ fn command(
     owned: &mut Option<OwnedSelection>,
     privacy: &mut SelectionPrivacy,
     command: Command,
-    changed: &AtomicBool,
+    changed: &ChangeFlag,
     commands: &mpsc::Receiver<Command>,
     wake: &mut UnixStream,
 ) -> bool {
@@ -929,7 +1004,7 @@ fn set_selection(
     a: &Atoms,
     owned: &mut Option<OwnedSelection>,
     payload: &mut OwnedSelection,
-    changed: &AtomicBool,
+    changed: &ChangeFlag,
 ) -> bool {
     payload.target = match payload.target {
         0 => a.utf8,
@@ -957,7 +1032,7 @@ fn set_selection(
         .is_ok();
     if ok {
         *owned = Some(payload.clone());
-        changed.store(false, Ordering::Release);
+        changed.store(false);
     }
     ok
 }
@@ -968,7 +1043,7 @@ fn event(
     owned: &mut Option<OwnedSelection>,
     privacy: &mut SelectionPrivacy,
     event: Event,
-    changed: &AtomicBool,
+    changed: &ChangeFlag,
 ) {
     match event {
         Event::XfixesSelectionNotify(e) if e.selection == a.clipboard => {
@@ -985,7 +1060,7 @@ fn note_selection(
     atoms: &Atoms,
     privacy: &mut SelectionPrivacy,
     event: x11rb::protocol::xfixes::SelectionNotifyEvent,
-    changed: &AtomicBool,
+    changed: &ChangeFlag,
 ) {
     let manager = if (privacy.tainted_cache || privacy.departed_owner.is_some())
         && event.owner != 0
@@ -1000,7 +1075,7 @@ fn note_selection(
         event.subtype != SelectionEvent::SET_SELECTION_OWNER,
         manager,
     );
-    changed.store(readable && event.owner != window, Ordering::Release);
+    changed.store(readable && event.owner != window);
 }
 
 fn manager_owns_selection(
@@ -1058,6 +1133,9 @@ fn serve(
         let mut targets = vec![a.targets, a.utf8, a.text, a.string, a.plain_utf8];
         if let Some(value) = owned {
             targets.push(value.target);
+            if value.concealed {
+                targets.push(a.kde_hint);
+            }
         }
         if c.change_property32(
             PropMode::REPLACE,
@@ -1065,6 +1143,18 @@ fn serve(
             property,
             AtomEnum::ATOM,
             &targets,
+        )
+        .is_ok()
+        {
+            delivered = property;
+        }
+    } else if request.target == a.kde_hint && owned.is_some_and(|value| value.concealed) {
+        if c.change_property8(
+            PropMode::REPLACE,
+            request.requestor,
+            property,
+            request.target,
+            b"secret",
         )
         .is_ok()
         {
@@ -1107,7 +1197,7 @@ struct Transfer<'a> {
     wake: &'a mut UnixStream,
     owned: &'a mut Option<OwnedSelection>,
     privacy: &'a mut SelectionPrivacy,
-    changed: &'a AtomicBool,
+    changed: &'a ChangeFlag,
     stopped: bool,
 }
 
@@ -1141,7 +1231,7 @@ impl Transfer<'_> {
         let revision = self.privacy.revision;
         if settings.private_mode {
             self.privacy.suppress_current();
-            self.changed.store(false, Ordering::Release);
+            self.changed.store(false);
             return None;
         }
         if owner == self.window || !self.privacy.permits_read(owner) {
@@ -1192,14 +1282,15 @@ impl Transfer<'_> {
         if type_ == copypaste_ipc::content_type::FILE {
             return file_capture(bytes, privacy, source);
         }
+        let (content, binary_content) = if binary {
+            (String::new(), Some(bytes))
+        } else {
+            (crate::clipboard::format::text_from_utf8(bytes), None)
+        };
         Some(Capture {
             privacy,
-            content: if binary {
-                String::new()
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
-            },
-            binary_content: binary.then_some(bytes),
+            content,
+            binary_content,
             file_path: None,
             file_metadata: None,
             content_type: type_.to_owned(),
@@ -1385,7 +1476,7 @@ impl Transfer<'_> {
                         // second poll is acknowledged without starting a nested
                         // selection conversion or retaining stale clipboard data.
                         let _ = reply.send(None);
-                        self.changed.store(false, Ordering::Release);
+                        self.changed.store(false);
                     }
                 }
             }
@@ -1587,7 +1678,7 @@ mod tests {
         let available = Arc::new(AtomicBool::new(false));
         let failed_setup = Arc::clone(&available);
         let failed_worker = thread::spawn(move || {
-            let _availability = WorkerAvailability::new(failed_setup);
+            let _availability = WorkerAvailability::new(failed_setup, Default::default());
         });
         failed_worker.join().expect("setup worker exits normally");
         assert!(
@@ -1599,8 +1690,8 @@ mod tests {
         let (ready, started) = mpsc::sync_channel(1);
         let (release, continue_worker) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || {
-            let availability = WorkerAvailability::new(worker_available);
-            assert!(!availability.0.load(Ordering::Acquire));
+            let availability = WorkerAvailability::new(worker_available, Default::default());
+            assert!(!availability.available.load(Ordering::Acquire));
             availability.mark_ready();
             ready.send(()).expect("report worker readiness");
             continue_worker.recv().expect("wait for release");
@@ -2022,7 +2113,8 @@ mod tests {
 
         let directory = tempfile::tempdir().expect("fixture data dir");
         let settings = copypaste_ipc::ConfigData::default();
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         wait_for_available(&clipboard);
         assert!(clipboard
             .poll_with_policy(CapturePolicy::new(&settings))
@@ -2049,7 +2141,8 @@ mod tests {
         }
         let directory = tempfile::tempdir().expect("fixture data dir");
         let owner = FixtureOwner::start(FixturePayload::Stalled);
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         wait_for_available(&clipboard);
         let availability = Arc::clone(&clipboard.available);
         let transfer = thread::spawn(move || {
@@ -2251,7 +2344,8 @@ mod tests {
                 .is_none_or(|mut values| values.next().is_none()),
             "fixture selection owner unexpectedly has direct metadata"
         );
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         let capture = wait_for_capture(&mut clipboard, &settings).expect("capture fixture text");
         assert_eq!(capture.content, "fixture text");
         assert_eq!(
@@ -2264,7 +2358,8 @@ mod tests {
 
         let tiff_bytes = b"fixture tiff".to_vec();
         let tiff = FixtureOwner::start(FixturePayload::Tiff(tiff_bytes.clone()));
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         let capture = wait_for_capture(&mut clipboard, &settings).unwrap_or_else(|| {
             panic!(
                 "capture fixture TIFF; owner handled {} selection requests",
@@ -2287,7 +2382,8 @@ mod tests {
             .to_string()
             .into_bytes();
         let file_owner = FixtureOwner::start(FixturePayload::File(file_uri));
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         let capture = wait_for_capture(&mut clipboard, &settings).expect("capture fixture file");
         assert_eq!(capture.file_path.as_deref(), Some(file.as_path()));
         assert_eq!(
@@ -2298,7 +2394,8 @@ mod tests {
         drop(file_owner);
 
         let secret = FixtureOwner::start(FixturePayload::Secret);
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         assert!(clipboard
             .poll_with_policy(CapturePolicy::new(&settings))
             .is_none());
@@ -2314,7 +2411,8 @@ mod tests {
             excluded_app_bundle_ids: vec!["org.example.Fixture".into()],
             ..Default::default()
         };
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         assert!(clipboard
             .poll_with_policy(CapturePolicy::new(&excluded_settings))
             .is_none());
@@ -2330,6 +2428,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"written tiff",
                 None,
+                false,
             )
             .expect("write TIFF to X11");
         let (connection, _) = x11rb::connect(None).expect("fixture verification X server");
@@ -2352,7 +2451,8 @@ mod tests {
             FixturePayload::Oversized,
         ] {
             let owner = FixtureOwner::start(payload);
-            let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+            let mut clipboard =
+                X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
             let start = Instant::now();
             assert!(clipboard
                 .poll_with_policy(CapturePolicy::new(&settings))
@@ -2511,7 +2611,8 @@ mod tests {
             ),
         ] {
             let directory = tempfile::tempdir().expect("fixture data directory");
-            let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+            let mut clipboard =
+                X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
             wait_for_available(&clipboard);
             let sender = Arc::clone(&clipboard.sender);
             let read_worker = |settings| {
@@ -2599,7 +2700,8 @@ mod tests {
         }
         let directory = tempfile::tempdir().expect("fixture data dir");
         let owner = FixtureOwner::start(FixturePayload::Stalled);
-        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let mut clipboard =
+            X11Clipboard::new(directory.path(), Default::default()).expect("X11 clipboard");
         let sender = Arc::clone(&clipboard.sender);
         let worker = thread::spawn(move || {
             let result = clipboard.read(&copypaste_ipc::ConfigData::default());

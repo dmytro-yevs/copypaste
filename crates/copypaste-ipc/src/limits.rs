@@ -29,7 +29,8 @@ pub const MAX_CLOUD_METADATA_BYTES: usize = MAX_SYNC_METADATA_BYTES;
 /// U+0020 with no short escape encodes as `\u00XX`.
 const JSON_ESCAPE_WORST_CASE: usize = 6;
 
-/// Room for the envelope around one item — ids, timestamps, flags, field names.
+/// Room for the envelope around one item — ids, timestamps, flags, field names
+/// and up to [`crate::MAX_ITEM_TAG_IDS`] tag ids.
 const ITEM_ENVELOPE_BYTES: usize = 4 * 1024;
 
 /// Frames larger than this are rejected before allocation.
@@ -79,7 +80,11 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
 pub const LIST_PREVIEW_BYTES: usize = 1024;
 
 /// Borrow the preview so callers can copy only the displayed prefix.
+///
+/// Surrounding whitespace is never displayed, so it does not consume the
+/// preview budget and dropping it alone does not mark the preview truncated.
 pub fn preview_text(content: &str) -> (&str, bool) {
+    let content = content.trim_start();
     if content.len() > MAX_CONTENT_BYTES {
         let first = unicode_segmentation::UnicodeSegmentation::graphemes(content, true)
             .next()
@@ -89,7 +94,7 @@ pub fn preview_text(content: &str) -> (&str, bool) {
         }
     }
     if content.len() <= LIST_PREVIEW_BYTES {
-        return (content, false);
+        return (content.trim_end(), false);
     }
     let mut cut = 0;
     for (at, cluster) in unicode_segmentation::UnicodeSegmentation::grapheme_indices(content, true)
@@ -99,7 +104,7 @@ pub fn preview_text(content: &str) -> (&str, bool) {
         }
         cut = at + cluster.len();
     }
-    (&content[..cut], true)
+    (content[..cut].trim_end(), true)
 }
 
 pub fn bound_preview(content: &mut String) -> bool {
@@ -129,6 +134,13 @@ mod tests {
         let mut content = "a".repeat(LIST_PREVIEW_BYTES + 1);
         assert!(bound_preview(&mut content));
         assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+    }
+
+    #[test]
+    fn surrounding_whitespace_neither_hides_nor_truncates_the_text() {
+        let mut content = format!("{}word\n \n", "\n".repeat(LIST_PREVIEW_BYTES * 2));
+        assert!(!bound_preview(&mut content));
+        assert_eq!(content, "word");
     }
 
     #[test]
@@ -209,6 +221,8 @@ mod tests {
             color_rgba: None,
             created_at: 1_767_225_600_000,
             pinned: false,
+            // The longest replicated record id the store accepts.
+            tag_ids: vec!["t".repeat(128); crate::MAX_ITEM_TAG_IDS],
             file_details: None,
             image_details: None,
             origin_device_id: "3c6e0b8a-9c15-424f-b8b8-1a2b3c4d5e6f".into(),

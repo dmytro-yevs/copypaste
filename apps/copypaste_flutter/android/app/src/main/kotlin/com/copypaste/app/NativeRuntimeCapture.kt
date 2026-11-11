@@ -20,7 +20,11 @@ internal object NativeRuntimeCapture {
     ): Boolean
     @JvmStatic external fun classify(token: Long, secret: Boolean, transient: Boolean): Boolean
     @JvmStatic external fun abandon(token: Long)
-    @JvmStatic external fun ingestText(token: Long, text: String): Boolean
+    // Results of ingestText; SAVED_SECRET covers OS hints and detected credentials.
+    const val INGEST_REFUSED = 0
+    const val INGEST_SAVED = 1
+    const val INGEST_SAVED_SECRET = 2
+    @JvmStatic external fun ingestText(token: Long, text: String): Int
     @JvmStatic external fun ingestFile(token: Long, sizeBytes: Long, filename: String, mimeType: String, sourceReference: String): Boolean
     @JvmStatic external fun ingestBinary(
         token: Long,

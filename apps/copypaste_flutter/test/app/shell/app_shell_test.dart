@@ -2,6 +2,7 @@ import 'dart:ui' show Tristate;
 
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
+import 'package:copypaste_flutter/app/theme/app_brand_logo.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -298,7 +299,7 @@ void main() {
           )
           .map((item) => item.icon),
       [
-        LucideIcons.history,
+        LucideIcons.clipboardList,
         DevicePresentation.collectionIcon,
         LucideIcons.settings,
       ],
@@ -443,6 +444,47 @@ void main() {
       find.byKey(const ValueKey<String>('bottom-navigation')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('compact editors hide navigation until their drawer closes', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(400, 700);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = AppNavigationController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      _shell(
+        controller: controller,
+        destinations: {
+          AppDestination.history: Builder(
+            builder: (context) => Button.primary(
+              child: const Text('Open editor'),
+              onPressed: () => AppOverlays.showCompactEditor<void>(
+                context,
+                builder: (context) => Button.outline(
+                  onPressed: () => closeOverlay(context),
+                  child: const Text('Close editor'),
+                ),
+              ),
+            ),
+          ),
+          AppDestination.devices: const Text('Devices body'),
+          AppDestination.settings: const Text('Settings body'),
+        },
+      ),
+    );
+    final navigation = find.byKey(const ValueKey<String>('bottom-navigation'));
+    expect(navigation, findsOneWidget);
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    expect(navigation, findsNothing);
+    await tester.tap(find.text('Close editor'));
+    await tester.pumpAndSettle();
+    expect(navigation, findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {
@@ -633,7 +675,7 @@ void main() {
     }
     final railCenter = tester.getCenter(find.byType(NavigationRail)).dx;
     for (final icon in [
-      LucideIcons.history,
+      LucideIcons.clipboardList,
       DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {
@@ -641,11 +683,10 @@ void main() {
       expect(tester.getCenter(iconFinder).dx, closeTo(railCenter, 1));
       expect(tester.widget<Icon>(iconFinder).size, AppIconSize.md);
     }
-    final compactLogo = tester.widget<Image>(
+    final compactLogo = tester.widget<AppBrandLogo>(
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
     );
-    expect(compactLogo.width, AppIconSize.xl);
-    expect(compactLogo.height, AppIconSize.xl);
+    expect(compactLogo.size, AppIconSize.xl);
     expect(
       tester
           .getCenter(find.byKey(const ValueKey<String>('copypaste-brand-logo')))
@@ -696,11 +737,10 @@ void main() {
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
       findsOneWidget,
     );
-    final expandedLogo = tester.widget<Image>(
+    final expandedLogo = tester.widget<AppBrandLogo>(
       find.byKey(const ValueKey<String>('copypaste-brand-logo')),
     );
-    expect(expandedLogo.width, AppIconSize.xl);
-    expect(expandedLogo.height, AppIconSize.xl);
+    expect(expandedLogo.size, AppIconSize.xl);
     final rail = find.byType(NavigationRail);
     final theme = Theme.of(tester.element(rail));
     expect(expandedRail.backgroundColor, theme.colorScheme.secondary);
@@ -756,7 +796,7 @@ void main() {
       }
     }
     for (final icon in [
-      LucideIcons.history,
+      LucideIcons.clipboardList,
       DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {

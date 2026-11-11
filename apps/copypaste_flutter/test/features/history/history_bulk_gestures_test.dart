@@ -53,23 +53,27 @@ void main() {
       await _mount(tester, controller);
       await tester.tap(_clip(0), kind: PointerDeviceKind.mouse);
       await _frames(tester);
-      expect(controller.selectedId, 'clip-0');
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      expect(controller.selection.selectedId, 'clip-0');
+      // macOS reserves Control-click for the context menu.
+      final additive = defaultTargetPlatform == TargetPlatform.macOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(additive);
       await tester.tap(_clip(2), kind: PointerDeviceKind.mouse);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyUpEvent(additive);
       await _frames(tester);
-      expect(controller.bulkSelectedIds, {'clip-0', 'clip-2'});
-      expect(controller.selectedId, isNull);
+      expect(controller.bulk.bulkSelectedIds, {'clip-0', 'clip-2'});
+      expect(controller.selection.selectedId, isNull);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
       await tester.tap(_clip(4), kind: PointerDeviceKind.mouse);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await _frames(tester);
-      expect(controller.bulkSelectedIds, {'clip-2', 'clip-3', 'clip-4'});
+      expect(controller.bulk.bulkSelectedIds, {'clip-2', 'clip-3', 'clip-4'});
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.tap(_clip(0), kind: PointerDeviceKind.mouse);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await _frames(tester);
-      expect(controller.bulkSelectedIds, {
+      expect(controller.bulk.bulkSelectedIds, {
         'clip-0',
         'clip-2',
         'clip-3',
@@ -81,7 +85,7 @@ void main() {
       expect(repository.deletedIds, isEmpty);
       await tester.tap(find.widgetWithText(Button, 'Cancel'));
       await _frames(tester);
-      expect(controller.bulkSelectedIds, hasLength(4));
+      expect(controller.bulk.bulkSelectedIds, hasLength(4));
       await tester.sendKeyEvent(LogicalKeyboardKey.delete);
       await _frames(tester);
       await tester.tap(find.widgetWithText(Button, 'Delete'));
@@ -92,7 +96,7 @@ void main() {
         'clip-3',
         'clip-4',
       });
-      expect(controller.items.map((clip) => clip.id).toSet(), {
+      expect(controller.window.items.map((clip) => clip.id).toSet(), {
         'clip-1',
         'clip-5',
       });
@@ -117,11 +121,11 @@ void main() {
         );
         await tester.pump(kLongPressTimeout + kPressTimeout);
         await tester.pump();
-        expect(controller.bulkSelectedIds, {'clip-0'});
-        expect(controller.isBulkDragSelecting, isTrue);
+        expect(controller.bulk.bulkSelectedIds, {'clip-0'});
+        expect(controller.bulk.isBulkDragSelecting, isTrue);
         await gesture.moveTo(tester.getCenter(_clip(3)));
         await _frames(tester);
-        expect(controller.bulkSelectedIds, {
+        expect(controller.bulk.bulkSelectedIds, {
           'clip-0',
           'clip-1',
           'clip-2',
@@ -129,7 +133,7 @@ void main() {
         });
         await gesture.moveTo(tester.getCenter(_clip(1)));
         await _frames(tester);
-        expect(controller.bulkSelectedIds, {'clip-0', 'clip-1'});
+        expect(controller.bulk.bulkSelectedIds, {'clip-0', 'clip-1'});
         if (kind == PointerDeviceKind.mouse) {
           await tester.sendEventToBinding(
             PointerScrollEvent(
@@ -139,22 +143,22 @@ void main() {
             ),
           );
           await _frames(tester);
-          expect(controller.bulkSelectedIds.length, greaterThan(2));
+          expect(controller.bulk.bulkSelectedIds.length, greaterThan(2));
         }
         await gesture.up();
         await _frames(tester);
-        expect(controller.isBulkDragSelecting, isFalse);
-        final selected = Set<String>.of(controller.bulkSelectedIds);
+        expect(controller.bulk.isBulkDragSelecting, isFalse);
+        final selected = Set<String>.of(controller.bulk.bulkSelectedIds);
         final scrollable = tester.state<ScrollableState>(
           find.byType(Scrollable).first,
         );
         final pixels = scrollable.position.pixels;
         await tester.pump(const Duration(milliseconds: 500));
         expect(scrollable.position.pixels, pixels);
-        expect(controller.bulkSelectedIds, selected);
+        expect(controller.bulk.bulkSelectedIds, selected);
         await tester.drag(find.byType(CustomScrollView), const Offset(0, -170));
         await _frames(tester);
-        expect(controller.bulkSelectedIds, selected);
+        expect(controller.bulk.bulkSelectedIds, selected);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
@@ -193,18 +197,18 @@ void main() {
         for (var frame = 0; frame < 24; frame++) {
           await tester.pump(const Duration(milliseconds: 100));
         }
-        expect(controller.items.length, greaterThan(6));
-        expect(controller.bulkSelectedIds.length, greaterThan(6));
-        expect(controller.bulkSelectedIds, contains('clip-0'));
+        expect(controller.window.items.length, greaterThan(6));
+        expect(controller.bulk.bulkSelectedIds.length, greaterThan(6));
+        expect(controller.bulk.bulkSelectedIds, contains('clip-0'));
         expect(repository.cursors, contains('6'));
         // The original row has left the viewport; the same held pointer still selects.
         expect(_clip(0).hitTestable(), findsNothing);
         await gesture.cancel();
         await _frames(tester);
-        expect(controller.isBulkDragSelecting, isFalse);
-        final selected = Set<String>.of(controller.bulkSelectedIds);
+        expect(controller.bulk.isBulkDragSelecting, isFalse);
+        final selected = Set<String>.of(controller.bulk.bulkSelectedIds);
         await tester.pump(const Duration(milliseconds: 500));
-        expect(controller.bulkSelectedIds, selected);
+        expect(controller.bulk.bulkSelectedIds, selected);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
@@ -239,7 +243,7 @@ void main() {
           expect(visible.isEmpty, isFalse);
           await tester.tapAt(visible.center);
           await _frames(tester);
-          expect(controller.bulkSelectedIds, {'clip-0'});
+          expect(controller.bulk.bulkSelectedIds, {'clip-0'});
           final imageFinder = find.byKey(
             const ValueKey('history-card-image-clip-0'),
           );

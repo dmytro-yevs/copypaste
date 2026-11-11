@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:mime/mime.dart';
@@ -45,7 +46,7 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
           .toList(growable: false);
     } on PlatformException catch (error) {
       throw HistoryFileOperationException(
-        error.message ?? 'Files could not be selected.',
+        error.message ?? AppStrings.current.platformFilesSelectionFailed,
       );
     }
   }
@@ -66,8 +67,8 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
       prepare: (_) async {
         if (await FileSystemEntity.type(file.path) !=
             FileSystemEntityType.file) {
-          throw const HistoryFileOperationException(
-            'Only regular files can be imported.',
+          throw HistoryFileOperationException(
+            AppStrings.current.platformFilesOnlyRegular,
           );
         }
         return file.path;

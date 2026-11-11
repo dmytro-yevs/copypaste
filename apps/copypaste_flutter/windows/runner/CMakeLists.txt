@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "app_update_channel.cpp"
   "app_update_verifier.cpp"
   "flutter_window.cpp"
+  "memory_pressure_monitor.cpp"
   "screenshot_protection.cpp"
   "startup_channel.cpp"
   "main.cpp"
@@ -43,6 +44,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "advapi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "bcrypt.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "wintrust.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../../../crates/copypaste-flutter-bridge/include"

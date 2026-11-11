@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import '../features/modules/controller/modules_controller.dart';
 
@@ -8,10 +7,11 @@ import '../features/notifications/notifications_controller.dart';
 import '../features/notifications/notifications_view.dart';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../features/devices/devices.dart';
+import '../l10n/l10n.dart';
+import 'localization/app_language.dart';
 import '../features/history/controller/history_controller.dart';
 import '../features/history/view/history_screen.dart';
 import '../features/settings/controller/quick_paste_settings_controller.dart';
@@ -46,6 +46,7 @@ class CopyPasteApp extends StatelessWidget {
     this.onRetryRuntime,
     this.onOpenAndroidCaptureSetup,
     this.navigatorKey,
+    this.language,
   });
 
   final AppNavigationController navigation;
@@ -62,6 +63,7 @@ class CopyPasteApp extends StatelessWidget {
   final Future<void> Function()? onRetryRuntime;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
   final GlobalKey<NavigatorState>? navigatorKey;
+  final AppLanguageController? language;
 
   @override
   Widget build(BuildContext context) {
@@ -85,17 +87,22 @@ class CopyPasteApp extends StatelessWidget {
           ),
         ),
       ),
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      supportedLocales: ShadcnLocalizations.supportedLocales,
+      locale: language?.locale,
+      localizationsDelegates: AppLocalization.delegates,
+      supportedLocales: AppLocalization.supportedLocales,
+      localeListResolutionCallback: AppLocalization.resolve,
       home: Builder(
         builder: (context) {
+          AppStrings.useLocale(Localizations.localeOf(context));
           final theme = Theme.of(context);
           final overlay = theme.brightness == Brightness.dark
               ? SystemUiOverlayStyle.light
               : SystemUiOverlayStyle.dark;
           Widget buildContent(bool windowReady) {
-            final unifiedTitleBar =
-                Platform.isMacOS && desktopWindow != null && windowReady;
+            final unifiedTitleBar = usesUnifiedMacosTitleBar(
+              desktopWindow,
+              windowReady: windowReady,
+            );
             final shell = AppShell(
               controller: navigation,
               unifiedTitleBar: unifiedTitleBar,
@@ -108,7 +115,7 @@ class CopyPasteApp extends StatelessWidget {
                   : () {
                       if (navigation.selectedDestination ==
                           AppDestination.history) {
-                        unawaited(historyController!.reload());
+                        unawaited(historyController!.window.reload());
                       }
                     },
               headerActions: {
@@ -118,13 +125,14 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -133,7 +141,7 @@ class CopyPasteApp extends StatelessWidget {
                       controller: settingsController!,
                       devices: devicesController,
                       onDrawerVisibilityChanged:
-                          navigation.setBottomOverlayOpen,
+                          navigation.handleDrawerVisibilityChanged,
                     ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
@@ -143,13 +151,14 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -161,7 +170,7 @@ class CopyPasteApp extends StatelessWidget {
                         controller: settingsController!,
                         devices: devicesController,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                     if (settingsController != null)
                       CaptureHeaderAction(controller: settingsController!),
@@ -172,13 +181,14 @@ class CopyPasteApp extends StatelessWidget {
                       NotificationsHeaderAction(
                         controller: inbox,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
-                    if (historyController?.fileOperations case final transfers?)
+                    if (historyController?.transfers.fileOperations
+                        case final transfers?)
                       FileOperationsHeaderAction(
                         controller: transfers,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         resolveDeviceClass: _deviceClassResolver(
                           devicesController,
                         ),
@@ -187,7 +197,7 @@ class CopyPasteApp extends StatelessWidget {
                       controller: settingsController!,
                       devices: devicesController,
                       onDrawerVisibilityChanged:
-                          navigation.setBottomOverlayOpen,
+                          navigation.handleDrawerVisibilityChanged,
                     ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
@@ -195,47 +205,54 @@ class CopyPasteApp extends StatelessWidget {
               destinations: {
                 AppDestination.history: historyController == null
                     ? StateView.error(
-                        title: 'History runtime is unavailable',
+                        title: context.l10n.appHistoryUnavailableTitle,
                         message:
                             runtimeUnavailableMessage ??
-                            'Start the application runtime before opening history.',
-                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                            context.l10n.appHistoryUnavailableMessage,
+                        actionLabel: onRetryRuntime == null
+                            ? null
+                            : context.l10n.commonRetry,
                         onAction: onRetryRuntime,
                       )
                     : HistoryScreen(
                         controller: historyController!,
                         findRequests: navigation.historyFindRequests,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                       ),
                 AppDestination.devices: devicesController == null
                     ? StateView.error(
-                        title: 'Devices runtime is unavailable',
+                        title: context.l10n.appDevicesUnavailableTitle,
                         message:
                             runtimeUnavailableMessage ??
-                            'Start the application runtime before opening devices.',
-                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                            context.l10n.appDevicesUnavailableMessage,
+                        actionLabel: onRetryRuntime == null
+                            ? null
+                            : context.l10n.commonRetry,
                         onAction: onRetryRuntime,
                       )
                     : DevicesScreen(
                         controller: devicesController!,
                         onDrawerVisibilityChanged:
-                            navigation.setBottomOverlayOpen,
+                            navigation.handleDrawerVisibilityChanged,
                         isActive: () =>
                             navigation.selectedDestination ==
                             AppDestination.devices,
                       ),
                 AppDestination.settings: settingsController == null
                     ? StateView.error(
-                        title: 'Settings runtime is unavailable',
+                        title: context.l10n.appSettingsUnavailableTitle,
                         message:
                             runtimeUnavailableMessage ??
-                            'Start the application runtime before opening settings.',
-                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                            context.l10n.appSettingsUnavailableMessage,
+                        actionLabel: onRetryRuntime == null
+                            ? null
+                            : context.l10n.commonRetry,
                         onAction: onRetryRuntime,
                       )
                     : SettingsScreen(
                         controller: settingsController!,
+                        language: language,
                         quickPaste: quickPasteSettings,
                         launchAtLogin: launchAtLogin,
                         desktopVisibility: desktopWindow?.visibility,
@@ -266,15 +283,15 @@ class CopyPasteApp extends StatelessWidget {
                           alignment: Alignment.centerRight,
                           child: Button.secondary(
                             onPressed: desktopWindow!.quit,
-                            child: const Text('Quit CopyPaste'),
+                            child: Text(context.l10n.appQuit),
                           ),
                         ),
                       ),
                     ],
                     child: StateView.error(
-                      title: 'Window setup needs attention',
+                      title: context.l10n.appWindowSetupTitle,
                       message: issue.message,
-                      actionLabel: 'Try again',
+                      actionLabel: context.l10n.commonTryAgain,
                       onAction: desktopWindow!.retry,
                     ),
                   ),

@@ -389,7 +389,7 @@ impl ClipboardSource for MacOsClipboard {
                         // §3.6's precedent is lossy conversion rather than dropping
                         // the user's copy, and I-37 forbids panicking on a malformed
                         // payload.
-                        let content = String::from_utf8_lossy(&bytes).into_owned();
+                        let content = super::format::text_from_utf8(bytes);
                         if content.is_empty() {
                             return None;
                         }
@@ -440,7 +440,7 @@ impl ClipboardSource for MacOsClipboard {
         })
     }
 
-    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
         // I-17 again: the paste-back path needs the pool as much as the poll.
         autoreleasepool(|_pool| {
             let pb = unsafe { NSPasteboard::generalPasteboard() };
@@ -453,7 +453,7 @@ impl ClipboardSource for MacOsClipboard {
                 // content visible. A poll landing between the two sees an empty
                 // pasteboard, which yields nothing and keeps polling.
                 self.tracker.sentinel.arm(pb.clearContents() as i64);
-                pb.setString_forType(&value, &utis.text)
+                pb.setString_forType(&value, &utis.text) && (!concealed || mark_concealed(&pb))
             });
             if !ok {
                 // §3.3 step 5.
@@ -486,6 +486,7 @@ impl ClipboardSource for MacOsClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
+        concealed: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
@@ -526,7 +527,9 @@ impl ClipboardSource for MacOsClipboard {
             self.tracker
                 .sentinel
                 .arm(unsafe { pb.clearContents() } as i64);
-            if !unsafe { pb.setData_forType(Some(&data), &uti) } {
+            if !unsafe { pb.setData_forType(Some(&data), &uti) }
+                || (concealed && !mark_concealed(&pb))
+            {
                 self.tracker.sentinel.clear();
                 return Err(ClipboardWriteError::Failed);
             }
@@ -555,6 +558,14 @@ impl ClipboardSource for MacOsClipboard {
     fn lost_intermediates_count(&self) -> u64 {
         self.tracker.lost_intermediates
     }
+}
+
+/// Adds the nspasteboard.org concealed marker, the one capture reads as
+/// `privacy.secret`, to the contents just written after `clearContents`.
+fn mark_concealed(pb: &NSPasteboard) -> bool {
+    let empty = unsafe { NSData::dataWithBytes_length(std::ptr::null_mut(), 0) };
+    let concealed = NSString::from_str("org.nspasteboard.ConcealedType");
+    unsafe { pb.setData_forType(Some(&empty), &concealed) }
 }
 
 // Tests — the half of manifest 01 that only a Mac can answer
@@ -720,6 +731,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"decrypted file bytes",
                 Some(&metadata),
+                false,
             )
             .unwrap();
 
@@ -782,7 +794,7 @@ mod tests {
 
         let pre = change_count();
         clipboard
-            .set_contents("pasted by us")
+            .set_contents("pasted by us", false)
             .expect("the write failed");
         let actual = change_count();
         assert_eq!(
@@ -1018,7 +1030,7 @@ mod tests {
         let _ = clipboard.poll();
 
         clipboard
-            .set_contents("pasted by us")
+            .set_contents("pasted by us", false)
             .expect("the write failed");
         if let Some(capture) = clipboard.poll() {
             panic!(

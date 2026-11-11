@@ -20,6 +20,7 @@ class MainFlutterWindow: NSWindow {
   private var quickPasteHostMethodChannel: FlutterMethodChannel?
   private var macosSetupChannel: MacosSetupChannel?
   private var securityChannel: FlutterMethodChannel?
+  private var appLanguageChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
   private var applicationLifecycle: MacosApplicationLifecycle?
   private var trayMenuChannel: MacosTrayMenuChannel?
@@ -43,6 +44,7 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     MacosScreenshotProtection.shared.register(window: self, view: flutterViewController.view)
+    MacosMemoryPressure.shared.register(engine: flutterViewController.engine)
     let security = FlutterMethodChannel(
       name: "com.copypaste.app/security", binaryMessenger: flutterViewController.engine.binaryMessenger)
     securityChannel = security
@@ -54,6 +56,28 @@ class MainFlutterWindow: NSWindow {
           result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
         }
         result(MacosScreenshotProtection.shared.setBlocked(enabled))
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    // Menus and system panels read AppleLanguages at launch; Flutter switches live.
+    let appLanguage = FlutterMethodChannel(
+      name: "com.copypaste.app/app_language", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    appLanguageChannel = appLanguage
+    appLanguage.setMethodCallHandler { call, result in
+      let key = "AppleLanguages"
+      switch call.method {
+      case "getApplicationLocale":
+        let domain = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")
+        var state: [String: Any] = ["supported": true, "live": false]
+        if let tag = (domain?[key] as? [String])?.first { state["tag"] = tag }
+        result(state)
+      case "setApplicationLocale":
+        if let tag = (call.arguments as? [String: Any])?["tag"] as? String {
+          UserDefaults.standard.set([tag], forKey: key)
+        } else {
+          UserDefaults.standard.removeObject(forKey: key)
+        }
+        result(["supported": true, "live": false])
       default: result(FlutterMethodNotImplemented)
       }
     }
@@ -642,6 +666,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.contentView?.layer?.masksToBounds = true
     FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
     SharedPreferencesPlugin.register(with: controller.registrar(forPlugin: "SharedPreferencesPlugin"))
+    MacosMemoryPressure.shared.register(engine: engine)
     configureContextChannel()
   }
 
@@ -710,11 +735,17 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private func stopEngine() {
     guard !engineStopped else { return }
     engineStopped = true
+    MacosMemoryPressure.shared.unregister(engine: engine)
     window.delegate = nil
+    // AppKit's application-wide focus-ring state strongly retains the last
+    // active first responder until a responder change is processed. Without
+    // this, the retired FlutterView keeps its IOSurfaces alive.
+    _ = window.makeFirstResponder(nil)
     window.close()
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
     window.contentViewController = nil
+    controller.view.removeFromSuperview()
     engine.viewController = nil
     engine.shutDownEngine()
   }
@@ -887,6 +918,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     window.contentViewController = controller
     MacosScreenshotProtection.shared.register(window: window, view: controller.view)
     RegisterGeneratedPlugins(registry: controller)
+    MacosMemoryPressure.shared.register(engine: controller.engine)
     configureContextChannel()
   }
 
@@ -925,6 +957,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     closed = true
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
+    MacosMemoryPressure.shared.unregister(engine: controller.engine)
     DispatchQueue.global(qos: .utility).async { [contextId] in _ = CPPairingDetach(contextId) }
     onClose(contextId)
   }

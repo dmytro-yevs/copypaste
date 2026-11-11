@@ -107,7 +107,7 @@ internal class PairingScannerChannel(
                     ) {
                         completion.success(raw)
                     } else {
-                        completion.error("invalid_pairing_qr", "Scan a CopyPaste pairing QR code.", null)
+                        completion.error("invalid_pairing_qr", activity.getString(R.string.pairing_invalid_qr), null)
                     }
                 }
                 .addOnCanceledListener { if (pending === result) takeResult()?.success(null) }
@@ -129,7 +129,7 @@ internal class PairingScannerChannel(
 
     private fun unavailable(stage: String = "module_install", error: Exception? = null) {
         Log.e(logTag, "Pairing scanner failed at $stage", error)
-        takeResult()?.error("scanner_unavailable", "Google scanner could not open. Enter the pairing code instead.", null)
+        takeResult()?.error("scanner_unavailable", activity.getString(R.string.pairing_scanner_unavailable), null)
     }
 
     private fun clearInstallListener() {

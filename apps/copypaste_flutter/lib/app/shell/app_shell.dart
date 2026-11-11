@@ -8,6 +8,8 @@ import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../l10n/l10n.dart';
+import '../theme/app_brand_logo.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_overlays.dart';
 import '../theme/app_theme.dart';
@@ -119,8 +121,9 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final drawerVisibility = AppOverlays.drawerVisibilityOf(context);
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge([widget.controller, drawerVisibility]),
       builder: (context, child) {
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -133,7 +136,8 @@ class _AppShellState extends State<AppShell> {
             final mobileNavigationVisible =
                 mode == _ShellNavigationMode.bottom &&
                 MediaQuery.viewInsetsOf(context).bottom == 0 &&
-                !widget.controller.bottomOverlayOpen;
+                !widget.controller.bottomOverlayOpen &&
+                !drawerVisibility.value;
             final systemBottomPadding = MediaQuery.paddingOf(context).bottom;
             final railExpanded = mode == _ShellNavigationMode.wide
                 ? (_desktopRailExpanded ?? true)
@@ -149,8 +153,8 @@ class _AppShellState extends State<AppShell> {
                     tooltip: (context) => TooltipContainer(
                       child: Text(
                         railExpanded
-                            ? 'Collapse navigation'
-                            : 'Expand navigation',
+                            ? context.l10n.appCollapseNavigation
+                            : context.l10n.appExpandNavigation,
                       ),
                     ),
                     child: Button.ghost(
@@ -184,12 +188,12 @@ class _AppShellState extends State<AppShell> {
                             Button.ghost(
                               style: AppTheme.brandButtonStyle,
                               onPressed: _openHistory,
-                              child: const Image(
-                                key: ValueKey<String>('header-brand-logo'),
-                                image: AssetImage('assets/brand/copypaste.png'),
-                                width: AppIconSize.md,
-                                height: AppIconSize.md,
-                                semanticLabel: 'Open History',
+                              child: AppBrandLogo(
+                                key: const ValueKey<String>(
+                                  'header-brand-logo',
+                                ),
+                                size: AppIconSize.md,
+                                semanticLabel: context.l10n.appOpenHistory,
                               ),
                             ),
                         ],
@@ -292,14 +296,8 @@ class _AppShellState extends State<AppShell> {
                         unawaited(widget.controller.handleEscape()),
                   desktopShortcut(LogicalKeyboardKey.keyF):
                       widget.controller.findInHistory,
-                  if (widget.onRefresh != null) ...{
-                    desktopShortcut(LogicalKeyboardKey.keyR): widget.onRefresh!,
-                    if (defaultTargetPlatform != TargetPlatform.macOS)
-                      const SingleActivator(
-                        LogicalKeyboardKey.f5,
-                        includeRepeats: false,
-                      ): widget.onRefresh!,
-                  },
+                  if (widget.onRefresh != null)
+                    ...desktopRefreshBindings(widget.onRefresh!),
                   if (defaultTargetPlatform != TargetPlatform.macOS) ...{
                     const SingleActivator(
                       LogicalKeyboardKey.browserBack,
@@ -314,13 +312,10 @@ class _AppShellState extends State<AppShell> {
                         unawaited(widget.controller.handleEscape()),
                   },
                 },
-                SingleActivator(
-                  LogicalKeyboardKey.comma,
-                  meta: defaultTargetPlatform == TargetPlatform.macOS,
-                  control: defaultTargetPlatform != TargetPlatform.macOS,
-                ): () => _selectDestination(
-                  const ValueKey<AppDestination>(AppDestination.settings),
-                ),
+                desktopShortcut(LogicalKeyboardKey.comma): () =>
+                    _selectDestination(
+                      const ValueKey<AppDestination>(AppDestination.settings),
+                    ),
                 const SingleActivator(LogicalKeyboardKey.escape): () async {
                   if (!await widget.controller.handleEscape()) {
                     await widget.onExitFullScreen?.call();
@@ -429,12 +424,10 @@ class _AppShellState extends State<AppShell> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Image(
-                key: ValueKey<String>('copypaste-brand-logo'),
-                image: AssetImage('assets/brand/copypaste.png'),
-                width: AppIconSize.xl,
-                height: AppIconSize.xl,
-                semanticLabel: 'Open History',
+              AppBrandLogo(
+                key: const ValueKey<String>('copypaste-brand-logo'),
+                size: AppIconSize.xl,
+                semanticLabel: context.l10n.appOpenHistory,
               ),
               if (expanded) ...[
                 const Gap(AppSpacing.sm),

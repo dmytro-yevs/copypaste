@@ -19,6 +19,24 @@ impl Store {
     /// Pinning is idempotent; a newly pinned item lands at the end of the pinned
     /// section.
     pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<bool, StoreError> {
+        self.set_pinned_inner(id, pinned, None)
+    }
+
+    pub fn set_pinned_synced(
+        &self,
+        id: &str,
+        pinned: bool,
+        key: &crate::ItemKey,
+    ) -> Result<bool, StoreError> {
+        self.set_pinned_inner(id, pinned, Some(key))
+    }
+
+    fn set_pinned_inner(
+        &self,
+        id: &str,
+        pinned: bool,
+        key: Option<&crate::ItemKey>,
+    ) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
         let previous_stamp: Option<i64> = tx
@@ -52,6 +70,9 @@ impl Store {
                 params![id, version_stamp],
             )?;
         }
+        if let Some(key) = key {
+            super::organization::write_pin(&tx, key, id)?;
+        }
         tx.commit()?;
         Ok(true)
     }
@@ -76,6 +97,22 @@ impl Store {
     /// `SQLITE_BUSY_SNAPSHOT` on a DEFERRED transaction while another
     /// connection is writing.
     pub fn reorder_pinned(&self, ids: &[String]) -> Result<u64, StoreError> {
+        self.reorder_pinned_inner(ids, None)
+    }
+
+    pub fn reorder_pinned_synced(
+        &self,
+        ids: &[String],
+        key: &crate::ItemKey,
+    ) -> Result<u64, StoreError> {
+        self.reorder_pinned_inner(ids, Some(key))
+    }
+
+    fn reorder_pinned_inner(
+        &self,
+        ids: &[String],
+        key: Option<&crate::ItemKey>,
+    ) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
 
@@ -130,6 +167,11 @@ impl Store {
             for (index, (id, previous_stamp)) in ordered.iter().enumerate() {
                 let version_stamp = previous_stamp.saturating_add(1).max(crate::now_ms());
                 renumbered += stmt.execute(params![id, (index + 1) as f64, version_stamp])? as u64;
+            }
+        }
+        if let Some(key) = key {
+            for (id, _) in &ordered {
+                super::organization::write_pin(&tx, key, id)?;
             }
         }
         tx.commit()?;

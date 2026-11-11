@@ -701,11 +701,23 @@ def x11_input_target(workspace, environment):
             target.wait(timeout=5)
 
 
-def wait_for_gui_socket(runtime_dir, previous):
+def runtime_socket_dirs(environment):
+    """Releases before 1.1.3 listen in TMPDIR; later ones in XDG_RUNTIME_DIR."""
+    value = environment.get("XDG_RUNTIME_DIR")
+    if not value:
+        raise RuntimeError("qualification session must provide XDG_RUNTIME_DIR")
+    return tuple(dict.fromkeys((Path(value), Path(environment["TMPDIR"]))))
+
+
+def runtime_sockets(socket_dirs):
+    return {path for directory in socket_dirs for path in directory.glob("cp-*.sock")}
+
+
+def wait_for_gui_socket(socket_dirs, previous):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         candidates = [
-            path for path in runtime_dir.glob("cp-*.sock")
+            path for path in runtime_sockets(socket_dirs)
             if path not in previous and path.exists() and stat.S_ISSOCK(path.stat().st_mode)
         ]
         if len(candidates) == 1:
@@ -716,10 +728,10 @@ def wait_for_gui_socket(runtime_dir, previous):
     raise RuntimeError("packaged GUI did not expose its app-owned runtime socket")
 
 
-def start_gui_runtime(executable, environment, runtime_dir, previous_sockets):
+def start_gui_runtime(executable, environment, socket_dirs, previous_sockets):
     app = subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
     try:
-        socket_path = wait_for_gui_socket(runtime_dir, previous_sockets)
+        socket_path = wait_for_gui_socket(socket_dirs, previous_sockets)
         if app.poll() is not None:
             raise RuntimeError("packaged GUI exited before its runtime became ready")
         return app, socket_path
@@ -1564,8 +1576,9 @@ def main():
             "XDG_DATA_HOME": str(data_home),
             "TMPDIR": str(runtime_dir),
         }
+        socket_dirs = runtime_socket_dirs(environment)
         app, runtime_socket = start_gui_runtime(
-            gui_entrypoint, environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
+            gui_entrypoint, environment, socket_dirs, runtime_sockets(socket_dirs),
         )
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
@@ -1655,11 +1668,11 @@ def main():
             ], env=cli_environment)
             persisted = "copypaste-restart-fixture"
             run([str(cli), "add", persisted], env=cli_environment)
-            prior_sockets = set(runtime_dir.glob("cp-*.sock"))
+            prior_sockets = runtime_sockets(socket_dirs)
             app.terminate()
             app.wait(timeout=5)
             app, runtime_socket = start_gui_runtime(
-                gui_entrypoint, environment, runtime_dir, prior_sockets,
+                gui_entrypoint, environment, socket_dirs, prior_sockets,
             )
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
             restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
@@ -1677,11 +1690,11 @@ def main():
             daemon_data = owned_daemon.data_dir
             def restart_gui_for_modules():
                 nonlocal app, runtime_socket, cli_environment, daemon_data
-                prior_sockets = set(runtime_dir.glob("cp-*.sock"))
+                prior_sockets = runtime_sockets(socket_dirs)
                 app.terminate()
                 app.wait(timeout=5)
                 app, runtime_socket = start_gui_runtime(
-                    gui_entrypoint, environment, runtime_dir, prior_sockets,
+                    gui_entrypoint, environment, socket_dirs, prior_sockets,
                 )
                 cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                 wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)

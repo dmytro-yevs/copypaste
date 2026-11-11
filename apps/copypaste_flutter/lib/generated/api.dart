@@ -4,11 +4,10 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -47,6 +46,25 @@ Future<String> moduleInvoke({
   id: id,
   command: command,
   argumentsJson: argumentsJson,
+);
+
+Future<HistoryTags> historyTags({required List<String> clipIds}) =>
+    RustLib.instance.api.crateApiHistoryTags(clipIds: clipIds);
+
+Future<void> saveHistoryTag({String? id, required String name}) =>
+    RustLib.instance.api.crateApiSaveHistoryTag(id: id, name: name);
+
+Future<void> deleteHistoryTag({required String id}) =>
+    RustLib.instance.api.crateApiDeleteHistoryTag(id: id);
+
+Future<void> changeClipTags({
+  required List<String> clipIds,
+  required List<String> tagIds,
+  required bool assigned,
+}) => RustLib.instance.api.crateApiChangeClipTags(
+  clipIds: clipIds,
+  tagIds: tagIds,
+  assigned: assigned,
 );
 
 /// Starts an app-owned desktop daemon in an explicit application data directory.
@@ -449,6 +467,7 @@ class Clip {
   final int? colorRgba;
   final PlatformInt64 createdAtMs;
   final bool pinned;
+  final List<String> tagIds;
   final String? originDeviceName;
   final DeviceClass originDeviceClass;
   final String? sourceAppName;
@@ -469,6 +488,7 @@ class Clip {
     this.colorRgba,
     required this.createdAtMs,
     required this.pinned,
+    required this.tagIds,
     this.originDeviceName,
     required this.originDeviceClass,
     this.sourceAppName,
@@ -491,6 +511,7 @@ class Clip {
       colorRgba.hashCode ^
       createdAtMs.hashCode ^
       pinned.hashCode ^
+      tagIds.hashCode ^
       originDeviceName.hashCode ^
       originDeviceClass.hashCode ^
       sourceAppName.hashCode ^
@@ -515,6 +536,7 @@ class Clip {
           colorRgba == other.colorRgba &&
           createdAtMs == other.createdAtMs &&
           pinned == other.pinned &&
+          tagIds == other.tagIds &&
           originDeviceName == other.originDeviceName &&
           originDeviceClass == other.originDeviceClass &&
           sourceAppName == other.sourceAppName &&
@@ -669,6 +691,10 @@ class ClipQuery {
   final String? originDeviceId;
   final String? sourceAppBundleId;
   final ClipSort sort;
+  final PlatformInt64? capturedFromMs;
+  final PlatformInt64? capturedBeforeMs;
+  final List<String> tagIds;
+  final bool untaggedOnly;
 
   const ClipQuery({
     this.search,
@@ -678,6 +704,10 @@ class ClipQuery {
     this.originDeviceId,
     this.sourceAppBundleId,
     required this.sort,
+    this.capturedFromMs,
+    this.capturedBeforeMs,
+    required this.tagIds,
+    required this.untaggedOnly,
   });
 
   @override
@@ -688,7 +718,11 @@ class ClipQuery {
       pinnedOnly.hashCode ^
       originDeviceId.hashCode ^
       sourceAppBundleId.hashCode ^
-      sort.hashCode;
+      sort.hashCode ^
+      capturedFromMs.hashCode ^
+      capturedBeforeMs.hashCode ^
+      tagIds.hashCode ^
+      untaggedOnly.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -701,12 +735,44 @@ class ClipQuery {
           pinnedOnly == other.pinnedOnly &&
           originDeviceId == other.originDeviceId &&
           sourceAppBundleId == other.sourceAppBundleId &&
-          sort == other.sort;
+          sort == other.sort &&
+          capturedFromMs == other.capturedFromMs &&
+          capturedBeforeMs == other.capturedBeforeMs &&
+          tagIds == other.tagIds &&
+          untaggedOnly == other.untaggedOnly;
 }
 
-enum ClipSemanticKind { plainText, link, email, color, phone, code, json, path }
+enum ClipSemanticKind {
+  plainText,
+  link,
+  email,
+  color,
+  phone,
+  code,
+  json,
+  path,
+  credentials,
+}
 
 enum ClipSort { newest, oldest, relevance }
+
+class ClipTags {
+  final String clipId;
+  final List<String> tagIds;
+
+  const ClipTags({required this.clipId, required this.tagIds});
+
+  @override
+  int get hashCode => clipId.hashCode ^ tagIds.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClipTags &&
+          runtimeType == other.runtimeType &&
+          clipId == other.clipId &&
+          tagIds == other.tagIds;
+}
 
 class CloudAccountStatus {
   final bool configured;
@@ -1132,11 +1198,17 @@ class HistoryDeviceFacet {
 class HistoryFacets {
   final List<HistoryDeviceFacet> originDevices;
   final List<HistorySourceAppFacet> sourceApps;
+  final List<HistoryTag> tags;
 
-  const HistoryFacets({required this.originDevices, required this.sourceApps});
+  const HistoryFacets({
+    required this.originDevices,
+    required this.sourceApps,
+    required this.tags,
+  });
 
   @override
-  int get hashCode => originDevices.hashCode ^ sourceApps.hashCode;
+  int get hashCode =>
+      originDevices.hashCode ^ sourceApps.hashCode ^ tags.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1144,7 +1216,8 @@ class HistoryFacets {
       other is HistoryFacets &&
           runtimeType == other.runtimeType &&
           originDevices == other.originDevices &&
-          sourceApps == other.sourceApps;
+          sourceApps == other.sourceApps &&
+          tags == other.tags;
 }
 
 class HistorySourceAppFacet {
@@ -1169,6 +1242,42 @@ class HistorySourceAppFacet {
           id == other.id &&
           label == other.label &&
           iconId == other.iconId;
+}
+
+class HistoryTag {
+  final String id;
+  final String name;
+
+  const HistoryTag({required this.id, required this.name});
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HistoryTag &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name;
+}
+
+class HistoryTags {
+  final List<HistoryTag> tags;
+  final List<ClipTags> assignments;
+
+  const HistoryTags({required this.tags, required this.assignments});
+
+  @override
+  int get hashCode => tags.hashCode ^ assignments.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HistoryTags &&
+          runtimeType == other.runtimeType &&
+          tags == other.tags &&
+          assignments == other.assignments;
 }
 
 /// Safe pairing state for ordinary Flutter UI. It deliberately has no invite

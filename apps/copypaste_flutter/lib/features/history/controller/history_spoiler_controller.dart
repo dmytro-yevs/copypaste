@@ -20,6 +20,9 @@ class HistorySpoilerController extends ChangeNotifier {
   HistorySpoilerState _state = const HistorySpoilerState(-1, {});
   bool _disposed = false;
   int _generation = 0;
+  Future<void>? _refresh;
+  int _refreshGeneration = -1;
+  bool _refreshAgain = false;
 
   bool isRevealed(String id) => _state.revealedIds.contains(id);
 
@@ -38,10 +41,35 @@ class HistorySpoilerController extends ChangeNotifier {
     if (revealed) notifyListeners();
   }
 
-  Future<void> refresh() async {
+  /// A request during a current-generation read joins it and runs one more
+  /// read afterwards; a newer generation starts its own read immediately.
+  Future<void> refresh() {
     final repository = _repository;
-    if (_disposed || repository == null) return;
-    final generation = _generation;
+    if (_disposed || repository == null) return Future<void>.value();
+    final running = _refresh;
+    if (running != null && _refreshGeneration == _generation) {
+      _refreshAgain = true;
+      return running;
+    }
+    final generation = _refreshGeneration = _generation;
+    late final Future<void> refresh;
+    refresh = () async {
+      try {
+        do {
+          _refreshAgain = false;
+          await _read(repository, generation);
+        } while (_refreshAgain && generation == _generation && !_disposed);
+      } finally {
+        if (identical(_refresh, refresh)) _refresh = null;
+      }
+    }();
+    return _refresh = refresh;
+  }
+
+  Future<void> _read(
+    HistorySpoilerRepository repository,
+    int generation,
+  ) async {
     try {
       final state = await repository.readSpoilers();
       if (generation == _generation) _apply(state);

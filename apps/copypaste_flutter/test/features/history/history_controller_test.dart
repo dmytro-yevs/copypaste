@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
+import 'package:copypaste_flutter/features/history/controller/history_transfer_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
@@ -25,42 +27,42 @@ void main() {
       addTearDown(controller.dispose);
       await controller.initialize();
 
-      final first = controller.items;
-      expect(controller.items, same(first));
+      final first = controller.window.items;
+      expect(controller.window.items, same(first));
       expect(() => first.clear(), throwsUnsupportedError);
-      await controller.loadMore();
-      final loaded = controller.items;
+      await controller.window.loadMore();
+      final loaded = controller.window.items;
       expect(loaded, isNot(same(first)));
       expect(first.map((clip) => clip.id), ['one']);
       expect(loaded.map((clip) => clip.id), ['one', 'two']);
-      expect(controller.items, same(loaded));
+      expect(controller.window.items, same(loaded));
 
-      expect(await controller.togglePin(loaded.first), isTrue);
-      final pinned = controller.items;
+      expect(await controller.mutations.togglePin(loaded.first), isTrue);
+      final pinned = controller.window.items;
       expect(pinned, isNot(same(loaded)));
       expect(loaded.first.pinned, isFalse);
       expect(pinned.first.pinned, isTrue);
-      expect(await controller.deleteClip('two'), isTrue);
-      final deleted = controller.items;
+      expect(await controller.mutations.deleteClip('two'), isTrue);
+      final deleted = controller.window.items;
       expect(deleted, isNot(same(pinned)));
       expect(pinned.map((clip) => clip.id), ['one', 'two']);
       expect(deleted.map((clip) => clip.id), ['one']);
 
       controller.suspend();
-      final suspended = controller.items;
+      final suspended = controller.window.items;
       expect(suspended, isEmpty);
       expect(suspended, isNot(same(deleted)));
       expect(deleted.single.id, 'one');
-      expect(controller.items, same(suspended));
+      expect(controller.window.items, same(suspended));
       await controller.initialize();
-      expect(controller.items.single.id, 'fresh');
-      expect(controller.items, isNot(same(suspended)));
+      expect(controller.window.items.single.id, 'fresh');
+      expect(controller.window.items, isNot(same(suspended)));
       expect(suspended, isEmpty);
-      final resumed = controller.items;
-      await controller.reload();
-      expect(controller.items.single.id, 'reloaded');
+      final resumed = controller.window.items;
+      await controller.window.reload();
+      expect(controller.window.items.single.id, 'reloaded');
       expect(resumed.single.id, 'fresh');
-      expect(controller.items, isNot(same(resumed)));
+      expect(controller.window.items, isNot(same(resumed)));
     });
 
     test(
@@ -76,36 +78,36 @@ void main() {
         );
         repository.imagePreviewFutures.add(Future.value(preview));
         expect(
-          await controller.requestImagePreview(
+          await controller.media.requestImagePreview(
             'one',
             bounds: const HistoryImagePreviewBounds(width: 1400, height: 320),
           ),
           same(preview),
         );
         expect(
-          await controller.requestImagePreview(
+          await controller.media.requestImagePreview(
             'one',
             bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
           ),
           same(preview),
         );
         expect(repository.imagePreviewEdges, hasLength(1));
-        await controller.requestImagePreview(
+        await controller.media.requestImagePreview(
           'one',
           bounds: const HistoryImagePreviewBounds(width: 900, height: 640),
         );
-        await controller.requestImagePreview(
+        await controller.media.requestImagePreview(
           'one',
           bounds: const HistoryImagePreviewBounds(width: 400, height: 320),
         );
-        await controller.requestImagePreview(
+        await controller.media.requestImagePreview(
           'other',
           bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
         );
         expect(repository.imagePreviewEdges, hasLength(4));
         controller.suspend();
         expect(
-          await controller.requestImagePreview(
+          await controller.media.requestImagePreview(
             'one',
             bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
           ),
@@ -131,12 +133,15 @@ void main() {
         final controller = HistoryController(repository);
         addTearDown(controller.dispose);
         await controller.initialize();
-        await controller.select('large');
-        expect(controller.selectedClip?.body, body);
-        expect(controller.items.single.body, isNull);
-        expect(controller.items.single.preview.length, 1024);
-        expect((await controller.spoilerContent('large')).body, isNull);
-        expect((await controller.spoilerContent('large')).preview.length, 1024);
+        await controller.selection.select('large');
+        expect(controller.selection.selectedClip?.body, body);
+        expect(controller.window.items.single.body, isNull);
+        expect(controller.window.items.single.preview.length, 1024);
+        expect((await controller.media.spoilerContent('large')).body, isNull);
+        expect(
+          (await controller.media.spoilerContent('large')).preview.length,
+          1024,
+        );
       },
     );
 
@@ -152,8 +157,8 @@ void main() {
         addTearDown(controller.dispose);
         var rebuilds = 0;
         controller.addListener(() => rebuilds++);
-        final loadedImage = controller.requestImagePreview('image');
-        final loadedIcon = controller.requestSourceIcon('icon');
+        final loadedImage = controller.media.requestImagePreview('image');
+        final loadedIcon = controller.media.requestSourceIcon('icon');
         final imageValue = HistoryImagePreview(
           Uint8List(4),
           width: 1,
@@ -184,8 +189,8 @@ void main() {
             ),
           ),
         );
-        await controller.requestImagePreview('view');
-        await controller.requestImagePreview('view');
+        await controller.media.requestImagePreview('view');
+        await controller.media.requestImagePreview('view');
         expect(repository.imagePreviewEdges, hasLength(2));
       },
     );
@@ -206,12 +211,12 @@ void main() {
               ),
             ),
           );
-          await controller.requestImagePreview(id);
+          await controller.media.requestImagePreview(id);
         }
         expect(repository.imagePreviewEdges, hasLength(3));
-        await controller.requestImagePreview('second');
+        await controller.media.requestImagePreview('second');
         expect(repository.imagePreviewEdges, hasLength(3));
-        await controller.requestImagePreview('first');
+        await controller.media.requestImagePreview('first');
         expect(repository.imagePreviewEdges, hasLength(4));
       },
     );
@@ -232,11 +237,20 @@ void main() {
           Future.value(small),
           Future.value(large),
         ]);
-        expect(await controller.requestImagePreview('small'), same(small));
-        expect(await controller.requestImagePreview('large'), same(large));
-        expect(await controller.requestImagePreview('small'), same(small));
+        expect(
+          await controller.media.requestImagePreview('small'),
+          same(small),
+        );
+        expect(
+          await controller.media.requestImagePreview('large'),
+          same(large),
+        );
+        expect(
+          await controller.media.requestImagePreview('small'),
+          same(small),
+        );
         expect(repository.imagePreviewEdges, hasLength(2));
-        await controller.requestImagePreview('large');
+        await controller.media.requestImagePreview('large');
         expect(repository.imagePreviewEdges, hasLength(3));
       },
     );
@@ -253,19 +267,19 @@ void main() {
           ]);
         final controller = HistoryController(repository);
         addTearDown(controller.dispose);
-        await controller.updateQuery(
+        await controller.window.updateQuery(
           const HistoryQuery(search: 'saved', sort: HistorySort.oldest),
         );
         await controller.initialize();
-        await controller.select('after');
-        controller.toggleSection('today');
+        await controller.selection.select('after');
+        controller.window.toggleSection('today');
         controller.suspend();
-        expect(controller.items, isEmpty);
-        expect(controller.selectedClip, isNull);
-        expect(controller.selectedId, 'after');
-        expect(controller.query.search, 'saved');
-        expect(controller.query.sort, HistorySort.oldest);
-        expect(controller.isSectionCollapsed('today'), isTrue);
+        expect(controller.window.items, isEmpty);
+        expect(controller.selection.selectedClip, isNull);
+        expect(controller.selection.selectedId, 'after');
+        expect(controller.window.query.search, 'saved');
+        expect(controller.window.query.sort, HistorySort.oldest);
+        expect(controller.window.isSectionCollapsed('today'), isTrue);
         final reads = repository.requests.length;
         repository.events.add(HistoryRuntimeEvent.itemsChanged);
         await Future<void>.delayed(Duration.zero);
@@ -274,8 +288,8 @@ void main() {
           Future.value(HistoryClipPage(items: [_clip('fresh')])),
         );
         await controller.initialize();
-        expect(controller.items.single.id, 'fresh');
-        expect(controller.selectedClip?.id, 'after');
+        expect(controller.window.items.single.id, 'fresh');
+        expect(controller.selection.selectedClip?.id, 'after');
         expect(repository.requests.last.query.search, 'saved');
       },
     );
@@ -291,16 +305,16 @@ void main() {
         repository.imagePreviewFutures.add(oldImage.future);
         final controller = HistoryController(repository);
         addTearDown(controller.dispose);
-        final staleIconRequest = controller.requestSourceIcon('icon');
-        final staleImageRequest = controller.requestImagePreview('image');
+        final staleIconRequest = controller.media.requestSourceIcon('icon');
+        final staleImageRequest = controller.media.requestImagePreview('image');
         controller.suspend();
-        expect(await controller.requestSourceIcon('icon'), isNull);
-        expect(await controller.requestImagePreview('image'), isNull);
+        expect(await controller.media.requestSourceIcon('icon'), isNull);
+        expect(await controller.media.requestImagePreview('image'), isNull);
         expect(repository.sourceIconCalls, 1);
         repository.pages.add(Future.value(const HistoryClipPage(items: [])));
         await controller.initialize();
         repository.sourceIconFuture = newIcon.future;
-        final resumedIconRequest = controller.requestSourceIcon('icon');
+        final resumedIconRequest = controller.media.requestSourceIcon('icon');
         oldIcon.complete(HistorySourceAppIcon(Uint8List(1024)));
         oldImage.complete(
           HistoryImagePreview(Uint8List(1024), width: 16, height: 16),
@@ -308,13 +322,16 @@ void main() {
         expect(await staleIconRequest, isNull);
         expect(await staleImageRequest, isNull);
         expect(
-          identical(controller.requestSourceIcon('icon'), resumedIconRequest),
+          identical(
+            controller.media.requestSourceIcon('icon'),
+            resumedIconRequest,
+          ),
           isTrue,
         );
         final icon = HistorySourceAppIcon(Uint8List(64));
         newIcon.complete(icon);
         expect(await resumedIconRequest, same(icon));
-        expect(await controller.requestSourceIcon('icon'), same(icon));
+        expect(await controller.media.requestSourceIcon('icon'), same(icon));
         expect(repository.sourceIconCalls, 2);
       },
     );
@@ -344,9 +361,9 @@ void main() {
           ),
         );
         await loading;
-        expect(controller.items, isEmpty);
-        expect(controller.state, HistoryLoadState.initial);
-        expect(controller.facets.sourceApps, isEmpty);
+        expect(controller.window.items, isEmpty);
+        expect(controller.window.state, HistoryLoadState.initial);
+        expect(controller.window.facets.sourceApps, isEmpty);
       },
     );
 
@@ -366,25 +383,25 @@ void main() {
         );
         addTearDown(controller.dispose);
 
-        controller.updateSearch('meeting');
+        controller.window.updateSearch('meeting');
         await Future<void>.delayed(Duration.zero);
-        expect(controller.query.sort, HistorySort.relevance);
+        expect(controller.window.query.sort, HistorySort.relevance);
 
-        await controller.updateQuery(
-          controller.query.copyWith(sort: HistorySort.oldest),
+        await controller.window.updateQuery(
+          controller.window.query.copyWith(sort: HistorySort.oldest),
         );
-        controller.updateSearch('meting');
+        controller.window.updateSearch('meting');
         await Future<void>.delayed(Duration.zero);
-        expect(controller.query.sort, HistorySort.oldest);
+        expect(controller.window.query.sort, HistorySort.oldest);
 
-        await controller.updateQuery(
-          controller.query.copyWith(sort: HistorySort.relevance),
+        await controller.window.updateQuery(
+          controller.window.query.copyWith(sort: HistorySort.relevance),
         );
-        controller.updateSearch('');
+        controller.window.updateSearch('');
         await Future<void>.delayed(Duration.zero);
-        expect(controller.query.sort, HistorySort.newest);
+        expect(controller.window.query.sort, HistorySort.newest);
         expect(repository.requests, hasLength(5));
-        expect(controller.state, HistoryLoadState.empty);
+        expect(controller.window.state, HistoryLoadState.empty);
       },
     );
 
@@ -415,6 +432,7 @@ void main() {
         'Code',
         'JSON',
         'Path',
+        'Credentials',
         'Image',
         'File',
         'Other',
@@ -428,6 +446,7 @@ void main() {
         HistoryClipKind.code,
         HistoryClipKind.json,
         HistoryClipKind.path,
+        HistoryClipKind.credentials,
       ]);
     });
 
@@ -443,7 +462,9 @@ void main() {
 
       unawaited(controller.initialize());
       await Future<void>.delayed(Duration.zero);
-      unawaited(controller.updateQuery(const HistoryQuery(search: 'second')));
+      unawaited(
+        controller.window.updateQuery(const HistoryQuery(search: 'second')),
+      );
       await Future<void>.delayed(Duration.zero);
 
       second.complete(HistoryClipPage(items: [_clip('current')]));
@@ -451,8 +472,8 @@ void main() {
       first.complete(HistoryClipPage(items: [_clip('stale')]));
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items.single.id, 'current');
-      expect(controller.query.search, 'second');
+      expect(controller.window.items.single.id, 'current');
+      expect(controller.window.query.search, 'second');
       controller.dispose();
     });
 
@@ -469,12 +490,12 @@ void main() {
         final controller = HistoryController(repository);
 
         await controller.initialize();
-        await controller.loadMore();
+        await controller.window.loadMore();
 
         expect(repository.requests, hasLength(2));
         expect(repository.requests.last.cursor, 'opaque-cursor');
         expect(repository.requests.last.query.search, isEmpty);
-        expect(controller.items.map((item) => item.id), ['one', 'two']);
+        expect(controller.window.items.map((item) => item.id), ['one', 'two']);
         controller.dispose();
       },
     );
@@ -495,17 +516,17 @@ void main() {
       final controller = HistoryController(repository);
       await controller.initialize();
 
-      unawaited(controller.loadMore());
+      unawaited(controller.window.loadMore());
       await Future<void>.delayed(Duration.zero);
-      await controller.updateQuery(const HistoryQuery(search: 'new'));
-      expect(controller.isLoadingMore, isFalse);
+      await controller.window.updateQuery(const HistoryQuery(search: 'new'));
+      expect(controller.window.isLoadingMore, isFalse);
 
-      await controller.loadMore();
+      await controller.window.loadMore();
       stalePage.complete(HistoryClipPage(items: [_clip('stale')]));
       await Future<void>.delayed(Duration.zero);
 
       expect(repository.requests.last.cursor, 'new-cursor');
-      expect(controller.items.map((item) => item.id), ['new', 'newer']);
+      expect(controller.window.items.map((item) => item.id), ['new', 'newer']);
       controller.dispose();
     });
 
@@ -518,12 +539,12 @@ void main() {
       final controller = HistoryController(repository);
 
       await controller.initialize();
-      final before = controller.items;
+      final before = controller.window.items;
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items.single.id, 'after');
-      expect(controller.items, isNot(same(before)));
+      expect(controller.window.items.single.id, 'after');
+      expect(controller.window.items, isNot(same(before)));
       expect(before.single.id, 'before');
       controller.dispose();
     });
@@ -537,12 +558,12 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      final before = controller.items;
+      final before = controller.window.items;
 
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items, same(before));
+      expect(controller.window.items, same(before));
     });
 
     test('refresh retains only unchanged row objects', () async {
@@ -558,14 +579,14 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      final before = controller.items;
+      final before = controller.window.items;
 
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items[0], same(before[0]));
-      expect(controller.items[1], isNot(same(before[1])));
-      expect(controller.items[1].pinned, isTrue);
+      expect(controller.window.items[0], same(before[0]));
+      expect(controller.window.items[1], isNot(same(before[1])));
+      expect(controller.window.items[1].pinned, isTrue);
     });
 
     test('refresh reuses unchanged rows after a reorder', () async {
@@ -577,14 +598,88 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      final before = controller.items;
+      final before = controller.window.items;
 
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items[0], same(before[1]));
-      expect(controller.items[1], same(before[0]));
-      expect(controller.items, isNot(same(before)));
+      expect(controller.window.items[0], same(before[1]));
+      expect(controller.window.items[1], same(before[0]));
+      expect(controller.window.items, isNot(same(before)));
+    });
+
+    test(
+      'refresh keeps the loaded selection until its summary changes',
+      () async {
+        HistoryClip detail({required bool pinned}) => HistoryClip(
+          id: 'one',
+          sourceAppIconId: 'app:one',
+          contentType: 'text/plain',
+          preview: 'one',
+          body: 'one',
+          createdAt: DateTime.utc(2026),
+          pinned: pinned,
+        );
+        final repository = _HistoryRepository()
+          ..detailClip = detail(pinned: false)
+          ..pages.addAll([
+            Future.value(HistoryClipPage(items: [_clip('one')])),
+            Future.value(HistoryClipPage(items: [_clip('one')])),
+            Future.value(
+              HistoryClipPage(items: [_clip('one').copyWith(pinned: true)]),
+            ),
+          ]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await controller.selection.select('one');
+        final loaded = controller.selection.selectedClip;
+        expect(loaded?.body, 'one');
+
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.selection.selectedClip, same(loaded));
+        expect(repository.getCalls, 1);
+
+        repository.detailClip = detail(pinned: true);
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(repository.getCalls, 2);
+        expect(controller.selection.selectedClip?.pinned, isTrue);
+        expect(controller.selection.selectedClip?.body, 'one');
+      },
+    );
+
+    test('coalesces a burst of watch events into one follow-up', () async {
+      final running = Completer<HistoryClipPage>();
+      final repository = _HistoryRepository()
+        ..pages.addAll([
+          Future.value(HistoryClipPage(items: [_clip('one')])),
+          running.future,
+          Future.value(
+            HistoryClipPage(
+              items: [_clip('three'), _clip('two'), _clip('one')],
+            ),
+          ),
+        ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      for (var event = 0; event < 5; event++) {
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.requests, hasLength(2));
+      running.complete(HistoryClipPage(items: [_clip('two'), _clip('one')]));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repository.requests, hasLength(3));
+      expect(controller.window.items.map((clip) => clip.id), [
+        'three',
+        'two',
+        'one',
+      ]);
     });
 
     test('refresh replaces a row when file metadata changes', () async {
@@ -604,32 +699,37 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      final before = controller.items.single;
+      final before = controller.window.items.single;
 
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       await Future<void>.delayed(Duration.zero);
 
-      expect(controller.items.single, isNot(same(before)));
-      expect(controller.items.single.file?.sourceAvailable, isTrue);
+      expect(controller.window.items.single, isNot(same(before)));
+      expect(controller.window.items.single.file?.sourceAvailable, isTrue);
     });
 
-    test('reconnects a completed watch and refreshes missed history', () async {
-      final first = StreamController<HistoryRuntimeEvent>.broadcast();
-      final second = StreamController<HistoryRuntimeEvent>.broadcast();
-      final repository = _RestartingWatchRepository([first, second]);
-      final controller = HistoryController(repository);
-      addTearDown(controller.dispose);
-      addTearDown(second.close);
+    test(
+      'keeps the self-reconnecting watch and refreshes missed history',
+      () async {
+        final watch = StreamController<HistoryRuntimeEvent>.broadcast();
+        final repository = _RestartingWatchRepository([watch]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        addTearDown(watch.close);
 
-      await controller.initialize();
-      expect(repository.watchCalls, 1);
-      repository.current = _clip('after-reconnect');
-      await first.close();
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(repository.watchCalls, 2);
-      expect(controller.items.single.id, 'after-reconnect');
-      expect(controller.errorMessage, isNull);
-    });
+        await controller.initialize();
+        watch.addError(StateError('Runtime watch disconnected'));
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.errors.message, isNotNull);
+        expect(watch.hasListener, isTrue);
+        repository.current = _clip('after-reconnect');
+        watch.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(repository.watchCalls, 1);
+        expect(controller.window.items.single.id, 'after-reconnect');
+        expect(controller.errors.message, isNull);
+      },
+    );
 
     test(
       'suspension cancels the watch before initialize opens a replacement',
@@ -664,8 +764,8 @@ void main() {
 
       await controller.initialize();
 
-      expect(controller.state, HistoryLoadState.empty);
-      expect(controller.skippedUndecryptable, 2);
+      expect(controller.window.state, HistoryLoadState.empty);
+      expect(controller.window.skippedUndecryptable, 2);
       controller.dispose();
     });
 
@@ -674,13 +774,13 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       const firstBounds = HistoryImagePreviewBounds(width: 1400, height: 320);
-      await controller.requestImagePreview('one', bounds: firstBounds);
-      await controller.requestImagePreview('one', bounds: firstBounds);
-      await controller.requestImagePreview(
+      await controller.media.requestImagePreview('one', bounds: firstBounds);
+      await controller.media.requestImagePreview('one', bounds: firstBounds);
+      await controller.media.requestImagePreview(
         'one',
         bounds: const HistoryImagePreviewBounds(width: 1400, height: 640),
       );
-      await controller.requestImagePreview('one', maxEdge: 1024);
+      await controller.media.requestImagePreview('one', maxEdge: 1024);
 
       expect(
         repository.imagePreviewBounds.map(
@@ -709,20 +809,22 @@ void main() {
         final controller = HistoryController(repository);
         await controller.initialize();
 
-        final firstThumbnail = controller.requestImagePreview(
+        final firstThumbnail = controller.media.requestImagePreview(
           'one',
           maxEdge: 96,
         );
-        final repeatedThumbnail = controller.requestImagePreview(
+        final repeatedThumbnail = controller.media.requestImagePreview(
           'one',
           maxEdge: 96,
         );
-        final detailPreview = controller.requestImagePreview(
+        final detailPreview = controller.media.requestImagePreview(
           'one',
           maxEdge: 1024,
         );
-        final firstSourceIcon = controller.requestSourceIcon('app:one');
-        final repeatedSourceIcon = controller.requestSourceIcon('app:one');
+        final firstSourceIcon = controller.media.requestSourceIcon('app:one');
+        final repeatedSourceIcon = controller.media.requestSourceIcon(
+          'app:one',
+        );
 
         expect(identical(firstThumbnail, repeatedThumbnail), isTrue);
         expect(identical(firstSourceIcon, repeatedSourceIcon), isTrue);
@@ -754,19 +856,19 @@ void main() {
         await controller.initialize();
         await Future.wait([
           for (final clip in clips)
-            controller.requestSourceIcon(clip.sourceAppIconId),
+            controller.media.requestSourceIcon(clip.sourceAppIconId),
         ]);
         await Future.wait([
           for (final clip in clips)
-            controller.requestSourceIcon(clip.sourceAppIconId),
+            controller.media.requestSourceIcon(clip.sourceAppIconId),
         ]);
         expect(repository.sourceIconCalls, 50);
 
-        await controller.updateQuery(const HistoryQuery(search: 'next'));
-        await controller.updateQuery(const HistoryQuery());
-        await controller.requestSourceIcon('app:icon-0');
+        await controller.window.updateQuery(const HistoryQuery(search: 'next'));
+        await controller.window.updateQuery(const HistoryQuery());
+        await controller.media.requestSourceIcon('app:icon-0');
         expect(repository.sourceIconCalls, 51);
-        await controller.requestSourceIcon('app:icon-49');
+        await controller.media.requestSourceIcon('app:icon-49');
         expect(repository.sourceIconCalls, 51);
       },
     );
@@ -782,15 +884,18 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      final first = controller.requestSourceIcon('app:shared');
-      await controller.updateQuery(const HistoryQuery(search: 'two'));
-      final second = controller.requestSourceIcon('app:shared');
+      final first = controller.media.requestSourceIcon('app:shared');
+      await controller.window.updateQuery(const HistoryQuery(search: 'two'));
+      final second = controller.media.requestSourceIcon('app:shared');
       expect(identical(first, second), isTrue);
       final icon = HistorySourceAppIcon(Uint8List.fromList([1, 2, 3]));
       pending.complete(icon);
       expect(await first, same(icon));
       expect(await second, same(icon));
-      expect(await controller.requestSourceIcon('app:shared'), same(icon));
+      expect(
+        await controller.media.requestSourceIcon('app:shared'),
+        same(icon),
+      );
       expect(repository.sourceIconCalls, 1);
     });
 
@@ -819,10 +924,10 @@ void main() {
 
         await controller.initialize();
 
-        expect(controller.facets.originDevices.single.label, 'Work Mac');
-        expect(controller.facets.originDevices.single.id, 'device-1');
-        expect(controller.facets.sourceApps.single.label, 'Editor');
-        await controller.updateQuery(
+        expect(controller.window.facets.originDevices.single.label, 'Work Mac');
+        expect(controller.window.facets.originDevices.single.id, 'device-1');
+        expect(controller.window.facets.sourceApps.single.label, 'Editor');
+        await controller.window.updateQuery(
           const HistoryQuery(
             origin: 'device-1',
             sourceApp: 'com.example.editor',
@@ -830,8 +935,11 @@ void main() {
         );
         expect(repository.requests.last.query.origin, 'device-1');
         expect(repository.requests.last.query.sourceApp, 'com.example.editor');
-        await controller.updateQuery(
-          controller.query.copyWith(clearOrigin: true, clearSourceApp: true),
+        await controller.window.updateQuery(
+          controller.window.query.copyWith(
+            clearOrigin: true,
+            clearSourceApp: true,
+          ),
         );
         expect(repository.requests.last.query.origin, isNull);
         expect(repository.requests.last.query.sourceApp, isNull);
@@ -848,10 +956,10 @@ void main() {
       final controller = HistoryController(repository);
       await controller.initialize();
 
-      await controller.togglePin(controller.items.single);
+      await controller.mutations.togglePin(controller.window.items.single);
 
-      expect(controller.items.single.pinned, isFalse);
-      expect(controller.errorMessage, 'The pin could not be updated.');
+      expect(controller.window.items.single.pinned, isFalse);
+      expect(controller.errors.message, 'The pin could not be updated.');
       controller.dispose();
     });
 
@@ -865,15 +973,19 @@ void main() {
       final controller = HistoryController(repository);
       await controller.initialize();
 
-      final first = controller.togglePin(controller.items.single);
-      final second = await controller.togglePin(controller.items.single);
+      final first = controller.mutations.togglePin(
+        controller.window.items.single,
+      );
+      final second = await controller.mutations.togglePin(
+        controller.window.items.single,
+      );
       expect(repository.setPinnedCalls, 1);
       expect(second, isFalse);
-      expect(controller.isPinPending('one'), isTrue);
+      expect(controller.mutations.isPinPending('one'), isTrue);
 
       pending.complete();
       expect(await first, isTrue);
-      expect(controller.isPinPending('one'), isFalse);
+      expect(controller.mutations.isPinPending('one'), isFalse);
       controller.dispose();
     });
 
@@ -885,12 +997,12 @@ void main() {
       final controller = HistoryController(repository);
       addTearDown(controller.dispose);
       await controller.initialize();
-      await controller.select('one');
+      await controller.selection.select('one');
 
-      expect(await controller.deleteClip('two'), isTrue);
-      expect(controller.items.map((clip) => clip.id), ['one']);
-      expect(controller.selectedId, 'one');
-      expect(controller.selectedClip?.id, 'one');
+      expect(await controller.mutations.deleteClip('two'), isTrue);
+      expect(controller.window.items.map((clip) => clip.id), ['one']);
+      expect(controller.selection.selectedId, 'one');
+      expect(controller.selection.selectedClip?.id, 'one');
     });
 
     test('guards delete mutations and preserves state after failure', () async {
@@ -902,25 +1014,25 @@ void main() {
       );
       final controller = HistoryController(repository);
       await controller.initialize();
-      await controller.select('one');
+      await controller.selection.select('one');
 
-      final firstDelete = controller.deleteSelected();
-      final secondDelete = await controller.deleteSelected();
+      final firstDelete = controller.mutations.deleteSelected();
+      final secondDelete = await controller.mutations.deleteSelected();
       expect(repository.deleteCalls, 1);
       expect(secondDelete, isFalse);
       pendingDelete.completeError(StateError('offline'));
       expect(await firstDelete, isFalse);
-      expect(controller.items.single.id, 'one');
+      expect(controller.window.items.single.id, 'one');
 
       final pendingAll = Completer<void>();
       repository.deleteAllPending = pendingAll.future;
-      final firstAll = controller.deleteAll();
-      final secondAll = await controller.deleteAll();
+      final firstAll = controller.mutations.deleteAll();
+      final secondAll = await controller.mutations.deleteAll();
       expect(repository.deleteAllCalls, 1);
       expect(secondAll, isFalse);
       pendingAll.completeError(StateError('offline'));
       expect(await firstAll, isFalse);
-      expect(controller.items.single.id, 'one');
+      expect(controller.window.items.single.id, 'one');
       controller.dispose();
     });
 
@@ -951,9 +1063,9 @@ void main() {
           fileDownloader: downloader,
         );
         await controller.initialize();
-        await controller.select(file.id);
+        await controller.selection.select(file.id);
 
-        expect(controller.canDownloadSelected, isTrue);
+        expect(controller.transfers.canDownloadSelected, isTrue);
         final pendingSave = Completer<void>();
         final pendingPresentation = Completer<void>();
         repository.savePending = pendingSave.future;
@@ -962,11 +1074,11 @@ void main() {
         final progress = <double?>[];
         final broadAtProgress = <int>[];
         controller.addListener(() => broadNotifications++);
-        controller.downloadProgressChanges.addListener(() {
-          progress.add(controller.downloadProgressFor(file.id));
+        controller.transfers.downloadProgressChanges.addListener(() {
+          progress.add(controller.transfers.downloadProgressFor(file.id));
           broadAtProgress.add(broadNotifications);
         });
-        final result = controller.downloadSelected();
+        final result = controller.transfers.downloadSelected();
         await Future<void>.delayed(Duration.zero);
         expect(progress, [0]);
         expect(broadNotifications, 1);
@@ -978,26 +1090,26 @@ void main() {
         pendingPresentation.complete();
         expect(await result, HistoryFileDownloadResult.saved);
         expect(broadNotifications, 2);
-        expect(controller.downloadProgressFor(file.id), isNull);
+        expect(controller.transfers.downloadProgressFor(file.id), isNull);
         expect(repository.savedFiles, [('file', '/tmp/report.pdf')]);
         expect(downloader.presentedPaths, ['/tmp/report.pdf']);
 
         repository.savePending = null;
         repository.saveError = StateError('save failed');
         expect(
-          await controller.downloadSelected(),
+          await controller.transfers.downloadSelected(),
           HistoryFileDownloadResult.failed,
         );
-        expect(controller.downloadFailedFor(file.id), isTrue);
+        expect(controller.transfers.downloadFailedFor(file.id), isTrue);
 
         final pendingDestination = Completer<String?>();
         downloader.destinationPending = pendingDestination.future;
-        final cancelled = controller.downloadSelected();
-        controller.cancelDownload(file.id);
+        final cancelled = controller.transfers.downloadSelected();
+        controller.transfers.cancelDownload(file.id);
         pendingDestination.complete('/tmp/report.pdf');
         expect(await cancelled, HistoryFileDownloadResult.cancelled);
-        expect(controller.isDownloadPending(file.id), isFalse);
-        expect(controller.downloadFailedFor(file.id), isFalse);
+        expect(controller.transfers.isDownloadPending(file.id), isFalse);
+        expect(controller.transfers.downloadFailedFor(file.id), isFalse);
         controller.dispose();
       },
     );
@@ -1043,6 +1155,7 @@ class _HistoryRepository implements HistoryRepository {
   Future<HistorySourceAppIcon?>? sourceIconFuture;
   int sourceIconCalls = 0;
   HistoryClip? detailClip;
+  int getCalls = 0;
   final List<(String, String)> savedFiles = [];
   Future<void>? savePending;
   Object? saveError;
@@ -1065,7 +1178,10 @@ class _HistoryRepository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryClip> get(String id) async => detailClip ?? _clip(id);
+  Future<HistoryClip> get(String id) async {
+    getCalls++;
+    return detailClip ?? _clip(id);
+  }
 
   @override
   Future<HistoryImagePreview?> imagePreview(

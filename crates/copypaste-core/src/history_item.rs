@@ -109,13 +109,18 @@ pub(crate) fn from_payload(
         content_type: row.content_type.clone(),
         content_class,
         semantic_kind: semantic
-            .filter(|_| !privacy.secret || !preview)
+            .filter(|value| {
+                !privacy.secret
+                    || !preview
+                    || value.kind == copypaste_ipc::SemanticKind::Credentials
+            })
             .map(|classification| classification.kind),
         color_rgba: semantic
             .filter(|_| !privacy.secret || !preview)
             .and_then(|classification| classification.color_rgba),
         created_at: row.created_at,
         pinned: row.pinned,
+        tag_ids: Vec::new(),
         file_details: if preview && privacy.secret {
             None
         } else {
@@ -202,6 +207,7 @@ impl StaticHistoryPreview {
             color_rgba: self.color_rgba,
             created_at: row.created_at,
             pinned: row.pinned,
+            tag_ids: Vec::new(),
             file_details,
             image_details: None,
             origin_device_id: origin.device_id.clone(),

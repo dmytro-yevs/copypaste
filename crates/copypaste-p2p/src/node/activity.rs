@@ -9,6 +9,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 
+/// How long automatic sessions and probes leave a peer alone after it proved
+/// to speak another protocol version. Nothing short of an update on one of the
+/// devices changes that, and the update is noticed sooner through compatibility
+/// evidence, a restart of this process, or an explicit sync.
+const VERSION_RETRY_MS: i64 = 5 * 60_000;
+
 #[derive(Default)]
 struct State {
     revision: u64,
@@ -16,6 +22,25 @@ struct State {
     peers: HashMap<String, Observation>,
     journal: super::journal::Journal,
 }
+impl State {
+    /// Every observed mismatch restarts the wait: a peer still dialling in on
+    /// another version keeps proving the condition current.
+    fn version_condition(&mut self, id: &str, code: SyncIssueCode) {
+        if code == SyncIssueCode::VersionMismatch {
+            self.peers.entry(id.into()).or_default().version_retry_at_ms =
+                Some(crate::now_ms().saturating_add(VERSION_RETRY_MS));
+        }
+    }
+    /// The same evidence that resolves the durable condition ends the wait.
+    fn version_evidence(&mut self, id: &str, evidence: SyncEvidence) {
+        if SyncIssueCode::VersionMismatch.resolved_by(evidence) {
+            if let Some(peer) = self.peers.get_mut(id) {
+                peer.version_retry_at_ms = None;
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct Observation {
     active: usize,
@@ -24,6 +49,7 @@ struct Observation {
     generation: u64,
     completed_session: u64,
     status: PeerSyncStatus,
+    version_retry_at_ms: Option<i64>,
 }
 pub(super) struct SyncActivity {
     state: Mutex<State>,
@@ -77,14 +103,29 @@ impl SyncActivity {
             .is_some_and(|time| time >= since)
     }
     pub(super) fn evidence(&self, id: &str, evidence: SyncEvidence) {
-        self.mutate(|state| state.journal.evidence(id, evidence));
+        self.mutate(|state| {
+            state.version_evidence(id, evidence);
+            state.journal.evidence(id, evidence)
+        });
     }
     pub(super) fn failure(&self, id: &str, error: NodeError) {
         self.mutate(|state| {
-            error
-                .sync_issue()
-                .is_some_and(|code| state.journal.condition(id, code, 0))
+            error.sync_issue().is_some_and(|code| {
+                state.version_condition(id, code);
+                state.journal.condition(id, code, 0)
+            })
         });
+    }
+    /// Whether automatic sessions and probes should leave this peer alone
+    /// because it recently proved to speak another protocol version.
+    pub(super) fn version_retry_deferred(&self, id: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .peers
+            .get(id)
+            .and_then(|peer| peer.version_retry_at_ms)
+            .is_some_and(|retry_at| crate::now_ms() < retry_at)
     }
     pub(super) fn forget(&self, id: &str) {
         self.mutate(|state| {
@@ -276,9 +317,11 @@ impl SessionObservation {
                 peer.status.phase = SyncPhase::Waiting;
             }
             if let Some(code) = error.and_then(NodeError::sync_issue) {
+                state.version_condition(&self.pairing_id, code);
                 state.journal.condition(&self.pairing_id, code, 0);
             }
             if let Some(stats) = stats.filter(|_| current_result) {
+                state.version_evidence(&self.pairing_id, SyncEvidence::HistoryComplete);
                 state.journal.evidence_at(
                     &self.pairing_id,
                     SyncEvidence::HistoryComplete,
