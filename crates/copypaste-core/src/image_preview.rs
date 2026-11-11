@@ -304,10 +304,29 @@ mod tests {
 
     #[test]
     fn refuses_a_decode_over_the_budget() {
+        // A 16-bit source needs the full framebuffer decoder.
+        let image =
+            ImageBuffer::from_pixel(1_200, 1_200, Rgba([0x2465u16, 0x65a8, 0xa824, 0xffff]));
+        let mut full_decode = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut full_decode), ImageFormat::Png)
+            .unwrap();
         assert!(matches!(
-            thumbnail_png(&png(1200, 1200), 1, None, None),
+            thumbnail_png(&full_decode, 1, None, None),
             Err(ImagePreviewError::TooLarge)
         ));
+        // A streamed source is still refused when the thumbnail itself does not fit.
+        assert!(matches!(
+            thumbnail_png(&png(1_200, 1_200), 1, Some(1_024), None),
+            Err(ImagePreviewError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn streams_a_tall_png_whose_framebuffer_exceeds_the_budget() {
+        // 1200 x 6000 RGBA decodes to ~27 MiB, far above the 4 MiB budget.
+        let thumbnail = thumbnail_png(&png(1_200, 6_000), 4, None, Some((1_400, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (64, 320));
     }
 
     #[test]

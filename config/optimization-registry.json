@@ -1478,7 +1478,7 @@
         "crates/copypaste-core/src/image_preview.rs",
         "crates/copypaste-core/src/image_preview/streaming_png.rs"
       ],
-      "invariant": "Use the existing image-rs thumbnail sampler and PNG encoder with a <=1MiB row window; preserve decoded-size acceptance, aspect ratio, no-upscale and byte-identical previews. Interlaced, animated,16-bit and oversized-window shapes retain the existing bounded decoder.",
+      "invariant": "Use the existing image-rs thumbnail sampler and PNG encoder with a <=1MiB row window; charge the decoded-memory budget for the retained row window and thumbnail only, and preserve aspect ratio, no-upscale and byte-identical previews. Interlaced, animated,16-bit and oversized-window shapes retain the existing bounded decoder.",
       "next_step": "Native isolated preview workload confirms lower daemon peak and byte-identical output. Complete History/hide/restore UI validation, fallback-format coverage, and native Android/Windows measurements. Profile observed CPU/latency increase before further tuning.",
       "native_resource_qualification": {
         "macOS": "not_established",
