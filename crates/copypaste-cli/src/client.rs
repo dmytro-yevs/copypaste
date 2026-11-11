@@ -631,14 +631,16 @@ mod tests {
     #[cfg(unix)]
     impl StubDaemon {
         fn start(name: &str, actions: Vec<StubAction>) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "copypaste-cli-test-{}-{name}.sock",
-                std::process::id()
-            ));
-            // Keep fixture sockets inside the configured artifact directory
-            // while avoiding Unix's small absolute endpoint-name limit.
+            let path =
+                std::env::temp_dir().join(format!("cp-cli-{}-{name}.sock", std::process::id()));
+            // Keep fixture sockets inside the configured temp directory while
+            // staying under Unix's small endpoint-name limit: a temp directory
+            // nested in the checkout is shorter relative to the current
+            // directory, a system one (macOS `/var/folders/...`) is shorter
+            // absolute. The filesystem root is an ancestor of every path, so
+            // the relative spelling always exists but is not always shorter.
             let cwd = std::env::current_dir().expect("current directory");
-            let path = cwd
+            let relative = cwd
                 .ancestors()
                 .enumerate()
                 .find_map(|(depth, ancestor)| {
@@ -650,7 +652,8 @@ mod tests {
                         relative.join(tail)
                     })
                 })
-                .unwrap_or(path);
+                .filter(|relative| relative.as_os_str().len() < path.as_os_str().len());
+            let path = relative.unwrap_or(path);
             let _ = std::fs::remove_file(&path);
             let listener = UnixListener::bind(&path).expect("bind stub socket");
             let request_ids = Arc::new(Mutex::new(Vec::new()));
