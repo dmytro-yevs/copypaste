@@ -14,10 +14,10 @@ pub(super) fn representation(
         ("text/plain", copypaste_ipc::content_type::TEXT, false),
         ("TEXT", copypaste_ipc::content_type::TEXT, false),
         ("STRING", copypaste_ipc::content_type::TEXT, false),
-        ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
-        ("text/html", copypaste_ipc::content_type::HTML, false),
         ("image/png", copypaste_ipc::content_type::IMAGE_PNG, true),
         ("image/tiff", copypaste_ipc::content_type::IMAGE_TIFF, true),
+        ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
+        ("text/html", copypaste_ipc::content_type::HTML, false),
     ]
     .into_iter()
     .find(|(mime, _, _)| available(mime))
@@ -103,10 +103,10 @@ mod tests {
             ("text/plain", copypaste_ipc::content_type::TEXT, false),
             ("TEXT", copypaste_ipc::content_type::TEXT, false),
             ("STRING", copypaste_ipc::content_type::TEXT, false),
-            ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
-            ("text/html", copypaste_ipc::content_type::HTML, false),
             ("image/png", copypaste_ipc::content_type::IMAGE_PNG, true),
             ("image/tiff", copypaste_ipc::content_type::IMAGE_TIFF, true),
+            ("text/rtf", copypaste_ipc::content_type::RICH_TEXT, false),
+            ("text/html", copypaste_ipc::content_type::HTML, false),
         ];
         for mask in 0u32..1 << expected.len() {
             let available = |mime: &str| {
