@@ -296,7 +296,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('History runtime is unavailable'), findsOneWidget);
-    expect(find.byType(MacosWindowHeader), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('macos-native-controls-reserve')),
+      findsOneWidget,
+    );
     expect(find.byType(DragToMoveArea), findsOneWidget);
   }, skip: !Platform.isMacOS);
 

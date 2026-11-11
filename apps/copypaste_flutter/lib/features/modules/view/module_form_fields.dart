@@ -2,9 +2,11 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
+import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
 import '../controller/module_form_draft.dart';
 import '../models/module_models.dart';
@@ -32,12 +34,22 @@ class ModuleFormFields extends StatelessWidget {
         ],
         for (final field in draft.fields) ...[
           if (field.kind == ModuleFieldKind.boolean)
-            Switch(
-              value: draft.values[field.id] as bool,
-              leading: Text(field.title),
-              onChanged: enabled
-                  ? (value) => draft.setValue(field.id, value)
-                  : null,
+            MergeSemantics(
+              child: Row(
+                children: [
+                  Expanded(child: Text(field.title)),
+                  const Gap(AppSpacing.md),
+                  AppSwitchFrame(
+                    child: Switch(
+                      value: draft.values[field.id] as bool,
+                      enabled: enabled,
+                      onChanged: enabled
+                          ? (value) => draft.setValue(field.id, value)
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
             )
           else ...[
             Text(field.title).small(),
@@ -121,7 +133,7 @@ class ModuleFormFields extends StatelessWidget {
                 ? context.l10n.modulesModelReady(model.title)
                 : context.l10n.modulesModelDownload(
                     model.title,
-                    (model.sizeBytes / (1024 * 1024)).toStringAsFixed(1),
+                    formatSizeNumber(model.sizeBytes / (1024 * 1024)),
                   ),
           ).small().muted(),
       ],

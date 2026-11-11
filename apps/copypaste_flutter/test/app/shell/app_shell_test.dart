@@ -1,8 +1,7 @@
-import 'dart:ui' show Tristate;
+import 'dart:ui' show SemanticsRole, Tristate;
 
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
-import 'package:copypaste_flutter/app/theme/app_brand_logo.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -98,7 +97,7 @@ void main() {
   ]) {
     for (final width in [390.0, 1400.0]) {
       testWidgets(
-        'platform Settings shortcut and brand return to History at $width',
+        'platform Settings shortcut and header return to History at $width',
         (tester) async {
           await tester.binding.setSurfaceSize(Size(width, 900));
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -117,7 +116,9 @@ void main() {
           await tester.tap(
             find.byKey(
               ValueKey(
-                width < 640 ? 'header-brand-logo' : 'copypaste-brand-logo',
+                width < 640
+                    ? 'header-brand-logo'
+                    : 'header-destination-history',
               ),
             ),
           );
@@ -130,29 +131,17 @@ void main() {
     }
   }
 
-  testWidgets('mobile header logo keeps the existing app bar height', (
+  testWidgets('mobile header logo keeps the shared header height', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      ShadcnApp(
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: AppTheme.mode,
-        builder: AppTheme.builder,
-        home: const Scaffold(
-          headers: [
-            AppBar(title: Text('History')),
-            Divider(),
-          ],
-          child: SizedBox.expand(),
-        ),
-      ),
-    );
-    final originalHeight = tester.getSize(find.byType(AppBar)).height;
     await tester.pumpWidget(_shell());
-    expect(tester.getSize(find.byType(AppBar)).height, originalHeight);
+    final header = find.byType(AppBar);
+    expect(
+      tester.getSize(header).height,
+      AppTheme.headerHeight(tester.element(header)),
+    );
     final logo = find.byKey(const ValueKey<String>('header-brand-logo'));
     final title = find.descendant(
       of: find.byType(AppBar),
@@ -654,227 +643,105 @@ void main() {
     }),
   );
 
-  testWidgets('uses the shadcn navigation rail at the compact breakpoint', (
+  testWidgets('carries the destinations in the header from the breakpoint', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(640, 720));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = AppNavigationController();
+    addTearDown(controller.dispose);
 
-    await tester.pumpWidget(_shell());
+    await tester.pumpWidget(_shell(controller: controller));
 
-    expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.byType(Tooltip), findsNWidgets(3));
-    final tooltips = tester.widgetList<Tooltip>(find.byType(Tooltip));
-    for (final tooltip in tooltips) {
-      expect(tooltip.alignment, Alignment.topCenter);
-      expect(tooltip.anchorAlignment, Alignment.bottomCenter);
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byType(NavigationBar), findsNothing);
+    final header = find.byType(AppHeader);
+    final items = [
+      for (final destination in AppDestination.values)
+        find.byKey(ValueKey('header-destination-${destination.name}')),
+    ];
+    for (final (index, item) in items.indexed) {
+      expect(find.descendant(of: header, matching: item), findsOneWidget);
       expect(
-        tooltip.tooltip(tester.element(find.byType(Tooltip).first)),
-        isA<TooltipContainer>(),
+        find.descendant(
+          of: item,
+          matching: find.text(appNavigationDestinations[index].label),
+        ),
+        findsOneWidget,
       );
-    }
-    final railCenter = tester.getCenter(find.byType(NavigationRail)).dx;
-    for (final icon in [
-      LucideIcons.clipboardList,
-      DevicePresentation.collectionIcon,
-      LucideIcons.settings,
-    ]) {
-      final iconFinder = find.byIcon(icon);
-      expect(tester.getCenter(iconFinder).dx, closeTo(railCenter, 1));
-      expect(tester.widget<Icon>(iconFinder).size, AppIconSize.md);
-    }
-    final compactLogo = tester.widget<AppBrandLogo>(
-      find.byKey(const ValueKey<String>('copypaste-brand-logo')),
-    );
-    expect(compactLogo.size, AppIconSize.xl);
-    expect(
-      tester
-          .getCenter(find.byKey(const ValueKey<String>('copypaste-brand-logo')))
-          .dx,
-      closeTo(railCenter, 1),
-    );
-    await tester.tap(find.byIcon(DevicePresentation.collectionIcon));
-    await tester.pump();
-    expect(find.text('Devices body'), findsOneWidget);
-  });
-
-  testWidgets('uses the shadcn expandable rail at the expanded breakpoint', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1024, 720));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
-    await tester.pumpWidget(_shell());
-
-    expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.byType(NavigationItem), findsNWidgets(3));
-    final expandedRail = tester.widget<NavigationRail>(
-      find.byType(NavigationRail),
-    );
-    expect(
-      expandedRail,
-      isA<NavigationRail>()
-          .having((rail) => rail.expanded, 'expanded', isTrue)
-          .having((rail) => rail.expandedSize, 'expandedSize', 220),
-    );
-    expect(find.text('Devices'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey<String>('navigation-rail-toggle')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey<String>('navigation-brand')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .getSize(find.byKey(const ValueKey<String>('navigation-brand')))
-          .height,
-      AppIconSize.xl,
-    );
-    expect(
-      find.byKey(const ValueKey<String>('copypaste-brand-logo')),
-      findsOneWidget,
-    );
-    final expandedLogo = tester.widget<AppBrandLogo>(
-      find.byKey(const ValueKey<String>('copypaste-brand-logo')),
-    );
-    expect(expandedLogo.size, AppIconSize.xl);
-    final rail = find.byType(NavigationRail);
-    final theme = Theme.of(tester.element(rail));
-    expect(expandedRail.backgroundColor, theme.colorScheme.secondary);
-    final selectedNavigationItem = tester.widget<NavigationItem>(
-      find.descendant(
-        of: rail,
-        matching: find.byKey(
-          const ValueKey<AppDestination>(AppDestination.history),
-        ),
-      ),
-    );
-    final selectedDecoration = selectedNavigationItem.selectedStyle!.decoration(
-      tester.element(rail),
-      const {WidgetState.selected},
-    );
-    expect(
-      (selectedDecoration as BoxDecoration).color,
-      theme.colorScheme.accent,
-    );
-    final navigationItemContext = tester.element(
-      find.descendant(
-        of: rail,
-        matching: find.byKey(
-          const ValueKey<AppDestination>(AppDestination.history),
-        ),
-      ),
-    );
-    expect(
-      selectedNavigationItem.selectedStyle!.padding(
-        navigationItemContext,
-        const {WidgetState.selected},
-      ),
-      selectedNavigationItem.style!.padding(navigationItemContext, const {}),
-    );
-    final brandLabel = find.descendant(
-      of: rail,
-      matching: find.text('CopyPaste'),
-    );
-    expect(
-      tester
-          .getCenter(find.byKey(const ValueKey<String>('copypaste-brand-logo')))
-          .dy,
-      closeTo(tester.getCenter(brandLabel).dy, 0.5),
-    );
-    for (final label in ['CopyPaste', 'History', 'Devices', 'Settings']) {
-      final labelFinder = find.descendant(of: rail, matching: find.text(label));
-      final text = tester.widget<Text>(labelFinder);
-      expect(text.style?.fontSize, theme.typography.large.fontSize);
-      expect(text.style?.fontWeight, theme.typography.medium.fontWeight);
-      expect(text.style?.height, theme.typography.large.height);
-      if (label == 'CopyPaste') {
-        expect(text.style?.color, theme.colorScheme.foreground);
+      if (index > 0) {
+        expect(
+          tester.getRect(item).left,
+          greaterThanOrEqualTo(tester.getRect(items[index - 1]).right),
+        );
       }
     }
-    for (final icon in [
-      LucideIcons.clipboardList,
-      DevicePresentation.collectionIcon,
-      LucideIcons.settings,
-    ]) {
-      expect(tester.widget<Icon>(find.byIcon(icon)).size, AppIconSize.md);
-    }
-    for (final destination in AppDestination.values) {
-      final iconWrapper = find.byKey(
-        ValueKey<String>('navigation-icon-${destination.name}'),
-      );
-      final label = find.descendant(
-        of: rail,
-        matching: find.text(destination.navigationDestination.label),
-      );
-      expect(tester.getSize(iconWrapper), const Size.square(AppIconSize.xl));
-      expect(
-        tester.getCenter(iconWrapper).dy,
-        closeTo(tester.getCenter(label).dy, 0.5),
-      );
-    }
-    final railBounds = tester.getRect(find.byType(NavigationRail));
-    expect(railBounds.width, 220);
-    final toggleBounds = tester.getRect(
-      find.byKey(const ValueKey<String>('navigation-rail-toggle')),
-    );
-    expect(toggleBounds.left, greaterThanOrEqualTo(railBounds.right));
-    await tester.tap(find.byIcon(LucideIcons.settings));
-    await tester.pump();
-    expect(find.text('Settings body'), findsOneWidget);
+    // The destination title is not repeated beside the navigation.
     expect(
-      tester.widget<NavigationRail>(find.byType(NavigationRail)).expanded,
-      isFalse,
+      find.descendant(of: header, matching: find.text('History')),
+      findsOne,
     );
-  });
+    expect(tester.getSize(find.text('History body')).width, 640);
 
-  testWidgets('collapsing the rail changes only horizontal geometry', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1024, 720));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    // The current destination recolours the header border under its item.
+    final headerRect = tester.getRect(header);
+    Finder indicator(Finder item) => find.ancestor(
+      of: item,
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is DecoratedBox &&
+            widget.decoration == AppTheme.headerNavigationSelectionDecoration,
+      ),
+    );
+    expect(tester.getRect(indicator(items[0])).bottom, headerRect.bottom);
+    expect(
+      tester.getRect(indicator(items[0])).width,
+      tester.getRect(items[0]).width,
+    );
+    expect(indicator(items[1]), findsNothing);
 
-    await tester.pumpWidget(_shell());
-
-    final rail = find.byType(NavigationRail);
-    final logo = find.byKey(const ValueKey<String>('copypaste-brand-logo'));
-    final beforeRailWidth = tester.getSize(rail).width;
-    final beforeLogo = tester.getRect(logo);
-    final beforeItems = <AppDestination, Rect>{
-      for (final destination in AppDestination.values)
-        destination: tester.getRect(
-          find.descendant(
-            of: rail,
-            matching: find.byKey(ValueKey<AppDestination>(destination)),
+    // Pointer hover and keyboard focus are both visible on an item.
+    final itemContext = tester.element(items[1]);
+    final colors = Theme.of(itemContext).colorScheme;
+    final style = tester.widget<Button>(items[1]).style;
+    BoxDecoration decoration(WidgetState state) =>
+        style.decoration(itemContext, {state}) as BoxDecoration;
+    expect(decoration(WidgetState.hovered).color, colors.border);
+    expect(decoration(WidgetState.focused).border!.top.color, colors.primary);
+    expect(
+      style.textStyle(itemContext, const {}).color,
+      colors.mutedForeground,
+    );
+    expect(
+      tester.widget<Button>(items[0]).style.textStyle(itemContext, const {}),
+      isA<TextStyle>()
+          .having((text) => text.color, 'color', colors.foreground)
+          .having(
+            (text) => text.fontWeight,
+            'weight',
+            AppTheme.headerNavigationSelectedWeight,
           ),
-        ),
-    };
+    );
 
-    await tester.tap(
-      find.byKey(const ValueKey<String>('navigation-rail-toggle')),
+    await tester.tap(items[1]);
+    await tester.pump();
+    expect(find.text('Devices body'), findsOneWidget);
+    expect(indicator(items[0]), findsNothing);
+    expect(indicator(items[1]), findsOneWidget);
+
+    // Activating the current destination again returns it to its root.
+    final detail = controller.push<void>(
+      tester.element(find.text('Devices body')),
+      builder: (context) => const Scaffold(child: Text('Detail route')),
     );
     await tester.pumpAndSettle();
-
-    expect(tester.getSize(rail).width, lessThan(beforeRailWidth));
-    final afterLogo = tester.getRect(logo);
-    expect(afterLogo.height, beforeLogo.height);
-    expect(afterLogo.center.dy, closeTo(beforeLogo.center.dy, 0.5));
-    for (final destination in AppDestination.values) {
-      final after = tester.getRect(
-        find.descendant(
-          of: rail,
-          matching: find.byKey(ValueKey<AppDestination>(destination)),
-        ),
-      );
-      expect(after.height, beforeItems[destination]!.height);
-      expect(
-        after.center.dy,
-        closeTo(beforeItems[destination]!.center.dy, 0.5),
-      );
-    }
+    expect(find.text('Detail route'), findsOneWidget);
+    await tester.tap(items[1]);
+    await tester.pumpAndSettle();
+    await detail;
+    expect(find.text('Detail route'), findsNothing);
+    expect(controller.selectedDestination, AppDestination.devices);
+    expect(tester.takeException(), isNull);
   });
 
   for (final layout in [
@@ -1011,7 +878,7 @@ void main() {
   });
 
   testWidgets(
-    'places the unified macOS header above navigation with a native control reserve',
+    'places navigation in the unified macOS header after the native control reserve',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1200, 720));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1022,63 +889,67 @@ void main() {
         _shell(
           controller: controller,
           unifiedTitleBar: true,
-          headerActions: const {
-            AppDestination.devices: [Text('Device header actions')],
+          headerActions: {
+            AppDestination.devices: [
+              Button.secondary(
+                key: const ValueKey('device-command'),
+                onPressed: () {},
+                child: const Text('Device command'),
+              ),
+            ],
           },
         ),
       );
 
-      final header = find.byType(MacosWindowHeader);
+      final header = find.byKey(const ValueKey<String>('macos-window-header'));
       final reserve = find.byKey(
         const ValueKey<String>('macos-native-controls-reserve'),
       );
+      final drag = find.byKey(
+        const ValueKey<String>('macos-window-drag-region'),
+      );
       expect(header, findsOneWidget);
       expect(find.byType(DragToMoveArea), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey<String>('macos-window-drag-region')),
-        findsOneWidget,
-      );
+      expect(tester.getRect(reserve).left, 0);
       expect(
         tester.getSize(reserve).width,
         MacosWindowHeader.nativeControlsWidth,
       );
-      expect(tester.getSize(header).height, AppControlSize.touch);
-      final headerAppBar = tester.widget<AppBar>(
-        find.descendant(of: header, matching: find.byType(AppBar)),
+      expect(tester.getSize(header), const Size(1200, AppControlSize.touch));
+      expect(
+        tester.widget<AppBar>(header).backgroundColor,
+        Theme.of(tester.element(header)).colorScheme.muted,
       );
-      final headerTheme = Theme.of(tester.element(header));
-      expect(headerAppBar.backgroundColor, headerTheme.colorScheme.muted);
       expect(
         tester.getRect(header).bottom,
-        lessThanOrEqualTo(tester.getRect(find.byType(NavigationRail)).top),
-      );
-      final headerTitle = find.descendant(
-        of: header,
-        matching: find.text('History'),
-      );
-      expect(headerTitle, findsOneWidget);
-      expect(
-        tester.getCenter(headerTitle).dy,
-        closeTo(tester.getCenter(header).dy, 0.5),
-      );
-      expect(
-        DefaultTextStyle.of(tester.element(headerTitle)).style.height,
-        AppTheme.light.typography.large.height,
-      );
-      expect(
-        find.byKey(const ValueKey<String>('navigation-rail-toggle')),
-        findsOneWidget,
+        tester.getRect(find.text('History body')).top,
       );
 
+      // Nothing sits under the window buttons, and only free space drags.
+      final wordmark = find.byKey(const ValueKey<String>('header-wordmark'));
+      expect(
+        tester.getRect(wordmark).left,
+        greaterThanOrEqualTo(tester.getRect(reserve).right),
+      );
       controller.selectDestination(AppDestination.devices);
       await tester.pump();
-
+      final dragRect = tester.getRect(drag);
+      expect(dragRect.width, greaterThan(0));
+      for (final control in [
+        for (final destination in AppDestination.values)
+          find.byKey(ValueKey('header-destination-${destination.name}')),
+        find.byKey(const ValueKey('device-command')),
+      ]) {
+        expect(find.descendant(of: drag, matching: control), findsNothing);
+        expect(tester.getRect(control).overlaps(dragRect), isFalse);
+      }
       expect(
         find.descendant(of: header, matching: find.text('Devices')),
-        findsOneWidget,
+        findsOne,
       );
-      expect(find.text('Device header actions'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
   );
 
   testWidgets('keeps the standard content header by default', (tester) async {
@@ -1087,36 +958,20 @@ void main() {
 
     await tester.pumpWidget(_shell());
 
-    expect(find.byType(MacosWindowHeader), findsNothing);
-    expect(find.byType(DragToMoveArea), findsNothing);
     expect(
-      find.ancestor(of: find.text('History'), matching: find.byType(AppBar)),
+      find.byKey(const ValueKey<String>('macos-native-controls-reserve')),
+      findsNothing,
+    );
+    expect(find.byType(DragToMoveArea), findsNothing);
+    final header = find.byType(AppBar);
+    expect(tester.getRect(header).width, 1200);
+    expect(
+      find.descendant(
+        of: header,
+        matching: find.byKey(const ValueKey('header-destination-history')),
+      ),
       findsOneWidget,
     );
-  });
-
-  testWidgets('desktop brand grows with enlarged text', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 720));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      ShadcnApp(
-        theme: AppTheme.light,
-        builder: AppTheme.builder,
-        home: MediaQuery(
-          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-          child: _testShell(),
-        ),
-      ),
-    );
-    // Scaled rail labels can animate their horizontal overflow continuously.
-    await tester.pump();
-    final brand = find.byKey(const ValueKey<String>('navigation-brand'));
-    final label = find.descendant(of: brand, matching: find.text('CopyPaste'));
-    final brandRect = tester.getRect(brand);
-    final labelRect = tester.getRect(label);
-    expect(labelRect.top, greaterThanOrEqualTo(brandRect.top));
-    expect(labelRect.bottom, lessThanOrEqualTo(brandRect.bottom));
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -1203,20 +1058,6 @@ void main() {
       builder: (context) => const Scaffold(child: Text('Detail route')),
     );
     await tester.pump();
-    await tester.tap(
-      find.byKey(const ValueKey<String>('navigation-rail-toggle')),
-    );
-    await tester.pump();
-    expect(
-      tester.widget<NavigationRail>(find.byType(NavigationRail)).expanded,
-      isFalse,
-    );
-    expect(
-      tester
-          .getRect(find.byKey(const ValueKey<String>('navigation-rail-toggle')))
-          .left,
-      greaterThanOrEqualTo(tester.getRect(find.byType(NavigationRail)).right),
-    );
     expect(find.text('Detail route'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
@@ -1224,13 +1065,11 @@ void main() {
     await detailRoute;
     await tester.binding.setSurfaceSize(const Size(320, 720));
     await tester.pump();
+    expect(find.byType(NavigationBar), findsOneWidget);
     await tester.binding.setSurfaceSize(const Size(1200, 720));
     await tester.pump();
 
-    expect(
-      tester.widget<NavigationRail>(find.byType(NavigationRail)).expanded,
-      isFalse,
-    );
+    expect(find.byType(NavigationBar), findsNothing);
     expect(initializations.value, 1);
     expect(inputController.text, 'Retained text');
     expect(scrollController.offset, greaterThan(0));
@@ -1278,7 +1117,10 @@ void main() {
     expect(find.text('Save'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
     await tester.enterText(find.byType(EditableText), 'Search');
-    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('header-destination-history')),
+      findsOneWidget,
+    );
     tester.view.resetViewInsets();
     await tester.pump();
     expect(find.text('Save'), findsOneWidget);
@@ -1324,13 +1166,20 @@ void main() {
             );
           }
           if (width >= 800) {
+            final landmark = find.semantics.byPredicate(
+              (node) =>
+                  node.label == 'Main navigation' &&
+                  node.getSemanticsData().role == SemanticsRole.navigation,
+            );
+            expect(landmark, findsOneWidget);
             expect(
-              find.semantics.byPredicate(
-                (node) =>
-                    node.label.split('\n').contains('History') &&
-                    !node.getSemanticsData().flagsCollection.isButton,
+              find.semantics.descendant(
+                of: landmark,
+                matching: find.semantics.byPredicate(
+                  (node) => node.getSemanticsData().flagsCollection.isButton,
+                ),
               ),
-              findsOneWidget,
+              findsNWidgets(3),
             );
             expect(find.semantics.byLabel('History body'), findsOneWidget);
           }
@@ -1370,14 +1219,6 @@ void main() {
             Tristate.isFalse,
           );
           if (width >= 800) {
-            expect(
-              find.semantics.byPredicate(
-                (node) =>
-                    node.label.split('\n').contains('Devices') &&
-                    !node.getSemanticsData().flagsCollection.isButton,
-              ),
-              findsOneWidget,
-            );
             expect(find.semantics.byLabel('Devices body'), findsOneWidget);
           }
         } finally {

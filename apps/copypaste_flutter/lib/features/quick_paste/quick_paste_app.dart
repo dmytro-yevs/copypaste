@@ -34,6 +34,7 @@ class _QuickPasteAppState extends State<QuickPasteApp> {
   Widget build(BuildContext context) {
     return ShadcnApp(
       title: 'CopyPaste Quick Paste',
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: AppTheme.mode,

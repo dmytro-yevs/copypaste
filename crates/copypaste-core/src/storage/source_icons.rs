@@ -345,7 +345,7 @@ pub(super) mod tests {
         let first = capture(&store, "first", Some("com.example.editor"), T0);
         let second = capture(&store, "second", Some("com.example.editor"), T0 + 1);
         let backup = dir.path().join("backup.db");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
         store.delete_all().unwrap();
         store.restore_from(&backup, &KEY).unwrap();
         assert_eq!(

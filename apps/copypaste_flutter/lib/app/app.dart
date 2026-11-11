@@ -19,6 +19,8 @@ import '../features/settings/controller/settings_controller.dart';
 import '../features/settings/controller/launch_at_login_controller.dart';
 import '../features/settings/view/capture_header_action.dart';
 import '../features/settings/view/sync_header_action.dart';
+import '../features/settings/view/storage_header_action.dart';
+import '../features/settings/controller/settings_navigation_state.dart';
 import '../features/settings/view/settings_screen.dart';
 import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
@@ -70,6 +72,8 @@ class CopyPasteApp extends StatelessWidget {
     return ShadcnApp(
       navigatorKey: navigatorKey,
       title: 'CopyPaste',
+      // The debug ribbon covers the header's end controls.
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: AppTheme.mode,
@@ -119,89 +123,48 @@ class CopyPasteApp extends StatelessWidget {
                       }
                     },
               headerActions: {
-                if (settingsController != null)
-                  AppDestination.history: [
-                    if (notifications case final inbox?)
-                      NotificationsHeaderAction(
-                        controller: inbox,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                      ),
-                    if (historyController?.transfers.fileOperations
-                        case final transfers?)
-                      FileOperationsHeaderAction(
-                        controller: transfers,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                        resolveDeviceClass: _deviceClassResolver(
-                          devicesController,
-                        ),
-                      ),
-                    SyncHeaderAction(
-                      controller: settingsController!,
-                      devices: devicesController,
-                      onDrawerVisibilityChanged:
-                          navigation.handleDrawerVisibilityChanged,
-                    ),
-                    CaptureHeaderAction(controller: settingsController!),
-                  ],
-                if (devicesController != null || settingsController != null)
+                if (devicesController != null)
                   AppDestination.devices: [
-                    if (notifications case final inbox?)
-                      NotificationsHeaderAction(
-                        controller: inbox,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                      ),
-                    if (historyController?.transfers.fileOperations
-                        case final transfers?)
-                      FileOperationsHeaderAction(
-                        controller: transfers,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                        resolveDeviceClass: _deviceClassResolver(
-                          devicesController,
-                        ),
-                      ),
-                    if (devicesController != null)
-                      DevicesHeaderActions(controller: devicesController!),
-                    if (settingsController != null)
-                      SyncHeaderAction(
-                        controller: settingsController!,
-                        devices: devicesController,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                      ),
-                    if (settingsController != null)
-                      CaptureHeaderAction(controller: settingsController!),
-                  ],
-                if (settingsController != null)
-                  AppDestination.settings: [
-                    if (notifications case final inbox?)
-                      NotificationsHeaderAction(
-                        controller: inbox,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                      ),
-                    if (historyController?.transfers.fileOperations
-                        case final transfers?)
-                      FileOperationsHeaderAction(
-                        controller: transfers,
-                        onDrawerVisibilityChanged:
-                            navigation.handleDrawerVisibilityChanged,
-                        resolveDeviceClass: _deviceClassResolver(
-                          devicesController,
-                        ),
-                      ),
-                    SyncHeaderAction(
-                      controller: settingsController!,
-                      devices: devicesController,
-                      onDrawerVisibilityChanged:
-                          navigation.handleDrawerVisibilityChanged,
-                    ),
-                    CaptureHeaderAction(controller: settingsController!),
+                    DevicesHeaderActions(controller: devicesController!),
                   ],
               },
+              headerStatus: [
+                if (settingsController != null) ...[
+                  CaptureHeaderAction(controller: settingsController!),
+                  SyncHeaderAction(
+                    controller: settingsController!,
+                    devices: devicesController,
+                    onDrawerVisibilityChanged:
+                        navigation.handleDrawerVisibilityChanged,
+                  ),
+                  StorageHeaderAction(
+                    usage: settingsController!.storageUsage,
+                    onPressed: () {
+                      // The storage quota and its usage are in Clipboard.
+                      settingsController!.showSection(
+                        SettingsSectionId.clipboard,
+                      );
+                      navigation.selectDestination(AppDestination.settings);
+                    },
+                  ),
+                ],
+              ],
+              headerEnd: [
+                if (historyController?.transfers.fileOperations
+                    case final transfers?)
+                  FileOperationsHeaderAction(
+                    controller: transfers,
+                    onDrawerVisibilityChanged:
+                        navigation.handleDrawerVisibilityChanged,
+                    resolveDeviceClass: _deviceClassResolver(devicesController),
+                  ),
+                if (notifications case final inbox?)
+                  NotificationsHeaderAction(
+                    controller: inbox,
+                    onDrawerVisibilityChanged:
+                        navigation.handleDrawerVisibilityChanged,
+                  ),
+              ],
               destinations: {
                 AppDestination.history: historyController == null
                     ? StateView.error(

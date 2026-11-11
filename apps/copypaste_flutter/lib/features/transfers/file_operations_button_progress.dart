@@ -1,7 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_motion.dart';
-import '../../app/theme/app_icon_frame.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 
@@ -22,7 +21,6 @@ class FileOperationsButtonProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final extent = AppTheme.controlHeight(context);
     final radius = theme.radiusMd;
     final trackColor = theme.colorScheme.border.withValues(alpha: 0.24);
 
@@ -38,22 +36,20 @@ class FileOperationsButtonProgress extends StatelessWidget {
       ),
     );
 
-    return AppIconFrame(
-      size: extent,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          child,
-          if (progress == null)
-            paint(1, staticBorder: true)
-          else
-            AppMotion.progressTransition(
-              context,
-              value: progress!.clamp(0, 1).toDouble(),
-              builder: (context, value, _) => paint(value, staticBorder: false),
-            ),
-        ],
-      ),
+    return Stack(
+      children: [
+        child,
+        Positioned.fill(
+          child: progress == null
+              ? paint(1, staticBorder: true)
+              : AppMotion.progressTransition(
+                  context,
+                  value: progress!.clamp(0, 1).toDouble(),
+                  builder: (context, value, _) =>
+                      paint(value, staticBorder: false),
+                ),
+        ),
+      ],
     );
   }
 }

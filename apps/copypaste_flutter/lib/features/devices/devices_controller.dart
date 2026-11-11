@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../platform/camera/system_pairing_scanner.dart';
 
 import 'devices_gateway.dart';
+import 'pairing_progress.dart';
 
 enum DevicesLoadState { loading, ready, error }
 
@@ -111,6 +112,8 @@ class DevicesController extends ChangeNotifier {
   bool _disposed = false;
   bool _incomingPairing = false;
   bool _locallyConfirmed = false;
+  PairingState? _furthestPairingState;
+  bool? _decisionRequest;
   bool get locallyConfirmed => _locallyConfirmed;
   bool get incomingPairing => _incomingPairing;
 
@@ -148,6 +151,22 @@ class DevicesController extends ChangeNotifier {
   PairingInvitation? get invitation => _invitation;
   String? get verificationCode => _verificationCode;
   bool get canConfirmPairing => _verificationCode != null && !_locallyConfirmed;
+
+  /// Step and decision state of the open pairing flow, for display only.
+  PairingProgress? get pairingProgress {
+    final mode = _pairingEntryMode;
+    if (mode == null) return null;
+    return PairingProgress.resolve(
+      mode: mode,
+      state: _pairingCeremony?.state,
+      furthestState: _furthestPairingState,
+      starting: _pairingInFlight || _pairingModeChangeInFlight,
+      hasError: errorMessage != null,
+      systemScanner: usesSystemScanner,
+      decisionInFlight: _decisionInFlight,
+      decisionRequest: _decisionRequest,
+    );
+  }
 
   /// Keep confirmed Offline during renewal; positive presence must be current.
   DeviceConnectionState peerConnectionState(DevicePeer peer) =>
@@ -613,12 +632,15 @@ class DevicesController extends ChangeNotifier {
       return;
     }
     _decisionInFlight = true;
+    _decisionRequest = accept;
     _notify();
     try {
       await session.confirm(accept: accept);
       if (identical(_pairingSession, session)) _locallyConfirmed = accept;
     } catch (error) {
       _errorMessage = devicesErrorMessage(error);
+      // An unconfirmed request is not reported as this device's decision.
+      _decisionRequest = null;
     } finally {
       _decisionInFlight = false;
       _notify();
@@ -697,7 +719,12 @@ class DevicesController extends ChangeNotifier {
       }
       _pairingSession = session;
       _locallyConfirmed = false;
+      _decisionRequest = null;
       _pairingCeremony = session.ceremony;
+      _furthestPairingState = PairingProgress.furthest(
+        null,
+        session.ceremony.state,
+      );
       _invitation = null;
       _clearVerificationCode();
       _pairingSubscription = session.updates.listen(_onPairingUpdate);
@@ -739,6 +766,10 @@ class DevicesController extends ChangeNotifier {
       return;
     }
     _pairingCeremony = ceremony;
+    _furthestPairingState = PairingProgress.furthest(
+      _furthestPairingState,
+      ceremony.state,
+    );
     _invitationExpiryTimer?.cancel();
     _invitationExpiryTimer = null;
     if (session != null && ceremony.state == PairingState.waitingForPeer) {

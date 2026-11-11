@@ -416,6 +416,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
                   controller: _search,
                   focusNode: _searchFocus,
                   autofocus: true,
+                  skipInputFeatureFocusTraversal: true,
                   style: AppTheme.clipboardMenuTextStyle(context),
                   placeholder: Text(
                     context.l10n.quickPasteSearchPlaceholder,
@@ -625,14 +626,18 @@ class _QuickPasteViewState extends State<QuickPasteView>
               ),
             );
           }
-          return Button.ghost(
-            key: const ValueKey('quick-paste-load-more'),
-            style: AppTheme.clipboardMenuButtonStyle(),
-            onPressed: controller.loadMore,
-            child: Text(
-              controller.paginationFailed
-                  ? context.l10n.commonTryAgain
-                  : context.l10n.quickPasteLoadMore,
+          // The inset keeps the keyboard focus ring inside the list viewport.
+          return Padding(
+            padding: const EdgeInsets.all(AppSpacing.xs),
+            child: Button.ghost(
+              key: const ValueKey('quick-paste-load-more'),
+              style: AppTheme.clipboardMenuButtonStyle(),
+              onPressed: controller.loadMore,
+              child: Text(
+                controller.paginationFailed
+                    ? context.l10n.commonTryAgain
+                    : context.l10n.quickPasteLoadMore,
+              ),
             ),
           );
         }
@@ -790,6 +795,8 @@ class _QuickPasteViewState extends State<QuickPasteView>
               selected: controller.focusedClip?.id == clip.id,
             ),
             alignment: Alignment.centerLeft,
+            // Focus moves the selection, which is this row's only focus cue.
+            disableFocusOutline: true,
             onFocus: (focused) {
               if (focused) controller.focus(clip);
             },

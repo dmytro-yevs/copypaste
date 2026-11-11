@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../support/focus_traversal.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
@@ -80,6 +82,195 @@ void main() {
       TargetPlatform.windows,
     }),
   );
+
+  testWidgets('a dialog field keeps its whole focus ring visible', (
+    tester,
+  ) async {
+    final focus = FocusNode();
+    addTearDown(focus.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: Center(
+            child: SizedBox(
+              width: 360,
+              child: Builder(
+                builder: (context) => AppOverlays.alertDialog(
+                  icon: LucideIcons.pencil,
+                  title: const Text('Rename'),
+                  content: TextField(
+                    key: const ValueKey('dialog-field'),
+                    focusNode: focus,
+                    decoration: AppOverlays.dialogFieldDecoration(context),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    focus.requestFocus();
+    await tester.pumpAndSettle();
+
+    final box = tester.renderObject<RenderBox>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('dialog-field')),
+            matching: find.byType(FocusOutline),
+          )
+          .first,
+    );
+    // FocusOutline paints its ring 3 px outside the field.
+    final ring = MatrixUtils.transformRect(
+      box.getTransformTo(null),
+      (Offset.zero & box.size).inflate(3),
+    );
+    var visible = ring;
+    RenderObject child = box;
+    for (var parent = box.parent; parent != null; parent = parent.parent) {
+      final clip = parent.describeApproximatePaintClip(child);
+      if (clip != null) {
+        visible = visible.intersect(
+          MatrixUtils.transformRect(parent.getTransformTo(null), clip),
+        );
+      }
+      child = parent;
+    }
+    expect(visible, ring);
+  });
+
+  testWidgets('keyboard focus stays in an open drawer and returns on close', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: Builder(
+            builder: (context) => Column(
+              children: [
+                Button.secondary(
+                  key: const ValueKey('behind'),
+                  onPressed: () {},
+                  child: const Text('Behind'),
+                ),
+                Button.primary(
+                  key: const ValueKey('opener'),
+                  onPressed: () => showOverlay<void>(
+                    context,
+                    AppOverlays.drawerConfiguration(context),
+                    builder: (context) => CallbackShortcuts(
+                      bindings: {
+                        const SingleActivator(LogicalKeyboardKey.escape): () =>
+                            closeDrawer(context),
+                      },
+                      child: Column(
+                        key: const ValueKey('drawer'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final label in ['First', 'Second'])
+                            Button.secondary(
+                              key: ValueKey(label),
+                              onPressed: () {},
+                              child: Text(label),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final opener = find.byKey(const ValueKey('opener'));
+    for (var i = 0; i < 3 && !focusInside(tester, opener); i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(focusInside(tester, opener), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final visited = <String>{};
+    for (var i = 0; i < 6; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(focusInside(tester, find.byKey(const ValueKey('drawer'))), isTrue);
+      for (final label in ['First', 'Second']) {
+        if (focusInside(tester, find.byKey(ValueKey(label)))) {
+          visited.add(label);
+        }
+      }
+    }
+    expect(visited, {'First', 'Second'});
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+    expect(focusInside(tester, find.byKey(const ValueKey('drawer'))), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drawer')), findsNothing);
+    expect(focusInside(tester, opener), isTrue);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('closing a drawer opened by touch refocuses no text field', (
+    tester,
+  ) async {
+    final field = TextEditingController();
+    addTearDown(field.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: Builder(
+            builder: (context) => Column(
+              children: [
+                TextField(key: const ValueKey('field'), controller: field),
+                Button.primary(
+                  onPressed: () => showOverlay<void>(
+                    context,
+                    AppOverlays.drawerConfiguration(context),
+                    builder: (context) => Button.primary(
+                      onPressed: () => closeDrawer(context),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('field')));
+    await tester.pump();
+    expect(focusInside(tester, find.byKey(const ValueKey('field'))), isTrue);
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('Close'), findsNothing);
+    expect(
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorStateOfType<EditableTextState>(),
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('opening another drawer replaces the previous drawer', (
     tester,

@@ -20,6 +20,12 @@ SingleActivator desktopShortcut(LogicalKeyboardKey key, {bool shift = false}) =>
       includeRepeats: false,
     );
 
+/// Reads as the platform writes it: ⌘1 on macOS, Ctrl+1 elsewhere.
+String desktopShortcutLabel(LogicalKeyboardKey key) =>
+    defaultTargetPlatform == TargetPlatform.macOS
+    ? '⌘${key.keyLabel}'
+    : 'Ctrl+${key.keyLabel}';
+
 Map<ShortcutActivator, VoidCallback> desktopWindowBindings({
   Future<void> Function()? onClose,
   Future<void> Function()? onQuit,

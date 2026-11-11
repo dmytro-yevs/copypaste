@@ -119,6 +119,15 @@ impl ClipboardPayload {
         }
     }
 
+    /// Line-feed separated lines of the whole text without surrounding
+    /// whitespace, so CRLF counts once and a lone CR is not a break.
+    #[must_use]
+    pub fn text_line_count(&self) -> Option<u32> {
+        let text = self.plain_text()?.trim();
+        let breaks = text.bytes().filter(|&byte| byte == b'\n').count();
+        Some(u32::try_from(breaks).unwrap_or(u32::MAX).saturating_add(1))
+    }
+
     #[must_use]
     pub fn source_reference(&self) -> Option<&str> {
         match self {
@@ -242,6 +251,23 @@ mod tests {
         let payload = ClipboardPayload::open(&row, &key).unwrap();
         assert_eq!(payload.plain_text(), Some("full body"));
         assert_eq!(payload.display_text(), "full body");
+    }
+
+    #[test]
+    fn text_lines_are_line_feeds_of_the_trimmed_whole_text() {
+        let lines =
+            |text: &str| ClipboardPayload::Text(Zeroizing::new(text.to_owned())).text_line_count();
+        assert_eq!(lines("a\nb\n\nd\ne"), Some(5));
+        assert_eq!(lines("a\r\nb\r\nc"), Some(3));
+        assert_eq!(lines("a\rb\rc"), Some(1));
+        assert_eq!(lines("\n \na\nb\n \t\n\n"), Some(2));
+        let long = "line\n".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        assert_eq!(lines(&long), Some(1024));
+        let file = ClipboardPayload::File {
+            bytes: Zeroizing::new(b"a\nb\nc\nd\ne".to_vec()),
+            metadata: None,
+        };
+        assert_eq!(file.text_line_count(), None);
     }
 
     #[test]

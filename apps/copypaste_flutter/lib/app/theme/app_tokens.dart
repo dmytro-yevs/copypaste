@@ -72,6 +72,7 @@ abstract final class AppControlSize {
 /// Shared compact metadata and desktop menu typography.
 abstract final class AppTypographySize {
   static const double historyMetadata = 12;
+  static const double captionLetterSpacing = 0.6;
   static const double menu = 13;
   static const double menuMetadata = menu - 2;
   static const double inspectorMetadata = 10;

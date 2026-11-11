@@ -6,8 +6,10 @@ import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/app_shell.dart';
+import 'package:copypaste_flutter/app/shell/header_fit.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/rendering.dart' show SemanticsAction;
+import 'package:flutter/rendering.dart'
+    show RenderBox, RenderClipRect, RenderObject, SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -364,7 +366,7 @@ void main() {
       (tester) async {
         final semantics = tester.ensureSemantics();
         final controller = DevicesController(
-          gateway: _ScreenGateway(peers: const [], discovered: const []),
+          gateway: _ScreenGateway(discovered: const []),
           captureProtection: _CaptureProtection(),
         );
         addTearDown(controller.dispose);
@@ -682,6 +684,58 @@ void main() {
       TargetPlatform.windows,
     }),
   );
+
+  testWidgets('header commands keep keyboard focus when their labels leave', (
+    tester,
+  ) async {
+    final controller = DevicesController(
+      gateway: _ScreenGateway(peers: const [], discovered: const []),
+      captureProtection: _CaptureProtection(),
+    );
+    final navigation = AppNavigationController(
+      initialDestination: AppDestination.devices,
+    );
+    addTearDown(controller.dispose);
+    addTearDown(navigation.dispose);
+    await controller.refresh();
+    await tester.binding.setSurfaceSize(const Size(1900, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: AppShell(
+          controller: navigation,
+          headerActions: {
+            AppDestination.devices: [
+              DevicesHeaderActions(controller: controller),
+            ],
+          },
+          destinations: const {
+            AppDestination.history: SizedBox.expand(),
+            AppDestination.devices: SizedBox.expand(),
+            AppDestination.settings: SizedBox.expand(),
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    HeaderStage stage() => HeaderFit.stageOf(
+      tester.element(find.byKey(const ValueKey<String>('pair-device'))),
+    );
+    expect(stage(), HeaderStage.detailed);
+    for (var step = 0; step < 12 && _focusedKey() != 'pair-device'; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(_focusedKey(), 'pair-device');
+
+    await tester.binding.setSurfaceSize(const Size(1000, 800));
+    await tester.pumpAndSettle();
+    expect(stage(), isNot(HeaderStage.detailed));
+    expect(_focusedKey(), 'pair-device');
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets(
     'unmounting a screen preserves its app-owned devices controller',
@@ -1099,6 +1153,64 @@ void main() {
     }
   }
 
+  testWidgets('a focused pairing code cell shows whole with its ring', (
+    tester,
+  ) async {
+    final controller = DevicesController(
+      gateway: _ScreenGateway(peers: const [], discovered: const []),
+      captureProtection: _CaptureProtection(),
+    );
+    addTearDown(controller.dispose);
+    await _pumpDevices(tester, controller, size: const Size(390, 844));
+    await tester.runAsync(controller.openCodeEntry);
+    await tester.pumpAndSettle();
+
+    final code = find.byKey(const ValueKey<String>('pairing-code-input'));
+    final scroll = find.byKey(const ValueKey<String>('pairing-code-scroll'));
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: scroll, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    // The row is wider than its viewport, so each end can be scrolled off.
+    expect(position.maxScrollExtent, greaterThan(0));
+    // Revealing a cell scrolls the row; it never moves the layout.
+    expect(
+      tester.getRect(code).left,
+      tester.getRect(find.text('Pairing code').first).left,
+    );
+
+    final cells = find.descendant(
+      of: code,
+      matching: find.byType(EditableText),
+    );
+    // Typing and arrows move focus cell by cell; each focused cell must show.
+    for (final cell in [cells.last, cells.first]) {
+      tester.widget<EditableText>(cell).focusNode.requestFocus();
+      await tester.pumpAndSettle();
+      final box = tester.renderObject<RenderBox>(
+        find.ancestor(of: cell, matching: find.byType(FocusOutline)).first,
+      );
+      // FocusOutline paints its ring 3 px outside the cell.
+      final ring = MatrixUtils.transformRect(
+        box.getTransformTo(null),
+        (Offset.zero & box.size).inflate(3),
+      );
+      var visible = ring;
+      RenderObject child = box;
+      for (var parent = box.parent; parent != null; parent = parent.parent) {
+        final clip = parent.describeApproximatePaintClip(child);
+        if (clip != null) {
+          visible = visible.intersect(
+            MatrixUtils.transformRect(parent.getTransformTo(null), clip),
+          );
+        }
+        child = parent;
+      }
+      expect(visible, ring);
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
   for (final (platform, size) in [
     (TargetPlatform.macOS, const Size(1000, 900)),
     (TargetPlatform.windows, const Size(1400, 900)),
@@ -1244,6 +1356,10 @@ void main() {
 
     await _pumpDevices(tester, controller);
 
+    expect(
+      find.byKey(const ValueKey<String>('devices-empty-state')),
+      findsNothing,
+    );
     for (final key in [
       'pair-device',
       'scan-pairing-qr',
@@ -1580,7 +1696,7 @@ void main() {
     },
   );
 
-  testWidgets('omits obsolete unavailable and trusted empty states', (
+  testWidgets('omits obsolete unavailable states and section headings', (
     tester,
   ) async {
     final gateway = _ScreenGateway(peers: const [], discovered: const []);
@@ -1606,7 +1722,6 @@ void main() {
       findsNothing,
     );
     expect(find.text('Trusted devices'), findsNothing);
-    expect(find.text('No trusted devices yet'), findsNothing);
     expect(find.text('Nearby devices'), findsOneWidget);
     expect(find.text('No devices nearby'), findsOneWidget);
     expect(
@@ -1614,6 +1729,355 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'explains pairing while no other device is paired',
+    (tester) async {
+      final gateway = _ScreenGateway(
+        peers: const [],
+        discovered: [_discoveredDevice('Nearby laptop')],
+      );
+      final controller = DevicesController(
+        gateway: gateway,
+        captureProtection: _CaptureProtection(),
+      );
+      addTearDown(controller.dispose);
+      await _pumpDevices(tester, controller, size: const Size(360, 1400));
+      await tester.pumpAndSettle();
+
+      final emptyState = find.byKey(
+        const ValueKey<String>('devices-empty-state'),
+      );
+      expect(emptyState, findsOneWidget);
+      expect(
+        find.descendant(
+          of: emptyState,
+          matching: find.text('No other devices paired yet'),
+        ),
+        findsOneWidget,
+      );
+      // It sits between this device and discovery and hides neither.
+      final emptyRect = tester.getRect(emptyState);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey<String>('this-device-card')))
+            .bottom,
+        lessThan(emptyRect.top),
+      );
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey<String>('nearby-devices')))
+            .top,
+        greaterThan(emptyRect.bottom),
+      );
+      expect(find.widgetWithText(Button, 'Connect'), findsOneWidget);
+      for (final label in ['Add device', 'Scan QR', 'Enter code']) {
+        expect(
+          find.descendant(of: emptyState, matching: find.text(label)),
+          findsOneWidget,
+        );
+      }
+
+      // A discovery pass in flight must not replace or remove it.
+      gateway.rescanPending = Completer<void>();
+      await tester.tap(find.byKey(const ValueKey<String>('rescan-devices')));
+      await tester.pump();
+      expect(find.text('Scanning…'), findsOneWidget);
+      expect(tester.getRect(emptyState), emptyRect);
+      gateway.rescanPending!.complete();
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('empty-enter-pairing-code')),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets('shows the pairing explanation only for a loaded empty group', (
+    tester,
+  ) async {
+    final emptyState = find.byKey(
+      const ValueKey<String>('devices-empty-state'),
+    );
+    final gateway = _ScreenGateway(peers: const [], discovered: const [])
+      ..loadPending = Completer<void>()
+      ..loadError = StateError('runtime unavailable');
+    final controller = DevicesController(
+      gateway: gateway,
+      captureProtection: _CaptureProtection(),
+    );
+    addTearDown(controller.dispose);
+    await _pumpDevices(tester, controller);
+    expect(find.text('Loading devices…'), findsOneWidget);
+    expect(emptyState, findsNothing);
+
+    gateway.loadPending!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Devices are unavailable'), findsOneWidget);
+    expect(emptyState, findsNothing);
+
+    gateway
+      ..loadPending = null
+      ..loadError = null;
+    await tester.tap(find.widgetWithText(Button, 'Try again'));
+    await tester.pumpAndSettle();
+    expect(emptyState, findsOneWidget);
+
+    // A failed later refresh keeps the explanation under its alert, and an
+    // open pairing pane owns the entry points.
+    gateway.loadError = StateError('runtime unavailable');
+    await tester.runAsync(controller.refresh);
+    await tester.pumpAndSettle();
+    expect(find.text('Device refresh failed'), findsOneWidget);
+    expect(emptyState, findsOneWidget);
+    await tester.runAsync(controller.openInvitation);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Button>(
+            find.byKey(const ValueKey<String>('empty-pair-device')),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('empty state commands wait while the system scanner is open', (
+    tester,
+  ) async {
+    const channel = MethodChannel('com.copypaste.app/qr_scanner');
+    final result = Completer<String?>();
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (call) async => call.method == 'scan' ? result.future : null,
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    final controller = DevicesController(
+      gateway: _ScreenGateway(peers: const [], discovered: const []),
+      captureProtection: _CaptureProtection(),
+    );
+    addTearDown(controller.dispose);
+    await _pumpDevices(tester, controller, size: const Size(390, 1200));
+    await tester.pumpAndSettle();
+    const commands = [
+      'empty-pair-device',
+      'empty-scan-pairing-qr',
+      'empty-enter-pairing-code',
+    ];
+    VoidCallback? action(String key) =>
+        tester.widget<Button>(find.byKey(ValueKey<String>(key))).onPressed;
+    for (final key in commands) {
+      expect(action(key), isNotNull, reason: key);
+    }
+
+    // No pane is open while the system scanner is up, yet no other
+    // pairing may start.
+    await tester.tap(find.byKey(const ValueKey('empty-scan-pairing-qr')));
+    await tester.pumpAndSettle();
+    expect(controller.systemScanInFlight, isTrue);
+    expect(controller.pairingInspectorOpen, isFalse);
+    for (final key in commands) {
+      expect(action(key), isNull, reason: key);
+    }
+
+    result.complete(null);
+    await tester.pumpAndSettle();
+    for (final key in commands) {
+      expect(action(key), isNotNull, reason: key);
+    }
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets(
+    'pairing names its step and both decisions at 360 pixels and doubled text',
+    (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final semantics = tester.ensureSemantics();
+      final gateway = _ScreenGateway();
+      gateway.session.ceremony = const PairingCeremony(
+        state: PairingState.awaitingConfirmation,
+        peerName: 'Pixel 8',
+      );
+      final controller = DevicesController(
+        gateway: gateway,
+        captureProtection: _CaptureProtection(),
+      );
+      addTearDown(controller.dispose);
+      try {
+        await _pumpDevices(tester, controller, size: const Size(360, 640));
+        await tester.runAsync(
+          () =>
+              controller.joinPairingUri('copypaste://pair/v1?test=invitation'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey<String>('devices-pairing-drawer')),
+          findsOneWidget,
+        );
+        final indicator = find.byKey(
+          const ValueKey<String>('pairing-step-indicator'),
+        );
+        // Too narrow for every name, so one line names the current step.
+        expect(
+          find.descendant(
+            of: indicator,
+            matching: find.textContaining('Confirm'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: indicator, matching: find.text('Connect')),
+          findsNothing,
+        );
+        expect(find.semantics.byLabel('Step 3 of 4: Confirm'), findsOneWidget);
+        String decision(String key) => tester
+            .widget<Text>(
+              find
+                  .descendant(
+                    of: find.byKey(ValueKey<String>(key)),
+                    matching: find.byType(Text),
+                  )
+                  .last,
+            )
+            .data!;
+        expect(decision('pairing-decision-local'), 'Not confirmed yet');
+        // The runtime does not report the other answer at this point.
+        expect(decision('pairing-decision-peer'), 'Answer not known');
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('pairing-decision-peer')),
+            matching: find.text('Pixel 8'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.widgetWithText(Button, 'Confirm'));
+        await tester.pumpAndSettle();
+        expect(decision('pairing-decision-local'), 'Confirmed');
+        expect(decision('pairing-decision-peer'), 'Waiting for confirmation');
+
+        // The runtime does not say whether the other device rejected or
+        // closed its pane, so neither the title nor its row claims either.
+        gateway.session.ceremony = const PairingCeremony(
+          state: PairingState.rejected,
+          peerName: 'Pixel 8',
+        );
+        await tester.runAsync(controller.closePairing);
+        await tester.pumpAndSettle();
+        await tester.runAsync(
+          () =>
+              controller.joinPairingUri('copypaste://pair/v1?test=invitation'),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Pairing not completed'), findsOneWidget);
+        expect(find.text('Pairing rejected'), findsNothing);
+        expect(find.text('Rejected'), findsNothing);
+        expect(decision('pairing-decision-peer'), 'Answer not known');
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  for (final size in [const Size(1400, 900), const Size(360, 480)]) {
+    testWidgets(
+      'Tab walks the pairing pane in order with a visible focus ring at $size',
+      (tester) async {
+        final controller = DevicesController(
+          gateway: _ScreenGateway(),
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: size);
+        await tester.pumpAndSettle();
+        await controller.openCodeEntry();
+        await tester.pumpAndSettle();
+
+        Future<String?> tab({bool back = false}) async {
+          if (back) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          if (back) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.pumpAndSettle();
+          _expectFocusRingUnclipped(tester);
+          return _focusedKey();
+        }
+
+        var key = await tab();
+        for (
+          var step = 0;
+          key != 'close-pairing-inspector' && step < 12;
+          step++
+        ) {
+          key = await tab();
+        }
+        expect(key, 'close-pairing-inspector');
+        // The eight code cells are one stop, not a trap or hidden stops.
+        expect(await tab(), 'pairing-code-input');
+        tester.testTextInput.enterText('A');
+        await tester.pumpAndSettle();
+        expect(_focusedKey(), 'pairing-code-input');
+        expect(await tab(), 'pairing-address-input');
+        expect(await tab(), 'submit-pairing-code');
+        expect(await tab(back: true), 'pairing-address-input');
+        expect(await tab(back: true), 'pairing-code-input');
+        expect(await tab(back: true), 'close-pairing-inspector');
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'every Tab stop in the list and device details shows its focus ring at $size',
+      (tester) async {
+        final controller = DevicesController(
+          gateway: _ScreenGateway(
+            discovered: [_discoveredDevice('Nearby laptop')],
+          ),
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: size);
+        await tester.pumpAndSettle();
+        controller.openPeerDetails('peer');
+        await tester.pumpAndSettle();
+
+        final stops = <String?>[];
+        for (var step = 0; step < 14; step++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pumpAndSettle();
+          // A stop without a ring would be an invisible one.
+          _expectFocusRingUnclipped(tester);
+          stops.add(_focusedKey());
+        }
+        final close = stops.indexOf('close-device-details');
+        expect(close, isNonNegative);
+        expect(
+          stops.skip(close + 1).take(3),
+          everyElement('device-details-actions'),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('keeps header commands usable at narrow widths', (tester) async {
     final gateway = _ScreenGateway(peers: const [], discovered: const []);
@@ -1638,7 +2102,13 @@ void main() {
         reason: '$key must be square',
       );
     }
-    expect(find.text('Add device'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.text('Add device'),
+      ),
+      findsNothing,
+    );
     expect(
       find.descendant(
         of: find.byKey(const ValueKey<String>('pair-device')),
@@ -1778,6 +2248,51 @@ Future<void> _pumpDevices(
   await tester.pump();
 }
 
+String? _focusedKey() {
+  String? key;
+  FocusManager.instance.primaryFocus?.context?.visitAncestorElements((element) {
+    final widgetKey = element.widget.key;
+    if (widgetKey is! ValueKey<String>) return true;
+    key = widgetKey.value;
+    return false;
+  });
+  return key;
+}
+
+/// The library paints the ring three pixels outside the focused control, so
+/// every clip between that control and the root must leave it that room.
+void _expectFocusRingUnclipped(WidgetTester tester) {
+  final focused = find.byWidgetPredicate(
+    (widget) => widget is FocusOutline && widget.focused,
+  );
+  expect(focused, findsWidgets, reason: 'no ring on ${_focusedKey()}');
+  for (final element in focused.evaluate()) {
+    final box = element.renderObject! as RenderBox;
+    final ring = (Offset.zero & box.size).inflate(3);
+    RenderObject child = box;
+    for (
+      var parent = box.parent;
+      parent != null;
+      child = parent, parent = parent.parent
+    ) {
+      final clip = parent is RenderClipRect && parent.clipper != null
+          ? parent.clipper!.getClip(parent.size)
+          : parent.describeApproximatePaintClip(child);
+      if (clip == null) continue;
+      final painted = MatrixUtils.transformRect(
+        box.getTransformTo(parent),
+        ring,
+      );
+      expect(
+        clip.inflate(0.01).expandToInclude(painted),
+        clip.inflate(0.01),
+        reason:
+            '${parent.runtimeType} clips the focus ring of ${_focusedKey()}',
+      );
+    }
+  }
+}
+
 class _ScreenGateway implements DevicesGateway, NearbyPairingGateway {
   String? nearbyAddress;
   @override
@@ -1848,6 +2363,8 @@ class _ScreenGateway implements DevicesGateway, NearbyPairingGateway {
   int loadCalls = 0;
   Object? syncError;
   Object? joinError;
+  Completer<void>? loadPending;
+  Object? loadError;
 
   @override
   Stream<void> get changes => const Stream<void>.empty();
@@ -1870,6 +2387,8 @@ class _ScreenGateway implements DevicesGateway, NearbyPairingGateway {
   @override
   Future<DevicesSnapshot> load() async {
     loadCalls++;
+    await loadPending?.future;
+    if (loadError case final error?) throw error;
     return DevicesSnapshot(
       thisDevice: ThisDevice(
         id: 'this-device-id',

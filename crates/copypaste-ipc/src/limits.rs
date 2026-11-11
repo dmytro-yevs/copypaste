@@ -233,6 +233,7 @@ mod tests {
             source_app_icon_id: None,
             too_large_to_sync: false,
             truncated: false,
+            line_count: Some(u32::MAX),
         }
     }
 

@@ -24,7 +24,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
+  RustStreamSink<BackupUpdate> dco_decode_StreamSink_backup_update_Sse(
+    dynamic raw,
+  );
+
+  @protected
   RustStreamSink<RuntimeEvent> dco_decode_StreamSink_runtime_event_Sse(
+    dynamic raw,
+  );
+
+  @protected
+  RustStreamSink<TextExportUpdate> dco_decode_StreamSink_text_export_update_Sse(
     dynamic raw,
   );
 
@@ -35,7 +45,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BackupSummary dco_decode_backup_summary(dynamic raw);
 
   @protected
+  BackupUpdate dco_decode_backup_update(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  BackupSummary dco_decode_box_autoadd_backup_summary(dynamic raw);
 
   @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
@@ -45,6 +61,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipFileDetails dco_decode_box_autoadd_clip_file_details(dynamic raw);
+
+  @protected
+  ClipGroupCounts dco_decode_box_autoadd_clip_group_counts(dynamic raw);
 
   @protected
   ClipImageDetails dco_decode_box_autoadd_clip_image_details(dynamic raw);
@@ -91,6 +110,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PairingCeremony dco_decode_box_autoadd_pairing_ceremony(dynamic raw);
 
   @protected
+  RuntimeError dco_decode_box_autoadd_runtime_error(dynamic raw);
+
+  @protected
   RuntimeSettingsHealth dco_decode_box_autoadd_runtime_settings_health(
     dynamic raw,
   );
@@ -101,7 +123,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeStorageUsage dco_decode_box_autoadd_runtime_storage_usage(dynamic raw);
+
+  @protected
   RuntimeSyncStatus dco_decode_box_autoadd_runtime_sync_status(dynamic raw);
+
+  @protected
+  TextExportSummary dco_decode_box_autoadd_text_export_summary(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
@@ -119,7 +147,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipContentClass dco_decode_clip_content_class(dynamic raw);
 
   @protected
+  ClipCountRange dco_decode_clip_count_range(dynamic raw);
+
+  @protected
   ClipFileDetails dco_decode_clip_file_details(dynamic raw);
+
+  @protected
+  ClipGroupCounts dco_decode_clip_group_counts(dynamic raw);
 
   @protected
   ClipImageDetails dco_decode_clip_image_details(dynamic raw);
@@ -223,6 +257,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ClipContentClass> dco_decode_list_clip_content_class(dynamic raw);
 
   @protected
+  List<ClipCountRange> dco_decode_list_clip_count_range(dynamic raw);
+
+  @protected
   List<ClipSemanticKind> dco_decode_list_clip_semantic_kind(dynamic raw);
 
   @protected
@@ -246,6 +283,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Peer> dco_decode_list_peer(dynamic raw);
 
   @protected
+  Uint64List dco_decode_list_prim_u_64_strict(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
@@ -266,6 +306,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  BackupSummary? dco_decode_opt_box_autoadd_backup_summary(dynamic raw);
+
+  @protected
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
@@ -273,6 +316,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipFileDetails? dco_decode_opt_box_autoadd_clip_file_details(dynamic raw);
+
+  @protected
+  ClipGroupCounts? dco_decode_opt_box_autoadd_clip_group_counts(dynamic raw);
 
   @protected
   ClipImageDetails? dco_decode_opt_box_autoadd_clip_image_details(dynamic raw);
@@ -318,12 +364,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PairingCeremony? dco_decode_opt_box_autoadd_pairing_ceremony(dynamic raw);
 
   @protected
+  RuntimeError? dco_decode_opt_box_autoadd_runtime_error(dynamic raw);
+
+  @protected
   RuntimeSettingsHealth? dco_decode_opt_box_autoadd_runtime_settings_health(
     dynamic raw,
   );
 
   @protected
+  RuntimeStorageUsage? dco_decode_opt_box_autoadd_runtime_storage_usage(
+    dynamic raw,
+  );
+
+  @protected
   RuntimeSyncStatus? dco_decode_opt_box_autoadd_runtime_sync_status(
+    dynamic raw,
+  );
+
+  @protected
+  TextExportSummary? dco_decode_opt_box_autoadd_text_export_summary(
     dynamic raw,
   );
 
@@ -364,6 +423,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw);
 
   @protected
+  RuntimeStorageUsage dco_decode_runtime_storage_usage(dynamic raw);
+
+  @protected
   RuntimeSyncIssue dco_decode_runtime_sync_issue(dynamic raw);
 
   @protected
@@ -385,6 +447,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TextExportSummary dco_decode_text_export_summary(dynamic raw);
 
   @protected
+  TextExportUpdate dco_decode_text_export_update(dynamic raw);
+
+  @protected
   ThisDevice dco_decode_this_device(dynamic raw);
 
   @protected
@@ -403,7 +468,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<BackupUpdate> sse_decode_StreamSink_backup_update_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RustStreamSink<RuntimeEvent> sse_decode_StreamSink_runtime_event_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RustStreamSink<TextExportUpdate> sse_decode_StreamSink_text_export_update_Sse(
     SseDeserializer deserializer,
   );
 
@@ -414,7 +489,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BackupSummary sse_decode_backup_summary(SseDeserializer deserializer);
 
   @protected
+  BackupUpdate sse_decode_backup_update(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  BackupSummary sse_decode_box_autoadd_backup_summary(
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
@@ -426,6 +509,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipFileDetails sse_decode_box_autoadd_clip_file_details(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ClipGroupCounts sse_decode_box_autoadd_clip_group_counts(
     SseDeserializer deserializer,
   );
 
@@ -496,6 +584,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeError sse_decode_box_autoadd_runtime_error(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSettingsHealth sse_decode_box_autoadd_runtime_settings_health(
     SseDeserializer deserializer,
   );
@@ -506,7 +599,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeStorageUsage sse_decode_box_autoadd_runtime_storage_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSyncStatus sse_decode_box_autoadd_runtime_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TextExportSummary sse_decode_box_autoadd_text_export_summary(
     SseDeserializer deserializer,
   );
 
@@ -526,7 +629,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipContentClass sse_decode_clip_content_class(SseDeserializer deserializer);
 
   @protected
+  ClipCountRange sse_decode_clip_count_range(SseDeserializer deserializer);
+
+  @protected
   ClipFileDetails sse_decode_clip_file_details(SseDeserializer deserializer);
+
+  @protected
+  ClipGroupCounts sse_decode_clip_group_counts(SseDeserializer deserializer);
 
   @protected
   ClipImageDetails sse_decode_clip_image_details(SseDeserializer deserializer);
@@ -646,6 +755,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ClipCountRange> sse_decode_list_clip_count_range(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<ClipSemanticKind> sse_decode_list_clip_semantic_kind(
     SseDeserializer deserializer,
   );
@@ -675,6 +789,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Peer> sse_decode_list_peer(SseDeserializer deserializer);
 
   @protected
+  Uint64List sse_decode_list_prim_u_64_strict(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
@@ -699,6 +816,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  BackupSummary? sse_decode_opt_box_autoadd_backup_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
@@ -708,6 +830,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipFileDetails? sse_decode_opt_box_autoadd_clip_file_details(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ClipGroupCounts? sse_decode_opt_box_autoadd_clip_group_counts(
     SseDeserializer deserializer,
   );
 
@@ -775,12 +902,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeError? sse_decode_opt_box_autoadd_runtime_error(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSettingsHealth? sse_decode_opt_box_autoadd_runtime_settings_health(
     SseDeserializer deserializer,
   );
 
   @protected
+  RuntimeStorageUsage? sse_decode_opt_box_autoadd_runtime_storage_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSyncStatus? sse_decode_opt_box_autoadd_runtime_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TextExportSummary? sse_decode_opt_box_autoadd_text_export_summary(
     SseDeserializer deserializer,
   );
 
@@ -829,6 +971,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeStorageUsage sse_decode_runtime_storage_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSyncIssue sse_decode_runtime_sync_issue(SseDeserializer deserializer);
 
   @protected
@@ -856,6 +1003,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TextExportUpdate sse_decode_text_export_update(SseDeserializer deserializer);
+
+  @protected
   ThisDevice sse_decode_this_device(SseDeserializer deserializer);
 
   @protected
@@ -877,8 +1027,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_backup_update_Sse(
+    RustStreamSink<BackupUpdate> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_StreamSink_runtime_event_Sse(
     RustStreamSink<RuntimeEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_StreamSink_text_export_update_Sse(
+    RustStreamSink<TextExportUpdate> self,
     SseSerializer serializer,
   );
 
@@ -889,7 +1051,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_backup_summary(BackupSummary self, SseSerializer serializer);
 
   @protected
+  void sse_encode_backup_update(BackupUpdate self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_backup_summary(
+    BackupSummary self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
@@ -903,6 +1074,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_clip_file_details(
     ClipFileDetails self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_clip_group_counts(
+    ClipGroupCounts self,
     SseSerializer serializer,
   );
 
@@ -991,6 +1168,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_runtime_error(
+    RuntimeError self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_runtime_settings_health(
     RuntimeSettingsHealth self,
     SseSerializer serializer,
@@ -1003,8 +1186,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_runtime_storage_usage(
+    RuntimeStorageUsage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_runtime_sync_status(
     RuntimeSyncStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_text_export_summary(
+    TextExportSummary self,
     SseSerializer serializer,
   );
 
@@ -1027,8 +1222,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_clip_count_range(
+    ClipCountRange self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_clip_file_details(
     ClipFileDetails self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_clip_group_counts(
+    ClipGroupCounts self,
     SseSerializer serializer,
   );
 
@@ -1183,6 +1390,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_clip_count_range(
+    List<ClipCountRange> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_clip_semantic_kind(
     List<ClipSemanticKind> self,
     SseSerializer serializer,
@@ -1219,6 +1432,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_peer(List<Peer> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_prim_u_64_strict(
+    Uint64List self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -1252,6 +1471,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_backup_summary(
+    BackupSummary? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
@@ -1263,6 +1488,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_clip_file_details(
     ClipFileDetails? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_clip_group_counts(
+    ClipGroupCounts? self,
     SseSerializer serializer,
   );
 
@@ -1345,14 +1576,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_runtime_error(
+    RuntimeError? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_runtime_settings_health(
     RuntimeSettingsHealth? self,
     SseSerializer serializer,
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_runtime_storage_usage(
+    RuntimeStorageUsage? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_runtime_sync_status(
     RuntimeSyncStatus? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_text_export_summary(
+    TextExportSummary? self,
     SseSerializer serializer,
   );
 
@@ -1411,6 +1660,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_runtime_storage_usage(
+    RuntimeStorageUsage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_runtime_sync_issue(
     RuntimeSyncIssue self,
     SseSerializer serializer,
@@ -1440,6 +1695,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_text_export_summary(
     TextExportSummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_text_export_update(
+    TextExportUpdate self,
     SseSerializer serializer,
   );
 

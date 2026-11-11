@@ -247,6 +247,18 @@ impl Runtime {
                 Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
                 Err(error) => storage_error(id, "history_facets", &error),
             },
+            Method::HistoryCounts { query, ranges } => {
+                match self
+                    .store
+                    .history_group_counts(&query, &ranges, Some(self.meta.device_id()))
+                {
+                    Ok(counts) => Response::ok(id, ResponseData::HistoryCounts(counts)),
+                    Err(StoreError::InvalidHistoryQuery) => {
+                        Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY)
+                    }
+                    Err(error) => storage_error(id, "history_counts", &error),
+                }
+            }
             Method::HistoryTags { clip_ids } => match self.store.history_tags(&clip_ids) {
                 Ok(tags) => Response::ok(id, ResponseData::HistoryTags(tags)),
                 Err(_) => Response::err(id, ErrorCode::InvalidRequest, "Tags could not be loaded."),
@@ -403,26 +415,14 @@ impl Runtime {
                 }
             }
             Method::ReorderPinned { ids } => self.reorder_pinned(id, &ids),
-            Method::Export { limit } => {
-                match copypaste_core::transfer::export(&self.store, &self.keyring, limit) {
-                    Ok(data) => Response::ok(id, ResponseData::Export(data)),
-                    Err(copypaste_core::transfer::ExportError::ContentTooLarge) => {
-                        Response::err(id, ErrorCode::ContentTooLarge, MSG_CONTENT_TOO_LARGE)
-                    }
-                    Err(copypaste_core::transfer::ExportError::Store(error)) => {
-                        storage_error(id, "export", &error)
-                    }
-                }
-            }
+            Method::Export { limit } => export_reply(
+                id,
+                copypaste_core::transfer::export(&self.store, &self.keyring, limit),
+            ),
             Method::Import { items } => self.import(id, items),
-            Method::Backup { dest_path } => {
-                match copypaste_core::history_backup::backup(&self.store, &dest_path) {
-                    Ok(size_bytes) => Response::ok(
-                        id,
-                        ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
-                    ),
-                    Err(error) => error.response(id),
-                }
+            Method::Backup { dest_path } => self.backup(id, &dest_path, |_| true),
+            Method::ExportStream | Method::BackupStream { .. } => {
+                Response::err(id, ErrorCode::InvalidRequest, MSG_TRANSPORT_ONLY)
             }
             Method::Restore { src_path, confirm } => {
                 let started = now_ms();
@@ -446,6 +446,7 @@ impl Runtime {
                 ResponseData::Config(ConfigApplied {
                     config: self.settings.config(),
                     restart_required: Vec::new(),
+                    storage_usage: self.storage_usage(),
                 }),
             ),
             Method::SetConfig { patch } => self.set_config(id, &patch),
@@ -489,6 +490,45 @@ impl Runtime {
                 tracing::error!("a reactor operation reached the blocking dispatcher");
                 Response::err(id, ErrorCode::Internal, MSG_STORAGE)
             }
+        }
+    }
+
+    /// Answer a streamed method, handing each interim frame to `emit`, which
+    /// returns `false` to abandon the operation. Blocking, like
+    /// [`Self::request_blocking`], which answers every other method.
+    pub fn request_stream(
+        &self,
+        id: u64,
+        method: Method,
+        emit: &mut dyn FnMut(Response) -> bool,
+    ) -> Response {
+        match method {
+            Method::ExportStream => export_reply(
+                id,
+                copypaste_core::transfer::export_chunks(&self.store, &self.keyring, |chunk| {
+                    emit(Response::ok(id, ResponseData::ExportChunk(chunk)))
+                }),
+            ),
+            Method::BackupStream { dest_path } => self.backup(id, &dest_path, |progress| {
+                emit(Response::ok(id, ResponseData::Progress(progress)))
+            }),
+            method => self.request_blocking(id, method),
+        }
+    }
+
+    fn backup(
+        &self,
+        id: u64,
+        dest_path: &str,
+        on_progress: impl FnMut(copypaste_ipc::TransferProgress) -> bool,
+    ) -> Response {
+        let db_key = self.keyring.db_key();
+        match copypaste_core::history_backup::backup(&self.store, &db_key, dest_path, on_progress) {
+            Ok(size_bytes) => Response::ok(
+                id,
+                ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
+            ),
+            Err(error) => error.response(id),
         }
     }
 
@@ -1044,6 +1084,21 @@ impl Runtime {
         }
     }
 
+    /// The quota's own indexed total, so "used of quota" is the comparison
+    /// retention makes. A failed read is reported as absent, not as zero.
+    fn storage_usage(&self) -> Option<copypaste_ipc::StorageUsage> {
+        match self.store.quota_usage() {
+            Ok(usage) => Some(copypaste_ipc::StorageUsage {
+                used_bytes: usage.unpinned_bytes,
+                oldest_unpinned_at: usage.oldest_unpinned_at,
+            }),
+            Err(error) => {
+                tracing::warn!(?error, "could not read storage usage");
+                None
+            }
+        }
+    }
+
     fn set_config(&self, id: u64, patch: &ConfigPatch) -> Response {
         self.set_config_with(id, patch, |_| {})
     }
@@ -1085,6 +1140,7 @@ impl Runtime {
                             .into_iter()
                             .map(str::to_string)
                             .collect(),
+                        storage_usage: self.storage_usage(),
                     }),
                 )
             }
@@ -1393,5 +1449,22 @@ fn settings_error(id: u64, error: &SettingsError) -> Response {
             Response::err(id, ErrorCode::InvalidRequest, error.to_string())
         }
         SettingsError::Store => Response::err(id, ErrorCode::Internal, error.to_string()),
+    }
+}
+
+fn export_reply(
+    id: u64,
+    result: Result<copypaste_ipc::ExportData, copypaste_core::transfer::ExportError>,
+) -> Response {
+    use copypaste_core::transfer::ExportError;
+    match result {
+        Ok(data) => Response::ok(id, ResponseData::Export(data)),
+        Err(ExportError::ContentTooLarge) => {
+            Response::err(id, ErrorCode::ContentTooLarge, MSG_CONTENT_TOO_LARGE)
+        }
+        Err(ExportError::Store(error)) => storage_error(id, "export", &error),
+        Err(error @ ExportError::Abandoned) => {
+            Response::err(id, ErrorCode::Internal, error.to_string())
+        }
     }
 }
