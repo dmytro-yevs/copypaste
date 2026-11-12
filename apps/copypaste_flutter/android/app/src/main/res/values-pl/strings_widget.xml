@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Historia</string>
+    <string name="widget_filter_pinned">Przypięte</string>
+    <string name="widget_filter_snippets">Fragmenty</string>
+    <string name="widget_filter_description">Wyświetlane: %1$s. Dotknij, aby zmienić.</string>
+    <string name="widget_privacy_full">Pełny podgląd</string>
+    <string name="widget_privacy_titles">Tylko tytuły</string>
+    <string name="widget_privacy_hidden">Ukryte</string>
+    <string name="widget_privacy_description">Podgląd: %1$s. Dotknij, aby zmienić.</string>
+    <string name="widget_search">Szukaj w CopyPaste</string>
+    <string name="widget_paused">Przechwytywanie wstrzymane · Wznów</string>
+    <string name="widget_empty">Brak klipów · Zapisz schowek</string>
+    <string name="widget_empty_pinned">Brak przypiętych klipów</string>
+    <string name="widget_empty_snippets">Brak fragmentów</string>
+    <string name="widget_setup">Skonfiguruj przechwytywanie</string>
+    <string name="widget_unavailable">Odblokuj, aby zobaczyć klipy</string>
+    <string name="widget_error">Nie udało się wczytać klipów · Dotknij, aby ponowić</string>
+    <string name="widget_hidden">Podglądy ukryte</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d klip</item>
+        <item quantity="few">%d klipy</item>
+        <item quantity="many">%d klipów</item>
+        <item quantity="other">%d klipu</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d fragment</item>
+        <item quantity="few">%d fragmenty</item>
+        <item quantity="many">%d fragmentów</item>
+        <item quantity="other">%d fragmentu</item>
+    </plurals>
+    <string name="widget_kind_text">Tekst</string>
+    <string name="widget_kind_link">Link</string>
+    <string name="widget_kind_image">Obraz</string>
+    <string name="widget_kind_file">Plik</string>
+    <string name="widget_kind_color">Kolor</string>
+    <string name="widget_kind_code">Kod</string>
+    <string name="widget_kind_snippet">Fragment</string>
+    <string name="widget_secret_item">Element tajny</string>
+    <string name="widget_secret_description">%1$s, tajne. Dotknij dwukrotnie i uwierzytelnij się, aby skopiować.</string>
+    <string name="widget_concealed_snippet">Ukryty fragment</string>
+    <string name="widget_copied">Skopiowano</string>
+    <string name="widget_copy_failed">Nie udało się skopiować</string>
+    <string name="widget_auth_reason">Kopiuj element tajny</string>
+</resources>

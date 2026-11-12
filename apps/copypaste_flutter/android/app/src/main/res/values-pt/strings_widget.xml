@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Histórico</string>
+    <string name="widget_filter_pinned">Fixados</string>
+    <string name="widget_filter_snippets">Trechos</string>
+    <string name="widget_filter_description">Mostrando %1$s. Toque para mudar.</string>
+    <string name="widget_privacy_full">Prévia completa</string>
+    <string name="widget_privacy_titles">Só títulos</string>
+    <string name="widget_privacy_hidden">Oculto</string>
+    <string name="widget_privacy_description">Prévias: %1$s. Toque para mudar.</string>
+    <string name="widget_search">Pesquisar no CopyPaste</string>
+    <string name="widget_paused">Captura pausada · Retomar</string>
+    <string name="widget_empty">Nenhum clipe ainda · Salvar área de transferência</string>
+    <string name="widget_empty_pinned">Nenhum clipe fixado</string>
+    <string name="widget_empty_snippets">Nenhum trecho ainda</string>
+    <string name="widget_setup">Configurar captura</string>
+    <string name="widget_unavailable">Desbloqueie para mostrar os clipes</string>
+    <string name="widget_error">Não foi possível carregar os clipes · Toque para tentar de novo</string>
+    <string name="widget_hidden">Prévias ocultas</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d clipe</item>
+        <item quantity="many">%d clipes</item>
+        <item quantity="other">%d clipes</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d trecho</item>
+        <item quantity="many">%d trechos</item>
+        <item quantity="other">%d trechos</item>
+    </plurals>
+    <string name="widget_kind_text">Texto</string>
+    <string name="widget_kind_link">Link</string>
+    <string name="widget_kind_image">Imagem</string>
+    <string name="widget_kind_file">Arquivo</string>
+    <string name="widget_kind_color">Cor</string>
+    <string name="widget_kind_code">Código</string>
+    <string name="widget_kind_snippet">Trecho</string>
+    <string name="widget_secret_item">Item secreto</string>
+    <string name="widget_secret_description">%1$s, secreto. Toque duas vezes e autentique-se para copiar.</string>
+    <string name="widget_concealed_snippet">Trecho oculto</string>
+    <string name="widget_copied">Copiado</string>
+    <string name="widget_copy_failed">Não foi possível copiar</string>
+    <string name="widget_auth_reason">Copiar um item secreto</string>
+</resources>

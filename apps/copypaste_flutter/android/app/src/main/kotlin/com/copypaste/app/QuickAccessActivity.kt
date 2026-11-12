@@ -6,6 +6,8 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.ResultReceiver
 import android.view.WindowManager
+import com.copypaste.app.widget.WidgetIntents
+import com.copypaste.app.widget.WidgetTapHandler
 
 /**
  * Transparent focus activity for tiles, the widget and the keyboard panel:
@@ -15,13 +17,21 @@ import android.view.WindowManager
 class QuickAccessActivity : Activity() {
     private var authenticator: DeviceAuthenticator? = null
     private var receiver: ResultReceiver? = null
+    private var widgetTap: WidgetTapHandler? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent?.action != ACTION_AUTHENTICATE || savedInstanceState != null) {
-            finish()
-            return
+        val intent = intent
+        when {
+            savedInstanceState != null -> finish()
+            intent?.action == ACTION_AUTHENTICATE -> authenticate(intent)
+            intent?.action == WidgetIntents.ACTION_TAP ->
+                widgetTap = WidgetTapHandler(this).also { it.start(intent) }
+            else -> finish()
         }
+    }
+
+    private fun authenticate(intent: Intent) {
         // The keyboard panel stays the input method while the prompt is up.
         window.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
         @Suppress("DEPRECATION")
@@ -37,16 +47,18 @@ class QuickAccessActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (authenticator?.onActivityResult(requestCode, resultCode) != true) {
-            @Suppress("DEPRECATION")
-            super.onActivityResult(requestCode, resultCode, data)
-        }
+        if (authenticator?.onActivityResult(requestCode, resultCode) == true) return
+        if (widgetTap?.onActivityResult(requestCode, resultCode) == true) return
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {
         authenticator?.dispose()
         authenticator = null
         deliver(DeviceAuthenticator.Outcome.Cancelled)
+        widgetTap?.dispose()
+        widgetTap = null
         super.onDestroy()
     }
 

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Історія</string>
+    <string name="widget_filter_pinned">Закріплені</string>
+    <string name="widget_filter_snippets">Фрагменти</string>
+    <string name="widget_filter_description">Показано: %1$s. Торкніться, щоб змінити.</string>
+    <string name="widget_privacy_full">Повний перегляд</string>
+    <string name="widget_privacy_titles">Лише назви</string>
+    <string name="widget_privacy_hidden">Приховано</string>
+    <string name="widget_privacy_description">Попередній перегляд: %1$s. Торкніться, щоб змінити.</string>
+    <string name="widget_search">Шукати в CopyPaste</string>
+    <string name="widget_paused">Запис призупинено · Відновити</string>
+    <string name="widget_empty">Кліпів ще немає · Зберегти буфер обміну</string>
+    <string name="widget_empty_pinned">Немає закріплених кліпів</string>
+    <string name="widget_empty_snippets">Фрагментів ще немає</string>
+    <string name="widget_setup">Налаштувати запис</string>
+    <string name="widget_unavailable">Розблокуйте, щоб побачити кліпи</string>
+    <string name="widget_error">Не вдалося завантажити кліпи · Торкніться, щоб повторити</string>
+    <string name="widget_hidden">Попередній перегляд приховано</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d кліп</item>
+        <item quantity="few">%d кліпи</item>
+        <item quantity="many">%d кліпів</item>
+        <item quantity="other">%d кліпу</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d фрагмент</item>
+        <item quantity="few">%d фрагменти</item>
+        <item quantity="many">%d фрагментів</item>
+        <item quantity="other">%d фрагмента</item>
+    </plurals>
+    <string name="widget_kind_text">Текст</string>
+    <string name="widget_kind_link">Посилання</string>
+    <string name="widget_kind_image">Зображення</string>
+    <string name="widget_kind_file">Файл</string>
+    <string name="widget_kind_color">Колір</string>
+    <string name="widget_kind_code">Код</string>
+    <string name="widget_kind_snippet">Фрагмент</string>
+    <string name="widget_secret_item">Секретний елемент</string>
+    <string name="widget_secret_description">%1$s, секретне. Двічі торкніться й підтвердьте особу, щоб скопіювати.</string>
+    <string name="widget_concealed_snippet">Прихований фрагмент</string>
+    <string name="widget_copied">Скопійовано</string>
+    <string name="widget_copy_failed">Не вдалося скопіювати</string>
+    <string name="widget_auth_reason">Скопіювати секретний елемент</string>
+</resources>

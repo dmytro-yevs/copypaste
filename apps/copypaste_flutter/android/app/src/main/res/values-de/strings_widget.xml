@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Verlauf</string>
+    <string name="widget_filter_pinned">Angeheftet</string>
+    <string name="widget_filter_snippets">Textbausteine</string>
+    <string name="widget_filter_description">Zeigt %1$s. Zum Ändern tippen.</string>
+    <string name="widget_privacy_full">Volle Vorschau</string>
+    <string name="widget_privacy_titles">Nur Titel</string>
+    <string name="widget_privacy_hidden">Ausgeblendet</string>
+    <string name="widget_privacy_description">Vorschau: %1$s. Zum Ändern tippen.</string>
+    <string name="widget_search">In CopyPaste suchen</string>
+    <string name="widget_paused">Erfassung pausiert · Fortsetzen</string>
+    <string name="widget_empty">Noch keine Clips · Zwischenablage speichern</string>
+    <string name="widget_empty_pinned">Keine angehefteten Clips</string>
+    <string name="widget_empty_snippets">Noch keine Textbausteine</string>
+    <string name="widget_setup">Erfassung einrichten</string>
+    <string name="widget_unavailable">Entsperren, um Clips anzuzeigen</string>
+    <string name="widget_error">Clips konnten nicht geladen werden · Tippen zum Wiederholen</string>
+    <string name="widget_hidden">Vorschauen ausgeblendet</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d Clip</item>
+        <item quantity="other">%d Clips</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d Textbaustein</item>
+        <item quantity="other">%d Textbausteine</item>
+    </plurals>
+    <string name="widget_kind_text">Text</string>
+    <string name="widget_kind_link">Link</string>
+    <string name="widget_kind_image">Bild</string>
+    <string name="widget_kind_file">Datei</string>
+    <string name="widget_kind_color">Farbe</string>
+    <string name="widget_kind_code">Code</string>
+    <string name="widget_kind_snippet">Textbaustein</string>
+    <string name="widget_secret_item">Geheimes Element</string>
+    <string name="widget_secret_description">%1$s, geheim. Doppeltippen und bestätigen, um zu kopieren.</string>
+    <string name="widget_concealed_snippet">Verborgener Textbaustein</string>
+    <string name="widget_copied">Kopiert</string>
+    <string name="widget_copy_failed">Kopieren fehlgeschlagen</string>
+    <string name="widget_auth_reason">Geheimes Element kopieren</string>
+</resources>

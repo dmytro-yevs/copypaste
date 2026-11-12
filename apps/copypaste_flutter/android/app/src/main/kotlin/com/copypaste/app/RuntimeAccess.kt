@@ -113,10 +113,14 @@ internal class RuntimeAccessWorker(
     private val executor: Executor,
     private val deliver: Executor,
 ) {
-    fun request(method: String, params: JSONObject? = null, onReply: (RuntimeReply) -> Unit) {
+    fun request(method: String, params: JSONObject? = null, onReply: (RuntimeReply) -> Unit) =
+        perform({ it.request(method, params) }, onReply)
+
+    /** Runs several requests as one task, so a surface reads a consistent set. */
+    fun <T> perform(work: (RuntimeAccess) -> T, onResult: (T) -> Unit) {
         executor.execute {
-            val reply = access.request(method, params)
-            deliver.execute { onReply(reply) }
+            val result = work(access)
+            deliver.execute { onResult(result) }
         }
     }
 

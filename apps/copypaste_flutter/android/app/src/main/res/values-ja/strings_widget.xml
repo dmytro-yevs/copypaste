@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">履歴</string>
+    <string name="widget_filter_pinned">ピン留め</string>
+    <string name="widget_filter_snippets">スニペット</string>
+    <string name="widget_filter_description">%1$sを表示中。タップして変更。</string>
+    <string name="widget_privacy_full">すべてプレビュー</string>
+    <string name="widget_privacy_titles">タイトルのみ</string>
+    <string name="widget_privacy_hidden">非表示</string>
+    <string name="widget_privacy_description">プレビュー: %1$s。タップして変更。</string>
+    <string name="widget_search">CopyPaste で検索</string>
+    <string name="widget_paused">取り込みを一時停止中 · 再開</string>
+    <string name="widget_empty">クリップはまだありません · クリップボードを保存</string>
+    <string name="widget_empty_pinned">ピン留めしたクリップはありません</string>
+    <string name="widget_empty_snippets">スニペットはまだありません</string>
+    <string name="widget_setup">取り込みを設定</string>
+    <string name="widget_unavailable">ロックを解除するとクリップが表示されます</string>
+    <string name="widget_error">クリップを読み込めませんでした · タップして再試行</string>
+    <string name="widget_hidden">プレビューは非表示です</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="other">%d 件のクリップ</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="other">%d 件のスニペット</item>
+    </plurals>
+    <string name="widget_kind_text">テキスト</string>
+    <string name="widget_kind_link">リンク</string>
+    <string name="widget_kind_image">画像</string>
+    <string name="widget_kind_file">ファイル</string>
+    <string name="widget_kind_color">カラー</string>
+    <string name="widget_kind_code">コード</string>
+    <string name="widget_kind_snippet">スニペット</string>
+    <string name="widget_secret_item">シークレット項目</string>
+    <string name="widget_secret_description">%1$s、シークレット。ダブルタップして認証するとコピーします。</string>
+    <string name="widget_concealed_snippet">非表示のスニペット</string>
+    <string name="widget_copied">コピーしました</string>
+    <string name="widget_copy_failed">コピーできませんでした</string>
+    <string name="widget_auth_reason">シークレット項目をコピー</string>
+</resources>

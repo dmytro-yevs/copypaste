@@ -90,6 +90,10 @@ pub trait RuntimeHost: Send + Sync {
 
     /// A paired device was removed: native surfaces drop what came from it.
     fn device_removed(&self, _device_id: &str) {}
+
+    /// What native surfaces show changed: history, snippets or the capture
+    /// state. Called once per change, never with content; hosts coalesce.
+    fn surfaces_changed(&self) {}
 }
 
 /// The writer-only host contract an in-process platform supplies.
@@ -119,6 +123,9 @@ pub trait ClipboardWriter: Send + Sync {
 
     /// See [`RuntimeHost::device_removed`].
     fn device_removed(&self, _device_id: &str) {}
+
+    /// See [`RuntimeHost::surfaces_changed`].
+    fn surfaces_changed(&self) {}
 }
 
 /// The Android host: native capture and feedback stay in the platform
@@ -156,6 +163,10 @@ impl RuntimeHost for InProcessHost {
 
     fn device_removed(&self, device_id: &str) {
         self.0.device_removed(device_id);
+    }
+
+    fn surfaces_changed(&self) {
+        self.0.surfaces_changed();
     }
 
     fn platform_status(&self) -> PlatformStatus {

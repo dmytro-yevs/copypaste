@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Cronologia</string>
+    <string name="widget_filter_pinned">Fissati</string>
+    <string name="widget_filter_snippets">Frammenti</string>
+    <string name="widget_filter_description">Mostra %1$s. Tocca per cambiare.</string>
+    <string name="widget_privacy_full">Anteprima completa</string>
+    <string name="widget_privacy_titles">Solo titoli</string>
+    <string name="widget_privacy_hidden">Nascosto</string>
+    <string name="widget_privacy_description">Anteprime: %1$s. Tocca per cambiare.</string>
+    <string name="widget_search">Cerca in CopyPaste</string>
+    <string name="widget_paused">Acquisizione in pausa · Riprendi</string>
+    <string name="widget_empty">Ancora nessuna clip · Salva gli appunti</string>
+    <string name="widget_empty_pinned">Nessuna clip fissata</string>
+    <string name="widget_empty_snippets">Ancora nessun frammento</string>
+    <string name="widget_setup">Configura l\'acquisizione</string>
+    <string name="widget_unavailable">Sblocca per mostrare le clip</string>
+    <string name="widget_error">Impossibile caricare le clip · Tocca per riprovare</string>
+    <string name="widget_hidden">Anteprime nascoste</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d clip</item>
+        <item quantity="many">%d clip</item>
+        <item quantity="other">%d clip</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d frammento</item>
+        <item quantity="many">%d frammenti</item>
+        <item quantity="other">%d frammenti</item>
+    </plurals>
+    <string name="widget_kind_text">Testo</string>
+    <string name="widget_kind_link">Link</string>
+    <string name="widget_kind_image">Immagine</string>
+    <string name="widget_kind_file">File</string>
+    <string name="widget_kind_color">Colore</string>
+    <string name="widget_kind_code">Codice</string>
+    <string name="widget_kind_snippet">Frammento</string>
+    <string name="widget_secret_item">Elemento segreto</string>
+    <string name="widget_secret_description">%1$s, segreto. Tocca due volte e autenticati per copiare.</string>
+    <string name="widget_concealed_snippet">Frammento nascosto</string>
+    <string name="widget_copied">Copiato</string>
+    <string name="widget_copy_failed">Impossibile copiare</string>
+    <string name="widget_auth_reason">Copia un elemento segreto</string>
+</resources>
