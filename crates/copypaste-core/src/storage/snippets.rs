@@ -250,7 +250,7 @@ fn local_device(conn: &Connection) -> Result<String, StoreError> {
         .unwrap_or_default())
 }
 
-fn normalize_line_endings(text: &str) -> String {
+pub(super) fn normalize_line_endings(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
