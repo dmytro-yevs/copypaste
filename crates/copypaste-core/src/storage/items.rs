@@ -16,6 +16,17 @@ use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
+/// Runs on a row a capture just stored or promoted, inside its transaction.
+pub(crate) type AfterWrite<'a> = &'a dyn Fn(&rusqlite::Connection, &str) -> Result<(), StoreError>;
+
+fn run_after<E: From<StoreError>>(
+    after: Option<AfterWrite<'_>>,
+    tx: &rusqlite::Connection,
+    id: &str,
+) -> Result<(), E> {
+    after.map_or(Ok(()), |after| after(tx, id)).map_err(E::from)
+}
+
 /// The tombstone write of [`Store::delete`] in a caller's transaction,
 /// stamped no earlier than `now_ms`.
 pub(super) fn tombstone_in_tx(
@@ -183,13 +194,23 @@ impl Store {
     /// A bump only ever moves the stamp *forward* (T-37), and it leaves
     /// `pinned` / `pin_order` alone: a re-copied pin keeps its slot in the
     /// pinned section rather than jumping to the top (manifest 06 INV-31).
-    pub fn insert_or_bump(&self, mut item: NewItem) -> Result<Ingest, StoreError> {
+    pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
+        self.insert_or_bump_with(item, None)
+    }
+
+    /// [`Store::insert_or_bump`], running `after` on the stored row before
+    /// the transaction commits.
+    pub(crate) fn insert_or_bump_with(
+        &self,
+        mut item: NewItem,
+        after: Option<AfterWrite<'_>>,
+    ) -> Result<Ingest, StoreError> {
         let sealed = (
             std::mem::take(&mut item.nonce),
             std::mem::take(&mut item.content_ciphertext),
         );
         let search_text = item.search_text.take();
-        self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed))
+        self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed), after)
             .map(|(ingested, _)| ingested)
     }
 
@@ -199,6 +220,7 @@ impl Store {
         mut item: NewItem,
         search_text: Option<&str>,
         seal: F,
+        after: Option<AfterWrite<'_>>,
     ) -> Result<(Ingest, bool), E>
     where
         E: From<StoreError>,
@@ -251,6 +273,7 @@ impl Store {
                 .map_err(StoreError::from)?;
             super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                 .map_err(StoreError::from)?;
+            run_after(after, &tx, &bumped.id)?;
             tx.commit().map_err(StoreError::from)?;
             let changed = bumped.created_at != existing.created_at
                 || bumped.payload_metadata != existing.payload_metadata;
@@ -319,6 +342,7 @@ impl Store {
                             .map_err(StoreError::from)?;
                         refresh_privacy(&tx, &mut bumped, privacy, credentials, search_text)
                             .map_err(StoreError::from)?;
+                        run_after(after, &tx, &bumped.id)?;
                         tx.commit().map_err(StoreError::from)?;
                         let changed = bumped.created_at != existing.created_at
                             || bumped.payload_metadata != existing.payload_metadata;
@@ -330,6 +354,7 @@ impl Store {
             Err(e) => return Err(StoreError::from(e).into()),
         }
 
+        run_after(after, &tx, &id)?;
         tx.commit().map_err(StoreError::from)?;
 
         Ok((

@@ -14,7 +14,6 @@
 //!   the ingest before it returns, and shutdown is observed between ticks, not
 //!   inside one.
 
-use std::borrow::Borrow;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,6 +24,7 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 pub use copypaste_core::{IngestError, Ingested};
+use copypaste_runtime::{CaptureDecision, CapturePlan, CaptureSubject};
 
 async fn wait_for_clipboard(
     signal: Option<&crate::clipboard::ChangeSignal>,
@@ -396,10 +396,17 @@ fn persist_pending(
     if let Some(outcome) = test_persist_outcome() {
         return outcome;
     }
+    let plan = match evaluate_rules(state, pending) {
+        CaptureDecision::Skip => {
+            *slot = None;
+            return CaptureOutcome::PolicyCancelled;
+        }
+        CaptureDecision::Store(plan) => plan,
+    };
     let ingested = if let Some(reference) = &pending.file_reference {
         let capture = &pending.capture;
         reference
-            .publish(
+            .publish_with_rules(
                 &state.store,
                 &state.keyring.item_key(),
                 capture
@@ -409,9 +416,10 @@ fn persist_pending(
                 pending.created_at,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
-                capture_metadata(capture).as_ref(),
+                plan.metadata(capture_metadata(capture)).as_ref(),
                 &settings,
                 false,
+                Some(plan.effects()),
             )
             .map_err(|error| match error {
                 copypaste_core::file_transfer::FileTransferError::Storage(error) => {
@@ -423,7 +431,13 @@ fn persist_pending(
                 _ => IngestError::InvalidMetadata,
             })
     } else {
-        ingest_capture(state, &settings, &pending.capture, pending.created_at)
+        ingest_planned(
+            state,
+            &settings,
+            &pending.capture,
+            pending.created_at,
+            &plan,
+        )
     };
     match ingested {
         Ok(Ingested::Stored(item)) => {
@@ -439,6 +453,7 @@ fn persist_pending(
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
             announce_capture(state, item.created_at, &item.id);
+            state.finish_capture(&item.id, &plan);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -449,6 +464,7 @@ fn persist_pending(
                 debug!(id = %item.id, "capture deduplicated against a recent item");
             }
             announce_capture(state, item.created_at, &item.id);
+            state.finish_capture(&item.id, &plan);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -508,19 +524,66 @@ fn announce_capture(state: &AppState, created_at: i64, item_id: &str) {
     state.copy_feedback();
 }
 
+/// [`ingest_planned`] with no content rules, for tests that store a capture
+/// directly.
+#[cfg(test)]
+pub(crate) fn ingest_capture(
+    state: &AppState,
+    settings: &copypaste_ipc::ConfigData,
+    capture: impl std::borrow::Borrow<crate::clipboard::Capture>,
+    created_at: i64,
+) -> Result<Ingested, IngestError> {
+    ingest_planned(
+        state,
+        settings,
+        capture.borrow(),
+        created_at,
+        &CapturePlan::default(),
+    )
+}
+
+/// The content rules' decision on a pending capture, before it is stored.
+fn evaluate_rules(state: &AppState, pending: &PendingCapture) -> CaptureDecision {
+    let capture = &pending.capture;
+    let file = capture
+        .file_metadata
+        .as_ref()
+        .map(copypaste_core::rules::apply::file_subject);
+    let text = if copypaste_ipc::content_type::is_text(&capture.content_type) {
+        Some(capture.content.as_str())
+    } else {
+        file.as_deref()
+    };
+    let byte_len = match (&pending.file_reference, &capture.binary_content) {
+        (Some(reference), _) => reference.size(),
+        (None, Some(bytes)) => bytes.len() as u64,
+        (None, None) => capture.content.len() as u64,
+    };
+    state.evaluate_capture(&CaptureSubject {
+        text,
+        content_type: &capture.content_type,
+        byte_len,
+        source_app: capture.app_bundle_id.as_deref(),
+        source_app_name: capture.app_name.as_deref(),
+        privacy: capture.privacy,
+        created_at: pending.created_at,
+    })
+}
+
 /// `settings` is the caller's snapshot, not a second read.
 ///
 /// A `set_config` landing between the pasteboard read and the ingest let an
 /// item pass `CapturePolicy`'s limit and then meet a different one here. One
-/// snapshot per capture makes the gate and the ingest the same decision.
-pub(crate) fn ingest_capture(
+/// snapshot per capture makes the gate and the ingest the same decision. The
+/// plan's effects are written in the transaction that stores the item.
+fn ingest_planned(
     state: &AppState,
     settings: &copypaste_ipc::ConfigData,
-    capture: impl Borrow<crate::clipboard::Capture>,
+    capture: &crate::clipboard::Capture,
     created_at: i64,
+    plan: &CapturePlan,
 ) -> Result<Ingested, IngestError> {
-    let capture = capture.borrow();
-    let payload_metadata = capture_metadata(capture);
+    let payload_metadata = plan.metadata(capture_metadata(capture));
     match (
         capture.content_type.as_str(),
         capture.binary_content.as_deref(),
@@ -536,7 +599,7 @@ pub(crate) fn ingest_capture(
                 None,
             )
             .and_then(|reference| {
-                reference.publish(
+                reference.publish_with_rules(
                     &state.store,
                     &state.keyring.item_key(),
                     metadata.clone(),
@@ -546,6 +609,7 @@ pub(crate) fn ingest_capture(
                     payload_metadata.as_ref(),
                     settings,
                     false,
+                    Some(plan.effects()),
                 )
             })
             .map_err(|error| match error {
@@ -562,10 +626,10 @@ pub(crate) fn ingest_capture(
             if crate::clipboard::format::supports(content_type)
                 && copypaste_ipc::content_type::is_text(content_type) =>
         {
-            copypaste_core::ingest::ingest_into_with_capture_source_metadata_with_current_retention(
+            copypaste_core::ingest::ingest_text_with_rules(
                 &state.store,
                 &state.keyring,
-                &capture.content,
+                plan.text(&capture.content),
                 &capture.content_type,
                 created_at,
                 capture.app_bundle_id.as_deref(),
@@ -573,6 +637,7 @@ pub(crate) fn ingest_capture(
                 payload_metadata.as_ref(),
                 settings,
                 || state.settings.get().clone(),
+                plan.effects(),
             )
         }
         (content_type, Some(bytes), None, None)
@@ -583,7 +648,7 @@ pub(crate) fn ingest_capture(
                     copypaste_ipc::ContentClass::Image
                 ) =>
         {
-            copypaste_core::ingest_binary_into_with_capture_source_metadata(
+            copypaste_core::ingest::ingest_binary_with_rules(
                 &state.store,
                 &state.keyring,
                 bytes,
@@ -593,12 +658,13 @@ pub(crate) fn ingest_capture(
                 capture.app_name.as_deref(),
                 payload_metadata.as_ref(),
                 settings,
+                Some(plan.effects()),
             )
         }
         (copypaste_ipc::content_type::FILE, Some(bytes), None, Some(metadata))
             if capture.content.is_empty() && !bytes.is_empty() && metadata.is_valid() =>
         {
-            copypaste_core::ingest_binary_into_with_capture_source_metadata(
+            copypaste_core::ingest::ingest_binary_with_rules(
                 &state.store,
                 &state.keyring,
                 bytes,
@@ -608,6 +674,7 @@ pub(crate) fn ingest_capture(
                 capture.app_name.as_deref(),
                 payload_metadata.as_ref(),
                 settings,
+                Some(plan.effects()),
             )
         }
         _ => Err(IngestError::Empty),
@@ -2187,5 +2254,259 @@ mod tests {
             assert_eq!(crate::testutil::contents(&state), ["ordered"]);
             assert!(events.try_recv().unwrap().captured);
         }
+    }
+
+    fn add_rule(state: &AppState, id: &str, name: &str, definition: &str) {
+        use copypaste_core::storage::organization::{
+            ContentRuleRecord, Record, RuleOrigin, RulePlacementRecord,
+        };
+        let rule = ContentRuleRecord {
+            id: id.into(),
+            origin: RuleOrigin::User,
+            builtin_version: None,
+            customized_fields: Vec::new(),
+            name: name.into(),
+            definition_json: definition.into(),
+            device_scope: Vec::new(),
+            schema_version: 1,
+            effective_from: 0,
+            deleted_at: None,
+        };
+        let placement = RulePlacementRecord {
+            id: id.into(),
+            enabled: true,
+            order_key: "m".into(),
+        };
+        state
+            .store
+            .write_organization_records(
+                &state.keyring.item_key(),
+                [
+                    Record::ContentRule(rule),
+                    Record::ContentRulePlacement(placement),
+                ],
+            )
+            .unwrap();
+    }
+
+    const SKIP_EVERYTHING: &str = r#"{"match":"all","conditions":[{"type":"size","unit":"bytes","op":"greater_than","value":0}],"actions":[{"type":"dont_save"}]}"#;
+
+    #[test]
+    fn a_dont_save_rule_stores_nothing_and_records_the_skip() {
+        let _serial = TEST_PERSIST_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let vault = SourceApp {
+            id: "com.example.vault".into(),
+            name: "Vault".into(),
+        };
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "rule-skip",
+            Box::new(OnceCapture {
+                inner: Some(captured("vault entry 1234", Some(vault))),
+            }),
+        );
+        add_rule(
+            &state,
+            "skip-vault",
+            "Skip the vault",
+            r#"{"match":"all","conditions":[{"type":"source_app","any_of":["com.example.vault"]}],"actions":[{"type":"dont_save"}]}"#,
+        );
+        let mut pending = None;
+        assert!(matches!(
+            tick(&state, &mut pending),
+            CaptureOutcome::PolicyCancelled
+        ));
+        assert!(pending.is_none());
+        assert_eq!(state.store.count().unwrap(), 0);
+        assert!(state.store.search("vault", 10).unwrap().is_empty());
+        let skipped = state.skipped_captures();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].rule_name, "Skip the vault");
+        assert_eq!(skipped[0].source_app_name.as_deref(), Some("Vault"));
+    }
+
+    /// Hands back what was written, with the markers it was written with.
+    struct EchoClipboard {
+        next: Option<crate::clipboard::Capture>,
+        writes: Arc<Mutex<Vec<(String, bool)>>>,
+    }
+
+    impl crate::clipboard::ClipboardSource for EchoClipboard {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            self.next.take()
+        }
+
+        fn poll_with_policy(
+            &mut self,
+            _: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            self.poll()
+        }
+
+        fn set_contents(
+            &mut self,
+            text: &str,
+            options: crate::clipboard::WriteOptions,
+        ) -> anyhow::Result<()> {
+            self.writes
+                .lock()
+                .unwrap()
+                .push((text.to_owned(), options.transient));
+            let mut echo = captured(text, None);
+            echo.privacy = copypaste_ipc::ClipboardPrivacy {
+                secret: options.secret,
+                transient: options.transient,
+            };
+            self.next = Some(echo);
+            Ok(())
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "fake-echo"
+        }
+    }
+
+    #[test]
+    fn a_transform_rule_that_replaces_the_clipboard_stores_one_item() {
+        let _serial = TEST_PERSIST_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "rule-transform",
+            Box::new(EchoClipboard {
+                next: Some(captured("shout this", None)),
+                writes: Arc::clone(&writes),
+            }),
+        );
+        add_rule(
+            &state,
+            "upper",
+            "Upper case",
+            r#"{"match":"all","conditions":[{"type":"content_text","op":"contains","value":"shout"}],"actions":[{"type":"transform","transform_id":"case.upper","replace_clipboard":true}]}"#,
+        );
+        let mut pending = None;
+        assert!(matches!(tick(&state, &mut pending), CaptureOutcome::Stored));
+        assert_eq!(crate::testutil::contents(&state), ["SHOUT THIS"]);
+        assert_eq!(
+            *writes.lock().unwrap(),
+            [("SHOUT THIS".to_owned(), true)],
+            "the result replaces the clipboard as a transient own write"
+        );
+        // The echoed result is not captured a second time.
+        assert!(matches!(
+            tick(&state, &mut pending),
+            CaptureOutcome::PolicyCancelled
+        ));
+        assert_eq!(state.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn history_adds_recopies_and_snippets_never_run_rules() {
+        use copypaste_ipc::clips::Delivery;
+        use copypaste_ipc::snippets::{ClipboardInput, SnippetDraft, SnippetOp};
+        use copypaste_ipc::ResponseData;
+
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("rules-own-writes");
+        add_rule(&state, "skip-all", "Skip everything", SKIP_EVERYTHING);
+        assert!(crate::testutil::calls::add(&state, 1, "a history item").ok);
+        let id = state.store.list(1, 0).unwrap()[0].id.clone();
+        assert!(crate::testutil::calls::copy(&state, 2, &id).ok);
+
+        let draft = SnippetDraft {
+            id: None,
+            collection_id: None,
+            title: "Greeting".into(),
+            abbreviation: None,
+            body_text: "hello from a snippet".into(),
+            body_rich: None,
+            template: false,
+            pinned: false,
+            concealed: false,
+            base_revision: None,
+        };
+        let saved = state.request_blocking(
+            3,
+            Method::Snippets {
+                op: SnippetOp::Save { draft },
+            },
+        );
+        let Some(ResponseData::SnippetSave(copypaste_ipc::snippets::SnippetSaveOutcome::Saved(
+            detail,
+        ))) = saved.data
+        else {
+            panic!("unexpected {saved:?}");
+        };
+        let used = state.request_blocking(
+            4,
+            Method::Snippets {
+                op: SnippetOp::Use {
+                    id: detail.snippet.id,
+                    values: Default::default(),
+                    clipboard: ClipboardInput::None,
+                    delivery: Delivery::Copy,
+                    locale: None,
+                },
+            },
+        );
+        assert!(used.ok, "{used:?}");
+
+        assert_eq!(crate::testutil::contents(&state), ["a history item"]);
+        assert_eq!(writes.count(), 2);
+        assert!(state.skipped_captures().is_empty());
+    }
+
+    #[test]
+    fn credential_rules_mark_a_capture_secret_and_the_enabled_expiry_deletes_it_in_15_minutes() {
+        use copypaste_core::rules::builtin;
+        use copypaste_core::storage::organization::{Record, RulePlacementRecord};
+
+        let _serial = TEST_PERSIST_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "rule-credentials",
+            Box::new(OnceCapture {
+                inner: Some(captured(
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjE\n",
+                    None,
+                )),
+            }),
+        );
+        let key = state.keyring.item_key();
+        for rule in builtin::builtins() {
+            let placement = RulePlacementRecord {
+                enabled: true,
+                ..rule.placement()
+            };
+            state
+                .store
+                .write_organization_records(
+                    &key,
+                    [
+                        Record::ContentRule(rule.record(0)),
+                        Record::ContentRulePlacement(placement),
+                    ],
+                )
+                .unwrap();
+        }
+        let mut pending = None;
+        assert!(matches!(tick(&state, &mut pending), CaptureOutcome::Stored));
+        let item = state.store.list(1, 0).unwrap().remove(0);
+        assert!(item.clipboard_privacy().secret);
+        let annotations = state.store.item_annotations(std::slice::from_ref(&item.id));
+        let annotations = annotations.unwrap().remove(&item.id).unwrap();
+        assert!(annotations.hidden_from_ai);
+        assert_eq!(
+            annotations.expires_at,
+            Some(item.created_at + 15 * 60 * 1000)
+        );
+        assert!(state
+            .store
+            .cloud_withheld_among(std::slice::from_ref(&item.id))
+            .unwrap()
+            .contains(&item.id));
     }
 }

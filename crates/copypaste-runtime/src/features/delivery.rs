@@ -369,6 +369,20 @@ impl Runtime {
         true
     }
 
+    /// Clear the clipboard after `after_ms` unless it changes first. Takes the
+    /// place of any pending restore.
+    pub(crate) fn schedule_clipboard_clear(&self, after_ms: i64) {
+        let token = self.changes.clipboard.delivered(None, None);
+        let at = self.deadlines.now().saturating_add(after_ms.max(0));
+        self.deadlines.schedule(
+            DeadlineKey::new(RESTORE_OWNER, ""),
+            at,
+            Box::new(move |runtime: &Runtime| {
+                runtime.restore_clipboard(&token);
+            }),
+        );
+    }
+
     /// Restore after `after_ms`, through the deadline scheduler. One restore
     /// is pending at a time; a later request replaces an earlier one.
     pub(crate) fn schedule_clipboard_restore(&self, token: String, after_ms: u32) {
