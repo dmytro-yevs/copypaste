@@ -10,6 +10,14 @@ use crate::protocol::PROTOCOL_VERSION;
 #[cfg_attr(target_os = "windows", allow(unsafe_code))]
 mod windows_firmware;
 
+/// The highest organization record class this build stores and syncs. A peer
+/// that declares less, or nothing, is legacy: it would decline every newer
+/// record on each session without moving its cursor, so it is not offered one.
+pub const ORGANIZATION_KINDS: u32 = 2;
+
+/// The class every build that syncs organization records accepts.
+const LEGACY_ORGANIZATION_KINDS: u32 = 1;
+
 /// Claims made by a device about itself. Trust comes from the channel carrying
 /// the value: mDNS is unverified, while the same value inside Noise is
 /// authenticated to the pairing key.
@@ -22,6 +30,7 @@ pub struct DeviceProfile {
     pub os_name: Option<String>,
     pub os_version: Option<String>,
     pub model: Option<String>,
+    pub organization_kinds: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +44,8 @@ struct DeviceProfileWire<'a> {
     os_name: &'a Option<String>,
     os_version: &'a Option<String>,
     model: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization_kinds: &'a Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +59,8 @@ struct DeviceProfileWireOwned {
     os_name: Option<String>,
     os_version: Option<String>,
     model: Option<String>,
+    #[serde(default)]
+    organization_kinds: Option<u32>,
 }
 
 impl Serialize for DeviceProfile {
@@ -68,6 +81,7 @@ impl Serialize for DeviceProfile {
             os_name: &self.os_name,
             os_version: &self.os_version,
             model: &self.model,
+            organization_kinds: &self.organization_kinds,
         }
         .serialize(serializer)
     }
@@ -93,6 +107,7 @@ impl<'de> Deserialize<'de> for DeviceProfile {
             os_name: wire.os_name,
             os_version: wire.os_version,
             model: wire.model,
+            organization_kinds: wire.organization_kinds,
         })
     }
 }
@@ -116,6 +131,16 @@ pub struct AndroidHardwareProfile {
 }
 
 impl DeviceProfile {
+    /// The organization record classes a peer that sent `profile` accepts.
+    #[must_use]
+    pub fn accepted_organization_kinds(profile: Option<&Self>) -> u32 {
+        profile
+            .and_then(|profile| profile.organization_kinds)
+            .map_or(LEGACY_ORGANIZATION_KINDS, |kinds| {
+                kinds.max(LEGACY_ORGANIZATION_KINDS)
+            })
+    }
+
     #[must_use]
     pub fn current() -> Self {
         let os = os_info::get();
@@ -136,6 +161,7 @@ impl DeviceProfile {
             os_name: native.os_name.or(detected_os_name),
             os_version: native.os_version.or(detected_os_version),
             model: native.model,
+            organization_kinds: Some(ORGANIZATION_KINDS),
         }
     }
 
@@ -405,6 +431,30 @@ mod tests {
             .model
             .as_ref()
             .is_none_or(|value| value.len() <= 128));
+    }
+
+    #[test]
+    fn organization_kinds_are_optional_and_older_profiles_are_legacy() {
+        let current = DeviceProfile::current();
+        assert_eq!(
+            DeviceProfile::accepted_organization_kinds(Some(&current)),
+            ORGANIZATION_KINDS
+        );
+        let wire = serde_json::to_value(&current).unwrap();
+        assert_eq!(wire["organization_kinds"], ORGANIZATION_KINDS);
+
+        // A 1.3.0 profile has no such field; a later one may add fields this
+        // build does not know, which must not fail the hello.
+        let older: DeviceProfile = serde_json::from_value(serde_json::json!({
+            "app_version": "1.3.0", "protocol_version": PROTOCOL_VERSION,
+            "platform": "macos", "device_class": "laptop",
+            "os_name": null, "os_version": null, "model": null,
+            "future_field": {"nested": true}
+        }))
+        .unwrap();
+        assert_eq!(older.organization_kinds, None);
+        assert_eq!(DeviceProfile::accepted_organization_kinds(Some(&older)), 1);
+        assert_eq!(DeviceProfile::accepted_organization_kinds(None), 1);
     }
 
     #[cfg(target_os = "macos")]

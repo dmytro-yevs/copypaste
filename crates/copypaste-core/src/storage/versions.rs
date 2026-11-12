@@ -92,6 +92,14 @@ macro_rules! version_columns {
 
 const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
 
+/// Keeps only legacy-class organization records, as an equality so the read
+/// seeks `idx_organization_kind_versions` instead of stepping over newer ones.
+const LEGACY_CLASS_FILTER: &str = "kind_class = 1 AND ";
+
+// Two classes exist, so "below this build" means "legacy only". A third class
+// needs a range filter for peers that accept some, but not all, of them.
+const _: () = assert!(copypaste_p2p::ORGANIZATION_KINDS == 2);
+
 fn summary_query(predicate: &str) -> String {
     format!("SELECT {} FROM clipboard_items WHERE {predicate} UNION ALL SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records WHERE {predicate}", version_columns!())
 }
@@ -99,13 +107,18 @@ fn summary_query(predicate: &str) -> String {
 /// Bound each indexed stream before merging metadata. Range reads over the
 /// payload-bearing UNION view otherwise materialize and sort ciphertext.
 fn version_ctes(changes: bool, newest: bool) -> String {
+    version_ctes_classes(changes, newest, "")
+}
+
+/// [`version_ctes`] with an extra predicate on the organization stream.
+fn version_ctes_classes(changes: bool, newest: bool, class_filter: &str) -> String {
     let local_stamp = if changes {
         "MAX(created_at, pin_updated_at)"
     } else {
         "created_at"
     };
     let direction = if newest { "DESC" } else { "ASC" };
-    format!("WITH local_versions AS MATERIALIZED (        SELECT {} FROM clipboard_items         WHERE {local_stamp} > ?1 OR ({local_stamp} = ?1 AND (?2 IS NULL OR id > ?2))         ORDER BY {local_stamp} {direction}, id {direction} LIMIT ?3),         organization_versions AS MATERIALIZED (        SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records         WHERE created_at > ?1 OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))         ORDER BY created_at {direction}, id {direction} LIMIT ?3),         version_candidates AS (SELECT *, {local_stamp} AS change_stamp FROM local_versions         UNION ALL SELECT *, created_at AS change_stamp FROM organization_versions),         bounded_versions AS MATERIALIZED (SELECT * FROM version_candidates         ORDER BY change_stamp {direction}, id {direction} LIMIT ?3) ", version_columns!())
+    format!("WITH local_versions AS MATERIALIZED (        SELECT {} FROM clipboard_items         WHERE {local_stamp} > ?1 OR ({local_stamp} = ?1 AND (?2 IS NULL OR id > ?2))         ORDER BY {local_stamp} {direction}, id {direction} LIMIT ?3),         organization_versions AS MATERIALIZED (        SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records         WHERE {class_filter}(created_at > ?1 OR (created_at = ?1 AND (?2 IS NULL OR id > ?2)))         ORDER BY created_at {direction}, id {direction} LIMIT ?3),         version_candidates AS (SELECT *, {local_stamp} AS change_stamp FROM local_versions         UNION ALL SELECT *, created_at AS change_stamp FROM organization_versions),         bounded_versions AS MATERIALIZED (SELECT * FROM version_candidates         ORDER BY change_stamp {direction}, id {direction} LIMIT ?3) ", version_columns!())
 }
 
 fn row_to_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
@@ -217,6 +230,31 @@ impl Store {
         let sql = format!(
             "{} SELECT {} FROM bounded_versions ORDER BY change_stamp ASC, id ASC",
             version_ctes(true, false),
+            version_columns!()
+        );
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_version)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// [`Store::summaries_since`] for a peer that accepts organization record
+    /// classes up to `organization_kinds`. A legacy peer declines every newer
+    /// record without moving its cursor, so offering one would make it ask
+    /// again in every session; it is offered the legacy class only.
+    pub fn summaries_since_for(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: i64,
+        organization_kinds: u32,
+    ) -> Result<Vec<Version>, StoreError> {
+        if organization_kinds >= copypaste_p2p::ORGANIZATION_KINDS {
+            return self.summaries_since(since_ms, after_id, limit);
+        }
+        let conn = self.conn()?;
+        let sql = format!(
+            "{} SELECT {} FROM bounded_versions ORDER BY change_stamp ASC, id ASC",
+            version_ctes_classes(true, false, LEGACY_CLASS_FILTER),
             version_columns!()
         );
         let mut stmt = conn.prepare_cached(&sql)?;
@@ -614,6 +652,48 @@ mod tests {
         assert!(s.upsert(&incoming("gone", "hash", T0)).unwrap());
         assert!(s.version("gone").unwrap().is_none());
         assert!(s.search("remote text", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_legacy_peer_is_offered_clips_and_legacy_records_but_no_library_record() {
+        use crate::storage::organization::{PreferenceRecord, Record};
+        let s = store();
+        let key = crate::Keyring::from_secret(&[5; 32]).item_key();
+        let clip = s.insert(item("pinned", T0)).unwrap();
+        s.set_pinned_synced(&clip.id, true, &key).unwrap();
+        let preference = Record::Preference(PreferenceRecord {
+            namespace: "snippets".into(),
+            key: "sort".into(),
+            value_json: "1".into(),
+        });
+        s.write_organization_record(&key, preference).unwrap();
+        let library: String = s
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT id FROM organization_records WHERE kind_class = 2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let ids = |kinds| -> Vec<String> {
+            let page = s.summaries_since_for(0, None, 100, kinds).unwrap();
+            page.into_iter().map(|version| version.id).collect()
+        };
+        let legacy = ids(1);
+        assert_eq!(legacy.len(), 2, "the clip and its pin record");
+        assert!(legacy.contains(&clip.id) && !legacy.contains(&library));
+        assert!(ids(copypaste_p2p::ORGANIZATION_KINDS).contains(&library));
+
+        let sql = version_ctes_classes(true, false, LEGACY_CLASS_FILTER)
+            + "SELECT id FROM bounded_versions";
+        let plan = plan_of(&s, &sql);
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("idx_organization_kind_versions")),
+            "the class filter must use its index, got {plan:?}"
+        );
     }
 
     #[test]
