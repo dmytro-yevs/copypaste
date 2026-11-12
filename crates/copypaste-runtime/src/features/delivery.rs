@@ -34,6 +34,8 @@ pub(crate) struct DeliveryOptions {
     pub(crate) transient: bool,
     /// Store the text as a new history item and copy that item instead.
     pub(crate) record_in_history: bool,
+    /// The text is HTML and is written as rich text.
+    pub(crate) html: bool,
 }
 
 /// The outcome of one clipboard delivery.
@@ -114,6 +116,14 @@ impl ClipboardOwner {
 
     fn current(&self) -> Option<String> {
         self.lock().item.clone()
+    }
+
+    fn retarget(&self, token: &str, previous: Option<String>) {
+        if let Some(pending) = self.lock().pending.as_mut() {
+            if pending.token == token {
+                pending.previous = previous;
+            }
+        }
     }
 
     /// Record a restorable delivery; replaces any earlier pending restore.
@@ -222,7 +232,11 @@ impl Runtime {
             .write(
                 "",
                 &ClipboardPayload::Text(text.to_owned().into()),
-                content_type::TEXT,
+                if options.html {
+                    content_type::HTML
+                } else {
+                    content_type::TEXT
+                },
                 WriteOptions {
                     secret: options.secret,
                     transient: options.transient,
@@ -261,6 +275,17 @@ impl Runtime {
         )
         .map(|ingested| ingested.into_item().id)
         .map_err(DeliveryError::Ingest)
+    }
+
+    /// The history item the clipboard holds, as far as this runtime observed.
+    pub(crate) fn clipboard_item(&self) -> Option<String> {
+        self.changes.clipboard.current()
+    }
+
+    /// Make `token`'s pending restore put back `previous` rather than what
+    /// its own delivery replaced, so a run of deliveries restores its start.
+    pub(crate) fn retarget_restore(&self, token: &str, previous: Option<String>) {
+        self.changes.clipboard.retarget(token, previous);
     }
 
     /// Put back what the clipboard held before `token`'s delivery, unless the
@@ -361,6 +386,7 @@ pub(super) fn handle(runtime: &Runtime, id: u64, op: ClipOp) -> Response {
                     secret,
                     transient: true,
                     record_in_history: false,
+                    html: false,
                 },
             ) {
                 Ok(delivered) => Response::ok(
