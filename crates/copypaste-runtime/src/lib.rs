@@ -23,6 +23,7 @@ use tokio::sync::{broadcast, watch};
 
 pub mod capture_admission;
 mod dispatch;
+mod features;
 pub mod host;
 pub mod messages;
 pub mod meta;
@@ -100,11 +101,9 @@ impl Changes {
             return;
         }
         let _ = self.events.send(EventData {
-            sync_status: None,
-            event,
-            item_count: self.store.count().unwrap_or(0),
             captured: captured_item_id.is_some(),
             captured_item_id: captured_item_id.map(str::to_owned),
+            ..EventData::change(event, self.store.count().unwrap_or(0))
         });
     }
 
@@ -255,13 +254,10 @@ impl Runtime {
         modules.bind_search(
             store.clone(),
             Arc::new(move || {
-                let _ = search_events.send(EventData {
-                    sync_status: None,
-                    event: EventKind::Items,
-                    item_count: search_store.count().unwrap_or(0),
-                    captured: false,
-                    captured_item_id: None,
-                });
+                let _ = search_events.send(EventData::change(
+                    EventKind::Items,
+                    search_store.count().unwrap_or(0),
+                ));
             }),
         );
         let shutdown = watch::channel(false).0;
@@ -690,10 +686,7 @@ impl Runtime {
         }
         let _ = self.changes.events.send(EventData {
             sync_status: Some(sync_status),
-            event: EventKind::Peers,
-            item_count: self.store.count().unwrap_or(0),
-            captured: false,
-            captured_item_id: None,
+            ..EventData::change(EventKind::Peers, self.store.count().unwrap_or(0))
         });
     }
 

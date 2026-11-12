@@ -18,6 +18,10 @@ enum Expected {
 }
 
 fn expected(method: &Method) -> Expected {
+    // A connection that is not the verified app may never run these.
+    if method.privileged() {
+        return Expected::Error(ErrorCode::Forbidden);
+    }
     match method {
         Method::Modules { .. } => {
             if copypaste_modules::ModuleTarget::current().is_some() {
@@ -88,9 +92,16 @@ fn expected(method: &Method) -> Expected {
         Method::GetPrivateMode | Method::SetPrivateMode { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::PrivateMode(_)))
         }
-        Method::Watch | Method::WatchRuntime | Method::Shutdown => {
+        Method::Watch | Method::WatchRuntime | Method::WatchEvents { .. } | Method::Shutdown => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
+        // Each feature group answers `unsupported` until its feature lands.
+        Method::Snippets { .. }
+        | Method::Clips { .. }
+        | Method::PasteQueue { .. }
+        | Method::Transforms { .. }
+        | Method::Rules { .. }
+        | Method::Ai { .. } => Expected::Error(ErrorCode::Unsupported),
         Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::CopyText { .. }
@@ -256,7 +267,41 @@ fn cases(root: &Path) -> Vec<Method> {
         },
         Method::SetPrivateMode { enabled: true },
         Method::GetPrivateMode,
+        Method::Snippets {
+            op: copypaste_ipc::snippets::SnippetOp::QuickSearch {
+                query: "sig".into(),
+                include_snippets: true,
+                limit: 10,
+            },
+        },
+        Method::Clips {
+            op: copypaste_ipc::clips::ClipOp::Annotations {
+                ids: vec!["missing".into()],
+            },
+        },
+        Method::PasteQueue {
+            op: copypaste_ipc::paste_queue::PasteQueueOp::Get,
+        },
+        Method::Transforms {
+            op: copypaste_ipc::transforms::TransformOp::Catalogue {
+                locale: "en".into(),
+            },
+        },
+        Method::Rules {
+            op: copypaste_ipc::rules::RuleOp::List,
+        },
+        Method::Ai {
+            op: copypaste_ipc::ai::AiOp::Grants,
+        },
+        Method::Ai {
+            op: copypaste_ipc::ai::AiOp::RevokeGrant {
+                id: "missing".into(),
+            },
+        },
         Method::Watch,
+        Method::WatchEvents {
+            kinds: vec![copypaste_ipc::EventKindFilter::AiApproval],
+        },
         Method::Shutdown,
     ]
 }
@@ -331,14 +376,14 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        55,
+        63,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
     for (index, method) in methods.into_iter().enumerate() {
         let id = index as u64 + 1;
         let expected = expected(&method);
-        let response = if matches!(method, Method::Shutdown) {
+        let response = if matches!(method, Method::Shutdown | Method::WatchEvents { .. }) {
             let stream = transport::connect(&dir.path().join("daemon.sock"))
                 .await
                 .expect("shutdown connection");

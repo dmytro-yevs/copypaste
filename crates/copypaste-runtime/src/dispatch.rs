@@ -460,9 +460,16 @@ impl Runtime {
                 )
             }
             Method::SetPrivateMode { enabled } => self.set_private_mode(id, enabled),
-            Method::Watch | Method::WatchRuntime | Method::Shutdown => {
-                Response::err(id, ErrorCode::InvalidRequest, MSG_TRANSPORT_ONLY)
-            }
+            Method::Snippets { op } => self.snippets(id, op),
+            Method::Clips { op } => self.clips(id, op),
+            Method::PasteQueue { op } => self.paste_queue(id, op),
+            Method::Transforms { op } => self.transforms(id, op),
+            Method::Rules { op } => self.rules(id, op),
+            Method::Ai { op } => self.ai(id, op),
+            Method::Watch
+            | Method::WatchRuntime
+            | Method::WatchEvents { .. }
+            | Method::Shutdown => Response::err(id, ErrorCode::InvalidRequest, MSG_TRANSPORT_ONLY),
             // Spelled out rather than left to a `_`, so a method added to the
             // enum is a compile error here until it is classified.
             Method::Modules { .. }

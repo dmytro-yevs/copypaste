@@ -11,6 +11,32 @@ use copypaste_ipc::{Method, ResponseData};
 
 use crate::client;
 
+pub mod ai;
+pub mod clips;
+pub mod paste_queue;
+pub mod rules;
+pub mod snippets;
+pub mod transforms;
+
+/// The payload of one successful reply.
+pub(crate) async fn request_data(method: Method) -> Result<ResponseData, RuntimeError> {
+    client::request(method)
+        .await?
+        .data
+        .ok_or_else(RuntimeError::internal)
+}
+
+/// The `$variant` payload of a reply to `$method`, or an internal error.
+macro_rules! expect_data {
+    ($method:expr, $variant:path) => {
+        match crate::api::request_data($method).await? {
+            $variant(value) => value,
+            _ => return Err(crate::api::RuntimeError::internal()),
+        }
+    };
+}
+pub(crate) use expect_data;
+
 async fn module_request(operation: copypaste_ipc::ModuleOperation) -> Result<String, RuntimeError> {
     let response = client::request(Method::Modules { operation }).await?;
     match response.data {
@@ -216,6 +242,7 @@ pub struct Clip {
     pub too_large_to_sync: bool,
     pub file_details: Option<ClipFileDetails>,
     pub image_details: Option<ClipImageDetails>,
+    pub annotations: Option<clips::ClipAnnotationState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1416,7 +1443,7 @@ pub async fn set_this_device_name(name: String) -> Result<(), RuntimeError> {
     empty_response(Method::SetDeviceName { name }).await
 }
 
-async fn item_response(method: Method) -> Result<Clip, RuntimeError> {
+pub(crate) async fn item_response(method: Method) -> Result<Clip, RuntimeError> {
     let response = client::request(method).await?;
     match response.data {
         Some(ResponseData::Item(item)) => Ok(clip(item)),
@@ -1424,7 +1451,7 @@ async fn item_response(method: Method) -> Result<Clip, RuntimeError> {
     }
 }
 
-async fn empty_response(method: Method) -> Result<(), RuntimeError> {
+pub(crate) async fn empty_response(method: Method) -> Result<(), RuntimeError> {
     let response = client::request(method).await?;
     match response.data {
         Some(ResponseData::Empty {}) => Ok(()),
@@ -1611,7 +1638,7 @@ fn device_observation_trust(
     }
 }
 
-fn clip(item: copypaste_ipc::Item) -> Clip {
+pub(crate) fn clip(item: copypaste_ipc::Item) -> Clip {
     Clip {
         secret: item.privacy.secret,
         transient: item.privacy.transient,
@@ -1643,6 +1670,7 @@ fn clip(item: copypaste_ipc::Item) -> Clip {
             height: details.height,
             size_bytes: details.size_bytes,
         }),
+        annotations: item.annotations.map(clips::ClipAnnotationState::from),
     }
 }
 
@@ -1931,7 +1959,7 @@ mod tests {
             source_app_name: Some("Camera".into()),
             source_app_icon_id: None,
             too_large_to_sync: true,
-            truncated: false,
+            ..copypaste_ipc::Item::default()
         });
 
         let metadata = mapped.image_details.expect("image metadata");

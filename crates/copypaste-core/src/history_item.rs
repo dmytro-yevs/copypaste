@@ -135,6 +135,7 @@ pub(crate) fn from_payload(
         source_app_icon_id: row.source_icon_id.clone(),
         too_large_to_sync,
         truncated,
+        ..Item::default()
     }
 }
 
@@ -218,6 +219,7 @@ impl StaticHistoryPreview {
             source_app_icon_id: row.source_icon_id.clone(),
             too_large_to_sync: self.too_large_to_sync,
             truncated: self.truncated,
+            ..Item::default()
         }
     }
 }

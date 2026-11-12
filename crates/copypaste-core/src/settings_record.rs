@@ -52,6 +52,10 @@ fn fail_closed(field: &str) -> ConfigPatch {
             notification_preview: Some(false),
             ..Default::default()
         },
+        "mcp_enabled" => ConfigPatch {
+            mcp_enabled: Some(false),
+            ..Default::default()
+        },
         _ => ConfigPatch::default(),
     }
 }
@@ -64,6 +68,7 @@ pub fn all_closed() -> ConfigData {
         sync_enabled: false,
         instant_clipboard: false,
         notification_preview: false,
+        mcp_enabled: false,
         excluded_app_bundle_ids: Vec::new(),
         ..ConfigData::default()
     }
@@ -175,6 +180,15 @@ mod tests {
         let (corrupt, health) = read(r#"{"notification_preview":"invalid"}"#);
         assert!(!corrupt.notification_preview);
         assert_eq!(health.unreadable_fields, ["notification_preview"]);
+    }
+
+    #[test]
+    fn an_unreadable_mcp_switch_fails_closed() {
+        let (config, health) = read(r#"{"mcp_enabled":"yes"}"#);
+        assert!(!config.mcp_enabled);
+        assert_eq!(health.unreadable_fields, ["mcp_enabled"]);
+        let (enabled, _) = read(r#"{"mcp_enabled":true}"#);
+        assert!(enabled.mcp_enabled);
     }
 
     fn stored(config: &ConfigData) -> String {
