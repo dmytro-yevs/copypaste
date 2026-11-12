@@ -3589,4 +3589,126 @@ class AppLocalizationsJa extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'CopyPaste を開く';
+
+  @override
+  String get trayOpenQuickPaste => 'Quick Paste を開く';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Quick Paste を開く ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => '新しいスニペット';
+
+  @override
+  String get trayRecent => '最近';
+
+  @override
+  String get trayRecentLoading => '読み込み中…';
+
+  @override
+  String get trayRecentFailed => 'クリップを読み込めませんでした';
+
+  @override
+  String get trayRecentEmpty => 'まだクリップがありません';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '最近のクリップ $count 件を非表示',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'シークレット';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => '別のデバイスの最新クリップをコピー';
+
+  @override
+  String get trayCaptureNow => '今すぐ記録';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '$time まで一時停止中';
+  }
+
+  @override
+  String get trayPauseFor => '一時停止する時間…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 分';
+
+  @override
+  String get trayPauseForOneHour => '1 時間';
+
+  @override
+  String get trayPauseUntilResumed => '再開するまで';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '収集中: $count 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return '最近スキップ ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'コンテンツルールを開く';
+
+  @override
+  String get trayRecentSettingsTitle => 'メニューバーとシステムトレイ';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'メニューバーまたはシステムトレイのメニューで「最近」に表示する内容です。';
+
+  @override
+  String get trayRecentCountTitle => '最近のクリップ';
+
+  @override
+  String get trayRecentCountDescription => 'メニューに表示する最新クリップの数です。';
+
+  @override
+  String get trayRecentPreviewTitle => '最近のクリップのプレビュー';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'メニューのテキストは CopyPaste の暗号化の外でシステムが保持します。表示を減らすとクリップの内容がそこに残りません。シークレットは常にマスクされます。';
+
+  @override
+  String get trayRecentPreviewFull => '完全なプレビュー';
+
+  @override
+  String get trayRecentPreviewTitles => '種類と取得元のみ';
+
+  @override
+  String get trayRecentPreviewHidden => '非表示';
+
+  @override
+  String get trayRecentSettingsKeywords => 'トレイ メニューバー 最近 プレビュー プライバシー 件数';
 }

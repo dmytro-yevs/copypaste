@@ -3567,4 +3567,126 @@ class AppLocalizationsKo extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'CopyPaste 열기';
+
+  @override
+  String get trayOpenQuickPaste => 'Quick Paste 열기';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Quick Paste 열기 ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => '새 스니펫';
+
+  @override
+  String get trayRecent => '최근';
+
+  @override
+  String get trayRecentLoading => '불러오는 중…';
+
+  @override
+  String get trayRecentFailed => '클립을 불러올 수 없음';
+
+  @override
+  String get trayRecentEmpty => '아직 클립 없음';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '최근 클립 $count개 숨김',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => '비밀';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => '다른 기기의 최신 클립 복사';
+
+  @override
+  String get trayCaptureNow => '지금 수집';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '$time까지 일시 정지됨';
+  }
+
+  @override
+  String get trayPauseFor => '일시 정지 시간…';
+
+  @override
+  String get trayPauseFor15Minutes => '15분';
+
+  @override
+  String get trayPauseForOneHour => '1시간';
+
+  @override
+  String get trayPauseUntilResumed => '재개할 때까지';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count개 항목',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '수집 중: $count개 항목',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return '최근 건너뜀 ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => '콘텐츠 규칙 열기';
+
+  @override
+  String get trayRecentSettingsTitle => '메뉴 막대 및 트레이';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      '메뉴 막대 또는 트레이 메뉴의 최근 항목에 표시할 내용입니다.';
+
+  @override
+  String get trayRecentCountTitle => '최근 클립';
+
+  @override
+  String get trayRecentCountDescription => '메뉴에 표시할 최신 클립 수입니다.';
+
+  @override
+  String get trayRecentPreviewTitle => '최근 클립 미리보기';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      '메뉴 텍스트는 CopyPaste 암호화 밖에서 시스템이 보관합니다. 클립 내용이 남지 않도록 덜 표시하세요. 비밀은 항상 가려집니다.';
+
+  @override
+  String get trayRecentPreviewFull => '전체 미리보기';
+
+  @override
+  String get trayRecentPreviewTitles => '유형 및 출처만';
+
+  @override
+  String get trayRecentPreviewHidden => '숨김';
+
+  @override
+  String get trayRecentSettingsKeywords => '트레이 메뉴 막대 최근 미리보기 개인정보 개수';
 }

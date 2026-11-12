@@ -3884,4 +3884,132 @@ class AppLocalizationsEs extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Abrir CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Abrir Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Abrir Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Nuevo fragmento';
+
+  @override
+  String get trayRecent => 'Recientes';
+
+  @override
+  String get trayRecentLoading => 'Cargando…';
+
+  @override
+  String get trayRecentFailed => 'No se pudieron cargar los clips';
+
+  @override
+  String get trayRecentEmpty => 'Aún no hay clips';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips recientes ocultos',
+      one: '1 clip reciente oculto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Secreto';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Copiar lo último de otro dispositivo';
+
+  @override
+  String get trayCaptureNow => 'Capturar ahora';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'En pausa hasta las $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Pausar durante…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minutos';
+
+  @override
+  String get trayPauseForOneHour => '1 hora';
+
+  @override
+  String get trayPauseUntilResumed => 'Hasta que la reanude';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count elementos',
+      one: 'Paste Queue: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Recopilando: $count elementos',
+      one: 'Recopilando: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Omitidos recientemente ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Abrir reglas de contenido';
+
+  @override
+  String get trayRecentSettingsTitle => 'Barra de menús y bandeja';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Lo que el menú de la barra de menús o de la bandeja muestra en Recientes.';
+
+  @override
+  String get trayRecentCountTitle => 'Clips recientes';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Cuántos de los clips más nuevos muestra el menú.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Vista previa de clips recientes';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'El sistema guarda el texto de los menús fuera del cifrado de CopyPaste. Muestra menos para que el contenido de los clips no llegue allí. Los secretos siempre se ocultan.';
+
+  @override
+  String get trayRecentPreviewFull => 'Vista previa completa';
+
+  @override
+  String get trayRecentPreviewTitles => 'Solo tipo y origen';
+
+  @override
+  String get trayRecentPreviewHidden => 'Oculto';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'bandeja barra de menús recientes vista previa privacidad cantidad';
 }

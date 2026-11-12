@@ -3853,4 +3853,138 @@ class AppLocalizationsUk extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Відкрити CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Відкрити Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Відкрити Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Новий фрагмент';
+
+  @override
+  String get trayRecent => 'Нещодавні';
+
+  @override
+  String get trayRecentLoading => 'Завантаження…';
+
+  @override
+  String get trayRecentFailed => 'Не вдалося завантажити кліпи';
+
+  @override
+  String get trayRecentEmpty => 'Кліпів ще немає';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count нещодавнього кліпу приховано',
+      many: '$count нещодавніх кліпів приховано',
+      few: '$count нещодавні кліпи приховано',
+      one: '$count нещодавній кліп приховано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Секрет';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Копіювати останній з іншого пристрою';
+
+  @override
+  String get trayCaptureNow => 'Записати зараз';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'Призупинено до $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Призупинити на…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 хвилин';
+
+  @override
+  String get trayPauseForOneHour => '1 годину';
+
+  @override
+  String get trayPauseUntilResumed => 'Доки не відновлю';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count елемента',
+      many: 'Paste Queue: $count елементів',
+      few: 'Paste Queue: $count елементи',
+      one: 'Paste Queue: $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Збирання: $count елемента',
+      many: 'Збирання: $count елементів',
+      few: 'Збирання: $count елементи',
+      one: 'Збирання: $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Нещодавно пропущені ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Відкрити правила вмісту';
+
+  @override
+  String get trayRecentSettingsTitle => 'Смуга меню і трей';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Що меню в смузі меню або треї показує в розділі «Нещодавні».';
+
+  @override
+  String get trayRecentCountTitle => 'Нещодавні кліпи';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Скільки найновіших кліпів показує меню.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Попередній перегляд нещодавніх кліпів';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Система зберігає текст меню поза шифруванням CopyPaste. Показуйте менше, щоб вміст кліпів туди не потрапляв. Секрети завжди приховано.';
+
+  @override
+  String get trayRecentPreviewFull => 'Повний перегляд';
+
+  @override
+  String get trayRecentPreviewTitles => 'Лише тип і джерело';
+
+  @override
+  String get trayRecentPreviewHidden => 'Приховано';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'трей смуга меню нещодавні перегляд приватність кількість';
 }

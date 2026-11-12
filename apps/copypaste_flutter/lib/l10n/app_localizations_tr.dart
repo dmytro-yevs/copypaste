@@ -3784,4 +3784,129 @@ class AppLocalizationsTr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'CopyPaste\'i aç';
+
+  @override
+  String get trayOpenQuickPaste => 'Quick Paste\'i aç';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Quick Paste\'i aç ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Yeni parçacık';
+
+  @override
+  String get trayRecent => 'Son kullanılanlar';
+
+  @override
+  String get trayRecentLoading => 'Yükleniyor…';
+
+  @override
+  String get trayRecentFailed => 'Kliplar yüklenemedi';
+
+  @override
+  String get trayRecentEmpty => 'Henüz klip yok';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count son klip gizlendi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Gizli';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Diğer cihazdaki en son klibi kopyala';
+
+  @override
+  String get trayCaptureNow => 'Şimdi yakala';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '$time saatine kadar duraklatıldı';
+  }
+
+  @override
+  String get trayPauseFor => 'Şu süreyle duraklat…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 dakika';
+
+  @override
+  String get trayPauseForOneHour => '1 saat';
+
+  @override
+  String get trayPauseUntilResumed => 'Ben sürdürene kadar';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count öğe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Toplanıyor: $count öğe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Son atlananlar ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'İçerik kurallarını aç';
+
+  @override
+  String get trayRecentSettingsTitle => 'Menü çubuğu ve tepsi';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Menü çubuğu veya tepsi menüsünün Son kullanılanlar altında gösterdikleri.';
+
+  @override
+  String get trayRecentCountTitle => 'Son kliplar';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Menünün gösterdiği en yeni klip sayısı.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Son klip önizlemeleri';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Sistem, menü metnini CopyPaste şifrelemesinin dışında tutar. Klip içeriğini oradan uzak tutmak için daha az gösterin. Gizli öğeler her zaman maskelenir.';
+
+  @override
+  String get trayRecentPreviewFull => 'Tam önizleme';
+
+  @override
+  String get trayRecentPreviewTitles => 'Yalnızca tür ve kaynak';
+
+  @override
+  String get trayRecentPreviewHidden => 'Gizli';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'tepsi menü çubuğu son önizleme gizlilik sayı';
 }

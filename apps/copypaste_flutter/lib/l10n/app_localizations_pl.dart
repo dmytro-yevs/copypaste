@@ -3866,4 +3866,138 @@ class AppLocalizationsPl extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Otwórz CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Otwórz Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Otwórz Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Nowy fragment';
+
+  @override
+  String get trayRecent => 'Ostatnie';
+
+  @override
+  String get trayRecentLoading => 'Wczytywanie…';
+
+  @override
+  String get trayRecentFailed => 'Nie udało się wczytać klipów';
+
+  @override
+  String get trayRecentEmpty => 'Brak klipów';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ostatniego klipu ukryte',
+      many: '$count ostatnich klipów ukrytych',
+      few: '$count ostatnie klipy ukryte',
+      one: '$count ostatni klip ukryty',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Tajne';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Kopiuj najnowszy z innego urządzenia';
+
+  @override
+  String get trayCaptureNow => 'Przechwyć teraz';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'Wstrzymano do $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Wstrzymaj na…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minut';
+
+  @override
+  String get trayPauseForOneHour => '1 godzinę';
+
+  @override
+  String get trayPauseUntilResumed => 'Do wznowienia';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count elementu',
+      many: 'Paste Queue: $count elementów',
+      few: 'Paste Queue: $count elementy',
+      one: 'Paste Queue: $count element',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Zbieranie: $count elementu',
+      many: 'Zbieranie: $count elementów',
+      few: 'Zbieranie: $count elementy',
+      one: 'Zbieranie: $count element',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Ostatnio pominięte ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Otwórz reguły treści';
+
+  @override
+  String get trayRecentSettingsTitle => 'Pasek menu i zasobnik';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Co menu na pasku menu lub w zasobniku pokazuje w sekcji Ostatnie.';
+
+  @override
+  String get trayRecentCountTitle => 'Ostatnie klipy';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Ile najnowszych klipów pokazuje menu.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Podgląd ostatnich klipów';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'System przechowuje tekst menu poza szyfrowaniem CopyPaste. Pokazuj mniej, aby nie trafiała tam treść klipów. Tajne elementy są zawsze maskowane.';
+
+  @override
+  String get trayRecentPreviewFull => 'Pełny podgląd';
+
+  @override
+  String get trayRecentPreviewTitles => 'Tylko typ i źródło';
+
+  @override
+  String get trayRecentPreviewHidden => 'Ukryte';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'zasobnik pasek menu ostatnie podgląd prywatność liczba';
 }

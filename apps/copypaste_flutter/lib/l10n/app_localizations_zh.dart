@@ -3475,4 +3475,125 @@ class AppLocalizationsZh extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => '打开 CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => '打开 Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return '打开 Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => '新建片段';
+
+  @override
+  String get trayRecent => '最近';
+
+  @override
+  String get trayRecentLoading => '正在加载…';
+
+  @override
+  String get trayRecentFailed => '无法加载剪贴';
+
+  @override
+  String get trayRecentEmpty => '还没有剪贴';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已隐藏 $count 条最近剪贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => '机密';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => '复制其他设备上的最新剪贴';
+
+  @override
+  String get trayCaptureNow => '立即捕获';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '已暂停至 $time';
+  }
+
+  @override
+  String get trayPauseFor => '暂停…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 分钟';
+
+  @override
+  String get trayPauseForOneHour => '1 小时';
+
+  @override
+  String get trayPauseUntilResumed => '直到我恢复';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue：$count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '正在收集：$count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return '最近跳过 ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => '打开内容规则';
+
+  @override
+  String get trayRecentSettingsTitle => '菜单栏和托盘';
+
+  @override
+  String get trayRecentSettingsDescription => '菜单栏或托盘菜单在“最近”下显示的内容。';
+
+  @override
+  String get trayRecentCountTitle => '最近剪贴';
+
+  @override
+  String get trayRecentCountDescription => '菜单显示的最新剪贴数量。';
+
+  @override
+  String get trayRecentPreviewTitle => '最近剪贴预览';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      '系统会在 CopyPaste 加密之外保存菜单文本。减少显示可避免剪贴内容出现在其中。机密内容始终会被遮盖。';
+
+  @override
+  String get trayRecentPreviewFull => '完整预览';
+
+  @override
+  String get trayRecentPreviewTitles => '仅类型和来源';
+
+  @override
+  String get trayRecentPreviewHidden => '隐藏';
+
+  @override
+  String get trayRecentSettingsKeywords => '托盘 菜单栏 最近 预览 隐私 数量';
 }

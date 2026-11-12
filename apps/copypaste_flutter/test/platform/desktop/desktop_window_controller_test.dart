@@ -732,10 +732,8 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   @override
   Future<void> initializeTray({
     bool visible = true,
-    required Future<void> Function() onOpenRequested,
-    required Future<void> Function() onCaptureRequested,
-    required Future<void> Function() onSettingsRequested,
-    required Future<void> Function() onQuitRequested,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
   }) async {
     trayVisible = visible;
     initializeTrayCalls += 1;
@@ -743,17 +741,33 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
       failedTrayInitializations -= 1;
       throw StateError('Tray setup failed.');
     }
-    openHandler = onOpenRequested;
-    captureHandler = onCaptureRequested;
-    settingsHandler = onSettingsRequested;
+    trayMenu = menu;
+    Future<void> Function() command(TrayCommand command) =>
+        () => events.onAction(TrayCommandAction(command));
+    openHandler = command(TrayCommand.openApp);
+    captureHandler = command(TrayCommand.toggleCapture);
+    settingsHandler = command(TrayCommand.openSettings);
   }
 
-  CaptureControlState captureState = CaptureControlState.unavailable;
+  List<TrayMenuEntry> trayMenu = const [];
+
+  CaptureControlState get captureState {
+    final label = trayMenu
+        .whereType<TrayMenuItem>()
+        .firstWhere((item) => item.key == TrayMenuKeys.toggleCapture)
+        .label;
+    return CaptureControlState.values.firstWhere(
+      (state) => state.actionLabel == label,
+    );
+  }
 
   @override
-  Future<void> updateCaptureMenu({required CaptureControlState state}) async {
-    captureState = state;
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu) async {
+    trayMenu = menu;
   }
+
+  @override
+  Future<void> openQuickPaste() async {}
 
   @override
   Future<void> initializeWindow(

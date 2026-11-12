@@ -4721,5 +4721,161 @@
         "type": "int"
       }
     }
+  },
+  "trayOpenApp": "Open CopyPaste",
+  "@trayOpenApp": {
+    "description": "Tray and menu-bar menu item that shows the main window."
+  },
+  "trayOpenQuickPaste": "Open Quick Paste",
+  "@trayOpenQuickPaste": {
+    "description": "Tray and menu-bar menu item that opens the Quick Paste window. Quick Paste is a product name."
+  },
+  "trayOpenQuickPasteWithShortcut": "Open Quick Paste ({shortcut})",
+  "@trayOpenQuickPasteWithShortcut": {
+    "description": "Same as trayOpenQuickPaste, followed by its global shortcut.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "Ctrl+Shift+C"
+      }
+    }
+  },
+  "trayNewSnippet": "New snippet",
+  "@trayNewSnippet": {
+    "description": "Tray and menu-bar menu item that opens the snippet editor for a new snippet."
+  },
+  "trayRecent": "Recent",
+  "@trayRecent": {
+    "description": "Tray and menu-bar submenu that lists the newest clips."
+  },
+  "trayRecentLoading": "Loading…",
+  "@trayRecentLoading": {
+    "description": "Shown in the Recent submenu while clips load."
+  },
+  "trayRecentFailed": "Couldn't load clips",
+  "@trayRecentFailed": {
+    "description": "Shown in the Recent submenu when clips could not be read."
+  },
+  "trayRecentEmpty": "No clips yet",
+  "@trayRecentEmpty": {
+    "description": "Shown in the Recent submenu when History is empty."
+  },
+  "trayRecentHidden": "{count, plural, =1{1 recent clip hidden} other{{count} recent clips hidden}}",
+  "@trayRecentHidden": {
+    "description": "Shown in the Recent submenu when previews are set to Hidden: only the number of clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayRecentSecret": "Secret",
+  "@trayRecentSecret": {
+    "description": "Replaces the content of a secret clip in the Recent submenu, followed by its source and time."
+  },
+  "trayCopyLatestFromOtherDevice": "Copy latest from other device",
+  "@trayCopyLatestFromOtherDevice": {
+    "description": "Tray and menu-bar menu item that copies the newest clip received from another device."
+  },
+  "trayCaptureNow": "Capture now",
+  "@trayCaptureNow": {
+    "description": "Tray and menu-bar menu item that stores the current clipboard in History now, even while capture is paused."
+  },
+  "trayPausedUntil": "Paused until {time}",
+  "@trayPausedUntil": {
+    "description": "Disabled tray row while capture is paused for a while. time is a clock time.",
+    "placeholders": {
+      "time": {
+        "type": "String",
+        "example": "2:30 PM"
+      }
+    }
+  },
+  "trayPauseFor": "Pause for…",
+  "@trayPauseFor": {
+    "description": "Tray and menu-bar submenu with pause durations."
+  },
+  "trayPauseFor15Minutes": "15 minutes",
+  "@trayPauseFor15Minutes": {
+    "description": "Pause duration in the Pause for submenu."
+  },
+  "trayPauseForOneHour": "1 hour",
+  "@trayPauseForOneHour": {
+    "description": "Pause duration in the Pause for submenu."
+  },
+  "trayPauseUntilResumed": "Until I resume",
+  "@trayPauseUntilResumed": {
+    "description": "Pause option in the Pause for submenu: no automatic resume."
+  },
+  "trayPasteQueue": "{count, plural, =1{Paste Queue: 1 item} other{Paste Queue: {count} items}}",
+  "@trayPasteQueue": {
+    "description": "Tray row with the number of items in the Paste Queue. Paste Queue is a product name.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayPasteQueueCollecting": "{count, plural, =1{Collecting: 1 item} other{Collecting: {count} items}}",
+  "@trayPasteQueueCollecting": {
+    "description": "Tray row while the Paste Queue collects copies, with its number of items.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayRecentlySkipped": "Recently skipped ({count})",
+  "@trayRecentlySkipped": {
+    "description": "Tray submenu listing captures that content rules did not save, with their number.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayOpenContentRules": "Open content rules",
+  "@trayOpenContentRules": {
+    "description": "Item in the Recently skipped submenu that opens the content rules settings."
+  },
+  "trayRecentSettingsTitle": "Menu bar and tray",
+  "@trayRecentSettingsTitle": {
+    "description": "Heading of the settings for the menu-bar (macOS) or tray (Windows, Linux) menu."
+  },
+  "trayRecentSettingsDescription": "What the menu bar or tray menu lists under Recent.",
+  "@trayRecentSettingsDescription": {
+    "description": "Description under trayRecentSettingsTitle."
+  },
+  "trayRecentCountTitle": "Recent clips",
+  "@trayRecentCountTitle": {
+    "description": "Setting title: how many clips the Recent submenu lists."
+  },
+  "trayRecentCountDescription": "How many of the newest clips the menu lists.",
+  "@trayRecentCountDescription": {
+    "description": "Description of trayRecentCountTitle."
+  },
+  "trayRecentPreviewTitle": "Recent clip previews",
+  "@trayRecentPreviewTitle": {
+    "description": "Setting title: how much of each clip the Recent submenu shows."
+  },
+  "trayRecentPreviewDescription": "The system keeps menu text outside CopyPaste's encryption. Show less to keep clip content out of it. Secrets are always masked.",
+  "@trayRecentPreviewDescription": {
+    "description": "Description of trayRecentPreviewTitle: menu text leaves the encrypted store."
+  },
+  "trayRecentPreviewFull": "Full preview",
+  "@trayRecentPreviewFull": {
+    "description": "Option of trayRecentPreviewTitle: the beginning of the clip text."
+  },
+  "trayRecentPreviewTitles": "Type and source only",
+  "@trayRecentPreviewTitles": {
+    "description": "Option of trayRecentPreviewTitle: clip type, source app and time, no content."
+  },
+  "trayRecentPreviewHidden": "Hidden",
+  "@trayRecentPreviewHidden": {
+    "description": "Option of trayRecentPreviewTitle: only the number of clips."
+  },
+  "trayRecentSettingsKeywords": "tray menu bar recent preview privacy count",
+  "@trayRecentSettingsKeywords": {
+    "description": "Space-separated search keywords for the menu-bar and tray settings."
   }
 }
