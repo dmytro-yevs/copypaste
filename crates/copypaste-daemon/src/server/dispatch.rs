@@ -23,9 +23,8 @@ use copypaste_runtime::Route;
 
 /// What the daemon knows about a connected peer, settled once per connection.
 ///
-/// `is_app` is true only for a peer verified as the signed CopyPaste app.
-/// Until that check exists no IPC peer is the app, so every privileged
-/// operation is refused.
+/// `is_app` is true only for a peer verified as the CopyPaste app
+/// (`peer_identity`); every other peer is refused privileged operations.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CallerIdentity {
     pub(crate) is_app: bool,

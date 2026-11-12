@@ -44,7 +44,7 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::{dispatch_request, gate, is_watch, parse, CallerIdentity};
+use super::dispatch::{dispatch_request, gate, is_watch, parse};
 use super::messages::{MSG_BAD_EVENT_FILTER, MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
@@ -245,7 +245,7 @@ async fn handle_connection(
     mut shutdown: watch::Receiver<bool>,
     mut release: watch::Receiver<bool>,
 ) {
-    let caller = CallerIdentity::default();
+    let mut peer = super::peer_identity::PeerIdentity::capture(&stream);
     let (reader, mut writer) = stream.into_split();
     let mut lines = Reader::new(reader);
 
@@ -337,6 +337,7 @@ async fn handle_connection(
             break;
         }
 
+        let caller = peer.caller(&request.method).await;
         if let Some(rejection) = gate(&state, &request, caller) {
             let close_connection = rejection.was_watch;
             if send(&mut writer, &rejection.response).await.is_err() || close_connection {
@@ -1342,6 +1343,41 @@ mod tests {
         assert!(ack.ok, "{:?}", ack.error);
         assert_eq!(ack.id, 25);
         assert!(matches!(ack.data, Some(ResponseData::Empty {})));
+
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    /// A peer that is not the app is refused a privileged operation before any
+    /// handler runs, and the same connection keeps serving ordinary requests.
+    #[tokio::test]
+    async fn privileged_operations_from_a_non_app_peer_are_forbidden() {
+        let (state, dir) = test_state("peer-identity");
+        let path = test_socket_path(&dir, "daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+        let unhide = Method::Clips {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromAi {
+                ids: vec!["clip".into()],
+                hidden: false,
+            },
+        };
+        let approve = Method::Ai {
+            op: copypaste_ipc::ai::AiOp::Deny {
+                request_id: "request".into(),
+            },
+        };
+        for (id, method) in [(1, unhide), (2, approve)] {
+            let refused = client.call(request(id, method)).await;
+            assert_eq!(refused.id, id);
+            assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
+        }
+        let status = client.call(request(3, Method::Status)).await;
+        assert!(status.ok, "{:?}", status.error);
 
         shutdown_tx.send(true).unwrap();
         state.release_drain_listener();
