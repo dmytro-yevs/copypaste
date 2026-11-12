@@ -952,6 +952,39 @@ pub(crate) async fn request(
     Ok(runtime.request(0, method).await)
 }
 
+pub(crate) async fn stream(
+    method: copypaste_ipc::Method,
+    mut on_frame: impl FnMut(copypaste_ipc::ResponseData) -> Result<(), crate::api::RuntimeError>,
+) -> Result<copypaste_ipc::Response, crate::api::RuntimeError> {
+    let runtime = RUNTIME
+        .get()
+        .ok_or_else(crate::api::RuntimeError::not_initialized)?;
+    runtime
+        .start_listener()
+        .await
+        .map_err(|_| crate::api::RuntimeError::internal())?;
+    let (frames, mut queued) = tokio::sync::mpsc::channel(1);
+    let worker = Arc::clone(runtime);
+    let work = tokio::task::spawn_blocking(move || {
+        worker.request_stream(0, method, &mut |frame| frames.blocking_send(frame).is_ok())
+    });
+    let mut failed = Ok(());
+    while let Some(frame) = queued.recv().await {
+        if let Some(data) = frame.data {
+            failed = on_frame(data);
+            if failed.is_err() {
+                break;
+            }
+        }
+    }
+    // Closing the queue abandons the operation; the join waits for its cleanup.
+    drop(queued);
+    let response = work
+        .await
+        .map_err(|_| crate::api::RuntimeError::internal())?;
+    failed.map(|()| response)
+}
+
 async fn push_capture_snapshot(
     runtime: &Arc<copypaste_runtime::Runtime>,
     sink: &crate::frb_generated::StreamSink<crate::api::RuntimeEvent>,

@@ -5,6 +5,8 @@ import 'dart:async';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../app/shell/header_action_content.dart';
+import '../../app/shell/header_fit.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
@@ -84,9 +86,15 @@ class _FileOperationsHeaderActionState
       final written = active.fold<int>(0, (sum, item) => sum + item.written);
       final button = Button.secondary(
         key: const ValueKey('file-operations-open'),
-        style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
+        style: AppTheme.headerActionButtonStyle(
+          const ButtonStyle.secondaryIcon(),
+        ),
         onPressed: _open,
-        child: const AppIconFrame(child: Icon(LucideIcons.download)),
+        child: HeaderActionContent(
+          icon: const AppIconFrame(child: Icon(LucideIcons.download)),
+          label: active.isEmpty ? null : '${active.length}',
+          labelUntil: HeaderStage.bottomNavigation,
+        ),
       );
       return Tooltip(
         tooltip: (_) => TooltipContainer(

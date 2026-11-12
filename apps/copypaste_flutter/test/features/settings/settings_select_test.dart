@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/app/localization/app_language.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
@@ -24,6 +25,10 @@ void main() {
           );
           await controller.initialize();
           addTearDown(controller.dispose);
+          final language = AppLanguageController(
+            store: MemoryAppLanguageStore(),
+          );
+          addTearDown(language.dispose);
           await tester.pumpWidget(
             ShadcnApp(
               theme: dark ? AppTheme.dark : AppTheme.light,
@@ -35,32 +40,44 @@ void main() {
                   builder: (context) => AppTheme.builder(context, child),
                 ),
               ),
-              home: Scaffold(child: SettingsScreen(controller: controller)),
+              home: Scaffold(
+                child: SettingsScreen(
+                  controller: controller,
+                  language: language,
+                ),
+              ),
             ),
           );
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
           final category = find.byKey(
-            const ValueKey('mobile-settings-section-clipboard'),
+            const ValueKey('mobile-settings-section-general'),
           );
-          if (category.evaluate().isNotEmpty) {
-            await tester.ensureVisible(category);
-            await tester.tap(category);
-            await tester.pump();
-            await tester.pump(const Duration(milliseconds: 300));
-          }
-          final field = find.widgetWithText(Select<int>, 'Keep forever');
+          await tester.tap(
+            category.evaluate().isNotEmpty
+                ? category
+                : find.descendant(
+                    of: find.byKey(const ValueKey('settings-section-general')),
+                    matching: find.text('General'),
+                  ),
+          );
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 300));
+          final field = find.widgetWithText(
+            Select<AppLanguage>,
+            'System default',
+          );
           await tester.ensureVisible(field);
           await tester.tap(field);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
-          final popup = find.byType(SelectPopup<int>);
+          final popup = find.byType(SelectPopup<AppLanguage>);
           final rect = tester.getRect(popup);
           expect(rect.width, closeTo(tester.getSize(field).width, 0.01));
           expect(rect.left, greaterThanOrEqualTo(0));
           expect(rect.right, lessThanOrEqualTo(width));
-          for (final item in tester.widgetList<SelectItemButton<int>>(
-            find.byType(SelectItemButton<int>),
+          for (final item in tester.widgetList<SelectItemButton<AppLanguage>>(
+            find.byType(SelectItemButton<AppLanguage>),
           )) {
             final clickable = tester.widget<Clickable>(
               find
@@ -77,10 +94,10 @@ void main() {
               BorderStyle.none,
             );
           }
-          await tester.tap(find.text('7 days').last);
+          await tester.tap(find.text('English').last);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 300));
-          expect(repository.currentSettings.retentionDays, 7);
+          expect(language.language, AppLanguage.english);
           expect(popup, findsNothing);
           expect(tester.takeException(), isNull);
         },

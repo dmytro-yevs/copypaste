@@ -2,7 +2,6 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
@@ -51,14 +50,13 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
     animation: controller,
     builder: (context, _) {
       final state = controller.state;
-      return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.escape): () {
-            if (!controller.busy) unawaited(closeDrawer(context));
-          },
+      return AppOverlays.drawerDismissal(
+        onDismiss: () {
+          if (!controller.busy) unawaited(closeDrawer(context));
         },
         child: Focus(
           autofocus: true,
+          skipTraversal: true,
           child: ConstrainedBox(
             key: const ValueKey('sms-access-setup-drawer'),
             constraints: AppOverlays.drawerContentConstraints(context),

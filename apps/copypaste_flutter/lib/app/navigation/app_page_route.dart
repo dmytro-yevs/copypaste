@@ -8,7 +8,9 @@ class AppPageRoute<T> extends ShadcnPageRoute<T> {
     required super.builder,
     required this.disableAnimations,
     super.settings,
-  }) : super(
+    bool? requestFocus,
+  }) : _requestFocus = requestFocus,
+       super(
          transitionDuration: AppMotion.resolveDisabled(
            disableAnimations,
            AppMotion.emphasized,
@@ -16,4 +18,9 @@ class AppPageRoute<T> extends ShadcnPageRoute<T> {
        );
 
   final bool disableAnimations;
+  final bool? _requestFocus;
+
+  /// Null follows the navigator.
+  @override
+  bool get requestFocus => _requestFocus ?? super.requestFocus;
 }

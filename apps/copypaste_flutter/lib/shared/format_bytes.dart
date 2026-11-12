@@ -1,13 +1,25 @@
+import 'package:intl/intl.dart';
+
 import '../l10n/l10n.dart';
 
-/// Shared file-size presentation used by History and modules.
+const int _kibibyte = 1024;
+const int _mebibyte = 1024 * _kibibyte;
+const int _gibibyte = 1024 * _mebibyte;
+
+/// Shared size presentation: binary units labelled KiB, MiB and GiB, with
+/// one decimal in the interface language's number format.
 String formatBytes(int bytes) {
   final strings = AppStrings.current;
-  if (bytes < 1024) return strings.sharedSizeBytes('$bytes');
-  if (bytes < 1024 * 1024) {
-    return strings.sharedSizeKilobytes((bytes / 1024).toStringAsFixed(1));
+  if (bytes < _kibibyte) return strings.sharedSizeBytes('$bytes');
+  if (bytes < _mebibyte) {
+    return strings.sharedSizeKibibytes(formatSizeNumber(bytes / _kibibyte));
   }
-  return strings.sharedSizeMegabytes(
-    (bytes / (1024 * 1024)).toStringAsFixed(1),
-  );
+  if (bytes < _gibibyte) {
+    return strings.sharedSizeMebibytes(formatSizeNumber(bytes / _mebibyte));
+  }
+  return strings.sharedSizeGibibytes(formatSizeNumber(bytes / _gibibyte));
 }
+
+/// A size amount with one decimal, for messages that name the unit.
+String formatSizeNumber(double value) =>
+    NumberFormat('0.0', AppStrings.current.localeName).format(value);

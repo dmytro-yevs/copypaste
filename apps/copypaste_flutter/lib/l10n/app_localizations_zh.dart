@@ -57,6 +57,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get commonEnable => '启用';
 
   @override
+  String get commonOn => '已开启';
+
+  @override
+  String get commonOff => '已关闭';
+
+  @override
   String get settingsLanguageTitle => '语言';
 
   @override
@@ -113,7 +119,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRuntimeExcludedAppsLimit => '最多可排除 256 个应用。';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed => '无法准备 Quick Paste。';
+  String get settingsQuickPasteStartFailed => '无法启动 Quick Paste，因此其快捷键不起作用。';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut 已被其他应用占用。请选择其他快捷键。';
+  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed => '无法更新自动粘贴设置。';
@@ -965,19 +976,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRestoreFailed => '无法恢复备份。';
 
   @override
-  String get settingsExportIncompleteTitle => '文本导出不完整';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved；$omissions。';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first，$second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => '同步';
 
   @override
@@ -1303,51 +1301,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '已保存 $count 个文本剪贴项',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '已排除 $count 个非文本剪贴项',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count 个文本剪贴项无法读取',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get devicesLoading => '正在加载设备…';
 
   @override
@@ -1364,6 +1317,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => '附近没有设备';
+
+  @override
+  String get devicesEmptyTitle => '尚未配对其他设备';
+
+  @override
+  String get devicesEmptyMessage =>
+      '配对另一台设备，即可在设备之间同步剪贴板历史记录。两台设备必须处于同一网络，且每次配对都需要在两台设备上确认。';
 
   @override
   String get devicesThisDevice => '此设备';
@@ -1697,6 +1657,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pairingStateFailed => '配对失败';
 
   @override
+  String get pairingStateNotCompleted => '配对未完成';
+
+  @override
   String get pairingHandshakingDescription => '设备正在建立安全通道。';
 
   @override
@@ -1713,6 +1676,48 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pairingIdleDescription => '开始配对以连接设备。';
+
+  @override
+  String get pairingStepInvite => '邀请';
+
+  @override
+  String get pairingStepScan => '扫描';
+
+  @override
+  String get pairingStepCode => '代码';
+
+  @override
+  String get pairingStepRequest => '请求';
+
+  @override
+  String get pairingStepConnect => '连接';
+
+  @override
+  String get pairingStepConfirm => '确认';
+
+  @override
+  String get pairingStepPaired => '已配对';
+
+  @override
+  String get pairingOtherDevice => '另一台设备';
+
+  @override
+  String get pairingDecisionNotConfirmed => '尚未确认';
+
+  @override
+  String get pairingDecisionSending => '正在发送您的决定…';
+
+  @override
+  String get pairingDecisionConfirmed => '已确认';
+
+  @override
+  String get pairingDecisionRejected => '已拒绝';
+
+  @override
+  String get pairingDecisionWaiting => '正在等待确认';
+
+  @override
+  String get pairingDecisionUnknown => '答复未知';
 
   @override
   String get pairingProtectedUnavailableTitle => '受保护的配对不可用';
@@ -1876,6 +1881,16 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return '同步：$status';
+  }
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 台设备',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2243,6 +2258,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 行',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get historyInspectorEmptyTitle => '选择一个剪贴项';
 
   @override
@@ -2476,10 +2501,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appWindowSetupTitle => '窗口设置需要处理';
 
   @override
-  String get appCollapseNavigation => '收起导航栏';
-
-  @override
-  String get appExpandNavigation => '展开导航栏';
+  String get appNavigationLabel => '主导航';
 
   @override
   String get appOpenHistory => '打开历史记录';
@@ -2564,13 +2586,13 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
   }
 
   @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
+  String sharedStepSemantics(int step, int count, String name) {
+    return '第 $step 步，共 $count 步：$name';
   }
 
   @override
@@ -2981,11 +3003,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modulesDownloadingModel => '正在下载语言模型…';
 
   @override
-  String get modulesInstalling => '正在安装…';
+  String get modulesPhaseDownload => '下载';
 
   @override
-  String modulesDownloadingProgress(int percent) {
-    return '正在下载 $percent%';
+  String get modulesPhaseInstall => '安装';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '正在安装 $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '正在更新 $module';
   }
 
   @override
@@ -3231,4 +3261,146 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyTagsAction => '标签…';
+
+  @override
+  String get commonDismiss => '关闭';
+
+  @override
+  String get settingsRetentionConfirmTitle => '移除较早的历史记录？';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return '新的期限：$limit。更早的未置顶剪贴项将立即从此设备移除，且无法恢复。已置顶的剪贴项会保留。';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle => '减小存储配额？';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return '新的配额：$size。如果未置顶的历史记录占用更多空间，最早的剪贴项将立即被移除，且无法恢复。已置顶的剪贴项会保留。';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => '应用限制';
+
+  @override
+  String get settingsHideEverywhereTitle => '完全隐藏 CopyPaste？';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请重新启动 CopyPaste。';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请按 $shortcut 或重新启动 CopyPaste。';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => '隐藏';
+
+  @override
+  String get settingsExportDoneTitle => '文本历史记录已导出';
+
+  @override
+  String get settingsBackupDoneTitle => '备份已创建';
+
+  @override
+  String get settingsRestoreDoneTitle => '历史记录已恢复';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已导出 $count 个文本剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个无法读取',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return '加密备份已保存 · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage => '此设备上的剪贴板历史记录现已与备份一致。';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used / $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '已用 $used，共 $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '已用 $used';
+  }
+
+  @override
+  String get storageUsageOverQuota => '已超出配额';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return '最早的剪贴项：$date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return '存储：$usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return '新的配额：$size。未置顶的历史记录占用 $used，因此最早的剪贴项将立即被移除，直到符合配额。移除后无法恢复。已置顶的剪贴项会保留。';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个剪贴项',
+    );
+    return '$_temp0';
+  }
 }

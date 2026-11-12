@@ -3,10 +3,10 @@ mod support;
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ContentClass,
     DiagnosticCounters, DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind,
-    ExportData, ExportItem, FileDetails, HistoryDeviceFacet, HistoryFacets, HistorySourceAppFacet,
-    ImageDetails, ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData,
-    PairingProgressData, PairingRole, PairingState, PrivateModeData, Request, Response,
-    ResponseData, StatusData, SyncResult, PROTOCOL_VERSION,
+    ExportChunk, ExportData, ExportItem, FileDetails, HistoryDeviceFacet, HistoryFacets,
+    HistorySourceAppFacet, ImageDetails, ImagePreview, ImportData, Item, ItemPage, Method,
+    PairingInviteData, PairingProgressData, PairingRole, PairingState, PrivateModeData, Request,
+    Response, ResponseData, StatusData, SyncResult, TransferProgress, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -43,6 +43,7 @@ fn item() -> Item {
         source_app_icon_id: None,
         too_large_to_sync: false,
         truncated: false,
+        line_count: None,
     }
 }
 
@@ -78,13 +79,16 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::FileOperations(_) => "file_operations",
         ResponseData::DownloadedFile(_) => "downloaded_file",
         ResponseData::Export(_) => "export",
+        ResponseData::ExportChunk(_) => "export_chunk",
         ResponseData::Import(_) => "import",
         ResponseData::Backup(_) => "backup",
+        ResponseData::Progress(_) => "progress",
         ResponseData::Discovered(_) => "discovered",
         ResponseData::Config(_) => "config",
         ResponseData::Event(_) => "event",
         ResponseData::Page(_) => "page",
         ResponseData::HistoryFacets(_) => "history_facets",
+        ResponseData::HistoryCounts(_) => "history_counts",
         ResponseData::HistoryTags(_) => "history_tags",
         ResponseData::SpoilerState { .. } => "spoiler_state",
         ResponseData::Item(_) => "item",
@@ -135,6 +139,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             capture: None,
         }),
         ResponseData::HistoryTags(Default::default()),
+        ResponseData::HistoryCounts(Some(copypaste_ipc::HistoryGroupCounts {
+            pinned: 2,
+            ranges: vec![14, 0],
+        })),
         ResponseData::Status(StatusData {
             runtime_watch: false,
             capture_watch: false,
@@ -161,6 +169,13 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             skipped_non_text: 1,
             skipped_undecryptable: 3,
         }),
+        ResponseData::ExportChunk(ExportChunk {
+            items: vec![export_item()],
+            progress: TransferProgress {
+                processed: 2,
+                total: 5,
+            },
+        }),
         ResponseData::Import(ImportData {
             inserted: 1,
             skipped: 2,
@@ -170,6 +185,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             pins_failed: 1,
         }),
         ResponseData::Backup(BackupData { size_bytes: 3 }),
+        ResponseData::Progress(TransferProgress {
+            processed: 1,
+            total: 4,
+        }),
         ResponseData::Discovered(DiscoveredData {
             devices: vec![DiscoveredDevice {
                 discovery_id: "peer-1".into(),
@@ -183,6 +202,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Config(ConfigApplied {
             config: ConfigData::default(),
             restart_required: vec!["lan_visibility".into()],
+            storage_usage: Some(copypaste_ipc::StorageUsage {
+                used_bytes: 4_096,
+                oldest_unpinned_at: Some(1),
+            }),
         }),
         ResponseData::Event(EventData {
             sync_status: None,
@@ -275,7 +298,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 27);
+    assert_eq!(variants.len(), 30);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
@@ -326,6 +349,7 @@ fn collection_variants_round_trip_when_empty() {
         ResponseData::Config(ConfigApplied {
             config: ConfigData::default(),
             restart_required: Vec::new(),
+            storage_usage: None,
         }),
         ResponseData::Page(ItemPage {
             items: Vec::new(),
@@ -481,6 +505,33 @@ fn export_request_fields_default_to_safe_values() {
 }
 
 #[test]
+fn streamed_frames_carry_their_progress_and_only_streamed_methods_stream() {
+    let frame: Response = serde_json::from_value(json!({"id":7,"ok":true,"data":{
+        "export_chunk":{"items":[],"progress":{"processed":3,"total":9}}}}))
+    .unwrap();
+    let Some(ResponseData::ExportChunk(chunk)) = frame.data else {
+        panic!("an export chunk decoded as the wrong payload")
+    };
+    assert_eq!(
+        chunk.progress,
+        TransferProgress {
+            processed: 3,
+            total: 9
+        }
+    );
+    assert!(Method::ExportStream.streams_progress());
+    assert!(Method::BackupStream {
+        dest_path: "b".into()
+    }
+    .streams_progress());
+    assert!(!Method::Export { limit: 0 }.streams_progress());
+    assert!(!Method::Backup {
+        dest_path: "b".into()
+    }
+    .streams_progress());
+}
+
+#[test]
 fn device_name_request_is_typed_and_round_trips() {
     let request = Request {
         id: 9,
@@ -547,4 +598,19 @@ fn a_bounded_list_body_says_so_on_the_wire() {
 
     let back: Item = serde_json::from_value(wire).unwrap();
     assert!(back.truncated);
+}
+
+#[test]
+fn a_line_count_round_trips_and_is_absent_when_unknown() {
+    let mut counted = item();
+    counted.line_count = Some(5_000);
+    let wire = serde_json::to_value(&counted).unwrap();
+    assert_eq!(wire["line_count"], json!(5_000));
+    let back: Item = serde_json::from_value(wire).unwrap();
+    assert_eq!(back.line_count, Some(5_000));
+
+    let wire = serde_json::to_value(item()).unwrap();
+    assert!(wire.get("line_count").is_none());
+    let back: Item = serde_json::from_value(wire).unwrap();
+    assert_eq!(back.line_count, None);
 }

@@ -69,7 +69,10 @@ class _AppNavigationHostState extends State<AppNavigationHost> {
           child: Navigator(
             key: widget.controller.navigatorKey,
             onGenerateRoute: (RouteSettings settings) {
+              // The destinations' root does not take focus from the shell,
+              // so Tab starts at the header; pushed pages still take it.
               return AppPageRoute<void>(
+                requestFocus: false,
                 settings: settings,
                 disableAnimations: MediaQuery.disableAnimationsOf(context),
                 builder: (BuildContext context) {

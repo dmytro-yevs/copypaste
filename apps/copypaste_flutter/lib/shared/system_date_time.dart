@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/intl.dart';
 
 /// Formats a calendar date with the active system locale.
 String formatSystemDate(BuildContext context, DateTime value) {
@@ -9,6 +11,19 @@ String formatSystemDate(BuildContext context, DateTime value) {
   );
   return localizations?.formatShortDate(local) ??
       local.toIso8601String().split('T').first;
+}
+
+/// Formats the weekday, day and month of a calendar date, without the year.
+String formatSystemWeekdayDate(BuildContext context, DateTime value) {
+  final localizations = Localizations.of<MaterialLocalizations>(
+    context,
+    MaterialLocalizations,
+  );
+  // Only the global Material delegate loads non-English date symbols.
+  final locale = localizations is GlobalMaterialLocalizations
+      ? Localizations.localeOf(context).toString()
+      : 'en_US';
+  return DateFormat.MMMMEEEEd(locale).format(value.toLocal());
 }
 
 /// Formats application timestamps with the active system locale and clock.

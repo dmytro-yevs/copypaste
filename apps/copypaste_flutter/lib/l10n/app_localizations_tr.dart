@@ -57,6 +57,12 @@ class AppLocalizationsTr extends AppLocalizations {
   String get commonEnable => 'Etkinleştir';
 
   @override
+  String get commonOn => 'Açık';
+
+  @override
+  String get commonOff => 'Kapalı';
+
+  @override
   String get settingsLanguageTitle => 'Dil';
 
   @override
@@ -121,8 +127,13 @@ class AppLocalizationsTr extends AppLocalizations {
       'En fazla 256 uygulamayı hariç tutabilirsiniz.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Quick Paste hazırlanamadı.';
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste başlatılamadı, bu yüzden kısayolu çalışmıyor.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut başka bir uygulama tarafından kullanılıyor. Başka bir kısayol seçin.';
+  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -1085,19 +1096,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get settingsRestoreFailed => 'Yedek geri yüklenemedi.';
 
   @override
-  String get settingsExportIncompleteTitle => 'Metin dışa aktarımı eksik';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved; $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first ve $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => 'Senkronizasyon';
 
   @override
@@ -1453,54 +1451,6 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count metin öğesi kaydedildi',
-      one: '$count metin öğesi kaydedildi',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'metin olmayan $count öğe hariç tutuldu',
-      one: 'metin olmayan $count öğe hariç tutuldu',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count metin öğesi okunamadı',
-      one: '$count metin öğesi okunamadı',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get devicesLoading => 'Cihazlar yükleniyor…';
 
   @override
@@ -1517,6 +1467,13 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'Yakında cihaz yok';
+
+  @override
+  String get devicesEmptyTitle => 'Henüz eşlenmiş başka cihaz yok';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Pano geçmişini cihazlar arasında senkronize tutmak için başka bir cihaz eşleyin. Her iki cihaz da aynı ağda olmalıdır ve her eşleme iki cihazda da onaylanır.';
 
   @override
   String get devicesThisDevice => 'Bu cihaz';
@@ -1857,6 +1814,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get pairingStateFailed => 'Eşleme başarısız oldu';
 
   @override
+  String get pairingStateNotCompleted => 'Eşleme tamamlanmadı';
+
+  @override
   String get pairingHandshakingDescription =>
       'Cihazlar güvenli bir kanal kuruyor.';
 
@@ -1878,6 +1838,48 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Bir cihaz bağlamak için eşleme denemesi başlatın.';
+
+  @override
+  String get pairingStepInvite => 'Davet';
+
+  @override
+  String get pairingStepScan => 'Tarama';
+
+  @override
+  String get pairingStepCode => 'Kod';
+
+  @override
+  String get pairingStepRequest => 'İstek';
+
+  @override
+  String get pairingStepConnect => 'Bağlantı';
+
+  @override
+  String get pairingStepConfirm => 'Onay';
+
+  @override
+  String get pairingStepPaired => 'Eşlendi';
+
+  @override
+  String get pairingOtherDevice => 'Diğer cihaz';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Henüz onaylanmadı';
+
+  @override
+  String get pairingDecisionSending => 'Kararınız gönderiliyor…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Onaylandı';
+
+  @override
+  String get pairingDecisionRejected => 'Reddedildi';
+
+  @override
+  String get pairingDecisionWaiting => 'Onay bekleniyor';
+
+  @override
+  String get pairingDecisionUnknown => 'Yanıt bilinmiyor';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2053,6 +2055,17 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Senkronizasyon: $status';
+  }
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count cihaz',
+      one: '$count cihaz',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2445,6 +2458,17 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count satır',
+      one: '$count satır',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get historyInspectorEmptyTitle => 'Bir öğe seçin';
 
   @override
@@ -2690,10 +2714,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get appWindowSetupTitle => 'Pencere kurulumu dikkat gerektiriyor';
 
   @override
-  String get appCollapseNavigation => 'Gezinmeyi daralt';
-
-  @override
-  String get appExpandNavigation => 'Gezinmeyi genişlet';
+  String get appNavigationLabel => 'Ana gezinme';
 
   @override
   String get appOpenHistory => 'Geçmiş\'i aç';
@@ -2784,13 +2805,13 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
   }
 
   @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Adım $step/$count: $name';
   }
 
   @override
@@ -3256,11 +3277,19 @@ class AppLocalizationsTr extends AppLocalizations {
   String get modulesDownloadingModel => 'Dil modeli indiriliyor…';
 
   @override
-  String get modulesInstalling => 'Yükleniyor…';
+  String get modulesPhaseDownload => 'İndirme';
 
   @override
-  String modulesDownloadingProgress(int percent) {
-    return 'İndiriliyor: %$percent';
+  String get modulesPhaseInstall => 'Yükleme';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '$module yükleniyor';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '$module güncelleniyor';
   }
 
   @override
@@ -3530,4 +3559,150 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Etiketler…';
+
+  @override
+  String get commonDismiss => 'Kapat';
+
+  @override
+  String get settingsRetentionConfirmTitle => 'Eski geçmiş kaldırılsın mı?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'Yeni sınır: $limit. Daha eski sabitlenmemiş öğeler bu cihazdan şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle =>
+      'Depolama kotası azaltılsın mı?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'Yeni kota: $size. Sabitlenmemiş geçmiş daha fazla yer kaplıyorsa en eski öğeler şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Sınırı uygula';
+
+  @override
+  String get settingsHideEverywhereTitle => 'CopyPaste tamamen gizlensin mi?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için CopyPaste\'i tekrar başlatın.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için $shortcut tuşlarına basın veya CopyPaste\'i tekrar başlatın.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Gizle';
+
+  @override
+  String get settingsExportDoneTitle => 'Metin geçmişi dışa aktarıldı';
+
+  @override
+  String get settingsBackupDoneTitle => 'Yedek oluşturuldu';
+
+  @override
+  String get settingsRestoreDoneTitle => 'Geçmiş geri yüklendi';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count metin öğesi dışa aktarıldı',
+      one: '$count metin öğesi dışa aktarıldı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe okunamadı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Şifreli yedek kaydedildi · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'Bu cihazdaki pano geçmişi artık yedekle aynı.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used / $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$quota alanın $used kadarı kullanılıyor';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used kullanılıyor';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Kota aşıldı';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'En eski öğe: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Depolama: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'Yeni kota: $size. Sabitlenmemiş geçmiş $used yer kaplıyor; bu yüzden sığana kadar en eski öğeleri şimdi kaldırılır. Bunlar geri getirilemez. Sabitlenmiş öğeler korunur.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe',
+      one: '$count öğe',
+    );
+    return '$_temp0';
+  }
 }

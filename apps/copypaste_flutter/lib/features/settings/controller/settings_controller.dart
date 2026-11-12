@@ -36,6 +36,22 @@ class SettingsController extends ChangeNotifier {
 
   final navigation = SettingsNavigationState();
 
+  /// Storage used against the quota; null until the runtime reports it.
+  ///
+  /// Refreshed by every settings read. While this has listeners it is also
+  /// re-read after each history change, coalesced to one request in flight,
+  /// so nothing is requested for a readout nobody displays.
+  ValueListenable<StorageUsage?> get storageUsage => _storageUsage;
+  late final _storageUsage = _ObservedValue<StorageUsage?>(
+    null,
+    _storageUsageObserved,
+  );
+  StreamSubscription<void>? _historySubscription;
+  bool _storageUsageRefreshing = false;
+  bool _storageUsageStale = false;
+  int _storageUsageRead = 0;
+  int _storageUsageApplied = 0;
+
   final SettingsRepository _repository;
   final SettingsFilePicker _filePicker;
   final CaptureServiceControl _captureControl;
@@ -57,8 +73,16 @@ class SettingsController extends ChangeNotifier {
   SyncStatus _syncSnapshot = const SyncStatus();
   StreamSubscription<SyncStatus>? _syncSubscription;
   String? _errorMessage;
+  final Map<SettingsOperation, String> _operationErrors = {};
+
+  /// The operation whose failure the shared banner shows until the next
+  /// change starts; [errorFor] keeps every failure.
+  SettingsOperation? _bannerOperation;
   String? _settingsHealthNotice;
-  bool _busy = false;
+  String? _dismissedHealthNotice;
+  final Set<SettingsOperation> _pending = {};
+  final _dataTransfer = ValueNotifier<DataTransferProgress?>(null);
+  Future<void> _settingsWrites = Future<void>.value();
   bool _blockScreenshots = false;
   bool _disposed = false;
   Timer? _captureTimer;
@@ -90,14 +114,53 @@ class SettingsController extends ChangeNotifier {
   RuntimeSettings? get settings => _settings;
   CaptureSettingsState? get capture => _capture;
   SyncStatus get syncStatus => _syncStatus;
-  String? get errorMessage => _errorMessage ?? _settingsHealthNotice;
-  bool get busy => _busy;
+
+  /// The latest failure until the next change starts, else a refresh
+  /// failure, else the settings-health notice unless it was dismissed.
+  String? get errorMessage =>
+      _operationErrors[_bannerOperation] ??
+      _errorMessage ??
+      (_settingsHealthNotice == _dismissedHealthNotice
+          ? null
+          : _settingsHealthNotice);
+
+  /// The failure of the last [operation], while it stands.
+  String? errorFor(SettingsOperation operation) => _operationErrors[operation];
+
+  /// Any change is in flight.
+  bool get busy => _pending.isNotEmpty;
+  bool isPending(SettingsOperation operation) => _pending.contains(operation);
+
+  /// The running text export or backup, or null while neither runs. Its
+  /// progress notifies here only, not the controller's listeners.
+  ValueListenable<DataTransferProgress?> get dataTransfer => _dataTransfer;
+
+  /// Whether [operation] may start now. A restore excludes every other
+  /// change; export, backup and restore exclude one another.
+  bool canStart(SettingsOperation operation) {
+    if (_disposed || _pending.contains(operation)) return false;
+    if (_pending.contains(SettingsOperation.restore)) return false;
+    if (operation == SettingsOperation.restore) return _pending.isEmpty;
+    return !operation.transfersHistory ||
+        !_pending.any((pending) => pending.transfersHistory);
+  }
+
+  bool get _settingsWriteInFlight =>
+      _pending.any((operation) => operation.writesSettings);
+  bool get _captureWriteInFlight =>
+      _pending.any((operation) => operation.writesCapture);
+
+  /// Whether Settings is presented; readouts it alone shows observe only
+  /// then.
+  bool get presentationActive => _presentationActive;
   bool get blockScreenshots => _blockScreenshots;
   bool get blockScreenshotsSupported => _screenshotProtection.supported;
   bool get screenshotCaptureSupported => _screenshotCapture.supported;
   ScreenshotCaptureStatus get screenshotCapture => _screenshotStatus;
 
-  Future<bool> setScreenshotCaptureEnabled(bool value) => _run(() async {
+  Future<bool> setScreenshotCaptureEnabled(
+    bool value,
+  ) => _run(SettingsOperation.screenshotCapture, () async {
     try {
       _screenshotStatus = await _screenshotCapture.setEnabled(value);
     } catch (_) {
@@ -110,9 +173,10 @@ class SettingsController extends ChangeNotifier {
     }
   });
 
-  Future<bool> requestScreenshotCapturePermission() => _run(() async {
-    _screenshotStatus = await _screenshotCapture.requestPermission();
-  });
+  Future<bool> requestScreenshotCapturePermission() =>
+      _run(SettingsOperation.screenshotCapture, () async {
+        _screenshotStatus = await _screenshotCapture.requestPermission();
+      });
 
   Future<void> initialize() async {
     if (_disposed) return;
@@ -124,6 +188,7 @@ class SettingsController extends ChangeNotifier {
       } catch (_) {
         // Notification setup is optional until the user enables it.
       }
+      final usageRead = ++_storageUsageRead;
       final values = await Future.wait<Object>([
         _repository.settings(),
         _repository.captureState(),
@@ -133,10 +198,11 @@ class SettingsController extends ChangeNotifier {
       ]);
       if (_disposed) return;
       _settings = values[0] as RuntimeSettings;
+      _acceptStorageUsage(_settings!.storageUsage, usageRead);
       _settingsConfirmed = true;
       _setCapture(values[1] as CaptureSettingsState);
       _acceptSyncStatus(_capture!.syncStatus);
-      _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
+      _setHealthNotice(_settingsHealthMessage(_capture!.settingsHealth));
       _blockScreenshots = values[2] as bool;
       if (_screenshotCapture.supported) {
         _screenshotStatus = await _screenshotCapture.status();
@@ -144,6 +210,7 @@ class SettingsController extends ChangeNotifier {
       if (_disposed) return;
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
+      _watchHistoryChanges();
       if (_repository case final CaptureEventsRepository captureEvents) {
         _captureStateSubscription ??= captureEvents.captureEvents().listen(
           _acceptCaptureEvent,
@@ -188,15 +255,22 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> retry() => initialize();
 
+  /// Selects [section] for the next time Settings is shown, or now.
+  void showSection(SettingsSectionId section) {
+    if (_disposed) return;
+    navigation.select(section);
+    _notify();
+  }
+
   Future<bool> toggleCapture() async {
     final capture = _capture;
-    if (capture == null || _busy) return false;
+    if (capture == null) return false;
     return setCapturePaused(!capture.controlState.canResume);
   }
 
   Future<bool> setCapturePaused(bool paused) async {
-    if (_capture == null || _busy) return false;
-    return _run(() async {
+    if (_capture == null) return false;
+    return _run(SettingsOperation.capture, () async {
       _setCapture(await _repository.setCapturePaused(paused));
       try {
         await _captureControl.setPaused(paused);
@@ -223,79 +297,105 @@ class SettingsController extends ChangeNotifier {
         rethrow;
       }
       _setCapture(await _repository.captureState());
-      _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
+      _setHealthNotice(_settingsHealthMessage(_capture!.settingsHealth));
     });
   }
 
-  Future<bool> setSkipSecret(bool value) =>
-      _update(RuntimeSettingsChange(skipSecret: value));
-  Future<bool> setSkipTransient(bool value) =>
-      _update(RuntimeSettingsChange(skipTransient: value));
+  Future<bool> setSkipSecret(bool value) => _update(
+    SettingsOperation.skipSecret,
+    () => RuntimeSettingsChange(skipSecret: value),
+  );
+  Future<bool> setSkipTransient(bool value) => _update(
+    SettingsOperation.skipTransient,
+    () => RuntimeSettingsChange(skipTransient: value),
+  );
 
-  Future<bool> setRetentionDays(int value) =>
-      _update(RuntimeSettingsChange(retentionDays: value));
+  Future<bool> setRetentionDays(int value) => _update(
+    SettingsOperation.retention,
+    () => RuntimeSettingsChange(retentionDays: value),
+  );
 
-  Future<bool> setStorageQuotaBytes(int value) =>
-      _update(RuntimeSettingsChange(storageQuotaBytes: value));
+  Future<bool> setStorageQuotaBytes(int value) => _update(
+    SettingsOperation.storageQuota,
+    () => RuntimeSettingsChange(storageQuotaBytes: value),
+  );
 
-  Future<bool> setMaxFileSizeBytes(int value) =>
-      _update(RuntimeSettingsChange(maxFileSizeBytes: value));
+  Future<bool> setMaxFileSizeBytes(int value) => _update(
+    SettingsOperation.maxFileSize,
+    () => RuntimeSettingsChange(maxFileSizeBytes: value),
+  );
 
   Future<bool> addExcludedApp(String rawValue) async {
     final value = rawValue.trim();
     final settings = _settings;
     if (settings == null || value.isEmpty) return false;
     if (settings.excludedAppIds.contains(value)) {
-      _errorMessage = AppStrings.current.settingsRuntimeAppAlreadyExcluded;
+      if (!canStart(SettingsOperation.excludedApps)) return false;
+      _clearErrorsFor(SettingsOperation.excludedApps);
+      _operationErrors[SettingsOperation.excludedApps] =
+          AppStrings.current.settingsRuntimeAppAlreadyExcluded;
+      _bannerOperation = SettingsOperation.excludedApps;
       _notify();
       return false;
     }
+    // The list is rebuilt when the write runs so an earlier queued change to
+    // it is never undone.
     return _update(
-      RuntimeSettingsChange(
-        excludedAppIds: [...settings.excludedAppIds, value],
+      SettingsOperation.excludedApps,
+      () => RuntimeSettingsChange(
+        excludedAppIds: [
+          ..._settings!.excludedAppIds.where((item) => item != value),
+          value,
+        ],
       ),
     );
   }
 
   Future<bool> removeExcludedApp(String value) {
-    final settings = _settings;
-    if (settings == null) return Future.value(false);
+    if (_settings == null) return Future.value(false);
     return _update(
-      RuntimeSettingsChange(
-        excludedAppIds: settings.excludedAppIds
+      SettingsOperation.excludedApps,
+      () => RuntimeSettingsChange(
+        excludedAppIds: _settings!.excludedAppIds
             .where((item) => item != value)
             .toList(growable: false),
       ),
     );
   }
 
-  Future<bool> setLanVisibility(bool value) =>
-      _update(RuntimeSettingsChange(lanVisibility: value));
+  Future<bool> setLanVisibility(bool value) => _update(
+    SettingsOperation.lanVisibility,
+    () => RuntimeSettingsChange(lanVisibility: value),
+  );
 
-  Future<bool> setInstantClipboard(bool value) =>
-      _update(RuntimeSettingsChange(instantClipboard: value));
+  Future<bool> setInstantClipboard(bool value) => _update(
+    SettingsOperation.instantClipboard,
+    () => RuntimeSettingsChange(instantClipboard: value),
+  );
 
-  Future<bool> setSyncEnabled(bool value) =>
-      _update(RuntimeSettingsChange(syncEnabled: value));
+  Future<bool> setSyncEnabled(bool value) => _update(
+    SettingsOperation.syncEnabled,
+    () => RuntimeSettingsChange(syncEnabled: value),
+  );
 
   Future<bool> setNotifyOnCopy(bool value) {
-    return _run(() async {
+    return _run(SettingsOperation.notifyOnCopy, () async {
       if (value && !await _notifications.requestPermission()) {
         throw const NotificationPermissionDenied();
       }
-      _settings = await _repository.updateSettings(
-        RuntimeSettingsChange(notifyOnCopy: value),
-      );
-      _settingsConfirmed = true;
-      _settingsHealthNotice = null;
+      await _writeSettings(() => RuntimeSettingsChange(notifyOnCopy: value));
     });
   }
 
-  Future<bool> setSoundOnCopy(bool value) =>
-      _update(RuntimeSettingsChange(soundOnCopy: value));
+  Future<bool> setSoundOnCopy(bool value) => _update(
+    SettingsOperation.soundOnCopy,
+    () => RuntimeSettingsChange(soundOnCopy: value),
+  );
 
-  Future<bool> setNotificationPreview(bool value) =>
-      _update(RuntimeSettingsChange(notificationPreview: value));
+  Future<bool> setNotificationPreview(bool value) => _update(
+    SettingsOperation.notificationPreview,
+    () => RuntimeSettingsChange(notificationPreview: value),
+  );
 
   Future<void> _showCaptureNotification(String? id) async {
     // Configuration events precede subsequent capture events on the shared
@@ -329,41 +429,54 @@ class SettingsController extends ChangeNotifier {
     }
   }
 
-  Future<bool> setBlockScreenshots(bool value) => _run(() async {
-    if (!_screenshotProtection.supported) {
-      throw UnsupportedError('Screenshot blocking is unavailable.');
-    }
-    await _screenshotProtection.setBlocked(value);
-    _blockScreenshots = await _screenshotProtection.blocked();
-  });
+  Future<bool> setBlockScreenshots(bool value) =>
+      _run(SettingsOperation.blockScreenshots, () async {
+        if (!_screenshotProtection.supported) {
+          throw UnsupportedError('Screenshot blocking is unavailable.');
+        }
+        await _screenshotProtection.setBlocked(value);
+        _blockScreenshots = await _screenshotProtection.blocked();
+      });
 
   Future<TextExportResult?> exportTextHistory() async {
     final path = await _filePicker.chooseTextExportPath();
     if (path == null) return null;
     TextExportResult? result;
-    final completed = await _run(() async {
-      result = await _repository.exportTextHistory(path);
+    final completed = await _run(SettingsOperation.exportText, () async {
+      result = await _tracked(
+        DataTransferKind.textExport,
+        (onProgress) =>
+            _repository.exportTextHistory(path, onProgress: onProgress),
+      );
+      if (_disposed) return;
       await _filePicker.presentCreatedFile(path, mimeType: 'application/json');
     });
     return completed ? result : null;
   }
 
-  Future<bool> createBackup() async {
+  /// Null when the chooser was cancelled or the backup failed.
+  Future<BackupResult?> createBackup() async {
     final path = await _filePicker.chooseBackupPath();
-    if (path == null) return false;
-    return _run(() async {
-      await _repository.backupHistory(path);
+    if (path == null) return null;
+    BackupResult? result;
+    final completed = await _run(SettingsOperation.backup, () async {
+      result = await _tracked(
+        DataTransferKind.backup,
+        (onProgress) => _repository.backupHistory(path, onProgress: onProgress),
+      );
+      if (_disposed) return;
       await _filePicker.presentCreatedFile(
         path,
         mimeType: 'application/octet-stream',
       );
     });
+    return completed ? result : null;
   }
 
   /// Returns null when the native picker is cancelled without restoring.
   Future<bool?> restoreBackup() async {
     var cancelled = false;
-    final restored = await _run(() async {
+    final restored = await _run(SettingsOperation.restore, () async {
       final path = await _filePicker.chooseRestorePath();
       if (path == null) {
         cancelled = true;
@@ -374,39 +487,101 @@ class SettingsController extends ChangeNotifier {
     return cancelled ? null : restored;
   }
 
+  /// Dismisses the shown failure and the current settings-health notice. A
+  /// notice that is reported again after it cleared is shown again.
   void clearMessages() {
-    if (_errorMessage == null) return;
-    _errorMessage = null;
+    if (errorMessage == null) return;
+    _clearErrors();
+    _dismissedHealthNotice = _settingsHealthNotice;
     _notify();
   }
 
-  Future<bool> _update(RuntimeSettingsChange change) {
-    return _run(() async {
-      _settings = await _repository.updateSettings(change);
-      _settingsConfirmed = true;
-      _settingsHealthNotice = null;
-    });
+  void _clearErrors() {
+    _operationErrors.clear();
+    _bannerOperation = null;
+    if (_loadState != SettingsLoadState.error) _errorMessage = null;
   }
 
-  Future<bool> _run(Future<void> Function() action) async {
-    if (_busy || _disposed) return false;
+  /// Other operations keep their failures while [operation] starts again.
+  void _clearErrorsFor(SettingsOperation operation) {
+    _operationErrors.remove(operation);
+    if (_loadState != SettingsLoadState.error) _errorMessage = null;
+  }
+
+  void _setHealthNotice(String? notice) {
+    _settingsHealthNotice = notice;
+    if (notice == null) _dismissedHealthNotice = null;
+  }
+
+  Future<bool> _update(
+    SettingsOperation operation,
+    RuntimeSettingsChange Function() change,
+  ) => _run(operation, () => _writeSettings(change));
+
+  /// Each write returns the whole record, so writes run one at a time in the
+  /// order they were started and the last answer holds every change.
+  Future<void> _writeSettings(RuntimeSettingsChange Function() change) {
+    final write = _settingsWrites.then((_) async {
+      if (_disposed) return;
+      final usageRead = ++_storageUsageRead;
+      final next = await _repository.updateSettings(change());
+      _settings = next;
+      _acceptStorageUsage(next.storageUsage, usageRead);
+      _settingsConfirmed = true;
+      _setHealthNotice(null);
+    });
+    _settingsWrites = write.then<void>((_) {}, onError: (Object _) {});
+    return write;
+  }
+
+  /// Publishes [kind]'s progress to [dataTransfer] while [operation] runs.
+  Future<T> _tracked<T>(
+    DataTransferKind kind,
+    Future<T> Function(DataTransferProgressCallback onProgress) operation,
+  ) async {
+    _dataTransfer.value = DataTransferProgress(kind);
+    try {
+      return await operation((processed, total) {
+        if (_disposed || _dataTransfer.value?.kind != kind) return;
+        _dataTransfer.value = DataTransferProgress(
+          kind,
+          processed: processed,
+          total: total,
+        );
+      });
+    } finally {
+      if (!_disposed) _dataTransfer.value = null;
+    }
+  }
+
+  Future<bool> _run(
+    SettingsOperation operation,
+    Future<void> Function() action,
+  ) async {
+    if (!canStart(operation)) return false;
     _settingsMutationEpoch++;
-    _busy = true;
-    _errorMessage = null;
+    _pending.add(operation);
+    _clearErrorsFor(operation);
+    _bannerOperation = null;
     _notify();
     try {
       await action();
       return true;
     } catch (error) {
-      final message = _message(
-        error,
-        AppStrings.current.settingsRuntimeChangeFailed,
-      );
-      _errorMessage = message;
+      _operationErrors
+        ..remove(operation)
+        ..[operation] = _message(
+          error,
+          AppStrings.current.settingsRuntimeChangeFailed,
+        );
+      _bannerOperation = operation;
       return false;
     } finally {
-      _busy = false;
-      if (_settingsRefreshRequested) unawaited(_refreshSettings());
+      _pending.remove(operation);
+      if (_settingsRefreshRequested && !_settingsWriteInFlight) {
+        unawaited(_refreshSettings());
+      }
+      if (_storageUsageStale) unawaited(_refreshStorageUsage());
       _notify();
     }
   }
@@ -416,6 +591,8 @@ class SettingsController extends ChangeNotifier {
   void setPresentationActive(bool active) {
     if (_disposed || active == _presentationActive) return;
     _presentationActive = active;
+    // Readouts shown only in Settings stop or start observing with it.
+    _notify();
     if (active) unawaited(_refreshSettings());
     _presentationEpoch++;
     _updateCapturePush();
@@ -471,7 +648,7 @@ class SettingsController extends ChangeNotifier {
     _setCapture(next);
     _captureEpochReset = false;
     _acceptSyncStatus(next.syncStatus);
-    _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
+    _setHealthNotice(_settingsHealthMessage(next.settingsHealth));
     _captureWatchReady = _captureStreamConnected && next.captureWatch;
     _updateCapturePush();
     if (!_sameCapture(previousCapture, _captureSnapshot) ||
@@ -487,12 +664,12 @@ class SettingsController extends ChangeNotifier {
     if (_disposed) return Future.value();
     _settingsConfirmed = false;
     _settingsRefreshRequested = true;
-    if (_busy) return Future.value();
+    if (_settingsWriteInFlight) return Future.value();
     if (_settingsRefresh case final pending?) return pending;
     late final Future<void> pending;
     pending = _readSettings().whenComplete(() {
       if (identical(_settingsRefresh, pending)) _settingsRefresh = null;
-      if (_settingsRefreshRequested && !_busy && !_disposed) {
+      if (_settingsRefreshRequested && !_settingsWriteInFlight && !_disposed) {
         unawaited(_refreshSettings());
       }
     });
@@ -501,14 +678,15 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> _readSettings() async {
-    while (_settingsRefreshRequested && !_busy && !_disposed) {
+    while (_settingsRefreshRequested && !_settingsWriteInFlight && !_disposed) {
       _settingsRefreshRequested = false;
       final epoch = _settingsMutationEpoch;
       final generation = _captureWatchGeneration;
+      final usageRead = ++_storageUsageRead;
       try {
         final next = await _repository.settings();
         if (_disposed) return;
-        if (_busy ||
+        if (_settingsWriteInFlight ||
             _settingsRefreshRequested ||
             epoch != _settingsMutationEpoch ||
             generation != _captureWatchGeneration) {
@@ -516,6 +694,7 @@ class SettingsController extends ChangeNotifier {
           continue;
         }
         _settings = next;
+        _acceptStorageUsage(next.storageUsage, usageRead);
         _settingsConfirmed = true;
         if (_errorMessage == _settingsRefreshError) _errorMessage = null;
         _notify();
@@ -527,6 +706,71 @@ class SettingsController extends ChangeNotifier {
         return;
       }
     }
+  }
+
+  void _storageUsageObserved(bool observed) {
+    if (_disposed) return;
+    if (observed) {
+      _watchHistoryChanges();
+      // Changes that arrived while nobody displayed the readout were skipped.
+      if (_loadState == SettingsLoadState.ready) {
+        unawaited(_refreshStorageUsage());
+      }
+    } else {
+      unawaited(_historySubscription?.cancel());
+      _historySubscription = null;
+      _storageUsageStale = false;
+    }
+  }
+
+  void _watchHistoryChanges() {
+    if (_historySubscription != null ||
+        !_storageUsage.observed ||
+        _loadState != SettingsLoadState.ready) {
+      return;
+    }
+    if (_repository case final HistoryChangesRepository history) {
+      _historySubscription = history.historyChanges().listen(
+        (_) => unawaited(_refreshStorageUsage()),
+        onError: (Object _, StackTrace _) {
+          // The reconnect that follows re-reads settings and usage together.
+        },
+      );
+    }
+  }
+
+  /// Re-read only the usage. It takes the settings read the runtime already
+  /// serves but leaves [settings] and the notification policy untouched.
+  Future<void> _refreshStorageUsage() async {
+    if (_disposed) return;
+    _storageUsageStale = true;
+    if (busy || _storageUsageRefreshing) return;
+    _storageUsageRefreshing = true;
+    try {
+      while (_storageUsageStale &&
+          !busy &&
+          !_disposed &&
+          _storageUsage.observed) {
+        _storageUsageStale = false;
+        final read = ++_storageUsageRead;
+        try {
+          final next = await _repository.settings();
+          _acceptStorageUsage(next.storageUsage, read);
+        } catch (_) {
+          // Keep the last confirmed readout; the next change retries.
+        }
+      }
+    } finally {
+      _storageUsageRefreshing = false;
+    }
+  }
+
+  /// Reads are numbered when they start, so a slower, older reply cannot
+  /// replace the result of a newer one.
+  void _acceptStorageUsage(StorageUsage? usage, int read) {
+    if (_disposed || read < _storageUsageApplied) return;
+    _storageUsageApplied = read;
+    _storageUsage.value = usage;
   }
 
   void _acceptScreenshotEvent(ScreenshotCaptureStatus next) {
@@ -581,7 +825,7 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> _refreshCapture() async {
     if (_disposed ||
-        _busy ||
+        _captureWriteInFlight ||
         (!_presentationActive && !backgroundCaptureStatusRequired) ||
         _captureRefreshInFlight) {
       return;
@@ -601,7 +845,7 @@ class SettingsController extends ChangeNotifier {
         screenshotStatus = await _screenshotCapture.status();
       }
       if (_disposed ||
-          _busy ||
+          _captureWriteInFlight ||
           epoch != _presentationEpoch ||
           watchGeneration != _captureWatchGeneration ||
           (!_captureEpochReset && next.epoch < (_capture?.epoch ?? 0)) ||
@@ -623,7 +867,7 @@ class SettingsController extends ChangeNotifier {
       _captureWatchReady = _captureStreamConnected && next.captureWatch;
       _updateCapturePush();
       _acceptSyncStatus(next.syncStatus);
-      _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
+      _setHealthNotice(_settingsHealthMessage(next.settingsHealth));
       if (!_sameCapture(previousCapture, _captureSnapshot) ||
           !_sameSync(previousSync, _syncSnapshot) ||
           !_sameScreenshot(previousScreenshot, _screenshotStatus) ||
@@ -823,7 +1067,33 @@ class SettingsController extends ChangeNotifier {
     unawaited(_captureStateSubscription?.cancel());
     unawaited(_screenshotSubscription?.cancel());
     unawaited(_syncSubscription?.cancel());
+    unawaited(_historySubscription?.cancel());
+    _storageUsage.dispose();
+    _dataTransfer.dispose();
     unawaited(_repository.dispose());
     super.dispose();
+  }
+}
+
+/// A value that reports when it gains its first and loses its last listener.
+class _ObservedValue<T> extends ValueNotifier<T> {
+  _ObservedValue(super.value, this._onObservedChanged);
+
+  final void Function(bool observed) _onObservedChanged;
+
+  bool get observed => hasListeners;
+
+  @override
+  void addListener(VoidCallback listener) {
+    final wasObserved = hasListeners;
+    super.addListener(listener);
+    if (!wasObserved) _onObservedChanged(true);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    final wasObserved = hasListeners;
+    super.removeListener(listener);
+    if (wasObserved && !hasListeners) _onObservedChanged(false);
   }
 }

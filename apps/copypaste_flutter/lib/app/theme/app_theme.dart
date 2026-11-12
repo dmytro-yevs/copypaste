@@ -25,8 +25,17 @@ abstract final class AppTheme {
     return theme.copyWith(
       colorScheme: () =>
           theme.colorScheme.copyWith(border: () => popupBorder(context)),
+      // Menu items size their icon slot as twice the base gap; the app-wide
+      // gap is too tight for a small icon, so popups use the menu's own.
+      density: () => _popupDensity,
     );
   }
+
+  static const _popupDensity = Density(
+    baseContainerPadding: AppSpacing.lg,
+    baseGap: AppIconSize.sm / 2,
+    baseContentPadding: AppSpacing.md,
+  );
 
   static Widget popupSurface(BuildContext context, {required Widget child}) =>
       Theme(
@@ -212,22 +221,100 @@ abstract final class AppTheme {
     padding: EdgeInsets.zero,
   );
 
-  static AbstractButtonStyle navigationRailButtonStyle(
-    BuildContext context, {
-    required bool selected,
-  }) {
-    final accent = Theme.of(context).colorScheme.accent;
-    return (selected
-            ? const ButtonStyle.secondary(
-                density: ButtonDensity.icon,
-              ).withBackgroundColor(
-                color: accent,
-                hoverColor: accent,
-                focusColor: accent,
-              )
-            : const ButtonStyle.ghost(density: ButtonDensity.icon))
-        .copyWith(decoration: _navigationButtonDecoration);
+  /// One header height on every platform; it grows with the text scale.
+  static double headerHeight(BuildContext context) {
+    final height = controlHeight(context) + AppSpacing.xs * 2;
+    return height < AppControlSize.touch ? AppControlSize.touch : height;
   }
+
+  static BoxDecoration headerDecoration(BuildContext context) => BoxDecoration(
+    border: Border(
+      bottom: BorderSide(color: Theme.of(context).colorScheme.border),
+    ),
+  );
+
+  /// Recolours the header border under the current destination.
+  static const headerNavigationSelectionDecoration = BoxDecoration(
+    border: Border(bottom: BorderSide(color: navigationAccent)),
+  );
+
+  static const headerNavigationSelectedWeight = FontWeight.w600;
+
+  /// Header destinations are text; the button only answers hover and focus.
+  static AbstractButtonStyle headerNavigationButtonStyle({
+    required bool selected,
+  }) => const ButtonStyle.ghost().copyWith(
+    decoration: (context, states, value) => _headerControlDecoration(
+      context,
+      states,
+      const BorderRadius.all(Radius.circular(AppRadius.md)),
+    ),
+    textStyle: (context, states, value) {
+      final colors = Theme.of(context).colorScheme;
+      final emphasized =
+          selected ||
+          states.contains(WidgetState.hovered) ||
+          states.contains(WidgetState.focused);
+      return value.copyWith(
+        color: emphasized ? colors.foreground : colors.mutedForeground,
+        fontWeight: selected ? headerNavigationSelectedWeight : null,
+      );
+    },
+  );
+
+  /// Lets an icon control carry text without leaving the shared height.
+  static AbstractButtonStyle headerActionButtonStyle(ButtonStyle style) =>
+      style.copyWith(
+        padding: (context, states, _) => EdgeInsets.symmetric(
+          horizontal: _iconInset(context, style, states),
+        ),
+      );
+
+  /// A cell of the status group: no surface of its own, the group's corners,
+  /// and the header's hover and focus treatment.
+  static final AbstractButtonStyle headerStatusCellStyle =
+      headerActionButtonStyle(const ButtonStyle.ghostIcon()).copyWith(
+        decoration: (context, states, value) =>
+            _headerControlDecoration(context, states, BorderRadius.zero),
+      );
+
+  /// Hover fills a header control; keyboard focus outlines it.
+  static BoxDecoration _headerControlDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    BorderRadius radius,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color:
+          states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.pressed)
+          ? colors.border
+          : null,
+      border: Border.all(
+        color: states.contains(WidgetState.focused)
+            ? colors.primary
+            : Colors.transparent,
+      ),
+      borderRadius: radius,
+    );
+  }
+
+  /// One surface for the status cells, matching the header's icon controls.
+  static BoxDecoration headerStatusGroupDecoration(BuildContext context) {
+    final theme = Theme.of(context);
+    return BoxDecoration(
+      color: theme.colorScheme.secondary,
+      borderRadius: BorderRadius.circular(theme.radiusMd),
+    );
+  }
+
+  static BoxDecoration headerStatusDividerDecoration(BuildContext context) =>
+      BoxDecoration(
+        border: BorderDirectional(
+          start: BorderSide(color: Theme.of(context).colorScheme.border),
+        ),
+      );
 
   static BoxDecoration historyPinnedDropDecoration(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -275,9 +362,12 @@ abstract final class AppTheme {
     return height < minimum ? minimum : height;
   }
 
+  /// Where a text field's content starts inside its box.
+  static const fieldContentInset = AppSpacing.md;
+
   static EdgeInsets controlFieldPadding(
     BuildContext context, {
-    double horizontal = AppSpacing.md,
+    double horizontal = fieldContentInset,
     double minimum = AppControlSize.regular,
   }) {
     final lineHeight = _controlLineHeight(context).ceilToDouble();
@@ -290,14 +380,21 @@ abstract final class AppTheme {
   static AbstractButtonStyle controlButtonStyle(ButtonStyle style) {
     if (style.density != ButtonDensity.icon) return style;
     return style.copyWith(
-      padding: (context, states, _) {
-        final iconSize =
-            style.iconTheme(context, states).size ??
-            Theme.of(context).iconTheme.small.size ??
-            AppIconSize.sm;
-        return EdgeInsets.all((controlHeight(context) - iconSize) / 2);
-      },
+      padding: (context, states, _) =>
+          EdgeInsets.all(_iconInset(context, style, states)),
     );
+  }
+
+  static double _iconInset(
+    BuildContext context,
+    ButtonStyle style,
+    Set<WidgetState> states,
+  ) {
+    final iconSize =
+        style.iconTheme(context, states).size ??
+        Theme.of(context).iconTheme.small.size ??
+        AppIconSize.sm;
+    return (controlHeight(context) - iconSize) / 2;
   }
 
   static double _controlLineHeight(BuildContext context) {
@@ -329,9 +426,42 @@ abstract final class AppTheme {
       .withPadding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
+          vertical: AppSpacing.sm,
+        ),
+      )
+      .copyWith(
+        decoration: _historySectionDecoration,
+        iconTheme: (context, states, value) => value.copyWith(
+          color: Theme.of(context).colorScheme.mutedForeground,
         ),
       );
+
+  /// The toolbar's soft surface with the shared border; keyboard focus is
+  /// shown by the shared focus ring.
+  static Decoration _historySectionDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    final decoration = softSelectDecoration(context, states, value);
+    if (decoration is! BoxDecoration) return decoration;
+    return decoration.copyWith(
+      border: Border.all(color: Theme.of(context).colorScheme.border),
+    );
+  }
+
+  /// Uppercase caption of a History group band; the label is [emphasized].
+  static TextStyle historySectionTextStyle(
+    BuildContext context, {
+    required bool emphasized,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return historyMetadataTextStyle(context).copyWith(
+      letterSpacing: AppTypographySize.captionLetterSpacing,
+      fontWeight: emphasized ? FontWeight.w600 : FontWeight.normal,
+      color: emphasized ? colors.foreground : colors.mutedForeground,
+    );
+  }
 
   static AbstractButtonStyle historyClipButtonStyle({required bool selected}) =>
       (selected ? const ButtonStyle.secondary() : const ButtonStyle.ghost())
@@ -467,11 +597,25 @@ abstract final class AppTheme {
 
   static const moduleSettingsActionAlignment = Alignment.center;
 
-  static ThemeData clipboardSearchTheme(BuildContext context) {
+  /// Scopes out the shared focus ring where controls outline themselves on
+  /// focus, so keyboard focus keeps one cue.
+  static ThemeData ownFocusCueTheme(BuildContext context) {
     final theme = Theme.of(context);
     return theme.copyWith(
       colorScheme: () =>
-          theme.colorScheme.copyWith(input: () => theme.colorScheme.accent),
+          theme.colorScheme.copyWith(ring: () => Colors.transparent),
+    );
+  }
+
+  /// The field keeps typing focus while the list selection is the focus cue,
+  /// so it draws no ring of its own.
+  static ThemeData clipboardSearchTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () => theme.colorScheme.copyWith(
+        input: () => theme.colorScheme.accent,
+        ring: () => Colors.transparent,
+      ),
     );
   }
 
@@ -587,17 +731,64 @@ abstract final class AppTheme {
 
   static const settingsRowPadding = EdgeInsets.all(AppSpacing.lg);
 
+  /// Space between blocks inside a settings row or group slot: a row's copy
+  /// and its control, or notices that follow each other.
+  static const settingsBlockSpacing = AppSpacing.md;
+
+  /// Space between settings navigation rows, and between the search field
+  /// and the first row; it is also the room for that row's focus ring.
+  static const settingsNavigationSpacing = focusRingInset;
+
+  /// The settings search field above the navigation rows.
+  static const settingsSearchPadding = EdgeInsets.fromLTRB(
+    AppSpacing.lg,
+    AppSpacing.lg,
+    AppSpacing.lg,
+    AppSpacing.zero,
+  );
+
+  /// Settings navigation starts its rows and their content where the search
+  /// field starts its box and its content.
+  static const settingsNavigationPadding = EdgeInsets.fromLTRB(
+    AppSpacing.lg,
+    settingsNavigationSpacing,
+    AppSpacing.lg,
+    AppSpacing.lg,
+  );
+
+  /// Separates the compact navigation rows by the same space as the gap
+  /// under the search field, with the rule centered in it.
+  static const settingsNavigationDividerTheme = DividerTheme(
+    height: settingsNavigationSpacing,
+  );
+
   static final settingsNavigationButtonStyle = const ButtonStyle.ghost()
-      .copyWith(decoration: _navigationButtonDecoration);
+      .copyWith(
+        decoration: _navigationButtonDecoration,
+        padding: _settingsNavigationButtonPadding,
+      );
 
   static final settingsNavigationSelectedButtonStyle =
       const ButtonStyle.secondary().copyWith(
         decoration: _navigationButtonDecoration,
+        padding: _settingsNavigationButtonPadding,
       );
+
+  static EdgeInsetsGeometry _settingsNavigationButtonPadding(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) => EdgeInsets.symmetric(
+    horizontal: fieldContentInset,
+    vertical: value.vertical / 2,
+  );
 
   static final settingsCategoryButtonStyle = const ButtonStyle.ghost().copyWith(
     decoration: _navigationButtonDecoration,
-    padding: (context, states, value) => settingsRowPadding,
+    padding: (context, states, value) => EdgeInsets.symmetric(
+      horizontal: fieldContentInset,
+      vertical: settingsRowPadding.top,
+    ),
   );
 
   static OutlinedContainerTheme settingsRowTheme(
@@ -612,6 +803,70 @@ abstract final class AppTheme {
     borderRadius: BorderRadius.zero,
     padding: settingsRowPadding,
   );
+
+  static const switchTrackRadius = AppRadius.xs;
+  static const _switchThumbRadius = AppRadius.xs / 2;
+  static const _switchWellOpacity = 0.18;
+  static const _switchOutlineOpacity = 0.5;
+
+  /// Squares the track and keeps the off well visible on every row surface.
+  static SwitchTheme switchTheme(BuildContext context) => SwitchTheme(
+    borderRadius: const BorderRadius.all(Radius.circular(switchTrackRadius)),
+    inactiveColor: Theme.of(
+      context,
+    ).colorScheme.foreground.withValues(alpha: _switchWellOpacity),
+  );
+
+  /// The stock switch takes its thumb radius and its disabled track fill from
+  /// the ambient theme only, so both are scoped to the control here; the
+  /// disabled track is outlined by the switch marks instead of filled.
+  static ThemeData switchControlTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      radius: () => theme.radius * _switchThumbRadius / theme.radiusLg,
+      colorScheme: () =>
+          theme.colorScheme.copyWith(muted: () => Colors.transparent),
+    );
+  }
+
+  /// Marks drawn over the track: on bar, off ring, off outline, disabled dash.
+  static ({Color on, Color off, Color outline, Color disabled})
+  switchMarkColors(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return (
+      on: colors.primaryForeground,
+      off: colors.mutedForeground,
+      outline: colors.foreground.withValues(alpha: _switchOutlineOpacity),
+      disabled: colors.mutedForeground,
+    );
+  }
+
+  static TextStyle switchStateTextStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.typography.xSmall.copyWith(
+      color: theme.colorScheme.mutedForeground,
+    );
+  }
+
+  /// The height a scale accepts touches in. The stock slider keeps its
+  /// compact look; touch screens get a finger-sized band around it.
+  static double? stopScaleHitHeight() =>
+      defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS
+      ? AppControlSize.touch
+      : null;
+
+  static TextStyle stopScaleLabelStyle(BuildContext context) =>
+      switchStateTextStyle(context);
+
+  // The library draws every keyboard focus ring from `ring` at half opacity,
+  // 3 px wide, outside the control. Each value is the calmest foreground that
+  // still keeps 3:1 on every surface; light has no room below full strength.
+  static const _lightFocusRing = Color(0xFF1A1C1F);
+  static const _darkFocusRing = Color(0xD4DFDFDF);
+
+  /// Room a scroll view leaves around controls at its edge for that ring.
+  static const focusRingInset = AppSpacing.xs;
 
   static const _lightColors = ColorScheme(
     brightness: Brightness.light,
@@ -632,7 +887,7 @@ abstract final class AppTheme {
     destructive: Color(0xFFE02E2A),
     border: Color(0x141A1C1F),
     input: Color(0xFFEDEDED),
-    ring: Colors.transparent,
+    ring: _lightFocusRing,
     chart1: Color(0xFFFA423E),
     chart2: Color(0xFF04B84C),
     chart3: Color(0xFFFB6A22),
@@ -659,7 +914,7 @@ abstract final class AppTheme {
     destructive: Color(0xFFE02E2A),
     border: Color(0x14DFDFDF),
     input: darkShellSurface,
-    ring: Colors.transparent,
+    ring: _darkFocusRing,
     chart1: Color(0xFFFA423E),
     chart2: Color(0xFF04B84C),
     chart3: Color(0xFFFB6A22),
@@ -916,30 +1171,28 @@ abstract final class AppTheme {
     );
     return ComponentTheme<TooltipTheme>(
       data: tooltipTheme,
-      child: ComponentTheme<FocusOutlineTheme>(
-        data: const FocusOutlineTheme(
-          border: Border.fromBorderSide(BorderSide.none),
+      child: ComponentTheme<TextFieldTheme>(
+        data: TextFieldTheme(
+          filled: true,
+          border: const Border.fromBorderSide(BorderSide.none),
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+          padding: controlFieldPadding(context),
         ),
-        child: ComponentTheme<TextFieldTheme>(
-          data: TextFieldTheme(
-            filled: true,
-            border: const Border.fromBorderSide(BorderSide.none),
-            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
-            padding: controlFieldPadding(context),
+        child: ComponentTheme<ChipTheme>(
+          data: const ChipTheme(
+            padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
           ),
-          child: ComponentTheme<ChipTheme>(
-            data: const ChipTheme(
-              padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            ),
-            child: ComponentTheme<SelectTheme>(
-              data: selectTheme(context),
-              child: ComponentTheme<InputOTPTheme>(
-                data: const InputOTPTheme(
-                  spacing: AppSpacing.sm,
-                  height: AppControlSize.regular,
-                ),
-                child: ComponentTheme<TabsTheme>(
-                  data: tabsTheme,
+          child: ComponentTheme<SelectTheme>(
+            data: selectTheme(context),
+            child: ComponentTheme<InputOTPTheme>(
+              data: const InputOTPTheme(
+                spacing: AppSpacing.sm,
+                height: AppControlSize.regular,
+              ),
+              child: ComponentTheme<TabsTheme>(
+                data: tabsTheme,
+                child: ComponentTheme<SwitchTheme>(
+                  data: switchTheme(context),
                   child: buttonThemedChild,
                 ),
               ),

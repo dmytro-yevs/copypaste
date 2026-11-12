@@ -57,8 +57,30 @@ void main() {
       expect(detail.sourceApp, 'Editor');
       expect(detail.createdAt, DateTime.utc(2024));
       expect(detail.tooLargeToSync, isFalse);
+      expect(listed.lineCount, isNull);
     },
   );
+
+  test('maps the runtime line count onto list and detail clips', () {
+    final generated = runtime.Clip(
+      secret: false,
+      transient: false,
+      id: 'text-1',
+      content: 'one\ntwo',
+      contentType: 'text',
+      contentClass: runtime.ClipContentClass.text,
+      createdAtMs: 0,
+      pinned: false,
+      tagIds: const [],
+      originDeviceClass: runtime.DeviceClass.unknown,
+      truncated: true,
+      lineCount: 4096,
+      tooLargeToSync: false,
+    );
+
+    expect(RuntimeHistoryRepository.mapListClip(generated).lineCount, 4096);
+    expect(RuntimeHistoryRepository.mapDetailClip(generated).lineCount, 4096);
+  });
 
   test('maps original image metadata and sync refusal state', () {
     final detail = RuntimeHistoryRepository.mapDetailClip(

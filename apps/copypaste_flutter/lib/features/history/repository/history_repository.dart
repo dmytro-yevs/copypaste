@@ -52,6 +52,16 @@ abstract interface class HistoryDownloadedFileRepository {
   Future<String?> downloadedFile(String id);
 }
 
+/// Exact group sizes for a list query, counted without loading its pages.
+abstract interface class HistoryGroupCountsRepository {
+  /// [days] are local calendar days. Null means the runtime cannot count this
+  /// query exactly (text search or a kind filter); it never estimates.
+  Future<HistoryGroupCounts?> groupCounts({
+    required HistoryQuery query,
+    required List<DateTime> days,
+  });
+}
+
 /// Tag management is separate from paged payload access.
 abstract interface class HistoryTagsRepository {
   Future<HistoryTags> tags(List<String> clipIds);

@@ -351,7 +351,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
       expect(find.text('Downloads and transfers'), findsOneWidget);
-      expect(find.text('256.0 KB / 1.0 MB'), findsOneWidget);
+      expect(find.text('256.0 KiB / 1.0 MiB'), findsOneWidget);
       expect(find.text('Android phone'), findsNWidgets(3));
       expect(find.text('MacBook Air'), findsNWidgets(3));
       expect(find.text('Show file'), findsOneWidget);

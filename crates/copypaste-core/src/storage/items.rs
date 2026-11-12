@@ -362,12 +362,47 @@ impl Store {
     /// refuse an aggregate result or honour an output limit without buffering.
     pub(crate) fn visit_live_items<E>(
         &self,
-        mut visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+        visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
     ) -> Result<(), E>
     where
         E: From<StoreError>,
     {
         let conn = self.conn().map_err(E::from)?;
+        Self::visit_live_rows(&conn, visit)
+    }
+
+    /// [`Self::visit_live_items`], first reporting how many rows it will visit.
+    ///
+    /// The count and the rows come from one read transaction, so they describe
+    /// the same history while captures continue.
+    pub(crate) fn visit_live_snapshot<E>(
+        &self,
+        total: impl FnOnce(u64),
+        visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
+        let conn = self.conn().map_err(E::from)?;
+        let snapshot = conn
+            .unchecked_transaction()
+            .map_err(StoreError::from)
+            .map_err(E::from)?;
+        total(
+            live_count(&snapshot)
+                .map_err(StoreError::from)
+                .map_err(E::from)?,
+        );
+        Self::visit_live_rows(&snapshot, visit)
+    }
+
+    fn visit_live_rows<E>(
+        conn: &rusqlite::Connection,
+        mut visit: impl FnMut(StoredItem) -> Result<ControlFlow<()>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<StoreError>,
+    {
         let mut stmt = conn
             .prepare_cached(LIVE_ITEMS_SQL)
             .map_err(StoreError::from)

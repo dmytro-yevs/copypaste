@@ -16,6 +16,7 @@ fn wire_name(method: &Method) -> &'static str {
         Method::Search { .. } => "search",
         Method::HistoryQuery { .. } => "history_query",
         Method::HistoryFacets => "history_facets",
+        Method::HistoryCounts { .. } => "history_counts",
         Method::HistoryTags { .. } => "history_tags",
         Method::MutateHistoryTags { .. } => "mutate_history_tags",
         Method::Copy { .. } => "copy",
@@ -49,8 +50,10 @@ fn wire_name(method: &Method) -> &'static str {
         Method::Discovered => "discovered",
         Method::Rescan => "rescan",
         Method::Export { .. } => "export",
+        Method::ExportStream => "export_stream",
         Method::Import { .. } => "import",
         Method::Backup { .. } => "backup",
+        Method::BackupStream { .. } => "backup_stream",
         Method::Restore { .. } => "restore",
         Method::CloudSignIn { .. } => "cloud_sign_in",
         Method::CloudSignUp { .. } => "cloud_sign_up",
@@ -97,6 +100,7 @@ fn catalog() -> Vec<Value> {
         json!({"method":"search","params":{"query":"needle","limit":10}}),
         json!({"method":"history_query","params":{"query":{"search":"needle","content_classes":["text","image"],"semantic_kinds":["link","color"],"pinned_only":true,"origin_device_id":"device-1","source_app_bundle_id":"com.example.app","sort":"relevance","tag_ids":[],"untagged_only":false},"limit":10,"cursor":null}}),
         json!({"method":"history_facets"}),
+        json!({"method":"history_counts","params":{"query":{"content_classes":[],"semantic_kinds":[],"pinned_only":false,"origin_device_id":"device-1","tag_ids":[],"untagged_only":false,"sort":"newest"},"ranges":[{"from_ms":1,"before_ms":2}]}}),
         json!({"method":"history_tags","params":{"clip_ids":[]}}),
         json!({"method":"mutate_history_tags","params":{"mutation":{"action":"save","id":null,"name":"Work"}}}),
         json!({"method":"copy","params":{"id":"item"}}),
@@ -130,8 +134,10 @@ fn catalog() -> Vec<Value> {
         json!({"method":"discovered"}),
         json!({"method":"rescan"}),
         json!({"method":"export","params":{"limit":0}}),
+        json!({"method":"export_stream"}),
         json!({"method":"import","params":{"items":[]}}),
         json!({"method":"backup","params":{"dest_path":"backup.db"}}),
+        json!({"method":"backup_stream","params":{"dest_path":"backup.db"}}),
         json!({"method":"restore","params":{"src_path":"backup.db","confirm":true}}),
         json!({"method":"cloud_sign_in","params":{"email":"a@example.com","password":"secret","passphrase":"phrase"}}),
         json!({"method":"cloud_sign_up","params":{"email":"a@example.com","password":"secret","passphrase":"phrase"}}),
@@ -162,7 +168,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        59,
+        62,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }

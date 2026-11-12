@@ -54,6 +54,9 @@ fn expected(method: &Method) -> Expected {
         Method::HistoryFacets => {
             Expected::Data(|data| matches!(data, ResponseData::HistoryFacets(_)))
         }
+        Method::HistoryCounts { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::HistoryCounts(Some(_))))
+        }
         Method::GetSpoilerState | Method::SetSpoilerRevealed { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::SpoilerState { .. }))
         }
@@ -77,8 +80,12 @@ fn expected(method: &Method) -> Expected {
         Method::Discovered | Method::Rescan => {
             Expected::Data(|data| matches!(data, ResponseData::Discovered(_)))
         }
-        Method::Export { .. } => Expected::Data(|data| matches!(data, ResponseData::Export(_))),
-        Method::Backup { .. } => Expected::Data(|data| matches!(data, ResponseData::Backup(_))),
+        Method::Export { .. } | Method::ExportStream => {
+            Expected::Data(|data| matches!(data, ResponseData::Export(_)))
+        }
+        Method::Backup { .. } | Method::BackupStream { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::Backup(_)))
+        }
         Method::CloudSignOut | Method::CloudStatus => {
             Expected::Data(|data| matches!(data, ResponseData::CloudStatus(_)))
         }
@@ -137,6 +144,13 @@ fn cases(root: &Path) -> Vec<Method> {
             cursor: None,
         },
         Method::HistoryFacets,
+        Method::HistoryCounts {
+            query: copypaste_ipc::HistoryQuery::default(),
+            ranges: vec![copypaste_ipc::HistoryCountRange {
+                from_ms: 0,
+                before_ms: 86_400_000,
+            }],
+        },
         Method::HistoryTags {
             clip_ids: Vec::new(),
         },
@@ -225,9 +239,16 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::Discovered,
         Method::Rescan,
         Method::Export { limit: 0 },
+        Method::ExportStream,
         Method::Import { items: Vec::new() },
         Method::Backup {
             dest_path: root.join("contract-backup.db").display().to_string(),
+        },
+        Method::BackupStream {
+            dest_path: root
+                .join("contract-streamed-backup.db")
+                .display()
+                .to_string(),
         },
         Method::Restore {
             src_path: root.join("missing.db").display().to_string(),
@@ -331,14 +352,15 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        55,
+        58,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
     for (index, method) in methods.into_iter().enumerate() {
         let id = index as u64 + 1;
         let expected = expected(&method);
-        let response = if matches!(method, Method::Shutdown) {
+        let streamed = method.streams_progress();
+        let mut response = if matches!(method, Method::Shutdown) {
             let stream = transport::connect(&dir.path().join("daemon.sock"))
                 .await
                 .expect("shutdown connection");
@@ -346,6 +368,15 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
         } else {
             client.call(request(id, method)).await
         };
+        while streamed
+            && matches!(
+                response.data,
+                Some(ResponseData::ExportChunk(_) | ResponseData::Progress(_))
+            )
+        {
+            assert_eq!(response.id, id);
+            response = client.next().await.expect("a stream ends with its reply");
+        }
         assert_eq!(response.id, id);
         if let Some(message) = &response.error {
             let root = dir.path().display().to_string();

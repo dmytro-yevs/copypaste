@@ -19,6 +19,9 @@ import '../../shared/system_date_time.dart';
 import 'device_presentation.dart';
 import 'devices_controller.dart';
 import 'devices_gateway.dart';
+import 'devices_header_actions.dart';
+import 'pairing_progress.dart';
+import 'pairing_decisions.dart';
 
 /// Devices management composed from shadcn_flutter primitives.
 class DevicesScreen extends StatefulWidget {
@@ -123,13 +126,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
             if (mounted) unawaited(_openDeviceDrawer());
           });
         }
-        final list = _devicesList(
-          context,
-          controller,
-          snapshot,
-          padding: wide && inspectorOpen
-              ? const EdgeInsets.all(AppSpacing.sm)
-              : const EdgeInsets.all(AppSpacing.xxl),
+        // Tab finishes the list before it enters the pane beside it.
+        final list = FocusTraversalGroup(
+          child: _devicesList(
+            context,
+            controller,
+            snapshot,
+            padding: wide && inspectorOpen
+                ? const EdgeInsets.all(AppSpacing.sm)
+                : const EdgeInsets.all(AppSpacing.xxl),
+          ),
         );
         if (!wide || !inspectorOpen) return list;
         return Padding(
@@ -209,9 +215,42 @@ class _DevicesScreenState extends State<DevicesScreen> {
           const Gap(AppSpacing.lg),
         ],
         _deviceCards(context, controller, snapshot),
+        if (snapshot.peers.isEmpty) ...[
+          const Gap(AppSpacing.md),
+          _noPairedDevices(context, controller),
+        ],
         const Gap(AppSpacing.xxl),
         _nearbyDevices(context, controller),
       ],
+    );
+  }
+
+  /// Shown for every loaded snapshot without peers, whatever discovery finds,
+  /// so it never appears or disappears while loading or scanning.
+  Widget _noPairedDevices(BuildContext context, DevicesController controller) {
+    return Card(
+      key: const ValueKey<String>('devices-empty-state'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StateView.empty(
+            title: context.l10n.devicesEmptyTitle,
+            message: context.l10n.devicesEmptyMessage,
+            icon: LucideIcons.link,
+          ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: DevicesHeaderActions.labeledActions(
+              context,
+              controller,
+              enabled: !controller.pairingInspectorOpen,
+              keyPrefix: 'empty-',
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -323,13 +362,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
           constraints: AppOverlays.drawerContentConstraints(context),
           child: Focus(
             autofocus: true,
-            child: CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.escape): () async {
-                  if (widget.controller.canClosePairing) {
-                    await widget.controller.closePairing();
-                  }
-                },
+            skipTraversal: true,
+            child: AppOverlays.drawerDismissal(
+              onDismiss: () async {
+                if (widget.controller.canClosePairing) {
+                  await widget.controller.closePairing();
+                }
               },
               child: AnimatedBuilder(
                 animation: widget.controller,
@@ -393,6 +431,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           constraints: AppOverlays.drawerContentConstraints(context),
           child: Focus(
             autofocus: true,
+            skipTraversal: true,
             child: CallbackShortcuts(
               bindings: <ShortcutActivator, VoidCallback>{
                 const SingleActivator(LogicalKeyboardKey.escape): () {
@@ -734,93 +773,102 @@ class _DeviceDetailsInspector extends StatelessWidget {
     final target = controller.deviceDetailsTarget;
     final device = _selectedDevice(context.l10n, target);
     if (device == null) return const SizedBox.shrink();
-    final content = Card(
-      key: ValueKey<String>(
-        inDrawer ? 'devices-details-drawer-card' : 'devices-details-inspector',
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              AppIconFrame(
-                size: AppIconSize.xl,
-                child: Icon(
-                  DevicePresentation.icon(device.details?.profile?.deviceClass),
+    final content = FocusTraversalGroup(
+      child: Card(
+        key: ValueKey<String>(
+          inDrawer
+              ? 'devices-details-drawer-card'
+              : 'devices-details-inspector',
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                AppIconFrame(
                   size: AppIconSize.xl,
-                ),
-              ),
-              const Gap(AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      device.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ).h3(),
-                    Text(
-                      DevicePresentation.summary(device.details),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ).muted(),
-                  ],
-                ),
-              ),
-              Tooltip(
-                showDuration: AppMotion.resolve(context, AppMotion.standard),
-                tooltip: (context) => TooltipContainer(
-                  child: Text(context.l10n.devicesCloseDetails),
-                ),
-                child: Semantics(
-                  label: context.l10n.devicesCloseDetails,
-                  button: true,
-                  child: Button.ghost(
-                    key: const ValueKey<String>('close-device-details'),
-                    style: AppTheme.controlButtonStyle(
-                      const ButtonStyle.ghostIcon(),
+                  child: Icon(
+                    DevicePresentation.icon(
+                      device.details?.profile?.deviceClass,
                     ),
-                    onPressed: onClose,
-                    child: const AppIconFrame(child: Icon(LucideIcons.x)),
+                    size: AppIconSize.xl,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const Gap(AppSpacing.md),
-          Expanded(
-            child: SingleChildScrollView(
-              key: const ValueKey<String>('device-details-scroll-content'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: SecondaryBadge(child: Text(device.relationship)),
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        device.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ).h3(),
+                      Text(
+                        DevicePresentation.summary(device.details),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ).muted(),
+                    ],
                   ),
-                  if (controller.errorMessage case final errorMessage?) ...[
-                    const Gap(AppSpacing.md),
-                    Alert.destructive(
-                      key: const ValueKey<String>(
-                        'device-details-action-error',
+                ),
+                Tooltip(
+                  showDuration: AppMotion.resolve(context, AppMotion.standard),
+                  tooltip: (context) => TooltipContainer(
+                    child: Text(context.l10n.devicesCloseDetails),
+                  ),
+                  child: Semantics(
+                    label: context.l10n.devicesCloseDetails,
+                    button: true,
+                    child: Button.ghost(
+                      key: const ValueKey<String>('close-device-details'),
+                      style: AppTheme.controlButtonStyle(
+                        const ButtonStyle.ghostIcon(),
                       ),
-                      leading: const AppIconFrame(
-                        child: Icon(LucideIcons.circleAlert),
-                      ),
-                      title: Text(controller.errorTitle),
-                      content: Text(errorMessage),
+                      onPressed: onClose,
+                      child: const AppIconFrame(child: Icon(LucideIcons.x)),
                     ),
-                  ],
-                  const Gap(AppSpacing.xl),
-                  _DeviceDetailsTable(rows: _detailRows(context, device)),
-                ],
+                  ),
+                ),
+              ],
+            ),
+            const Gap(AppSpacing.md),
+            Expanded(
+              child: AppOverlays.focusRingClip(
+                child: SingleChildScrollView(
+                  key: const ValueKey<String>('device-details-scroll-content'),
+                  clipBehavior: Clip.none,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SecondaryBadge(child: Text(device.relationship)),
+                      ),
+                      if (controller.errorMessage case final errorMessage?) ...[
+                        const Gap(AppSpacing.md),
+                        Alert.destructive(
+                          key: const ValueKey<String>(
+                            'device-details-action-error',
+                          ),
+                          leading: const AppIconFrame(
+                            child: Icon(LucideIcons.circleAlert),
+                          ),
+                          title: Text(controller.errorTitle),
+                          content: Text(errorMessage),
+                        ),
+                      ],
+                      const Gap(AppSpacing.xl),
+                      _DeviceDetailsTable(rows: _detailRows(context, device)),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-          const Gap(AppSpacing.xxl),
-          _actions(context, device),
-        ],
+            const Gap(AppSpacing.xxl),
+            _actions(context, device),
+          ],
+        ),
       ),
     );
     if (!inDrawer) return content;
@@ -1109,12 +1157,22 @@ class _PairingInspectorState extends State<_PairingInspector> {
   late final TextEditingController _addressController = TextEditingController(
     text: widget.controller.pendingAddress,
   );
+  final FocusNode _codeFocusNode = FocusNode();
   String _pairingCode = '';
   String? _validationMessage;
   PairingCameraScanner? _scanner;
 
   @override
+  void initState() {
+    super.initState();
+    _codeFocusNode.addListener(_enterCodeCell);
+    FocusManager.instance.addListener(_revealCodeCell);
+  }
+
+  @override
   void dispose() {
+    FocusManager.instance.removeListener(_revealCodeCell);
+    _codeFocusNode.dispose();
     _addressController.dispose();
     final scanner = _scanner;
     if (scanner != null) unawaited(scanner.dispose());
@@ -1124,68 +1182,77 @@ class _PairingInspectorState extends State<_PairingInspector> {
   @override
   Widget build(BuildContext context) {
     final mode = widget.controller.pairingEntryMode;
-    final content = Card(
-      key: ValueKey<String>(
-        widget.inDrawer
-            ? 'devices-pairing-drawer-card'
-            : 'devices-pairing-inspector',
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              AppIconFrame(
-                child: Icon(DevicePresentation.pairingEntryIcon(mode)),
-              ),
-              const Gap(AppSpacing.md),
-              Expanded(
-                child: Text(
-                  _modeTitle(mode),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ).h3(),
-              ),
-              Button.ghost(
-                key: const ValueKey<String>('close-pairing-inspector'),
-                style: AppTheme.controlButtonStyle(
-                  const ButtonStyle.ghostIcon(),
+    final content = FocusTraversalGroup(
+      child: Card(
+        key: ValueKey<String>(
+          widget.inDrawer
+              ? 'devices-pairing-drawer-card'
+              : 'devices-pairing-inspector',
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                AppIconFrame(
+                  child: Icon(DevicePresentation.pairingEntryIcon(mode)),
                 ),
-                onPressed: widget.controller.canClosePairing
-                    ? widget.onClose
-                    : null,
-                child: const AppIconFrame(child: Icon(LucideIcons.x)),
-              ),
-            ],
-          ),
-          const Gap(AppSpacing.lg),
-          Expanded(
-            child: SingleChildScrollView(
-              key: const ValueKey<String>('pairing-scroll-content'),
-              child: switch (mode) {
-                PairingEntryMode.invite => _invitationContent(),
-                PairingEntryMode.nearby =>
-                  widget.controller.pairing != null
-                      ? _pairingProgress(widget.controller.pairing!)
-                      : widget.controller.pairingInFlight
-                      ? StateView.loading(
-                          message: context.l10n.pairingSendingRequest,
-                        )
-                      : _pairingError(),
-                PairingEntryMode.scanQr => _scannerContent(),
-                PairingEntryMode.enterCode => _codeContent(),
-                null => StateView.empty(
-                  title: context.l10n.pairingEmptyTitle,
-                  message: context.l10n.pairingEmptyMessage,
+                const Gap(AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    _modeTitle(mode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ).h3(),
                 ),
-              },
+                Button.ghost(
+                  key: const ValueKey<String>('close-pairing-inspector'),
+                  style: AppTheme.controlButtonStyle(
+                    const ButtonStyle.ghostIcon(),
+                  ),
+                  onPressed: widget.controller.canClosePairing
+                      ? widget.onClose
+                      : null,
+                  child: const AppIconFrame(child: Icon(LucideIcons.x)),
+                ),
+              ],
             ),
-          ),
-          if (_pairingActions() case final actions?) ...[
-            const Gap(AppSpacing.xl),
-            actions,
+            const Gap(AppSpacing.lg),
+            Expanded(
+              // Grouped by its viewport, so controls scrolled below the
+              // pinned actions still come before them in Tab order.
+              child: FocusTraversalGroup(
+                child: AppOverlays.focusRingClip(
+                  child: SingleChildScrollView(
+                    key: const ValueKey<String>('pairing-scroll-content'),
+                    clipBehavior: Clip.none,
+                    child: _withStepIndicator(switch (mode) {
+                      PairingEntryMode.invite => _invitationContent(),
+                      PairingEntryMode.nearby =>
+                        widget.controller.pairing != null
+                            ? _pairingProgress(widget.controller.pairing!)
+                            : widget.controller.pairingInFlight
+                            ? StateView.loading(
+                                message: context.l10n.pairingSendingRequest,
+                              )
+                            : _pairingError(),
+                      PairingEntryMode.scanQr => _scannerContent(),
+                      PairingEntryMode.enterCode => _codeContent(),
+                      null => StateView.empty(
+                        title: context.l10n.pairingEmptyTitle,
+                        message: context.l10n.pairingEmptyMessage,
+                      ),
+                    }),
+                  ),
+                ),
+              ),
+            ),
+            if (_pairingActions() case final actions?) ...[
+              const Gap(AppSpacing.xl),
+              actions,
+            ],
           ],
-        ],
+        ),
       ),
     );
     if (!widget.inDrawer) return content;
@@ -1197,6 +1264,23 @@ class _PairingInspectorState extends State<_PairingInspector> {
         AppSpacing.lg,
       ),
       child: content,
+    );
+  }
+
+  /// The indicator scrolls with the content so the pinned actions always fit.
+  Widget _withStepIndicator(Widget content) {
+    final progress = widget.controller.pairingProgress;
+    if (progress == null) return content;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DevicePresentation.pairingStepProgress(
+          progress,
+          key: const ValueKey<String>('pairing-step-indicator'),
+        ),
+        const Gap(AppSpacing.lg),
+        content,
+      ],
     );
   }
 
@@ -1223,24 +1307,34 @@ class _PairingInspectorState extends State<_PairingInspector> {
         Semantics(
           label: l10n.pairingCode,
           textField: true,
-          child: SingleChildScrollView(
-            key: const ValueKey<String>('pairing-code-scroll'),
-            scrollDirection: Axis.horizontal,
-            child: Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: () => Theme.of(
-                  context,
-                ).colorScheme.copyWith(border: () => Colors.transparent),
-              ),
-              child: InputOTP(
-                key: const ValueKey<String>('pairing-code-input'),
-                onChanged: (value) {
-                  setState(() {
-                    _pairingCode = value.otpToString();
-                    _validationMessage = null;
-                  });
-                },
-                children: _pairingCodeChildren(),
+          child: AppOverlays.focusRingClip(
+            child: SingleChildScrollView(
+              key: const ValueKey<String>('pairing-code-scroll'),
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              child: Focus(
+                focusNode: _codeFocusNode,
+                onKeyEvent: _leaveCodeInput,
+                child: FocusTraversalGroup(
+                  descendantsAreTraversable: false,
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: () => Theme.of(
+                        context,
+                      ).colorScheme.copyWith(border: () => Colors.transparent),
+                    ),
+                    child: InputOTP(
+                      key: const ValueKey<String>('pairing-code-input'),
+                      onChanged: (value) {
+                        setState(() {
+                          _pairingCode = value.otpToString();
+                          _validationMessage = null;
+                        });
+                      },
+                      children: _pairingCodeChildren(),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -1339,6 +1433,67 @@ class _PairingInspectorState extends State<_PairingInspector> {
     );
   }
 
+  /// The library gives every code cell its own focus scope plus an unpainted
+  /// focus node, so Tab would stall on hidden stops and then cycle inside one
+  /// cell. The code input is therefore a single Tab stop that hands focus to
+  /// the cell to type in; arrows and typing still move between cells.
+  void _enterCodeCell() {
+    if (!_codeFocusNode.hasPrimaryFocus) return;
+    final cells = [
+      for (final node in _codeFocusNode.descendants)
+        if (node is! FocusScopeNode &&
+            node.children.isEmpty &&
+            node.canRequestFocus)
+          node,
+    ]..sort((a, b) => a.rect.left.compareTo(b.rect.left));
+    if (cells.isEmpty) return;
+    final ordered = Directionality.of(context) == TextDirection.rtl
+        ? cells.reversed.toList()
+        : cells;
+    final index = _pairingCode.length.clamp(0, ordered.length - 1);
+    ordered[index].requestFocus();
+  }
+
+  /// A cell only scrolls its caret into view; a narrow code row shows the
+  /// whole focused cell with room for its focus ring instead.
+  void _revealCodeCell() {
+    if (!_codeFocusNode.hasFocus || _codeFocusNode.hasPrimaryFocus) return;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !focused.mounted) return;
+      RenderObject? cell;
+      focused.visitAncestorElements((element) {
+        if (element.widget is! FocusOutline) return true;
+        cell = element.renderObject;
+        return false;
+      });
+      if (cell case final RenderBox box when box.attached) {
+        box.showOnScreen(
+          rect: (Offset.zero & box.size).inflate(AppTheme.focusRingInset),
+        );
+      }
+    });
+  }
+
+  KeyEventResult _leaveCodeInput(FocusNode node, KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    if (event.logicalKey != LogicalKeyboardKey.tab ||
+        node.hasPrimaryFocus ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyUpEvent) {
+      // Left traversable, this node would hand focus straight back to a cell.
+      node.skipTraversal = true;
+      keyboard.isShiftPressed ? node.previousFocus() : node.nextFocus();
+      node.skipTraversal = false;
+    }
+    return KeyEventResult.handled;
+  }
+
   Future<void> _startScanner() async {
     setState(() => _validationMessage = null);
     final scanner = _scanner ??= PairingCameraScanner(
@@ -1389,6 +1544,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
 
   Widget _pairingProgress(PairingCeremony ceremony) {
     final l10n = context.l10n;
+    final progress = widget.controller.pairingProgress;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1403,8 +1559,10 @@ class _PairingInspectorState extends State<_PairingInspector> {
               const Gap(AppSpacing.md),
               Expanded(
                 child: Text(
-                  widget.controller.locallyConfirmed &&
-                          ceremony.state == PairingState.awaitingConfirmation
+                  progress != null && progress.failed
+                      ? DevicePresentation.pairingOutcomeTitle(progress)
+                      : widget.controller.locallyConfirmed &&
+                            ceremony.state == PairingState.awaitingConfirmation
                       ? l10n.pairingWaitingForOtherDevice
                       : DevicePresentation.pairingStateTitle(ceremony.state),
                 ).h4(),
@@ -1486,6 +1644,18 @@ class _PairingInspectorState extends State<_PairingInspector> {
                 ),
               ],
             ),
+          ),
+        ],
+        if (widget.controller.pairingProgress case PairingProgress(
+          :final localDecision?,
+          :final peerDecision?,
+        )) ...[
+          const Gap(AppSpacing.lg),
+          PairingDecisions(
+            key: const ValueKey<String>('pairing-decisions'),
+            local: localDecision,
+            peer: peerDecision,
+            peerName: ceremony.peerName,
           ),
         ],
         if (widget.controller.errorMessage != null) ...[

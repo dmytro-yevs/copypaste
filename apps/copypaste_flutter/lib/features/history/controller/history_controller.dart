@@ -10,6 +10,7 @@ import '../repository/history_file_transfer.dart';
 import '../repository/history_repository.dart';
 import 'history_bulk_controller.dart';
 import 'history_errors.dart';
+import 'history_group_counts_controller.dart';
 import 'history_media_cache.dart';
 import 'history_mutation_controller.dart';
 import 'history_ocr_controller.dart';
@@ -29,6 +30,7 @@ class HistoryController extends ChangeNotifier {
     this._repository, {
     int pageSize = 50,
     bool includeFacets = true,
+    bool includeGroupCounts = false,
     bool separatePinnedWindow = false,
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
@@ -44,6 +46,10 @@ class HistoryController extends ChangeNotifier {
       spoilers: spoilers,
       tags: tags,
       media: media,
+      groupCounts: HistoryGroupCountsController(
+        _scope,
+        enabled: includeGroupCounts,
+      ),
       refresh: refresh,
       ensureWatch: _ensureWatch,
       pageSize: pageSize,

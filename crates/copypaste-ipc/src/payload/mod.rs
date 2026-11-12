@@ -126,6 +126,28 @@ pub struct HistoryFacets {
     pub tags: Vec<crate::HistoryTag>,
 }
 
+/// Most ranges one [`crate::Method::HistoryCounts`] request may name.
+pub const MAX_HISTORY_COUNT_RANGES: usize = 256;
+
+/// One group of unpinned clips a client displays: `[from_ms, before_ms)` in
+/// Unix milliseconds. The client owns the calendar and time-zone rules that
+/// produced the instants; the runtime only counts between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryCountRange {
+    pub from_ms: i64,
+    pub before_ms: i64,
+}
+
+/// Exact sizes of the groups a filtered History list shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryGroupCounts {
+    /// Pinned clips matching the query.
+    pub pinned: u64,
+    /// Unpinned clips matching the query in each requested range, in request
+    /// order.
+    pub ranges: Vec<u64>,
+}
+
 /// One page of history, and how much of it could not be shown.
 ///
 /// `skipped_undecryptable` is on the wire because the alternative
@@ -227,6 +249,24 @@ pub struct ExportData {
     /// Items whose `content_type` is not text.
     pub skipped_non_text: u32,
     pub skipped_undecryptable: u32,
+}
+
+/// One interim frame of [`crate::Method::ExportStream`]: the next exported
+/// items and how far the read has come.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportChunk {
+    pub items: Vec<ExportItem>,
+    pub progress: TransferProgress,
+}
+
+/// How far a streamed operation has come. `processed` never exceeds `total`.
+///
+/// Export counts live history rows, skipped ones included; backup counts
+/// database pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferProgress {
+    pub processed: u64,
+    pub total: u64,
 }
 
 /// What an import did.
@@ -650,6 +690,11 @@ pub struct Item {
 
     #[serde(default)]
     pub truncated: bool,
+
+    /// Line-feed separated lines of the whole trimmed text, so it holds when
+    /// `content` is a cut preview. Only textual, non-secret items carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<u32>,
 }
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::{dispatch_request, gate, parse};
+use super::dispatch::{dispatch_request, dispatch_stream, gate, parse};
 use super::messages::{MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
@@ -395,6 +395,27 @@ async fn handle_connection(
             };
             Some(admission)
         };
+
+        if request.method.streams_progress() {
+            let (frames, mut queued) = tokio::sync::mpsc::channel(1);
+            let work = dispatch_stream(&state, request, wire_lease, frames);
+            // A failed write drops `queued`, which abandons the operation; the
+            // join still waits for it to clean up before the connection closes.
+            let forward = async move {
+                while let Some(frame) = queued.recv().await {
+                    send(&mut writer, &frame).await?;
+                }
+                Ok::<_, ()>(writer)
+            };
+            let (response, forwarded) = tokio::join!(work, forward);
+            let Ok(returned) = forwarded else { return };
+            writer = returned;
+            if send(&mut writer, &response).await.is_err() {
+                break;
+            }
+            drop(admission);
+            continue;
+        }
 
         let is_interactive = super::dispatch::interactive(&request.method);
         let response = dispatch_request(&state, request, wire_lease).await;
@@ -1546,6 +1567,55 @@ mod tests {
         assert!(
             matches!(link.data, Some(ResponseData::DownloadedFile(Some(value))) if value == destination.to_string_lossy())
         );
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn a_streamed_export_arrives_as_ordered_chunks_then_its_summary() {
+        let (state, dir) = test_state("export-stream");
+        let body = "x".repeat(600 * 1024);
+        for n in 0..4 {
+            crate::testutil::add(&state, &format!("{n}{body}"));
+        }
+        let path = progress_socket_path(&dir);
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let mut abandoned = Client::new(transport::connect(&path).await.unwrap());
+        let first = abandoned.call(request(1, Method::ExportStream)).await;
+        assert!(matches!(first.data, Some(ResponseData::ExportChunk(_))));
+        drop(abandoned);
+
+        let mut client = Client::new(transport::connect(&path).await.unwrap());
+        let mut frame = client.call(request(2, Method::ExportStream)).await;
+        let mut chunks = Vec::new();
+        while let Some(ResponseData::ExportChunk(chunk)) = frame.data {
+            assert_eq!(frame.id, 2);
+            chunks.push(chunk);
+            frame = client.next_frame().await;
+        }
+        assert!(
+            matches!(frame.data, Some(ResponseData::Export(ref summary)) if summary.items.is_empty()),
+            "{frame:?}"
+        );
+        assert!(
+            chunks
+                .iter()
+                .filter(|chunk| !chunk.items.is_empty())
+                .count()
+                >= 2
+        );
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.items.len()).sum::<usize>(),
+            4
+        );
+        let last = chunks.last().unwrap().progress;
+        assert_eq!((last.processed, last.total), (4, 4));
+        assert!(client.call(request(3, Method::Status)).await.ok);
+
         shutdown_tx.send(true).unwrap();
         state.release_drain_listener();
         let _ = server.await;

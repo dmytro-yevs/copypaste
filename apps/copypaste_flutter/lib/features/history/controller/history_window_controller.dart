@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/history_models.dart';
 import 'history_controller.dart';
 import 'history_errors.dart';
+import 'history_group_counts_controller.dart';
 import 'history_media_cache.dart';
 import 'history_refresh_coordinator.dart';
 import 'history_resource_limits.dart';
@@ -38,6 +39,7 @@ class HistoryWindowController {
     required HistorySpoilerController spoilers,
     required HistoryTagsController tags,
     required HistoryMediaCache media,
+    required HistoryGroupCountsController groupCounts,
     required HistoryRefreshCoordinator refresh,
     required Future<void> Function() ensureWatch,
     required int pageSize,
@@ -48,6 +50,7 @@ class HistoryWindowController {
        _spoilers = spoilers,
        _tags = tags,
        _media = media,
+       _groupCounts = groupCounts,
        _refresh = refresh,
        _ensureWatch = ensureWatch,
        _pageRows = pageSize.clamp(1, HistoryResourceLimits.pageRows),
@@ -61,6 +64,7 @@ class HistoryWindowController {
   final HistorySpoilerController _spoilers;
   final HistoryTagsController _tags;
   final HistoryMediaCache _media;
+  final HistoryGroupCountsController _groupCounts;
   final HistoryRefreshCoordinator _refresh;
   final Future<void> Function() _ensureWatch;
   final int _pageRows;
@@ -222,6 +226,37 @@ class HistoryWindowController {
       !hasUnfilteredQuery || _query.sort != HistorySort.newest;
 
   bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
+
+  /// Exact sizes of the pinned group and of each displayed day, for the
+  /// current query. Null while unknown or when the query cannot be counted
+  /// exactly (text search, a kind filter, rows that failed to decrypt).
+  HistoryGroupCounts? get groupCounts => _groupCounts.counts;
+
+  /// Reports the groups resident pages display. A day reached only through an
+  /// evicted page has no header on screen and is not counted.
+  void _syncGroupCounts({bool historyChanged = false}) {
+    if (!_groupCounts.enabled) return;
+    final days = <DateTime>{};
+    var listed = false;
+    var exact = true;
+    for (final page in _window.pages) {
+      if (page.items == null) continue;
+      if (page.skippedUndecryptable > 0) exact = false;
+      for (var i = 0; i < page.ids.length; i++) {
+        listed = true;
+        if (page.pinnedIds.contains(page.ids[i])) continue;
+        final at = DateTime.fromMillisecondsSinceEpoch(page.createdAtMillis[i]);
+        days.add(DateTime(at.year, at.month, at.day));
+      }
+    }
+    _groupCounts.sync(
+      query: _query,
+      days: days.toList(growable: false),
+      listed: listed,
+      exact: exact,
+      historyChanged: historyChanged,
+    );
+  }
 
   void toggleSection(String key) {
     if (!_collapsedSections.add(key)) _collapsedSections.remove(key);
@@ -420,6 +455,7 @@ class HistoryWindowController {
       }
       _window.append(null, page);
       _replaceItems(List.of(page.items));
+      _syncGroupCounts(historyChanged: true);
       _history.bulk.prune();
       _nextCursor = page.nextCursor;
       _skippedUndecryptable = page.skippedUndecryptable;
@@ -576,6 +612,8 @@ class HistoryWindowController {
     final epoch = ++_queryEpoch;
     _isLoadingMore = false;
     _nextCursor = null;
+    // Counts are their own read, so they refresh beside the rows, not after.
+    _syncGroupCounts(historyChanged: true);
     var refreshed = false;
     await Future.wait([
       () async {
@@ -848,6 +886,7 @@ class HistoryWindowController {
         if (page.items != null) ...page.items!,
     ]);
     _nextCursor = _window.pages.isEmpty ? null : _window.pages.last.nextCursor;
+    _syncGroupCounts();
     afterWindowChange?.call();
   }
 
@@ -901,6 +940,8 @@ class HistoryWindowController {
   void removeClip(String id) {
     _mutateItems((items) => items.removeWhere((item) => item.id == id));
     _window.removeId(id);
+    // Counts must not wait for the history watch, which may be down.
+    _syncGroupCounts(historyChanged: true);
   }
 
   void updateEmptyState() {
@@ -910,6 +951,7 @@ class HistoryWindowController {
   void keepPinnedOnly() {
     _mutateItems((items) => items.removeWhere((item) => !item.pinned));
     _window.retainPinnedOnly();
+    _syncGroupCounts(historyChanged: true);
     _nextCursor = null;
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
   }
@@ -935,6 +977,7 @@ class HistoryWindowController {
     _replaceItems([]);
     _window.clear();
     _facets = const HistoryFacets();
+    _groupCounts.clear();
     _nextCursor = null;
     _isLoadingMore = false;
     _state = HistoryLoadState.initial;

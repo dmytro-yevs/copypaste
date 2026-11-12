@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../features/devices/device_presentation.dart';
@@ -11,10 +12,14 @@ class AppNavigationDestination {
   const AppNavigationDestination({
     required this.destination,
     required this.icon,
+    required this.shortcutKey,
   });
 
   final AppDestination destination;
   final IconData icon;
+
+  /// Pressed with the desktop command modifier to open the destination.
+  final LogicalKeyboardKey shortcutKey;
 
   String get label => switch (destination) {
     AppDestination.history => AppStrings.current.appDestinationHistory,
@@ -32,14 +37,17 @@ const List<AppNavigationDestination> appNavigationDestinations =
       AppNavigationDestination(
         destination: AppDestination.history,
         icon: LucideIcons.clipboardList,
+        shortcutKey: LogicalKeyboardKey.digit1,
       ),
       AppNavigationDestination(
         destination: AppDestination.devices,
         icon: DevicePresentation.collectionIcon,
+        shortcutKey: LogicalKeyboardKey.digit2,
       ),
       AppNavigationDestination(
         destination: AppDestination.settings,
         icon: LucideIcons.settings,
+        shortcutKey: LogicalKeyboardKey.digit3,
       ),
     ];
 

@@ -2,11 +2,15 @@ import 'package:copypaste_flutter/features/history/repository/history_file_impor
 import 'package:flutter/foundation.dart';
 
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
+import 'package:copypaste_flutter/shared/locale_case.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
@@ -330,6 +334,138 @@ void main() {
     expect(find.text('Pinned result'), findsNothing);
     expect(find.text('Today result'), findsOneWidget);
     expect(find.text('Older result'), findsOneWidget);
+  });
+
+  testWidgets('shows each group as a band with its label, date and state', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final semantics = tester.ensureSemantics();
+    final now = DateTime.now();
+    final controller = HistoryController(
+      _PinRepository([
+        _clip('Pinned clip', now, pinned: true),
+        _clip('Today clip', now),
+      ]),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pinned = find.byKey(const ValueKey<String>('history-section-pinned'));
+    final today = find.byKey(const ValueKey<String>('history-section-today'));
+    final date = DateFormat.MMMMEEEEd('en_US').format(now);
+    Finder inBand(Finder band, Finder matching) =>
+        find.descendant(of: band, matching: matching);
+    expect(inBand(pinned, find.text('PINNED')), findsOneWidget);
+    expect(inBand(pinned, find.byIcon(LucideIcons.pin)), findsOneWidget);
+    expect(inBand(today, find.text('TODAY')), findsOneWidget);
+    expect(inBand(today, find.text(date.toUpperCase())), findsOneWidget);
+    // The emphasised label and the quieter date differ in weight and colour.
+    final label = tester.widget<Text>(find.text('TODAY')).style!;
+    final detail = tester.widget<Text>(find.text(date.toUpperCase())).style!;
+    expect(label.fontWeight, isNot(detail.fontWeight));
+    expect(label.color, isNot(detail.color));
+    expect(label.letterSpacing, greaterThan(0));
+    expect(
+      tester.getSemantics(today),
+      isSemantics(
+        isHeader: true,
+        isButton: true,
+        hasExpandedState: true,
+        isExpanded: true,
+        hasTapAction: true,
+        label: 'Today, $date',
+      ),
+    );
+    // Keyboard focus is shown by the shared ring alone; the border stays put.
+    final context = tester.element(today);
+    final style = tester.widget<Button>(today).style;
+    BoxBorder? border(Set<WidgetState> states) =>
+        (style.decoration(context, states) as BoxDecoration).border;
+    expect(
+      border(const {}),
+      Border.all(color: Theme.of(context).colorScheme.border),
+    );
+    expect(border(const {WidgetState.focused}), border(const {}));
+    expect(tester.widget<Button>(today).disableFocusOutline, isFalse);
+
+    await tester.tap(today);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Today clip'), findsNothing);
+    expect(find.text('Pinned clip'), findsOneWidget);
+    expect(
+      inBand(today, find.byIcon(LucideIcons.chevronRight)),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSemantics(today),
+      isSemantics(isHeader: true, isExpanded: false),
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('keeps a localized band inside a phone at double text size', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    const locale = Locale('tr');
+    final now = DateTime.now();
+    final controller = HistoryController(
+      _PinRepository([
+        _clip('Pinned clip', now, pinned: true),
+        _clip('Today clip', now),
+      ]),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        locale: locale,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Turkish keeps its dotted capital; caseless scripts stay as written.
+    expect(toLocaleUpperCase('ilk ışık', locale), 'İLK IŞIK');
+    expect(toLocaleUpperCase('今日', const Locale('ja')), '今日');
+    expect(find.text('SABİTLENENLER'), findsOneWidget);
+    expect(find.text('BUGÜN'), findsOneWidget);
+    expect(
+      find.text(
+        toLocaleUpperCase(DateFormat.MMMMEEEEd('tr').format(now), locale),
+      ),
+      findsOneWidget,
+    );
+    for (final key in ['history-section-pinned', 'history-section-today']) {
+      final band = find.byKey(ValueKey<String>(key));
+      final chevron = tester.getRect(
+        find.descendant(
+          of: band,
+          matching: find.byIcon(LucideIcons.chevronDown),
+        ),
+      );
+      expect(chevron.right, lessThan(tester.getRect(band).right));
+      expect(chevron.width, AppIconSize.sm);
+    }
+    expect(tester.takeException(), isNull);
   });
 }
 
