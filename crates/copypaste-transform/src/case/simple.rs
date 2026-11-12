@@ -1,7 +1,6 @@
 //! UPPERCASE, lowercase and swap case: full Unicode mappings whose output
 //! length may differ from the input (`ß` → `SS`).
 
-use icu_casemap::CaseMapper;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::catalogue::{Category, Context, Flags, Output, TransformDef};
@@ -20,6 +19,7 @@ pub(super) static UPPER: TransformDef = TransformDef {
     category: Category::Case,
     params: &LOCALE,
     flags: Flags::PLAIN,
+    modifier: Some("upper"),
     example: ("Straße", "STRASSE"),
     run: run_upper,
 };
@@ -30,6 +30,7 @@ pub(super) static LOWER: TransformDef = TransformDef {
     category: Category::Case,
     params: &LOCALE,
     flags: Flags::PLAIN,
+    modifier: Some("lower"),
     example: ("ΟΔΟΣ Hello", "οδο\u{3c2} hello"),
     run: run_lower,
 };
@@ -40,6 +41,7 @@ pub(super) static SWAP: TransformDef = TransformDef {
     category: Category::Case,
     params: &[],
     flags: Flags::PLAIN,
+    modifier: Some("swap"),
     example: ("Hello World", "hELLO wORLD"),
     run: run_swap,
 };
@@ -54,21 +56,17 @@ fn device_locale<'c>(params: &Params, ctx: &'c Context) -> Option<&'c str> {
 }
 
 fn run_upper(input: &str, params: &Params, ctx: &Context) -> Result<Output, TransformError> {
-    let mapper = CaseMapper::new();
-    let text = match device_locale(params, ctx).and_then(|tag| tag.parse().ok()) {
-        Some(language) => mapper.uppercase_to_string(input, &language),
-        None => mapper.uppercase_to_string(input, &Default::default()),
-    };
-    Ok(Output::new(text.into_owned()))
+    Ok(Output::new(super::upper_in(
+        input,
+        device_locale(params, ctx),
+    )))
 }
 
 fn run_lower(input: &str, params: &Params, ctx: &Context) -> Result<Output, TransformError> {
-    let mapper = CaseMapper::new();
-    let text = match device_locale(params, ctx).and_then(|tag| tag.parse().ok()) {
-        Some(language) => mapper.lowercase_to_string(input, &language),
-        None => mapper.lowercase_to_string(input, &Default::default()),
-    };
-    Ok(Output::new(text.into_owned()))
+    Ok(Output::new(super::lower_in(
+        input,
+        device_locale(params, ctx),
+    )))
 }
 
 /// Swaps the case of each grapheme cluster by its first character, so

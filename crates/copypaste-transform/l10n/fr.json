@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "MAJUSCULES",
+      "description": "Met toutes les lettres en majuscules selon les règles Unicode complètes.",
+      "params": {
+        "locale": {
+          "label": "Règles de langue",
+          "options": {
+            "invariant": "Neutre",
+            "system": "Langue de l’appareil"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "minuscules",
+      "description": "Met toutes les lettres en minuscules selon les règles Unicode complètes.",
+      "params": {
+        "locale": {
+          "label": "Règles de langue",
+          "options": {
+            "invariant": "Neutre",
+            "system": "Langue de l’appareil"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Casse de titre",
+      "description": "Met une majuscule aux mots ; le style titre laisse les petits mots en minuscules.",
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "headline": "Titre",
+            "all_words": "Chaque mot"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Casse de phrase",
+      "description": "Met une majuscule au premier mot de chaque phrase et le reste en minuscules.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Assemble les mots en un identifiant commençant par une minuscule.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Assemble les mots en un identifiant où chaque mot prend une majuscule.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        },
+        "keep_acronyms": {
+          "label": "Conserver les sigles"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Relie les mots en minuscules par des tirets bas.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Relie les mots en minuscules par des traits d’union.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Relie les mots en majuscules par des tirets bas.",
+      "params": {
+        "per_line": {
+          "label": "Chaque ligne séparément"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Inverser la casse",
+      "description": "Passe les majuscules en minuscules et les minuscules en majuscules."
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Rogner",
+      "description": "Supprime les espaces et sauts de ligne au début et à la fin du texte."
+    },
+    "lines.trim_each": {
+      "name": "Rogner chaque ligne",
+      "description": "Supprime les espaces au début, à la fin ou des deux côtés de chaque ligne.",
+      "params": {
+        "sides": {
+          "label": "Côtés",
+          "options": {
+            "both": "Les deux",
+            "start": "Début",
+            "end": "Fin"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Réduire les espaces",
+      "description": "Remplace les suites d’espaces et de tabulations par un seul espace.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Conserver les sauts de ligne"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Supprimer les lignes vides",
+      "description": "Supprime les lignes vides ou ne contenant que des espaces.",
+      "params": {
+        "whitespace_only": {
+          "label": "Les lignes d’espaces comptent comme vides"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Trier les lignes",
+      "description": "Trie les lignes par ordre alphabétique, naturel, numérique ou par longueur.",
+      "params": {
+        "order": {
+          "label": "Ordre",
+          "options": {
+            "asc": "A à Z",
+            "desc": "Z à A"
+          }
+        },
+        "mode": {
+          "label": "Comparaison",
+          "options": {
+            "natural": "Naturel",
+            "code_point": "Point de code",
+            "case_insensitive": "Ignorer la casse",
+            "numeric": "Numérique",
+            "length": "Longueur"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Supprimer les lignes en double",
+      "description": "Garde la première occurrence de chaque ligne dans l’ordre d’origine.",
+      "params": {
+        "case_sensitive": {
+          "label": "Respecter la casse"
+        },
+        "compare_trimmed": {
+          "label": "Ignorer les espaces autour"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Inverser les lignes",
+      "description": "Inverse l’ordre des lignes."
+    },
+    "lines.join": {
+      "name": "Joindre les lignes",
+      "description": "Réunit toutes les lignes en une seule avec un séparateur.",
+      "params": {
+        "separator": {
+          "label": "Séparateur",
+          "options": {
+            "space": "Espace",
+            "comma": "Virgule",
+            "none": "Aucun",
+            "custom": "Personnalisé"
+          }
+        },
+        "custom_separator": {
+          "label": "Séparateur personnalisé"
+        },
+        "drop_empty": {
+          "label": "Ignorer les lignes vides"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Déplier les paragraphes",
+      "description": "Rejoint les lignes coupées à l’intérieur des paragraphes, comme dans un texte copié d’un PDF.",
+      "params": {
+        "dehyphenate": {
+          "label": "Recoller les mots coupés"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Préfixer les lignes",
+      "description": "Ajoute une puce, un numéro, un signe de citation ou un texte personnalisé à chaque ligne.",
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "dash": "Tiret",
+            "asterisk": "Astérisque",
+            "number": "Numéros",
+            "quote": "Citation",
+            "custom": "Personnalisé"
+          }
+        },
+        "custom_prefix": {
+          "label": "Préfixe personnalisé"
+        },
+        "skip_empty": {
+          "label": "Ignorer les lignes vides"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Supprimer les caractères invisibles",
+      "description": "Supprime les caractères de largeur nulle, bidi et traits d’union conditionnels, et remplace les espaces insécables."
+    },
+    "clean.quotes": {
+      "name": "Redresser les guillemets",
+      "description": "Remplace les guillemets typographiques par des droits et, en option, les tirets par des traits d’union.",
+      "params": {
+        "dashes": {
+          "label": "Redresser aussi les tirets"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

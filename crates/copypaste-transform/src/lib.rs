@@ -33,7 +33,7 @@ pub use catalogue::{
     Output, ParamInfo, Step, TransformDef, TransformInfo, LOCALES,
 };
 pub use counts::{counts, preview_prefix, Counts};
-pub use detect::{detect, DetectOptions, Detector, Suggestion};
+pub use detect::{detect, DetectOptions, Detector, Suggestion, MAX_SUGGESTIONS};
 pub use error::{Location, ParamIssue, TransformError, Warning};
 pub use modifiers::{apply_modifier, modifiers, Modifier};
 pub use params::{ParamKind, ParamSpec, Params, MAX_TEXT_PARAM_BYTES};

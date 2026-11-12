@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "大写",
+      "description": "按完整的 Unicode 规则将所有字母转换为大写。",
+      "params": {
+        "locale": {
+          "label": "语言规则",
+          "options": {
+            "invariant": "与语言无关",
+            "system": "设备语言"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "小写",
+      "description": "按完整的 Unicode 规则将所有字母转换为小写。",
+      "params": {
+        "locale": {
+          "label": "语言规则",
+          "options": {
+            "invariant": "与语言无关",
+            "system": "设备语言"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "标题格式",
+      "description": "将单词首字母大写；标题样式会让短词保持小写。",
+      "params": {
+        "style": {
+          "label": "样式",
+          "options": {
+            "headline": "标题",
+            "all_words": "每个单词"
+          }
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "句子格式",
+      "description": "将每个句子的第一个词首字母大写，其余转为小写。",
+      "params": {
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "将单词连接成以小写开头的标识符。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "将单词连接成每个词首字母大写的标识符。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "用下划线连接小写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "用连字符连接小写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "用下划线连接大写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "大小写互换",
+      "description": "将大写字母变为小写，小写字母变为大写。"
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "去除首尾空白",
+      "description": "删除文本开头和结尾的空格和换行。"
+    },
+    "lines.trim_each": {
+      "name": "去除每行空白",
+      "description": "删除每行开头、结尾或两侧的空格。",
+      "params": {
+        "sides": {
+          "label": "位置",
+          "options": {
+            "both": "两侧",
+            "start": "开头",
+            "end": "结尾"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "合并空白",
+      "description": "将连续的空格和制表符变为一个空格。",
+      "params": {
+        "keep_line_breaks": {
+          "label": "保留换行"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "删除空行",
+      "description": "删除空行或只含空格的行。",
+      "params": {
+        "whitespace_only": {
+          "label": "只含空白的行视为空行"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "排序行",
+      "description": "按字母、自然、数值或长度对行排序。",
+      "params": {
+        "order": {
+          "label": "顺序",
+          "options": {
+            "asc": "升序",
+            "desc": "降序"
+          }
+        },
+        "mode": {
+          "label": "比较方式",
+          "options": {
+            "natural": "自然顺序",
+            "code_point": "码位",
+            "case_insensitive": "忽略大小写",
+            "numeric": "数值",
+            "length": "长度"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "删除重复行",
+      "description": "按原顺序保留每行的首次出现。",
+      "params": {
+        "case_sensitive": {
+          "label": "区分大小写"
+        },
+        "compare_trimmed": {
+          "label": "忽略首尾空格"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "反转行顺序",
+      "description": "将行按相反顺序排列。"
+    },
+    "lines.join": {
+      "name": "合并行",
+      "description": "用分隔符将所有行合并为一行。",
+      "params": {
+        "separator": {
+          "label": "分隔符",
+          "options": {
+            "space": "空格",
+            "comma": "逗号",
+            "none": "无",
+            "custom": "自定义"
+          }
+        },
+        "custom_separator": {
+          "label": "自定义分隔符"
+        },
+        "drop_empty": {
+          "label": "跳过空行"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "解除段落换行",
+      "description": "连接段落内被强制换行的行，例如从 PDF 复制的文本。",
+      "params": {
+        "dehyphenate": {
+          "label": "合并被连字符拆开的单词"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "添加行前缀",
+      "description": "在每行前添加项目符号、编号、引用符号或自定义文本。",
+      "params": {
+        "style": {
+          "label": "样式",
+          "options": {
+            "dash": "短横线",
+            "asterisk": "星号",
+            "number": "编号",
+            "quote": "引用",
+            "custom": "自定义"
+          }
+        },
+        "custom_prefix": {
+          "label": "自定义前缀"
+        },
+        "skip_empty": {
+          "label": "跳过空行"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "删除不可见字符",
+      "description": "删除零宽字符、双向控制字符和软连字符，并将不换行空格替换为普通空格。"
+    },
+    "clean.quotes": {
+      "name": "拉直引号",
+      "description": "将弯引号替换为直引号，并可选择将破折号替换为连字符。",
+      "params": {
+        "dashes": {
+          "label": "同时拉直破折号"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

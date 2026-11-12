@@ -1,0 +1,272 @@
+[
+  {
+    "transform": "case.upper",
+    "input": "straße",
+    "output": "STRASSE"
+  },
+  {
+    "transform": "case.upper",
+    "input": "hello, world 42",
+    "output": "HELLO, WORLD 42"
+  },
+  {
+    "transform": "case.upper",
+    "input": "istanbul",
+    "output": "ISTANBUL"
+  },
+  {
+    "transform": "case.upper",
+    "params": {
+      "locale": "system"
+    },
+    "locale": "tr-TR",
+    "input": "istanbul",
+    "output": "İSTANBUL"
+  },
+  {
+    "transform": "case.upper",
+    "params": {
+      "locale": "system"
+    },
+    "input": "istanbul",
+    "output": "ISTANBUL"
+  },
+  {
+    "transform": "case.upper",
+    "input": "ﬁne ǆungla",
+    "output": "FINE ǄUNGLA"
+  },
+  {
+    "transform": "case.upper",
+    "params": {
+      "locale": "klingon"
+    },
+    "input": "x",
+    "error": "invalid_param"
+  },
+  {
+    "transform": "case.lower",
+    "input": "ΟΔΟΣ",
+    "output": "οδος"
+  },
+  {
+    "transform": "case.lower",
+    "input": "HELLO World",
+    "output": "hello world"
+  },
+  {
+    "transform": "case.lower",
+    "params": {
+      "locale": "system"
+    },
+    "locale": "tr",
+    "input": "KIŞ",
+    "output": "kış"
+  },
+  {
+    "transform": "case.lower",
+    "input": "Ǆ",
+    "output": "ǆ"
+  },
+  {
+    "transform": "case.title",
+    "input": "don't stop",
+    "output": "Don't Stop"
+  },
+  {
+    "transform": "case.title",
+    "input": "the lord of the rings",
+    "output": "The Lord of the Rings"
+  },
+  {
+    "transform": "case.title",
+    "params": {
+      "style": "all_words"
+    },
+    "input": "the lord of the rings",
+    "output": "The Lord Of The Rings"
+  },
+  {
+    "transform": "case.title",
+    "input": "the NASA report",
+    "output": "The NASA Report"
+  },
+  {
+    "transform": "case.title",
+    "params": {
+      "keep_acronyms": false
+    },
+    "input": "the NASA report",
+    "output": "The Nasa Report"
+  },
+  {
+    "transform": "case.title",
+    "input": "HELLO WORLD",
+    "output": "Hello World"
+  },
+  {
+    "transform": "case.title",
+    "input": "war: the story of us",
+    "output": "War: The Story of Us"
+  },
+  {
+    "transform": "case.title",
+    "input": "a tale\nof two cities\n",
+    "output": "A Tale\nOf Two Cities\n"
+  },
+  {
+    "transform": "case.title",
+    "input": "élan vital",
+    "output": "Élan Vital"
+  },
+  {
+    "transform": "case.sentence",
+    "input": "hello WORLD. how are you?",
+    "output": "Hello WORLD. How are you?"
+  },
+  {
+    "transform": "case.sentence",
+    "params": {
+      "keep_acronyms": false
+    },
+    "input": "hello WORLD. how are you?",
+    "output": "Hello world. How are you?"
+  },
+  {
+    "transform": "case.sentence",
+    "input": "first line\nsecond LINE here",
+    "output": "First line\nSecond LINE here"
+  },
+  {
+    "transform": "case.sentence",
+    "input": "wait! really? yes",
+    "output": "Wait! Really? Yes"
+  },
+  {
+    "transform": "case.camel",
+    "input": "user account ID",
+    "output": "userAccountId"
+  },
+  {
+    "transform": "case.camel",
+    "input": "XMLHttpRequest",
+    "output": "xmlHttpRequest"
+  },
+  {
+    "transform": "case.camel",
+    "params": {
+      "keep_acronyms": true
+    },
+    "input": "user id",
+    "output": "userID"
+  },
+  {
+    "transform": "case.camel",
+    "input": "hello world\nfoo bar",
+    "output": "helloWorld\nfooBar"
+  },
+  {
+    "transform": "case.camel",
+    "params": {
+      "per_line": false
+    },
+    "input": "hello world\nfoo bar",
+    "output": "helloWorldFooBar"
+  },
+  {
+    "transform": "case.pascal",
+    "input": "user id",
+    "output": "UserId"
+  },
+  {
+    "transform": "case.pascal",
+    "params": {
+      "keep_acronyms": true
+    },
+    "input": "user id",
+    "output": "UserID"
+  },
+  {
+    "transform": "case.pascal",
+    "input": "parse_url_2_text",
+    "output": "ParseUrl2Text"
+  },
+  {
+    "transform": "case.pascal",
+    "params": {
+      "keep_acronyms": true
+    },
+    "input": "parseURL2Text",
+    "output": "ParseURL2Text"
+  },
+  {
+    "transform": "case.snake",
+    "input": "parseHTTPResponse2XX",
+    "output": "parse_http_response2_xx"
+  },
+  {
+    "transform": "case.snake",
+    "input": "Hello World",
+    "output": "hello_world"
+  },
+  {
+    "transform": "case.snake",
+    "input": "  --foo--bar  ",
+    "output": "foo_bar"
+  },
+  {
+    "transform": "case.snake",
+    "input": "東京 タワー",
+    "output": "東京_タワー"
+  },
+  {
+    "transform": "case.snake",
+    "input": "café Noir",
+    "output": "café_noir"
+  },
+  {
+    "transform": "case.snake",
+    "input": "2fast 4you",
+    "output": "2_fast_4_you"
+  },
+  {
+    "transform": "case.kebab",
+    "input": "Hello World Again",
+    "output": "hello-world-again"
+  },
+  {
+    "transform": "case.kebab",
+    "input": "fooBar_baz",
+    "output": "foo-bar-baz"
+  },
+  {
+    "transform": "case.kebab",
+    "input": "Foo Bar\r\nBaz Qux\r\n",
+    "output": "foo-bar\r\nbaz-qux\r\n"
+  },
+  {
+    "transform": "case.constant",
+    "input": "maxRetryCount",
+    "output": "MAX_RETRY_COUNT"
+  },
+  {
+    "transform": "case.constant",
+    "input": "straße weg",
+    "output": "STRASSE_WEG"
+  },
+  {
+    "transform": "case.swap",
+    "input": "Hello World",
+    "output": "hELLO wORLD"
+  },
+  {
+    "transform": "case.swap",
+    "input": "👩\u200d💻 Ab 🇺🇦 👨\u200d👩\u200d👧",
+    "output": "👩\u200d💻 aB 🇺🇦 👨\u200d👩\u200d👧"
+  },
+  {
+    "transform": "case.swap",
+    "input": "ß",
+    "output": "SS"
+  }
+]

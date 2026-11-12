@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "MAIUSCOLO",
+      "description": "Converte tutte le lettere in maiuscolo con le regole Unicode complete.",
+      "params": {
+        "locale": {
+          "label": "Regole della lingua",
+          "options": {
+            "invariant": "Neutrale",
+            "system": "Lingua del dispositivo"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "minuscolo",
+      "description": "Converte tutte le lettere in minuscolo con le regole Unicode complete.",
+      "params": {
+        "locale": {
+          "label": "Regole della lingua",
+          "options": {
+            "invariant": "Neutrale",
+            "system": "Lingua del dispositivo"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Stile titolo",
+      "description": "Mette in maiuscolo le parole; lo stile titolo lascia minuscole le parole brevi.",
+      "params": {
+        "style": {
+          "label": "Stile",
+          "options": {
+            "headline": "Titolo",
+            "all_words": "Ogni parola"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Mantieni le sigle"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Stile frase",
+      "description": "Mette in maiuscolo la prima parola di ogni frase e il resto in minuscolo.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Mantieni le sigle"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Unisce le parole in un identificatore che inizia in minuscolo.",
+      "params": {
+        "per_line": {
+          "label": "Ogni riga separatamente"
+        },
+        "keep_acronyms": {
+          "label": "Mantieni le sigle"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Unisce le parole in un identificatore con ogni parola maiuscola.",
+      "params": {
+        "per_line": {
+          "label": "Ogni riga separatamente"
+        },
+        "keep_acronyms": {
+          "label": "Mantieni le sigle"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Unisce parole minuscole con trattini bassi.",
+      "params": {
+        "per_line": {
+          "label": "Ogni riga separatamente"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Unisce parole minuscole con trattini.",
+      "params": {
+        "per_line": {
+          "label": "Ogni riga separatamente"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Unisce parole maiuscole con trattini bassi.",
+      "params": {
+        "per_line": {
+          "label": "Ogni riga separatamente"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Inverti maiuscole",
+      "description": "Rende minuscole le maiuscole e maiuscole le minuscole."
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Rifila",
+      "description": "Rimuove spazi e a capo all’inizio e alla fine del testo."
+    },
+    "lines.trim_each": {
+      "name": "Rifila ogni riga",
+      "description": "Rimuove gli spazi all’inizio, alla fine o su entrambi i lati di ogni riga.",
+      "params": {
+        "sides": {
+          "label": "Lati",
+          "options": {
+            "both": "Entrambi",
+            "start": "Inizio",
+            "end": "Fine"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Comprimi spazi",
+      "description": "Trasforma sequenze di spazi e tabulazioni in un solo spazio.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Mantieni gli a capo"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Rimuovi righe vuote",
+      "description": "Elimina le righe vuote o con soli spazi.",
+      "params": {
+        "whitespace_only": {
+          "label": "Righe di soli spazi contano come vuote"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Ordina righe",
+      "description": "Ordina le righe in modo alfabetico, naturale, numerico o per lunghezza.",
+      "params": {
+        "order": {
+          "label": "Ordine",
+          "options": {
+            "asc": "Da A a Z",
+            "desc": "Da Z ad A"
+          }
+        },
+        "mode": {
+          "label": "Confronto",
+          "options": {
+            "natural": "Naturale",
+            "code_point": "Punto di codice",
+            "case_insensitive": "Ignora maiuscole",
+            "numeric": "Numerico",
+            "length": "Lunghezza"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Rimuovi righe duplicate",
+      "description": "Mantiene la prima occorrenza di ogni riga nell’ordine originale.",
+      "params": {
+        "case_sensitive": {
+          "label": "Distingui maiuscole"
+        },
+        "compare_trimmed": {
+          "label": "Ignora gli spazi attorno"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Inverti righe",
+      "description": "Mette le righe in ordine inverso."
+    },
+    "lines.join": {
+      "name": "Unisci righe",
+      "description": "Combina tutte le righe in una con un separatore.",
+      "params": {
+        "separator": {
+          "label": "Separatore",
+          "options": {
+            "space": "Spazio",
+            "comma": "Virgola",
+            "none": "Nessuno",
+            "custom": "Personalizzato"
+          }
+        },
+        "custom_separator": {
+          "label": "Separatore personalizzato"
+        },
+        "drop_empty": {
+          "label": "Salta le righe vuote"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Ricomponi paragrafi",
+      "description": "Unisce le righe spezzate nei paragrafi, come nel testo copiato da PDF.",
+      "params": {
+        "dehyphenate": {
+          "label": "Riunisci le parole sillabate"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Prefissa righe",
+      "description": "Aggiunge un punto elenco, un numero, un segno di citazione o un testo personalizzato a ogni riga.",
+      "params": {
+        "style": {
+          "label": "Stile",
+          "options": {
+            "dash": "Trattino",
+            "asterisk": "Asterisco",
+            "number": "Numeri",
+            "quote": "Citazione",
+            "custom": "Personalizzato"
+          }
+        },
+        "custom_prefix": {
+          "label": "Prefisso personalizzato"
+        },
+        "skip_empty": {
+          "label": "Salta le righe vuote"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Rimuovi caratteri invisibili",
+      "description": "Elimina caratteri a larghezza zero, bidi e trattini morbidi e sostituisce gli spazi unificatori."
+    },
+    "clean.quotes": {
+      "name": "Raddrizza virgolette",
+      "description": "Sostituisce le virgolette tipografiche con quelle dritte e, se scelto, le lineette con trattini.",
+      "params": {
+        "dashes": {
+          "label": "Raddrizza anche le lineette"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

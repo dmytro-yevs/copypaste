@@ -87,6 +87,10 @@ pub struct TransformDef {
     pub(crate) category: Category,
     pub(crate) params: &'static [ParamSpec],
     pub(crate) flags: Flags,
+    /// Name under which templates use this transform as `| name`, run with
+    /// default parameters. Only deterministic transforms without free-text
+    /// parameters get one.
+    pub(crate) modifier: Option<&'static str>,
     /// Worked example `(input, output)` with default parameters.
     pub(crate) example: (&'static str, &'static str),
     pub(crate) run: Runner,
@@ -111,6 +115,10 @@ impl TransformDef {
 
     pub fn flags(&self) -> Flags {
         self.flags
+    }
+
+    pub fn modifier(&self) -> Option<&'static str> {
+        self.modifier
     }
 
     pub fn example(&self) -> (&'static str, &'static str) {
@@ -139,6 +147,14 @@ impl Catalogue {
         debug_assert!(
             def.id.starts_with(def.category.key()),
             "transform {} is outside its category",
+            def.id
+        );
+        debug_assert!(
+            def.modifier.is_none()
+                || (def.flags.deterministic
+                    && !def.flags.needs_free_text
+                    && !def.flags.always_sensitive),
+            "transform {} cannot be a template modifier",
             def.id
         );
         self.defs.push(def);
@@ -239,7 +255,7 @@ impl<'a> Context<'a> {
 
     /// [`Self::check`] once every 1,024 iterations of a loop.
     pub fn tick(&self, iteration: usize) -> Result<(), TransformError> {
-        if iteration % 1024 == 0 {
+        if iteration.is_multiple_of(1024) {
             self.check()
         } else {
             Ok(())
@@ -434,6 +450,8 @@ pub struct TransformInfo {
     pub example_out: &'static str,
     pub params: Vec<ParamInfo>,
     pub flags: Flags,
+    /// Template modifier name, if the transform has one.
+    pub modifier: Option<&'static str>,
 }
 
 /// The localized catalogue for a BCP 47 `locale`, falling back to English
@@ -482,6 +500,7 @@ fn info(def: &TransformDef, local: Option<&EntryText>, en: Option<&EntryText>) -
             .map(|spec| param_info(spec, local, en))
             .collect(),
         flags: def.flags,
+        modifier: def.modifier,
     }
 }
 

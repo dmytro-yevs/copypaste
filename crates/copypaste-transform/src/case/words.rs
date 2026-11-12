@@ -26,6 +26,7 @@ pub(super) static TITLE: TransformDef = TransformDef {
     category: Category::Case,
     params: &TITLE_PARAMS,
     flags: Flags::PLAIN,
+    modifier: Some("title"),
     example: ("the lord of the rings", "The Lord of the Rings"),
     run: run_title,
 };
@@ -36,6 +37,7 @@ pub(super) static SENTENCE: TransformDef = TransformDef {
     category: Category::Case,
     params: &SENTENCE_PARAMS,
     flags: Flags::PLAIN,
+    modifier: Some("sentence"),
     example: ("hello WORLD. how are you?", "Hello WORLD. How are you?"),
     run: run_sentence,
 };
