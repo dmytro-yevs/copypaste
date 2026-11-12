@@ -42,6 +42,7 @@ impl Runtime {
             SnippetOp::Render { .. } | SnippetOp::Lint { .. } => render::handle(self, id, op),
             SnippetOp::Release => {
                 render::release();
+                transfer::release(self);
                 Response::ok(id, ResponseData::Empty {})
             }
             SnippetOp::Use { .. } => usage::handle(self, id, op),

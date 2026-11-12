@@ -501,7 +501,13 @@ fn publish_copies(tx: &Connection, key: &ItemKey) -> Result<usize, StoreError> {
     Ok(published)
 }
 
-fn save(tx: &Connection, key: &ItemKey, draft: &SnippetDraft) -> Result<String, SnippetError> {
+/// Saves `draft`; a new snippet takes `new_id` unless some snippet ever had it.
+fn save(
+    tx: &Connection,
+    key: &ItemKey,
+    draft: &SnippetDraft,
+    new_id: Option<&str>,
+) -> Result<String, SnippetError> {
     let title = draft.title.trim();
     if !single_line(title, MAX_TITLE_CHARS) {
         return Err(SnippetError::InvalidTitle);
@@ -529,10 +535,11 @@ fn save(tx: &Connection, key: &ItemKey, draft: &SnippetDraft) -> Result<String, 
     if let Some(collection_id) = &draft.collection_id {
         live_collection(tx, collection_id)?;
     }
-    let id = existing.as_ref().map_or_else(
-        || uuid::Uuid::new_v4().to_string(),
-        |existing| existing.id.clone(),
-    );
+    let id = match (&existing, new_id) {
+        (Some(existing), _) => existing.id.clone(),
+        (None, Some(wanted)) if !snippet_known(tx, wanted)? => wanted.to_owned(),
+        (None, _) => uuid::Uuid::new_v4().to_string(),
+    };
     check_abbreviation(
         tx,
         &id,
@@ -627,6 +634,16 @@ fn snippet_total(conn: &Connection) -> Result<usize, StoreError> {
     )
 }
 
+/// Whether any snippet, purged ones included, ever had this id.
+fn snippet_known(conn: &Connection, id: &str) -> Result<bool, StoreError> {
+    Ok(record(conn, id)?.is_some()
+        || conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM snippets WHERE id=?1)",
+            [id],
+            |r| r.get(0),
+        )?)
+}
+
 /// Non-purged template snippets other than `except` whose body mentions
 /// `needle`; the caller's parser decides which of them really reference it.
 fn reference_candidates(
@@ -675,6 +692,71 @@ fn move_to(
             ..record
         },
     )
+}
+
+/// Creates or renames a collection; a new one takes `new_id` when unused.
+fn save_collection(
+    tx: &Connection,
+    key: &ItemKey,
+    draft: &CollectionDraft,
+    new_id: Option<&str>,
+) -> Result<String, SnippetError> {
+    let name = draft.name.trim();
+    if name.is_empty()
+        || !single_line(name, MAX_COLLECTION_NAME_CHARS)
+        || draft.icon.trim().is_empty()
+        || !single_line(&draft.icon, MAX_COLLECTION_STYLE_CHARS)
+        || draft.accent.trim().is_empty()
+        || !single_line(&draft.accent, MAX_COLLECTION_STYLE_CHARS)
+    {
+        return Err(SnippetError::InvalidCollection);
+    }
+    let existing = match &draft.id {
+        Some(id) => Some(live_collection(tx, id)?),
+        None => None,
+    };
+    let live: Vec<(String, String)> = tx
+        .prepare("SELECT id,name FROM snippet_collections WHERE deleted_at IS NULL")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let folded = abbreviation::normalize(name);
+    if let Some((collection_id, _)) = live.iter().find(|(id, other)| {
+        Some(id) != draft.id.as_ref() && abbreviation::normalize(other) == folded
+    }) {
+        return Err(SnippetError::CollectionNameTaken {
+            collection_id: collection_id.clone(),
+        });
+    }
+    if existing.is_none() && live.len() >= MAX_COLLECTIONS {
+        return Err(SnippetError::LimitReached);
+    }
+    let (id, order_key) = match existing {
+        Some(existing) => (existing.id, existing.order_key),
+        None => {
+            let last: Option<String> =
+                tx.query_row("SELECT MAX(order_key) FROM snippet_collections", [], |r| {
+                    r.get(0)
+                })?;
+            let id = match new_id {
+                Some(wanted) if collection(tx, wanted)?.is_none() => wanted.to_owned(),
+                _ => uuid::Uuid::new_v4().to_string(),
+            };
+            (id, order_key_between(last.as_deref(), None))
+        }
+    };
+    organization::write(
+        tx,
+        key,
+        Record::SnippetCollection(SnippetCollectionRecord {
+            id: id.clone(),
+            name: name.to_owned(),
+            icon: draft.icon.trim().to_owned(),
+            accent: draft.accent.trim().to_owned(),
+            order_key,
+            deleted_at: None,
+        }),
+    )?;
+    Ok(id)
 }
 
 impl Store {
@@ -773,7 +855,7 @@ impl Store {
         key: &ItemKey,
         draft: &SnippetDraft,
     ) -> Result<SnippetDetail, SnippetError> {
-        let id = self.snippet_write(|tx| save(tx, key, draft))?;
+        let id = self.snippet_write(|tx| save(tx, key, draft, None))?;
         self.snippet(&id)?.ok_or(SnippetError::NotFound)
     }
 
@@ -1042,63 +1124,7 @@ impl Store {
         key: &ItemKey,
         draft: &CollectionDraft,
     ) -> Result<SnippetCollection, SnippetError> {
-        let id = self.snippet_write(|tx| {
-            let name = draft.name.trim();
-            if name.is_empty()
-                || !single_line(name, MAX_COLLECTION_NAME_CHARS)
-                || draft.icon.trim().is_empty()
-                || !single_line(&draft.icon, MAX_COLLECTION_STYLE_CHARS)
-                || draft.accent.trim().is_empty()
-                || !single_line(&draft.accent, MAX_COLLECTION_STYLE_CHARS)
-            {
-                return Err(SnippetError::InvalidCollection);
-            }
-            let existing = match &draft.id {
-                Some(id) => Some(live_collection(tx, id)?),
-                None => None,
-            };
-            let live: Vec<(String, String)> = tx
-                .prepare("SELECT id,name FROM snippet_collections WHERE deleted_at IS NULL")?
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<rusqlite::Result<_>>()?;
-            let folded = abbreviation::normalize(name);
-            if let Some((collection_id, _)) = live.iter().find(|(id, other)| {
-                Some(id) != draft.id.as_ref() && abbreviation::normalize(other) == folded
-            }) {
-                return Err(SnippetError::CollectionNameTaken {
-                    collection_id: collection_id.clone(),
-                });
-            }
-            if existing.is_none() && live.len() >= MAX_COLLECTIONS {
-                return Err(SnippetError::LimitReached);
-            }
-            let (id, order_key) = match existing {
-                Some(existing) => (existing.id, existing.order_key),
-                None => {
-                    let last: Option<String> =
-                        tx.query_row("SELECT MAX(order_key) FROM snippet_collections", [], |r| {
-                            r.get(0)
-                        })?;
-                    (
-                        uuid::Uuid::new_v4().to_string(),
-                        order_key_between(last.as_deref(), None),
-                    )
-                }
-            };
-            organization::write(
-                tx,
-                key,
-                Record::SnippetCollection(SnippetCollectionRecord {
-                    id: id.clone(),
-                    name: name.to_owned(),
-                    icon: draft.icon.trim().to_owned(),
-                    accent: draft.accent.trim().to_owned(),
-                    order_key,
-                    deleted_at: None,
-                }),
-            )?;
-            Ok(id)
-        })?;
+        let id = self.snippet_write(|tx| save_collection(tx, key, draft, None))?;
         self.snippet_collections()?
             .into_iter()
             .find(|collection| collection.id == id)
@@ -1308,6 +1334,108 @@ impl Store {
         let published = publish_copies(&tx, key)?;
         tx.commit()?;
         Ok(published)
+    }
+}
+
+/// Reads inside one snapshot, for planning a batch of changes (import).
+pub struct SnippetReader<'a>(&'a Connection);
+
+impl SnippetReader<'_> {
+    /// The stored metadata and body of a snippet in any state, purged
+    /// included.
+    pub fn snippet(
+        &self,
+        id: &str,
+    ) -> Result<Option<(SnippetRecord, Option<SnippetBodyRecord>)>, StoreError> {
+        Ok(match record(self.0, id)? {
+            Some(record) => Some((record, body(self.0, id)?)),
+            None => None,
+        })
+    }
+
+    /// The live snippet holding this abbreviation, if any.
+    pub fn abbreviation_owner(&self, abbreviation: &str) -> Result<Option<String>, StoreError> {
+        Ok(abbreviation_owner(self.0, abbreviation, "")?.map(|(id, _)| id))
+    }
+
+    /// Live collections.
+    pub fn collections(&self) -> Result<Vec<SnippetCollectionRecord>, StoreError> {
+        let ids: Vec<String> = self
+            .0
+            .prepare(
+                "SELECT id FROM snippet_collections WHERE deleted_at IS NULL ORDER BY order_key,id",
+            )?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut live = Vec::with_capacity(ids.len());
+        for id in ids {
+            live.extend(collection(self.0, &id)?);
+        }
+        Ok(live)
+    }
+
+    /// Snippets counted against [`MAX_SNIPPETS`].
+    pub fn snippet_total(&self) -> Result<usize, StoreError> {
+        snippet_total(self.0)
+    }
+}
+
+/// Several snippet and collection writes in one transaction: all of them
+/// land, or none does.
+pub struct SnippetBatch<'a> {
+    reader: SnippetReader<'a>,
+    key: &'a ItemKey,
+}
+
+impl<'a> std::ops::Deref for SnippetBatch<'a> {
+    type Target = SnippetReader<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reader
+    }
+}
+
+impl SnippetBatch<'_> {
+    /// [`Store::save_snippet`] inside the batch; a new snippet takes `new_id`
+    /// when no snippet ever had it.
+    pub fn save(&self, draft: &SnippetDraft, new_id: Option<&str>) -> Result<String, SnippetError> {
+        save(self.reader.0, self.key, draft, new_id)
+    }
+
+    /// [`Store::save_snippet_collection`] inside the batch, with the same
+    /// choice of id.
+    pub fn save_collection(
+        &self,
+        draft: &CollectionDraft,
+        new_id: Option<&str>,
+    ) -> Result<String, SnippetError> {
+        save_collection(self.reader.0, self.key, draft, new_id)
+    }
+}
+
+impl Store {
+    /// Runs `work` over one consistent snapshot of the library.
+    pub fn read_snippets<T>(
+        &self,
+        work: impl FnOnce(&SnippetReader<'_>) -> Result<T, SnippetError>,
+    ) -> Result<T, SnippetError> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        work(&SnippetReader(&tx))
+    }
+
+    /// Runs `work` in one write transaction, committed only when it succeeds.
+    pub fn write_snippets<T>(
+        &self,
+        key: &ItemKey,
+        work: impl FnOnce(&SnippetBatch<'_>) -> Result<T, SnippetError>,
+    ) -> Result<T, SnippetError> {
+        self.snippet_write(|tx| {
+            work(&SnippetBatch {
+                reader: SnippetReader(tx),
+                key,
+            })
+        })
     }
 }
 
