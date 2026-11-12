@@ -98,10 +98,12 @@ fn expected(method: &Method) -> Expected {
         Method::Transforms { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::TransformCatalogue(_)))
         }
+        Method::PasteQueue { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::PasteQueue(_)))
+        }
         // Each feature group answers `unsupported` until its feature lands.
         Method::Snippets { .. }
         | Method::Clips { .. }
-        | Method::PasteQueue { .. }
         | Method::Rules { .. }
         | Method::Ai { .. } => Expected::Error(ErrorCode::Unsupported),
         Method::Copy { .. }

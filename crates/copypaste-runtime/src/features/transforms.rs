@@ -279,6 +279,7 @@ impl Runtime {
                             secret: sensitive,
                             transient: true,
                             record_in_history: false,
+                            html: false,
                         },
                     ),
                 };
