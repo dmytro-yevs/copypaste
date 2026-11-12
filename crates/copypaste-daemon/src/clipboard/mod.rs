@@ -134,10 +134,9 @@ impl<'a> CapturePolicy<'a> {
         {
             return false;
         }
-        let detected =
-            copypaste_core::classify_credentials(&capture.content_type, &capture.content)
-                .unwrap_or_default();
-        capture.privacy.union(detected).allows(self.settings)
+        // Detected credentials are stored and masked at ingest; only
+        // user settings may keep a capture out of History.
+        true
     }
 }
 
@@ -483,11 +482,10 @@ mod tests {
     }
 
     #[test]
-    fn detected_credentials_obey_the_secret_capture_setting() {
+    fn detected_credentials_are_always_captured() {
         let capture = super::Capture::text("-----BEGIN OPENSSH PRIVATE KEY-----\npartial".into());
-        let mut settings = ConfigData::default();
-        assert!(!CapturePolicy::new(&settings).allows_materialized(&capture));
-        settings.skip_secret = false;
+        let settings = ConfigData::default();
+        assert!(settings.skip_secret);
         assert!(CapturePolicy::new(&settings).allows_materialized(&capture));
     }
 
