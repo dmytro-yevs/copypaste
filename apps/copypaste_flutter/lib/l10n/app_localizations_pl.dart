@@ -3657,4 +3657,38 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Tagi…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'odblokować poufne elementy',
+      'other': 'Odblokuj poufne elementy',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'użyć ukrytego fragmentu',
+      'other': 'Użyj ukrytego fragmentu',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'skopiować poufny element',
+      'other': 'Skopiuj poufny element',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Niedostępne w tym systemie';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Najpierw skonfiguruj hasło, PIN lub biometrię urządzenia';
 }

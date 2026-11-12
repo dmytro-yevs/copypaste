@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Opcional. Necessário para que o Quick Paste volte ao app anterior.",
   "onboardingLinuxWaylandClipboardUnavailable": "O acesso à área de transferência não está disponível nesta sessão Wayland. Ative o complemento assinado para GNOME ou KDE e verifique novamente.",
   "historyMoreActions": "Mais ações",
-  "historyTagsAction": "Etiquetas…"
+  "historyTagsAction": "Etiquetas…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{desbloquear itens confidenciais} other{Desbloquear itens confidenciais}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{usar um snippet oculto} other{Usar um snippet oculto}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copiar um item confidencial} other{Copiar um item confidencial}}",
+  "deviceAuthUnavailable": "Indisponível neste sistema",
+  "deviceAuthNotConfigured": "Primeiro configure uma senha, PIN ou biometria do dispositivo"
 }

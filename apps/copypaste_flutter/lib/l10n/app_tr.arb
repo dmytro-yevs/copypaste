@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "İsteğe bağlı. Quick Paste'in önceki uygulamaya dönebilmesi için gerekir.",
   "onboardingLinuxWaylandClipboardUnavailable": "Bu Wayland oturumunda pano erişimi kullanılamıyor. İmzalı GNOME veya KDE yardımcısını etkinleştirin, ardından yeniden denetleyin.",
   "historyMoreActions": "Diğer işlemler",
-  "historyTagsAction": "Etiketler…"
+  "historyTagsAction": "Etiketler…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{gizli öğelerin kilidini açmaya} other{Gizli öğelerin kilidini aç}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{gizli bir kod parçacığını kullanmaya} other{Gizli kod parçacığını kullan}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{gizli bir öğeyi kopyalamaya} other{Gizli öğeyi kopyala}}",
+  "deviceAuthUnavailable": "Bu sistemde kullanılamaz",
+  "deviceAuthNotConfigured": "Önce bir cihaz parolası, PIN veya biyometri ayarlayın"
 }

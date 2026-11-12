@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Необов’язково. Потрібно, щоб через Quick Paste можна було повертатися до попередньої програми.",
   "onboardingLinuxWaylandClipboardUnavailable": "У цьому сеансі Wayland немає доступу до буфера обміну. Увімкніть підписаний супровідний компонент для GNOME або KDE, а потім перевірте знову.",
   "historyMoreActions": "Інші дії",
-  "historyTagsAction": "Теги…"
+  "historyTagsAction": "Теги…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{розблокувати секретні елементи} other{Розблокувати секретні елементи}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{використати прихований фрагмент} other{Використати прихований фрагмент}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{скопіювати секретний елемент} other{Скопіювати секретний елемент}}",
+  "deviceAuthUnavailable": "Недоступно в цій системі",
+  "deviceAuthNotConfigured": "Спершу налаштуйте пароль, PIN-код або біометрію пристрою"
 }

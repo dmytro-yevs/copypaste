@@ -6038,6 +6038,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Tags…'**
   String get historyTagsAction;
+
+  /// Reason shown in the operating system's identity prompt for unlocking secret items for the current surface (Quick Paste, the Android keyboard panel or History). The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{unlock secret items} other{Unlock secret items}}'**
+  String deviceAuthReasonUnlockSecrets(String platform);
+
+  /// Reason shown in the operating system's identity prompt for using a snippet the user marked as concealed. The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{use a concealed snippet} other{Use a concealed snippet}}'**
+  String deviceAuthReasonUseConcealedSnippet(String platform);
+
+  /// Reason shown in the operating system's identity prompt for copying a secret item, for example from the tray Recent menu. The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{copy a secret item} other{Copy a secret item}}'**
+  String deviceAuthReasonCopySecret(String platform);
+
+  /// Status shown for an identity-check setting when the system has no device authentication (for example Linux).
+  ///
+  /// In en, this message translates to:
+  /// **'Not available on this system'**
+  String get deviceAuthUnavailable;
+
+  /// Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up a device password, PIN or biometrics first'**
+  String get deviceAuthNotConfigured;
 }
 
 class _AppLocalizationsDelegate

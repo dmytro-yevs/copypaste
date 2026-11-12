@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Facultatif. Nécessaire pour que Quick Paste puisse revenir à l’app précédente.",
   "onboardingLinuxWaylandClipboardUnavailable": "L’accès au presse-papiers n’est pas disponible dans cette session Wayland. Activez le compagnon signé GNOME ou KDE, puis vérifiez à nouveau.",
   "historyMoreActions": "Plus d’actions",
-  "historyTagsAction": "Étiquettes…"
+  "historyTagsAction": "Étiquettes…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{déverrouiller les éléments secrets} other{Déverrouiller les éléments secrets}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{utiliser un extrait masqué} other{Utiliser un extrait masqué}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copier un élément secret} other{Copier un élément secret}}",
+  "deviceAuthUnavailable": "Non disponible sur ce système",
+  "deviceAuthNotConfigured": "Configurez d’abord un mot de passe, un code PIN ou la biométrie de l’appareil"
 }

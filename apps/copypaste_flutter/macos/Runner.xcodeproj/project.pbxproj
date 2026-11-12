@@ -40,6 +40,7 @@
 		C0DE0D112610060000000002 /* HotkeyManagerMacosPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */; };
 		C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */; };
 		C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */; };
+		DA0E7A11F9A0000000000002 /* MacosDeviceAuthentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0E7A11F9A0000000000001 /* MacosDeviceAuthentication.swift */; };
 		C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */; };
 /* End PBXBuildFile section */
 
@@ -118,6 +119,7 @@
 		C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManagerMacosPluginTests.swift; sourceTree = "<group>"; };
 		C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureProtectedLayerTree.swift; sourceTree = "<group>"; };
 		C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosScreenshotProtection.swift; sourceTree = "<group>"; };
+		DA0E7A11F9A0000000000001 /* MacosDeviceAuthentication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosDeviceAuthentication.swift; sourceTree = "<group>"; };
 		C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosApplicationLifecycle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -210,6 +212,7 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */,
+				DA0E7A11F9A0000000000001 /* MacosDeviceAuthentication.swift */,
 				C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */,
 				C0DE0A112610030000000001 /* MacosSetupChannel.swift */,
 				C0DE0B112610040000000001 /* QuickPasteGeometry.swift */,
@@ -443,6 +446,7 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */,
+				DA0E7A11F9A0000000000002 /* MacosDeviceAuthentication.swift in Sources */,
 				C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */,
 				C0DE0A112610030000000002 /* MacosSetupChannel.swift in Sources */,
 				C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */,

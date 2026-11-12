@@ -183,6 +183,7 @@ class MainActivity : FlutterActivity() {
     private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
     private var historyFilesChannel: HistoryFilesChannel? = null
+    private var deviceAuthChannel: DeviceAuthChannel? = null
     private val clipboardFocusGuard = ClipboardFocusCaptureGuard()
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
@@ -219,6 +220,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        deviceAuthChannel = DeviceAuthChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/app_language")
             .setMethodCallHandler { call, result ->
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -599,12 +601,15 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (historyFilesChannel?.onActivityResult(requestCode, resultCode, data) == true) return
+        if (deviceAuthChannel?.onActivityResult(requestCode, resultCode) == true) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {
         historyFilesChannel?.dispose()
         historyFilesChannel = null
+        deviceAuthChannel?.dispose()
+        deviceAuthChannel = null
         foregroundCaptureEligible = false
         AndroidClipboardReader.retireForeground(foregroundCaptureHost)
         foregroundCaptureHost = null

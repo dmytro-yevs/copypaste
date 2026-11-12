@@ -20,6 +20,7 @@ class MainFlutterWindow: NSWindow {
   private var quickPasteHostMethodChannel: FlutterMethodChannel?
   private var macosSetupChannel: MacosSetupChannel?
   private var securityChannel: FlutterMethodChannel?
+  private var deviceAuthentication: MacosDeviceAuthentication?
   private var appLanguageChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
   private var applicationLifecycle: MacosApplicationLifecycle?
@@ -45,6 +46,7 @@ class MainFlutterWindow: NSWindow {
     )
     MacosScreenshotProtection.shared.register(window: self, view: flutterViewController.view)
     MacosMemoryPressure.shared.register(engine: flutterViewController.engine)
+    deviceAuthentication = MacosDeviceAuthentication(binaryMessenger: flutterViewController.engine.binaryMessenger)
     let security = FlutterMethodChannel(
       name: "com.copypaste.app/security", binaryMessenger: flutterViewController.engine.binaryMessenger)
     securityChannel = security
@@ -602,6 +604,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let engine: FlutterEngine
   private let controller: FlutterViewController
   private var contextChannel: FlutterMethodChannel?
+  private var deviceAuthentication: MacosDeviceAuthentication?
   private let pasteSession = QuickPastePasteSession()
   private var performingAction = false
   private var closed = false
@@ -667,6 +670,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
     SharedPreferencesPlugin.register(with: controller.registrar(forPlugin: "SharedPreferencesPlugin"))
     MacosMemoryPressure.shared.register(engine: engine)
+    deviceAuthentication = MacosDeviceAuthentication(binaryMessenger: engine.binaryMessenger)
     configureContextChannel()
   }
 
@@ -736,6 +740,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     guard !engineStopped else { return }
     engineStopped = true
     MacosMemoryPressure.shared.unregister(engine: engine)
+    deviceAuthentication = nil
     window.delegate = nil
     // AppKit's application-wide focus-ring state strongly retains the last
     // active first responder until a responder change is processed. Without

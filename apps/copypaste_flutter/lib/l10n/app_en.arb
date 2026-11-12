@@ -4399,5 +4399,40 @@
   "historyTagsAction": "Tags…",
   "@historyTagsAction": {
     "description": "Menu item on a History row that opens the editor for the clip's tags."
+  },
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{unlock secret items} other{Unlock secret items}}",
+  "@deviceAuthReasonUnlockSecrets": {
+    "description": "Reason shown in the operating system's identity prompt for unlocking secret items for the current surface (Quick Paste, the Android keyboard panel or History). The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{use a concealed snippet} other{Use a concealed snippet}}",
+  "@deviceAuthReasonUseConcealedSnippet": {
+    "description": "Reason shown in the operating system's identity prompt for using a snippet the user marked as concealed. The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copy a secret item} other{Copy a secret item}}",
+  "@deviceAuthReasonCopySecret": {
+    "description": "Reason shown in the operating system's identity prompt for copying a secret item, for example from the tray Recent menu. The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthUnavailable": "Not available on this system",
+  "@deviceAuthUnavailable": {
+    "description": "Status shown for an identity-check setting when the system has no device authentication (for example Linux)."
+  },
+  "deviceAuthNotConfigured": "Set up a device password, PIN or biometrics first",
+  "@deviceAuthNotConfigured": {
+    "description": "Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up."
   }
 }

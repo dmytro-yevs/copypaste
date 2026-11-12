@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Opcional. Necesario para que Quick Paste vuelva a la app anterior.",
   "onboardingLinuxWaylandClipboardUnavailable": "El acceso al portapapeles no está disponible en esta sesión Wayland. Activa el complemento firmado de GNOME o KDE y vuelve a comprobarlo.",
   "historyMoreActions": "Más acciones",
-  "historyTagsAction": "Etiquetas…"
+  "historyTagsAction": "Etiquetas…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{desbloquear elementos secretos} other{Desbloquear elementos secretos}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{usar un fragmento oculto} other{Usar un fragmento oculto}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copiar un elemento secreto} other{Copiar un elemento secreto}}",
+  "deviceAuthUnavailable": "No disponible en este sistema",
+  "deviceAuthNotConfigured": "Primero configura una contraseña, un PIN o la biometría del dispositivo"
 }

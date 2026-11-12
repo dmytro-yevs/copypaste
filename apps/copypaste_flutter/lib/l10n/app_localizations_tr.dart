@@ -3575,4 +3575,38 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Etiketler…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli öğelerin kilidini açmaya',
+      'other': 'Gizli öğelerin kilidini aç',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli bir kod parçacığını kullanmaya',
+      'other': 'Gizli kod parçacığını kullan',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli bir öğeyi kopyalamaya',
+      'other': 'Gizli öğeyi kopyala',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Bu sistemde kullanılamaz';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Önce bir cihaz parolası, PIN veya biyometri ayarlayın';
 }
