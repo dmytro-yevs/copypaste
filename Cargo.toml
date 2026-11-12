@@ -22,6 +22,8 @@ members = [
     "crates/copypaste-cli",
     "crates/copypaste-flutter-bridge",
     "crates/copypaste-runtime",
+    "crates/copypaste-transform",
+    "crates/copypaste-template",
 ]
 
 [workspace.package]
@@ -125,6 +127,42 @@ objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
 objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "NSImage"] }
 security-framework = "3.7"
+# Text transforms, templates and content rules. All pure Rust, no network.
+# `regex` is linear-time (no backtracking blow-up on user patterns); callers
+# still set `size_limit` and `dfa_size_limit` on every user-supplied pattern.
+regex = "1.13.1"
+# IANA zones with DST-correct calendar arithmetic. `tz-system` is left out:
+# the template renderer is always handed the zone id and never detects it.
+# Zone data comes from zoneinfo on macOS and Linux, the concatenated tzdata on
+# Android, and a bundled copy on Windows only.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
+# One CLDR engine, so a date template and case folding give byte-identical
+# output on every OS. Kept on the 2.2 line that `url` already locks, so the
+# ICU stack is not duplicated. Compiled data only; extras are opt-in.
+icu_datetime = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_calendar = { version = "2.2.1", default-features = false, features = ["compiled_data"] }
+icu_locale = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_casemap = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+# RFC 4180 with quoted fields that span lines.
+csv = "1.4.0"
+# YAML 1.2 in pure Rust (no C libyaml port and no unsafe parser). Chosen over
+# serde_yaml_ng: that fork sits on unsafe-libyaml, while saphyr keeps a node
+# tree with spans for line:column errors. `encoding` is off: input is UTF-8.
+saphyr = { version = "0.3.3", default-features = false }
+# XML format and minify. quick-xml never resolves external entities. Already
+# locked transitively at this version.
+quick-xml = "0.41.0"
+# Checksum transforms. 0.10 shares the `digest` 0.10 line with sha2.
+md-5 = "0.10.6"
+sha1 = "0.10.7"
+crc32fast = "1.5.0"
+percent-encoding = "2.3.2"
+# Official MCP SDK for the `copypaste mcp` stdio server. Pinned exactly
+# because its API still moves between minor releases; 3.9.0 is the first
+# release outside RUSTSEC-2026-0462. The default `base64` feature is off: it
+# would add a second base64 major next to the workspace one.
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "macros", "transport-io"] }
 
 [profile.release]
 opt-level = 3
