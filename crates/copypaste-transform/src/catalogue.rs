@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{check_output_len, TransformError, Warning};
 use crate::params::{ParamKind, ParamSpec, Params};
+use crate::url::tracking::TrackingRules;
 use crate::MAX_INPUT_BYTES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -195,14 +196,16 @@ pub fn catalogue() -> &'static Catalogue {
     })
 }
 
-/// Per-run environment: cancellation, time budget, and the device locale
-/// and zone for the few transforms that offer them as an option.
+/// Per-run environment: cancellation, time budget, the device locale and
+/// zone for the few transforms that offer them as an option, and the user's
+/// tracking-parameter lists.
 #[derive(Clone, Debug, Default)]
 pub struct Context<'a> {
     cancel: Option<&'a AtomicBool>,
     deadline: Option<Instant>,
     locale: Option<String>,
     time_zone: Option<jiff::tz::TimeZone>,
+    tracking: Option<&'a TrackingRules>,
 }
 
 impl<'a> Context<'a> {
@@ -234,12 +237,22 @@ impl<'a> Context<'a> {
         self
     }
 
+    /// The user's tracking-parameter additions and exceptions.
+    pub fn with_tracking(mut self, rules: &'a TrackingRules) -> Self {
+        self.tracking = Some(rules);
+        self
+    }
+
     pub fn locale(&self) -> Option<&str> {
         self.locale.as_deref()
     }
 
     pub fn time_zone(&self) -> Option<&jiff::tz::TimeZone> {
         self.time_zone.as_ref()
+    }
+
+    pub fn tracking(&self) -> Option<&'a TrackingRules> {
+        self.tracking
     }
 
     /// Fails if the run was cancelled or ran out of time.

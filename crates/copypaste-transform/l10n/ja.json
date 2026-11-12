@@ -254,7 +254,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "トラッキングパラメータを削除",
+      "description": "すべてのリンクから utm_ やクリック ID のパラメータを取り除きます。署名付きリンクは変更しません。",
+      "keywords": [
+        "トラッキング",
+        "リンクを整理",
+        "プライバシー"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "リダイレクトリンクを展開",
+      "description": "検索エンジン、SNS、Safe Links のリダイレクトを、オフラインで実際のリンク先に置き換えます。",
+      "keywords": [
+        "リダイレクト"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "リッチテキストをプレーンテキストに",
+      "description": "書式付きの内容から段落と改行を保ったままテキストを取り出します。",
+      "keywords": [
+        "プレーンテキスト",
+        "書式を削除"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML を Markdown に",
+      "description": "見出し、リンク、リスト、表、コードブロックを Markdown に変換します。コードの空白は保持されます。",
+      "keywords": [
+        "変換"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown をプレーンテキストに",
+      "description": "Markdown の記法を取り除いてテキストを残します。表はタブ区切りになります。",
+      "keywords": [
+        "プレーンテキスト"
+      ],
+      "params": {
+        "link_style": {
+          "label": "リンク",
+          "options": {
+            "text": "テキストのみ",
+            "text_url": "テキストと URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "リスト記号を残す"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: デコード",
+      "description": "トークンのヘッダーとペイロードを JSON で表示します。署名は検証しません。",
+      "keywords": [
+        "トークン"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "タイムスタンプを日付に",
+      "description": "Unix タイムスタンプを日付に変換します。秒、ミリ秒、マイクロ秒、ナノ秒を自動判別します。",
+      "keywords": [
+        "タイムスタンプ",
+        "時刻"
+      ],
+      "params": {
+        "unit": {
+          "label": "単位",
+          "options": {
+            "auto": "自動判別",
+            "seconds": "秒",
+            "milliseconds": "ミリ秒",
+            "microseconds": "マイクロ秒",
+            "nanoseconds": "ナノ秒"
+          }
+        },
+        "format": {
+          "label": "形式",
+          "options": {
+            "iso_utc": "ISO 8601（UTC）",
+            "iso_local": "ISO 8601（現地時刻）",
+            "rfc2822": "RFC 2822 形式"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "日付をタイムスタンプに",
+      "description": "ISO 8601、RFC 2822、または一般的な日付を Unix タイムスタンプに変換します。オフセットがなければ現地時刻とみなします。",
+      "keywords": [
+        "タイムスタンプ",
+        "時刻"
+      ],
+      "params": {
+        "unit": {
+          "label": "単位",
+          "options": {
+            "seconds": "秒",
+            "milliseconds": "ミリ秒"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "検索と置換",
+      "description": "テキストまたは正規表現の一致を置換します。置換文字列の $1 はグループを挿入します。",
+      "keywords": [
+        "置換",
+        "検索"
+      ],
+      "params": {
+        "find": {
+          "label": "検索"
+        },
+        "replace": {
+          "label": "置換後"
+        },
+        "regex": {
+          "label": "正規表現"
+        },
+        "case_sensitive": {
+          "label": "大文字と小文字を区別"
+        },
+        "whole_word": {
+          "label": "単語単位"
+        },
+        "multiline": {
+          "label": "^ と $ を行ごとに適用"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "一致を抽出",
+      "description": "URL、メール、数値、アドレス、色、UUID、パターンの一致をすべて 1 行に 1 つずつ並べます。",
+      "keywords": [
+        "抽出"
+      ],
+      "params": {
+        "preset": {
+          "label": "抽出対象",
+          "options": {
+            "urls": "リンク",
+            "emails": "メールアドレス",
+            "numbers": "数値",
+            "ipv4": "IPv4 アドレス",
+            "ipv6": "IPv6 アドレス",
+            "hex_colors": "16 進カラー",
+            "uuids": "UUID 値",
+            "custom": "カスタムパターン"
+          }
+        },
+        "pattern": {
+          "label": "パターン"
+        },
+        "dedupe": {
+          "label": "重複を削除"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "文字を削除",
+      "description": "数字、句読点、ASCII 以外の文字、絵文字、または指定した文字を削除します。",
+      "keywords": [
+        "削除",
+        "数字"
+      ],
+      "params": {
+        "class": {
+          "label": "削除する文字",
+          "options": {
+            "digits": "数字",
+            "punctuation": "句読点",
+            "non_ascii": "ASCII 以外の文字",
+            "emoji": "絵文字",
+            "custom": "指定した文字"
+          }
+        },
+        "chars": {
+          "label": "文字"
+        }
+      }
+    }
+  }
 }

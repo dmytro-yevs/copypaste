@@ -254,7 +254,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "移除跟踪参数",
+      "description": "从所有链接中移除 utm_ 和点击 ID 参数，已签名的链接保持不变。",
+      "keywords": [
+        "跟踪",
+        "清理链接",
+        "隐私"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "展开重定向链接",
+      "description": "离线将搜索引擎、社交网络和 Safe Links 的重定向替换为真实目标地址。",
+      "keywords": [
+        "重定向"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "富文本转纯文本",
+      "description": "保留带格式内容的文字，以及段落和换行。",
+      "keywords": [
+        "纯文本",
+        "清除格式"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML 转 Markdown",
+      "description": "将标题、链接、列表、表格和代码块转换为 Markdown，并保留代码中的空白。",
+      "keywords": [
+        "转换"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown 转纯文本",
+      "description": "移除 Markdown 语法并保留文字；表格改为制表符分隔。",
+      "keywords": [
+        "纯文本"
+      ],
+      "params": {
+        "link_style": {
+          "label": "链接",
+          "options": {
+            "text": "仅文字",
+            "text_url": "文字和 URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "保留列表符号"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT：解码",
+      "description": "以 JSON 显示令牌的头部和载荷。不验证签名。",
+      "keywords": [
+        "令牌"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "时间戳转日期",
+      "description": "将 Unix 时间戳转换为日期，自动识别秒、毫秒、微秒或纳秒。",
+      "keywords": [
+        "时间戳",
+        "时间"
+      ],
+      "params": {
+        "unit": {
+          "label": "单位",
+          "options": {
+            "auto": "自动识别",
+            "seconds": "秒",
+            "milliseconds": "毫秒",
+            "microseconds": "微秒",
+            "nanoseconds": "纳秒"
+          }
+        },
+        "format": {
+          "label": "格式",
+          "options": {
+            "iso_utc": "ISO 8601（UTC）",
+            "iso_local": "ISO 8601（本地时间）",
+            "rfc2822": "RFC 2822 格式"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "日期转时间戳",
+      "description": "将 ISO 8601、RFC 2822 或普通日期转换为 Unix 时间戳；没有时区偏移时按本地时间处理。",
+      "keywords": [
+        "时间戳",
+        "时间"
+      ],
+      "params": {
+        "unit": {
+          "label": "单位",
+          "options": {
+            "seconds": "秒",
+            "milliseconds": "毫秒"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "查找和替换",
+      "description": "替换文本或正则表达式的匹配项；替换内容中的 $1 会插入分组。",
+      "keywords": [
+        "替换",
+        "查找"
+      ],
+      "params": {
+        "find": {
+          "label": "查找"
+        },
+        "replace": {
+          "label": "替换为"
+        },
+        "regex": {
+          "label": "正则表达式"
+        },
+        "case_sensitive": {
+          "label": "区分大小写"
+        },
+        "whole_word": {
+          "label": "仅完整单词"
+        },
+        "multiline": {
+          "label": "^ 和 $ 按行匹配"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "提取匹配项",
+      "description": "列出每个 URL、邮箱、数字、地址、颜色、UUID 或模式匹配项，每行一个。",
+      "keywords": [
+        "提取"
+      ],
+      "params": {
+        "preset": {
+          "label": "查找内容",
+          "options": {
+            "urls": "链接",
+            "emails": "邮箱地址",
+            "numbers": "数字",
+            "ipv4": "IPv4 地址",
+            "ipv6": "IPv6 地址",
+            "hex_colors": "十六进制颜色",
+            "uuids": "UUID 标识",
+            "custom": "自定义模式"
+          }
+        },
+        "pattern": {
+          "label": "模式"
+        },
+        "dedupe": {
+          "label": "去除重复"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "删除字符",
+      "description": "删除数字、标点、非 ASCII 字符、表情符号或你指定的字符。",
+      "keywords": [
+        "删除",
+        "数字"
+      ],
+      "params": {
+        "class": {
+          "label": "删除内容",
+          "options": {
+            "digits": "数字",
+            "punctuation": "标点",
+            "non_ascii": "非 ASCII 字符",
+            "emoji": "表情符号",
+            "custom": "指定的字符"
+          }
+        },
+        "chars": {
+          "label": "字符"
+        }
+      }
+    }
+  }
 }

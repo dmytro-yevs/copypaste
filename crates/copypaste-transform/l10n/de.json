@@ -254,7 +254,192 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "Tracking-Parameter entfernen",
+      "description": "Entfernt utm_- und Klick-ID-Parameter aus allen Links; signierte Links bleiben unverändert.",
+      "keywords": [
+        "tracking",
+        "link bereinigen",
+        "datenschutz"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Weiterleitungslinks auflösen",
+      "description": "Ersetzt Weiterleitungen von Suche, sozialen Netzwerken und Safe Links offline durch ihr echtes Ziel.",
+      "keywords": [
+        "weiterleitung",
+        "umleitung"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Formatierter Text zu reinem Text",
+      "description": "Behält den Text formatierter Inhalte mit Absätzen und Zeilenumbrüchen.",
+      "keywords": [
+        "reiner text",
+        "formatierung entfernen"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML zu Markdown",
+      "description": "Wandelt Überschriften, Links, Listen, Tabellen und Codeblöcke in Markdown um; Leerraum im Code bleibt erhalten.",
+      "keywords": [
+        "umwandeln"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown zu reinem Text",
+      "description": "Entfernt die Markdown-Syntax und behält den Text; Tabellen werden durch Tabs getrennt.",
+      "keywords": [
+        "reiner text"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Links",
+          "options": {
+            "text": "Nur Text",
+            "text_url": "Text und URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Listenzeichen behalten"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Dekodieren",
+      "description": "Zeigt Header und Payload des Tokens als JSON. Die Signatur wird nicht geprüft.",
+      "keywords": [
+        "token"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Zeitstempel zu Datum",
+      "description": "Wandelt einen Unix-Zeitstempel in ein Datum um und erkennt Sekunden, Milli-, Mikro- oder Nanosekunden.",
+      "keywords": [
+        "zeitstempel",
+        "zeit"
+      ],
+      "params": {
+        "unit": {
+          "label": "Einheit",
+          "options": {
+            "auto": "Erkennen",
+            "seconds": "Sekunden",
+            "milliseconds": "Millisekunden",
+            "microseconds": "Mikrosekunden",
+            "nanoseconds": "Nanosekunden"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (Ortszeit)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Datum zu Zeitstempel",
+      "description": "Wandelt ein ISO-8601-, RFC-2822- oder einfaches Datum in einen Unix-Zeitstempel um; ohne Versatz gilt die Ortszeit.",
+      "keywords": [
+        "zeitstempel",
+        "zeit"
+      ],
+      "params": {
+        "unit": {
+          "label": "Einheit",
+          "options": {
+            "seconds": "Sekunden",
+            "milliseconds": "Millisekunden"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Suchen und ersetzen",
+      "description": "Ersetzt Text oder Treffer eines regulären Ausdrucks; $1 im Ersatz fügt eine Gruppe ein.",
+      "keywords": [
+        "ersetzen",
+        "suchen"
+      ],
+      "params": {
+        "find": {
+          "label": "Suchen"
+        },
+        "replace": {
+          "label": "Ersetzen durch"
+        },
+        "regex": {
+          "label": "Regulärer Ausdruck"
+        },
+        "case_sensitive": {
+          "label": "Groß-/Kleinschreibung beachten"
+        },
+        "whole_word": {
+          "label": "Nur ganze Wörter"
+        },
+        "multiline": {
+          "label": "^ und $ gelten je Zeile"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Treffer extrahieren",
+      "description": "Listet alle URLs, E-Mails, Zahlen, Adressen, Farben, UUIDs oder Mustertreffer auf, einen pro Zeile.",
+      "keywords": [
+        "extrahieren"
+      ],
+      "params": {
+        "preset": {
+          "label": "Suchen nach",
+          "options": {
+            "urls": "Links",
+            "emails": "E-Mail-Adressen",
+            "numbers": "Zahlen",
+            "ipv4": "IPv4-Adressen",
+            "ipv6": "IPv6-Adressen",
+            "hex_colors": "Hex-Farben",
+            "uuids": "UUIDs",
+            "custom": "Eigenes Muster"
+          }
+        },
+        "pattern": {
+          "label": "Muster"
+        },
+        "dedupe": {
+          "label": "Duplikate entfernen"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Zeichen entfernen",
+      "description": "Löscht Ziffern, Satzzeichen, Nicht-ASCII-Zeichen, Emoji oder von dir angegebene Zeichen.",
+      "keywords": [
+        "löschen",
+        "ziffern"
+      ],
+      "params": {
+        "class": {
+          "label": "Entfernen",
+          "options": {
+            "digits": "Ziffern",
+            "punctuation": "Satzzeichen",
+            "non_ascii": "Nicht-ASCII-Zeichen",
+            "emoji": "Emojis",
+            "custom": "Angegebene Zeichen"
+          }
+        },
+        "chars": {
+          "label": "Zeichen"
+        }
+      }
+    }
+  }
 }

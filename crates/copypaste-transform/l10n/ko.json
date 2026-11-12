@@ -254,7 +254,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "추적 매개변수 제거",
+      "description": "모든 링크에서 utm_ 및 클릭 ID 매개변수를 제거하고 서명된 링크는 그대로 둡니다.",
+      "keywords": [
+        "추적",
+        "링크 정리",
+        "개인정보"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "리디렉션 링크 풀기",
+      "description": "검색, 소셜, Safe Links 리디렉션을 오프라인으로 실제 대상 주소로 바꿉니다.",
+      "keywords": [
+        "리디렉션"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "서식 있는 텍스트를 일반 텍스트로",
+      "description": "서식 있는 내용의 텍스트를 문단과 줄바꿈을 유지한 채 남깁니다.",
+      "keywords": [
+        "일반 텍스트",
+        "서식 제거"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML을 Markdown으로",
+      "description": "제목, 링크, 목록, 표, 코드 블록을 Markdown으로 변환하며 코드의 공백은 유지합니다.",
+      "keywords": [
+        "변환"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown을 일반 텍스트로",
+      "description": "Markdown 문법을 제거하고 텍스트만 남깁니다. 표는 탭으로 구분됩니다.",
+      "keywords": [
+        "일반 텍스트"
+      ],
+      "params": {
+        "link_style": {
+          "label": "링크",
+          "options": {
+            "text": "텍스트만",
+            "text_url": "텍스트와 URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "목록 기호 유지"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: 디코딩",
+      "description": "토큰의 헤더와 페이로드를 JSON으로 보여 줍니다. 서명은 검증하지 않습니다.",
+      "keywords": [
+        "토큰"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "타임스탬프를 날짜로",
+      "description": "Unix 타임스탬프를 날짜로 바꾸며 초, 밀리초, 마이크로초, 나노초를 자동으로 판별합니다.",
+      "keywords": [
+        "타임스탬프",
+        "시간"
+      ],
+      "params": {
+        "unit": {
+          "label": "단위",
+          "options": {
+            "auto": "자동 판별",
+            "seconds": "초",
+            "milliseconds": "밀리초",
+            "microseconds": "마이크로초",
+            "nanoseconds": "나노초"
+          }
+        },
+        "format": {
+          "label": "형식",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (현지 시간)",
+            "rfc2822": "RFC 2822 형식"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "날짜를 타임스탬프로",
+      "description": "ISO 8601, RFC 2822 또는 일반 날짜를 Unix 타임스탬프로 바꿉니다. 오프셋이 없으면 현지 시간을 사용합니다.",
+      "keywords": [
+        "타임스탬프",
+        "시간"
+      ],
+      "params": {
+        "unit": {
+          "label": "단위",
+          "options": {
+            "seconds": "초",
+            "milliseconds": "밀리초"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "찾아 바꾸기",
+      "description": "텍스트 또는 정규식 일치 항목을 바꿉니다. 바꿀 내용의 $1은 그룹을 넣습니다.",
+      "keywords": [
+        "바꾸기",
+        "찾기"
+      ],
+      "params": {
+        "find": {
+          "label": "찾을 내용"
+        },
+        "replace": {
+          "label": "바꿀 내용"
+        },
+        "regex": {
+          "label": "정규식"
+        },
+        "case_sensitive": {
+          "label": "대/소문자 구분"
+        },
+        "whole_word": {
+          "label": "전체 단어만"
+        },
+        "multiline": {
+          "label": "^와 $를 줄마다 적용"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "일치 항목 추출",
+      "description": "URL, 이메일, 숫자, 주소, 색상, UUID 또는 패턴 일치 항목을 한 줄에 하나씩 나열합니다.",
+      "keywords": [
+        "추출"
+      ],
+      "params": {
+        "preset": {
+          "label": "찾을 항목",
+          "options": {
+            "urls": "링크",
+            "emails": "이메일 주소",
+            "numbers": "숫자",
+            "ipv4": "IPv4 주소",
+            "ipv6": "IPv6 주소",
+            "hex_colors": "16진수 색상",
+            "uuids": "UUID 값",
+            "custom": "사용자 지정 패턴"
+          }
+        },
+        "pattern": {
+          "label": "패턴"
+        },
+        "dedupe": {
+          "label": "중복 제거"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "문자 제거",
+      "description": "숫자, 문장 부호, ASCII가 아닌 문자, 이모지 또는 지정한 문자를 삭제합니다.",
+      "keywords": [
+        "삭제",
+        "숫자"
+      ],
+      "params": {
+        "class": {
+          "label": "제거할 문자",
+          "options": {
+            "digits": "숫자",
+            "punctuation": "문장 부호",
+            "non_ascii": "ASCII가 아닌 문자",
+            "emoji": "이모지",
+            "custom": "지정한 문자"
+          }
+        },
+        "chars": {
+          "label": "문자"
+        }
+      }
+    }
+  }
 }

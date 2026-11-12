@@ -254,7 +254,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "Usuń parametry śledzące",
+      "description": "Usuwa parametry utm_ i identyfikatory kliknięć ze wszystkich linków; podpisanych linków nie zmienia.",
+      "keywords": [
+        "śledzenie",
+        "oczyść link",
+        "prywatność"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Rozwiń linki przekierowań",
+      "description": "Offline zastępuje przekierowania wyszukiwarek, serwisów społecznościowych i Safe Links ich prawdziwym celem.",
+      "keywords": [
+        "przekierowanie"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Tekst sformatowany na zwykły tekst",
+      "description": "Zachowuje tekst sformatowanej treści wraz z akapitami i podziałami wierszy.",
+      "keywords": [
+        "zwykły tekst",
+        "usuń formatowanie"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML na Markdown",
+      "description": "Zamienia nagłówki, linki, listy, tabele i bloki kodu na Markdown, zachowując odstępy w kodzie.",
+      "keywords": [
+        "konwertuj"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown na zwykły tekst",
+      "description": "Usuwa składnię Markdown i zostawia tekst; tabele są rozdzielane tabulatorami.",
+      "keywords": [
+        "zwykły tekst"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Linki",
+          "options": {
+            "text": "Tylko tekst",
+            "text_url": "Tekst i URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Zachowaj punktory"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Dekoduj",
+      "description": "Pokazuje nagłówek i ładunek tokena jako JSON. Podpis nie jest weryfikowany.",
+      "keywords": [
+        "token"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Znacznik czasu na datę",
+      "description": "Zamienia znacznik czasu Unix na datę, rozpoznając sekundy, milisekundy, mikrosekundy lub nanosekundy.",
+      "keywords": [
+        "znacznik czasu",
+        "czas"
+      ],
+      "params": {
+        "unit": {
+          "label": "Jednostka",
+          "options": {
+            "auto": "Wykryj",
+            "seconds": "Sekundy",
+            "milliseconds": "Milisekundy",
+            "microseconds": "Mikrosekundy",
+            "nanoseconds": "Nanosekundy"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (czas lokalny)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Data na znacznik czasu",
+      "description": "Zamienia datę ISO 8601, RFC 2822 lub zwykłą na znacznik czasu Unix; bez przesunięcia przyjmuje czas lokalny.",
+      "keywords": [
+        "znacznik czasu",
+        "czas"
+      ],
+      "params": {
+        "unit": {
+          "label": "Jednostka",
+          "options": {
+            "seconds": "Sekundy",
+            "milliseconds": "Milisekundy"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Znajdź i zamień",
+      "description": "Zamienia tekst lub dopasowania wyrażenia regularnego; $1 w zamienniku wstawia grupę.",
+      "keywords": [
+        "zamień",
+        "szukaj"
+      ],
+      "params": {
+        "find": {
+          "label": "Znajdź"
+        },
+        "replace": {
+          "label": "Zamień na"
+        },
+        "regex": {
+          "label": "Wyrażenie regularne"
+        },
+        "case_sensitive": {
+          "label": "Uwzględniaj wielkość liter"
+        },
+        "whole_word": {
+          "label": "Tylko całe słowa"
+        },
+        "multiline": {
+          "label": "^ i $ działają w każdym wierszu"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Wyodrębnij dopasowania",
+      "description": "Wypisuje każdy URL, e-mail, liczbę, adres, kolor, UUID lub dopasowanie wzorca, jedno w wierszu.",
+      "keywords": [
+        "wyodrębnij"
+      ],
+      "params": {
+        "preset": {
+          "label": "Szukaj",
+          "options": {
+            "urls": "Linki",
+            "emails": "Adresy e-mail",
+            "numbers": "Liczby",
+            "ipv4": "Adresy IPv4",
+            "ipv6": "Adresy IPv6",
+            "hex_colors": "Kolory szesnastkowe",
+            "uuids": "Identyfikatory UUID",
+            "custom": "Własny wzorzec"
+          }
+        },
+        "pattern": {
+          "label": "Wzorzec"
+        },
+        "dedupe": {
+          "label": "Usuń duplikaty"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Usuń znaki",
+      "description": "Usuwa cyfry, interpunkcję, znaki spoza ASCII, emoji lub wskazane przez ciebie znaki.",
+      "keywords": [
+        "usuń",
+        "cyfry"
+      ],
+      "params": {
+        "class": {
+          "label": "Usuń",
+          "options": {
+            "digits": "Cyfry",
+            "punctuation": "Interpunkcja",
+            "non_ascii": "Znaki spoza ASCII",
+            "emoji": "Emotikony",
+            "custom": "Wskazane znaki"
+          }
+        },
+        "chars": {
+          "label": "Znaki"
+        }
+      }
+    }
+  }
 }

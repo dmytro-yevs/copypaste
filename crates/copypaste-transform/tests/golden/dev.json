@@ -1,0 +1,393 @@
+[
+  {
+    "transform": "dev.jwt_decode",
+    "input": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImV4cCI6MTUwMDAwMDAwMH0.c2ln",
+    "output": "{\n  \"header\": {\n    \"alg\": \"HS256\",\n    \"typ\": \"JWT\"\n  },\n  \"payload\": {\n    \"sub\": \"42\",\n    \"exp\": 1500000000\n  }\n}",
+    "warnings": [
+      "jwt.signature_not_verified",
+      "jwt.expired"
+    ],
+    "sensitive": true
+  },
+  {
+    "transform": "dev.jwt_decode",
+    "input": "Bearer eyJhbGciOiJub25lIn0.eyJuYmYiOjQxMDI0NDQ4MDB9.",
+    "output": "{\n  \"header\": {\n    \"alg\": \"none\"\n  },\n  \"payload\": {\n    \"nbf\": 4102444800\n  }\n}",
+    "warnings": [
+      "jwt.signature_not_verified",
+      "jwt.not_yet_valid"
+    ],
+    "sensitive": true
+  },
+  {
+    "transform": "dev.jwt_decode",
+    "input": "abc.def",
+    "error": "jwt.malformed"
+  },
+  {
+    "transform": "dev.jwt_decode",
+    "input": "a.b.c.d.e",
+    "error": "jwt.encrypted"
+  },
+  {
+    "transform": "dev.jwt_decode",
+    "input": "!!!.e30.x",
+    "error": "jwt.header_invalid"
+  },
+  {
+    "transform": "dev.jwt_decode",
+    "input": "eyJhbGciOiJub25lIn0.WzFd.x",
+    "error": "jwt.payload_invalid"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000",
+    "output": "2023-11-14T22:13:20Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000000",
+    "output": "2023-11-14T22:13:20Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000000000",
+    "output": "2023-11-14T22:13:20Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000000000000",
+    "output": "2023-11-14T22:13:20Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "17000000000",
+    "error": "timestamp.unit_required"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "9999999999999",
+    "error": "timestamp.unit_required"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "params": {
+      "unit": "seconds"
+    },
+    "input": "17000000000",
+    "output": "2508-09-16T06:13:20Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000.5",
+    "output": "2023-11-14T22:13:20.5Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "1700000000123",
+    "output": "2023-11-14T22:13:20.123Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "-86400",
+    "error": "timestamp.unit_required"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "params": {
+      "unit": "seconds"
+    },
+    "input": "-86400",
+    "output": "1969-12-31T00:00:00Z"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "params": {
+      "format": "rfc2822"
+    },
+    "input": "  1700000000\n",
+    "output": "Tue, 14 Nov 2023 22:13:20 +0000"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "params": {
+      "format": "iso_local"
+    },
+    "input": "1700000000",
+    "output": "2023-11-14T22:13:20+00:00"
+  },
+  {
+    "transform": "dev.timestamp_to_date",
+    "input": "17x",
+    "error": "timestamp.not_a_number"
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "input": "2023-11-14T22:13:20Z",
+    "output": "1700000000",
+    "warnings": []
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "params": {
+      "unit": "milliseconds"
+    },
+    "input": "2023-11-15T00:13:20+02:00",
+    "output": "1700000000000"
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "input": "Tue, 14 Nov 2023 22:13:20 +0000",
+    "output": "1700000000"
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "input": "2023-11-14 22:13:20",
+    "output": "1700000000",
+    "warnings": [
+      "date.local_zone_assumed"
+    ]
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "input": "2023-11-14",
+    "output": "1699920000",
+    "warnings": [
+      "date.local_zone_assumed"
+    ]
+  },
+  {
+    "transform": "dev.date_to_timestamp",
+    "input": "next tuesday",
+    "error": "date.unrecognized"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "cat",
+      "replace": "dog"
+    },
+    "input": "Cat cat CAT",
+    "output": "dog dog dog"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "cat",
+      "replace": "dog",
+      "case_sensitive": true
+    },
+    "input": "Cat cat CAT",
+    "output": "Cat dog CAT"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "cat",
+      "replace": "dog",
+      "whole_word": true
+    },
+    "input": "cat concat cat.",
+    "output": "dog concat dog."
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "(\\w+)@(\\w+)",
+      "replace": "$2 at $1",
+      "regex": true
+    },
+    "input": "me@host",
+    "output": "host at me"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "a",
+      "replace": "$1"
+    },
+    "input": "banana",
+    "output": "b$1n$1n$1"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": ".",
+      "replace": "-"
+    },
+    "input": "a.b.c",
+    "output": "a-b-c"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "^- ",
+      "replace": "* ",
+      "regex": true
+    },
+    "input": "- a\n- b",
+    "output": "* a\n* b"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "^- ",
+      "replace": "* ",
+      "regex": true,
+      "multiline": false
+    },
+    "input": "- a\n- b",
+    "output": "* a\n- b"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "x$",
+      "replace": "y",
+      "regex": true
+    },
+    "input": "ax\r\nbx",
+    "output": "ay\r\nby"
+  },
+  {
+    "transform": "dev.find_replace",
+    "params": {
+      "find": "a(b",
+      "regex": true
+    },
+    "input": "abc",
+    "error": "regex.invalid_pattern"
+  },
+  {
+    "transform": "dev.find_replace",
+    "input": "unchanged",
+    "output": "unchanged",
+    "warnings": [
+      "find.empty_pattern"
+    ]
+  },
+  {
+    "transform": "dev.extract",
+    "input": "a https://x.test/1, b https://y.test/2.",
+    "output": "https://x.test/1\nhttps://y.test/2"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "emails"
+    },
+    "input": "Mail a.b@x.test or c@y.co.uk.",
+    "output": "a.b@x.test\nc@y.co.uk"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "numbers"
+    },
+    "input": "3 apples, -2.5 kg, 10",
+    "output": "3\n-2.5\n10"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "ipv4"
+    },
+    "input": "1.2.3.4 and 999.1.1.1 and 10.0.0.255",
+    "output": "1.2.3.4\n10.0.0.255"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "ipv6"
+    },
+    "input": "::1 and 2001:db8::ff00:42:8329 at 10:30",
+    "output": "::1\n2001:db8::ff00:42:8329"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "hex_colors"
+    },
+    "input": "#fff, #A0B1C2 and #12345 and #abcdefgh",
+    "output": "#fff\n#A0B1C2"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "uuids"
+    },
+    "input": "id 123e4567-e89b-12d3-a456-426614174000 ok",
+    "output": "123e4567-e89b-12d3-a456-426614174000"
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "dedupe": true
+    },
+    "input": "https://a.test https://b.test https://a.test",
+    "output": "https://a.test\nhttps://b.test"
+  },
+  {
+    "transform": "dev.extract",
+    "input": "nothing here",
+    "output": "",
+    "warnings": [
+      "extract.no_matches"
+    ]
+  },
+  {
+    "transform": "dev.extract",
+    "params": {
+      "preset": "custom",
+      "pattern": "\\d{3}"
+    },
+    "input": "a123b4567",
+    "output": "123\n456"
+  },
+  {
+    "transform": "dev.remove_chars",
+    "input": "R2-D2 v1.0",
+    "output": "R-D v."
+  },
+  {
+    "transform": "dev.remove_chars",
+    "params": {
+      "class": "punctuation"
+    },
+    "input": "Hello, world! (yes) $5",
+    "output": "Hello world yes 5"
+  },
+  {
+    "transform": "dev.remove_chars",
+    "params": {
+      "class": "non_ascii"
+    },
+    "input": "café ñ ok",
+    "output": "caf  ok"
+  },
+  {
+    "transform": "dev.remove_chars",
+    "params": {
+      "class": "emoji"
+    },
+    "input": "Hi 👋🏽 🇺🇦 1️⃣ ❤️ © 👩‍💻",
+    "output": "Hi     © "
+  },
+  {
+    "transform": "dev.remove_chars",
+    "params": {
+      "class": "custom",
+      "chars": "-"
+    },
+    "input": "555-123-4567",
+    "output": "5551234567"
+  },
+  {
+    "transform": "dev.remove_chars",
+    "params": {
+      "class": "digits"
+    },
+    "input": "١٢٣ and 123",
+    "output": " and "
+  }
+]
