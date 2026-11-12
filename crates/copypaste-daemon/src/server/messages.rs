@@ -11,6 +11,8 @@ pub(super) const MSG_MALFORMED: &str = "malformed request";
 pub(super) const MSG_TOO_LARGE: &str = "request exceeds the maximum frame size";
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
 pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watching for changes";
+pub(super) const MSG_FORBIDDEN: &str = "only the CopyPaste app can perform this operation";
+pub(super) const MSG_BAD_EVENT_FILTER: &str = "watch_events needs between 1 and 16 event kinds";
 
 #[cfg(test)]
 mod tests {
@@ -24,6 +26,8 @@ mod tests {
             MSG_TOO_LARGE,
             MSG_INTERNAL,
             MSG_WATCHERS_FULL,
+            MSG_FORBIDDEN,
+            MSG_BAD_EVENT_FILTER,
         ] {
             assert!(
                 !message.contains('/') && !message.contains('\\'),

@@ -395,6 +395,8 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         notify_on_copy: *notify_on_copy,
         notification_preview: *notification_preview,
         sound_on_copy: *sound_on_copy,
+        paste_queue: None,
+        mcp_enabled: None,
     }
 }
 
@@ -571,6 +573,8 @@ mod tests {
                 notify_on_copy: Some(true),
                 notification_preview: Some(false),
                 sound_on_copy: Some(false),
+                paste_queue: None,
+                mcp_enabled: None,
             }
         );
     }

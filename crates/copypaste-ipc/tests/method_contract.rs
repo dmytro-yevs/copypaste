@@ -64,6 +64,13 @@ fn wire_name(method: &Method) -> &'static str {
         Method::GetPrivateMode => "get_private_mode",
         Method::Watch => "watch",
         Method::WatchRuntime => "watch_runtime",
+        Method::WatchEvents { .. } => "watch_events",
+        Method::Snippets { .. } => "snippets",
+        Method::Clips { .. } => "clips",
+        Method::PasteQueue { .. } => "paste_queue",
+        Method::Transforms { .. } => "transforms",
+        Method::Rules { .. } => "rules",
+        Method::Ai { .. } => "ai",
         Method::Shutdown => "shutdown",
     }
 }
@@ -144,6 +151,14 @@ fn catalog() -> Vec<Value> {
         json!({"method":"set_private_mode","params":{"enabled":true}}),
         json!({"method":"get_private_mode"}),
         json!({"method":"watch"}),
+        json!({"method":"watch_runtime"}),
+        json!({"method":"watch_events","params":{"kinds":[{"kind":"ai_approval"},{"kind":"library","kinds":64},{"kind":"status"}]}}),
+        json!({"method":"snippets","params":{"op":{"op":"quick_search","query":"sig","include_snippets":true,"limit":10}}}),
+        json!({"method":"clips","params":{"op":{"op":"set_hidden_from_ai","ids":["item"],"hidden":true}}}),
+        json!({"method":"paste_queue","params":{"op":{"op":"deliver","target":{"kind":"next"},"plain_text":null,"mode":"clipboard"}}}),
+        json!({"method":"transforms","params":{"op":{"op":"run","source":{"kind":"clip","id":"item"},"steps_or_pipeline":{"kind":"pipeline","id":"p"},"action":"copy","bypass_default":false}}}),
+        json!({"method":"rules","params":{"op":{"op":"apply","preview_token":"t","request_id":"r"}}}),
+        json!({"method":"ai","params":{"op":{"op":"session_attach","session_id":"s"}}}),
         json!({"method":"shutdown"}),
     ]
 }
@@ -162,9 +177,181 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        59,
+        67,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
+}
+
+/// One representative of every operation in each feature group survives a
+/// serde round trip, and the gates the daemon delegates to answer per op.
+#[test]
+fn every_feature_operation_round_trips_and_answers_its_gates() {
+    use copypaste_ipc::{ai, clips, paste_queue, rules, snippets, transforms};
+    let text = || "text".to_string();
+    let id = || "id".to_string();
+    let snippet_ops = vec![
+        snippets::SnippetOp::List {
+            scope: snippets::SnippetScope::Collection { id: id() },
+            cursor: None,
+            limit: 50,
+        },
+        snippets::SnippetOp::Save {
+            draft: snippets::SnippetDraft {
+                id: None,
+                collection_id: None,
+                title: text(),
+                abbreviation: Some("sig".into()),
+                body_text: text(),
+                body_rich: None,
+                template: true,
+                pinned: false,
+                concealed: false,
+                base_revision: None,
+            },
+        },
+        snippets::SnippetOp::Render {
+            source: snippets::RenderSource::Body { text: text() },
+            values: [("name".to_string(), text())].into(),
+            clipboard: snippets::ClipboardInput::None,
+            purpose: snippets::RenderPurpose::Preview,
+        },
+        snippets::SnippetOp::ImportCommit {
+            token: id(),
+            policies: snippets::ImportPolicies::default(),
+        },
+        snippets::SnippetOp::Release,
+    ];
+    let clip_ops = vec![
+        clips::ClipOp::SaveEdit {
+            id: id(),
+            text: text(),
+            replace_original: true,
+        },
+        clips::ClipOp::DeliverText {
+            text: text(),
+            secret: true,
+            delivery: clips::Delivery::Copy,
+        },
+        clips::ClipOp::SetHiddenFromAi {
+            ids: vec![id()],
+            hidden: false,
+        },
+    ];
+    let queue_ops = vec![
+        paste_queue::PasteQueueOp::Add {
+            sources: vec![paste_queue::QueueSource::Text {
+                text: text(),
+                via: paste_queue::QueueTextVia::Share,
+            }],
+        },
+        paste_queue::PasteQueueOp::SetCollecting {
+            on: true,
+            on_finished: paste_queue::QueueRestart::Append,
+        },
+        paste_queue::PasteQueueOp::Confirm {
+            token: id(),
+            outcome: paste_queue::QueueDeliveryOutcome::Inserted,
+        },
+    ];
+    let transform_ops = vec![
+        transforms::TransformOp::Preview {
+            request_id: id(),
+            source: transforms::TransformSource::Clipboard,
+            steps: vec![transforms::TransformStep {
+                transform_id: "upper".into(),
+                version: 1,
+                params_json: "{}".into(),
+                enabled: true,
+            }],
+        },
+        transforms::TransformOp::DefaultFor {
+            app_identity: transforms::AppIdentity {
+                platform: "macos".into(),
+                identifier: "com.example".into(),
+            },
+        },
+    ];
+    let rule_ops = vec![
+        rules::RuleOp::Test {
+            definition_json: Some("{}".into()),
+            rule_id: None,
+            sample: rules::RuleSample::Text { text: text() },
+            full_set: false,
+        },
+        rules::RuleOp::Save {
+            draft: rules::RuleDraft {
+                id: None,
+                name: text(),
+                enabled: true,
+                definition_json: "{}".into(),
+                device_scope: rules::RuleDeviceScope::Devices { ids: vec![id()] },
+            },
+        },
+    ];
+    let ai_ops = vec![
+        ai::AiOp::Tool {
+            session_id: id(),
+            call: ai::AiToolCall::RenderSnippet {
+                id: id(),
+                values: Default::default(),
+            },
+        },
+        ai::AiOp::Approve {
+            request_id: id(),
+            scopes: vec![ai::AiScope::ReadHistory],
+            lookback: ai::AiLookback::Week,
+        },
+        ai::AiOp::Status { session_id: None },
+    ];
+    let methods: Vec<Method> = snippet_ops
+        .into_iter()
+        .map(|op| Method::Snippets { op })
+        .chain(clip_ops.into_iter().map(|op| Method::Clips { op }))
+        .chain(queue_ops.into_iter().map(|op| Method::PasteQueue { op }))
+        .chain(
+            transform_ops
+                .into_iter()
+                .map(|op| Method::Transforms { op }),
+        )
+        .chain(rule_ops.into_iter().map(|op| Method::Rules { op }))
+        .chain(ai_ops.into_iter().map(|op| Method::Ai { op }))
+        .collect();
+    for method in methods {
+        let encoded = serde_json::to_value(&method).unwrap();
+        let decoded: Method = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), encoded);
+        let gates = method.feature_op().expect("a feature-group method");
+        assert!(
+            !gates.interactive() || gates.blocking_weight() <= 32,
+            "{method:?} would never fit the interactive pool"
+        );
+    }
+
+    let privileged = |op| Method::Ai { op }.privileged();
+    assert!(privileged(ai::AiOp::RevokeGrant { id: id() }));
+    assert!(!privileged(ai::AiOp::Grants));
+    assert!(Method::Clips {
+        op: clips::ClipOp::SetHiddenFromAi {
+            ids: vec![id()],
+            hidden: false
+        }
+    }
+    .privileged());
+    assert!(!Method::Clips {
+        op: clips::ClipOp::SetHiddenFromAi {
+            ids: vec![id()],
+            hidden: true
+        }
+    }
+    .privileged());
+    assert!(!Method::Status.privileged());
+    assert!(Method::Rules {
+        op: rules::RuleOp::Apply {
+            preview_token: id(),
+            request_id: id()
+        }
+    }
+    .is_long_running());
 }
 
 #[test]

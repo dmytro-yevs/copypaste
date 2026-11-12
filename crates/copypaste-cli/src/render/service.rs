@@ -105,6 +105,13 @@ pub fn event_text(event: &EventData) -> String {
         }
         EventKind::Items => format!("items changed ({} in history)", event.item_count),
         EventKind::Peers => "paired devices changed".to_string(),
+        EventKind::PasteQueue => "paste queue changed".to_string(),
+        EventKind::Library => "snippets, rules or AI tool settings changed".to_string(),
+        EventKind::AiApproval => "an AI tool is waiting for approval".to_string(),
+        EventKind::Progress => match &event.operation {
+            Some(progress) => format!("progress {}/{}", progress.done, progress.total),
+            None => "progress".to_string(),
+        },
     }
 }
 
@@ -378,21 +385,13 @@ mod tests {
     #[test]
     fn a_capture_event_reads_differently_from_any_other_change() {
         let captured = event_text(&EventData {
-            sync_status: None,
-            event: EventKind::Items,
-            item_count: 3,
             captured: true,
             captured_item_id: Some("captured-item".into()),
+            ..EventData::change(EventKind::Items, 3)
         });
         assert!(captured.contains("captured"), "{captured}");
 
-        let other = event_text(&EventData {
-            sync_status: None,
-            event: EventKind::Items,
-            item_count: 3,
-            captured: false,
-            captured_item_id: None,
-        });
+        let other = event_text(&EventData::change(EventKind::Items, 3));
         assert!(!other.contains("captured"), "{other}");
     }
 }

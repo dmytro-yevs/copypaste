@@ -43,6 +43,18 @@ fn item() -> Item {
         source_app_icon_id: None,
         too_large_to_sync: false,
         truncated: false,
+        annotations: Some(copypaste_ipc::ItemAnnotations {
+            expires_at: Some(2),
+            hidden_from_ai: true,
+            provenance: Some(copypaste_ipc::ClipProvenance {
+                kind: copypaste_ipc::payload::ProvenanceKind::Edited,
+                from_clip_id: Some("item-0".into()),
+                transform_snapshot: Vec::new(),
+                pipeline_name: None,
+                grant_name: None,
+            }),
+            ..Default::default()
+        }),
     }
 }
 
@@ -98,6 +110,45 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::CloudStatus(_) => "cloud_status",
         ResponseData::CloudSync(_) => "cloud_sync",
         ResponseData::PrivateMode(_) => "private_mode",
+        ResponseData::SnippetPage(_) => "snippet_page",
+        ResponseData::Snippet(_) => "snippet",
+        ResponseData::SnippetSave(_) => "snippet_save",
+        ResponseData::SnippetCollections(_) => "snippet_collections",
+        ResponseData::SnippetCollection(_) => "snippet_collection",
+        ResponseData::TemplateLints(_) => "template_lints",
+        ResponseData::SnippetHits(_) => "snippet_hits",
+        ResponseData::Rendered(_) => "rendered",
+        ResponseData::Delivered(_) => "delivered",
+        ResponseData::SnippetImportPlan(_) => "snippet_import_plan",
+        ResponseData::SnippetImportReport(_) => "snippet_import_report",
+        ResponseData::ClipAnnotations(_) => "clip_annotations",
+        ResponseData::RuleTrace(_) => "rule_trace",
+        ResponseData::MaybeItem(_) => "maybe_item",
+        ResponseData::PasteQueue(_) => "paste_queue",
+        ResponseData::QueueDelivery(_) => "queue_delivery",
+        ResponseData::TransformCatalogue(_) => "transform_catalogue",
+        ResponseData::TransformPreview(_) => "transform_preview",
+        ResponseData::TransformSuggestions(_) => "transform_suggestions",
+        ResponseData::Pipelines(_) => "pipelines",
+        ResponseData::Pipeline(_) => "pipeline",
+        ResponseData::TransformPreferences(_) => "transform_preferences",
+        ResponseData::PipelineDefault(_) => "pipeline_default",
+        ResponseData::RuleList(_) => "rule_list",
+        ResponseData::Rule(_) => "rule",
+        ResponseData::RuleErrors(_) => "rule_errors",
+        ResponseData::RulePreview(_) => "rule_preview",
+        ResponseData::RuleApplyReport(_) => "rule_apply_report",
+        ResponseData::OperationProgress(_) => "operation_progress",
+        ResponseData::SkipLog(_) => "skip_log",
+        ResponseData::AiPolicy(_) => "ai_policy",
+        ResponseData::AiGrants(_) => "ai_grants",
+        ResponseData::AiGrant(_) => "ai_grant",
+        ResponseData::AiGrantCreated(_) => "ai_grant_created",
+        ResponseData::AiApprovals(_) => "ai_approvals",
+        ResponseData::AiAccessLog(_) => "ai_access_log",
+        ResponseData::AiStatus(_) => "ai_status",
+        ResponseData::AiSession(_) => "ai_session",
+        ResponseData::AiToolResult(_) => "ai_tool_result",
         ResponseData::Empty {} => "empty",
     }
 }
@@ -123,7 +174,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Modules { json: "[]".into() },
         ResponseData::FileOperations(vec![]),
         ResponseData::DownloadedFile(Some("/saved/file.bin".into())),
-        ResponseData::RuntimeEvent(copypaste_ipc::RuntimeEventData {
+        ResponseData::RuntimeEvent(Box::new(copypaste_ipc::RuntimeEventData {
             file_operation: Some(copypaste_ipc::FileOperationUpdate {
                 id: Some("transfer".into()),
                 phase: Some(copypaste_ipc::FileOperationPhase::Running),
@@ -133,7 +184,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             change: None,
             progress: None,
             capture: None,
-        }),
+        })),
         ResponseData::HistoryTags(Default::default()),
         ResponseData::Status(StatusData {
             runtime_watch: false,
@@ -185,12 +236,20 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             restart_required: vec!["lan_visibility".into()],
         }),
         ResponseData::Event(EventData {
-            sync_status: None,
-            event: EventKind::Items,
-            item_count: 1,
             captured: true,
             captured_item_id: Some("captured-item".into()),
+            ..EventData::change(EventKind::Items, 1)
         }),
+        ResponseData::Event(EventData {
+            library: Some(copypaste_ipc::LibraryKinds::SNIPPETS),
+            ..EventData::change(EventKind::Library, 1)
+        }),
+        ResponseData::MaybeItem(None),
+        ResponseData::OperationProgress(Some(copypaste_ipc::OperationProgress {
+            request_id: "r".into(),
+            done: 1,
+            total: 2,
+        })),
         ResponseData::Page(ItemPage {
             items: vec![item()],
             skipped_undecryptable: 1,
@@ -275,7 +334,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 27);
+    assert_eq!(variants.len(), 30);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
@@ -298,6 +357,20 @@ fn status_without_a_device_id_remains_compatible_with_older_backends() {
     assert_eq!(status.device_id, None);
     assert!(!status.clipboard_available);
     assert!(!status.runtime_watch);
+}
+
+#[test]
+fn an_item_without_annotations_still_decodes_and_omits_them() {
+    let mut value = serde_json::to_value(item()).unwrap();
+    value.as_object_mut().unwrap().remove("annotations");
+    let decoded: Item = serde_json::from_value(value).expect("an annotation-free item decodes");
+    assert_eq!(decoded.annotations, None);
+    let encoded = serde_json::to_value(Item {
+        annotations: None,
+        ..item()
+    })
+    .unwrap();
+    assert!(encoded.get("annotations").is_none());
 }
 
 #[test]

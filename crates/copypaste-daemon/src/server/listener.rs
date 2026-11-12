@@ -44,8 +44,8 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::{dispatch_request, gate, parse};
-use super::messages::{MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
+use super::dispatch::{dispatch_request, gate, is_watch, parse, CallerIdentity};
+use super::messages::{MSG_BAD_EVENT_FILTER, MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
 /// Connections served at once (manifest 04 §3.5). Over-cap connections are
@@ -245,6 +245,7 @@ async fn handle_connection(
     mut shutdown: watch::Receiver<bool>,
     mut release: watch::Receiver<bool>,
 ) {
+    let caller = CallerIdentity::default();
     let (reader, mut writer) = stream.into_split();
     let mut lines = Reader::new(reader);
 
@@ -336,7 +337,7 @@ async fn handle_connection(
             break;
         }
 
-        if let Some(rejection) = gate(&state, &request) {
+        if let Some(rejection) = gate(&state, &request, caller) {
             let close_connection = rejection.was_watch;
             if send(&mut writer, &rejection.response).await.is_err() || close_connection {
                 break;
@@ -347,10 +348,22 @@ async fn handle_connection(
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
         // longer owns the read half's deadline.
-        if matches!(&request.method, Method::Watch | Method::WatchRuntime) {
-            let typed = matches!(&request.method, Method::WatchRuntime);
-            drop(wire_lease);
+        if is_watch(&request.method) {
             let id = request.id;
+            let typed = !matches!(&request.method, Method::Watch);
+            let filter = match request.method {
+                Method::WatchEvents { kinds } => {
+                    let Some(filter) = super::watch::WatchFilter::new(kinds, caller) else {
+                        let invalid =
+                            Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_EVENT_FILTER);
+                        let _ = send(&mut writer, &invalid).await;
+                        break;
+                    };
+                    Some(filter)
+                }
+                _ => None,
+            };
+            drop(wire_lease);
             let Ok(_permit) = Arc::clone(&watchers).try_acquire_owned() else {
                 let full = Response::err(id, ErrorCode::Internal, MSG_WATCHERS_FULL);
                 let _ = send(&mut writer, &full).await;
@@ -377,8 +390,12 @@ async fn handle_connection(
                     &mut lines,
                     &mut writer,
                     &mut shutdown,
+                    filter.as_ref(),
                 )
                 .await;
+                if let Some(filter) = &filter {
+                    state.on_watch_closed(filter.connection());
+                }
             } else {
                 super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
             }
@@ -774,7 +791,7 @@ mod tests {
         static TEST_BUDGET: OnceLock<WireBudget> = OnceLock::new();
         reader.budget = TEST_BUDGET.get_or_init(WireBudget::default);
         let task = tokio::spawn(async move {
-            let prefix = br#"{"id":1,"protocol_version":6,"method":"status","unknown":""#;
+            let prefix = br#"{"id":1,"protocol_version":7,"method":"status","unknown":""#;
             let suffix = br#""}"#;
             let mut remaining = MAX_FRAME_BYTES - prefix.len() - suffix.len();
             let chunk = [b'x'; CONTROL_FRAME];
@@ -1331,6 +1348,65 @@ mod tests {
         let _ = server.await;
     }
 
+    /// A filtered subscriber gets only its kinds: no capture snapshot and no
+    /// history change unless asked, and its one allowed request is answered.
+    #[tokio::test]
+    async fn watch_events_delivers_only_the_requested_kinds() {
+        use copypaste_ipc::EventKindFilter;
+        let (state, dir) = test_state("watch-events");
+        let path = test_socket_path(&dir, "daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let subscribe = |kinds| async {
+            let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+            let ack = client.call(request(1, Method::WatchEvents { kinds })).await;
+            (client, ack)
+        };
+
+        let (mut empty, ack) = subscribe(Vec::new()).await;
+        assert_eq!(ack.error_code, Some(ErrorCode::InvalidRequest));
+        assert_connection_closed(&mut empty).await;
+
+        let (mut items, ack) = subscribe(vec![EventKindFilter::Items]).await;
+        assert!(ack.ok, "{:?}", ack.error);
+        let (mut approvals, ack) = subscribe(vec![EventKindFilter::AiApproval]).await;
+        assert!(ack.ok, "{:?}", ack.error);
+        crate::server::dispatch::dispatch_store(
+            &state,
+            99,
+            Method::Add {
+                content: "pushed".into(),
+            },
+        );
+        let frame = tokio::time::timeout(Duration::from_secs(5), items.next_frame())
+            .await
+            .expect("the requested kind arrives");
+        let Some(ResponseData::RuntimeEvent(event)) = frame.data else {
+            panic!("expected a runtime event, got {frame:?}");
+        };
+        assert!(event.capture.is_none(), "the snapshot was not requested");
+        assert_eq!(event.change.unwrap().event, copypaste_ipc::EventKind::Items);
+
+        let attach = request(
+            2,
+            Method::Ai {
+                op: copypaste_ipc::ai::AiOp::SessionAttach {
+                    session_id: "s".into(),
+                },
+            },
+        );
+        let reply = tokio::time::timeout(Duration::from_secs(5), approvals.call(attach))
+            .await
+            .expect("the history change was filtered and the attach is answered");
+        assert_eq!(reply.id, 2);
+        assert_eq!(reply.error_code, Some(ErrorCode::Unsupported));
+
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
     #[tokio::test]
     async fn runtime_watch_sends_snapshot_and_capture_transitions() {
         let (state, dir) = test_state("runtime-capture-watch");
@@ -1635,12 +1711,13 @@ mod tests {
                 &mut reader,
                 &mut writer,
                 &mut shutdown_rx,
+                None,
             )
             .await;
         });
         let mut client = Client::new(client_stream);
         let mut frames = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..6 {
             frames.push(
                 tokio::time::timeout(Duration::from_secs(5), client.next_frame())
                     .await
@@ -1668,6 +1745,24 @@ mod tests {
         let peers = peers.change.as_ref().unwrap();
         assert_eq!(peers.event, copypaste_ipc::EventKind::Peers);
         assert!(peers.sync_status.is_some());
+        let refreshed: Vec<_> = frames[4..]
+            .iter()
+            .filter_map(|frame| match &frame.data {
+                Some(ResponseData::RuntimeEvent(event)) => event.change.as_ref(),
+                _ => None,
+            })
+            .map(|change| (change.event, change.library))
+            .collect();
+        assert_eq!(
+            refreshed,
+            [
+                (copypaste_ipc::EventKind::PasteQueue, None),
+                (
+                    copypaste_ipc::EventKind::Library,
+                    Some(copypaste_ipc::LibraryKinds::all())
+                ),
+            ]
+        );
         drop(client);
         tokio::time::timeout(Duration::from_secs(5), pump)
             .await
@@ -1679,21 +1774,16 @@ mod tests {
     async fn a_watcher_continues_after_lagging() {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
         events_tx
-            .send(copypaste_ipc::EventData {
-                sync_status: None,
-                event: copypaste_ipc::EventKind::Items,
-                item_count: 1,
-                captured: false,
-                captured_item_id: None,
-            })
+            .send(copypaste_ipc::EventData::change(
+                copypaste_ipc::EventKind::Items,
+                1,
+            ))
             .unwrap();
         events_tx
             .send(copypaste_ipc::EventData {
-                sync_status: None,
-                event: copypaste_ipc::EventKind::Items,
-                item_count: 2,
                 captured: true,
                 captured_item_id: Some("captured-item".into()),
+                ..copypaste_ipc::EventData::change(copypaste_ipc::EventKind::Items, 2)
             })
             .unwrap();
 

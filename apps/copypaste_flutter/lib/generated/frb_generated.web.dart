@@ -7,6 +7,12 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api.dart';
+import 'api/ai.dart';
+import 'api/clips.dart';
+import 'api/paste_queue.dart';
+import 'api/rules.dart';
+import 'api/snippets.dart';
+import 'api/transforms.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -32,16 +38,64 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  AiAccessEntryView dco_decode_ai_access_entry_view(dynamic raw);
+
+  @protected
+  AiApprovalKind dco_decode_ai_approval_kind(dynamic raw);
+
+  @protected
+  AiApprovalView dco_decode_ai_approval_view(dynamic raw);
+
+  @protected
+  AiClientConfigSnippet dco_decode_ai_client_config_snippet(dynamic raw);
+
+  @protected
+  AiContentKind dco_decode_ai_content_kind(dynamic raw);
+
+  @protected
+  AiGrantCreatedView dco_decode_ai_grant_created_view(dynamic raw);
+
+  @protected
+  AiGrantView dco_decode_ai_grant_view(dynamic raw);
+
+  @protected
+  AiLookback dco_decode_ai_lookback(dynamic raw);
+
+  @protected
+  AiPolicyView dco_decode_ai_policy_view(dynamic raw);
+
+  @protected
+  AiScope dco_decode_ai_scope(dynamic raw);
+
+  @protected
+  AiSessionState dco_decode_ai_session_state(dynamic raw);
+
+  @protected
+  AiStatusView dco_decode_ai_status_view(dynamic raw);
+
+  @protected
   BackupSummary dco_decode_backup_summary(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  AiLookback dco_decode_box_autoadd_ai_lookback(dynamic raw);
+
+  @protected
+  AiSessionState dco_decode_box_autoadd_ai_session_state(dynamic raw);
+
+  @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
 
   @protected
   CaptureState dco_decode_box_autoadd_capture_state(dynamic raw);
+
+  @protected
+  Clip dco_decode_box_autoadd_clip(dynamic raw);
+
+  @protected
+  ClipAnnotationState dco_decode_box_autoadd_clip_annotation_state(dynamic raw);
 
   @protected
   ClipFileDetails dco_decode_box_autoadd_clip_file_details(dynamic raw);
@@ -58,10 +112,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipProvenance dco_decode_box_autoadd_clip_provenance(dynamic raw);
+
+  @protected
   ClipQuery dco_decode_box_autoadd_clip_query(dynamic raw);
 
   @protected
   ClipSemanticKind dco_decode_box_autoadd_clip_semantic_kind(dynamic raw);
+
+  @protected
+  DeliveredText dco_decode_box_autoadd_delivered_text(dynamic raw);
 
   @protected
   DeviceDetails dco_decode_box_autoadd_device_details(dynamic raw);
@@ -88,7 +148,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
+  OperationProgressView dco_decode_box_autoadd_operation_progress_view(
+    dynamic raw,
+  );
+
+  @protected
   PairingCeremony dco_decode_box_autoadd_pairing_ceremony(dynamic raw);
+
+  @protected
+  PasteQueueNothingToPaste dco_decode_box_autoadd_paste_queue_nothing_to_paste(
+    dynamic raw,
+  );
+
+  @protected
+  PasteQueuePreferences dco_decode_box_autoadd_paste_queue_preferences(
+    dynamic raw,
+  );
+
+  @protected
+  RuleDraftInput dco_decode_box_autoadd_rule_draft_input(dynamic raw);
 
   @protected
   RuntimeSettingsHealth dco_decode_box_autoadd_runtime_settings_health(
@@ -104,6 +182,40 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSyncStatus dco_decode_box_autoadd_runtime_sync_status(dynamic raw);
 
   @protected
+  SnippetCollectionDraft dco_decode_box_autoadd_snippet_collection_draft(
+    dynamic raw,
+  );
+
+  @protected
+  SnippetDetailView dco_decode_box_autoadd_snippet_detail_view(dynamic raw);
+
+  @protected
+  SnippetDraftInput dco_decode_box_autoadd_snippet_draft_input(dynamic raw);
+
+  @protected
+  SnippetImportPolicies dco_decode_box_autoadd_snippet_import_policies(
+    dynamic raw,
+  );
+
+  @protected
+  TemplateClipboard dco_decode_box_autoadd_template_clipboard(dynamic raw);
+
+  @protected
+  TransformFailureView dco_decode_box_autoadd_transform_failure_view(
+    dynamic raw,
+  );
+
+  @protected
+  TransformPipelineDraft dco_decode_box_autoadd_transform_pipeline_draft(
+    dynamic raw,
+  );
+
+  @protected
+  TransformSourceInput dco_decode_box_autoadd_transform_source_input(
+    dynamic raw,
+  );
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -114,6 +226,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Clip dco_decode_clip(dynamic raw);
+
+  @protected
+  ClipAnnotationEntry dco_decode_clip_annotation_entry(dynamic raw);
+
+  @protected
+  ClipAnnotationState dco_decode_clip_annotation_state(dynamic raw);
 
   @protected
   ClipContentClass dco_decode_clip_content_class(dynamic raw);
@@ -134,6 +252,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipPage dco_decode_clip_page(dynamic raw);
 
   @protected
+  ClipProvenance dco_decode_clip_provenance(dynamic raw);
+
+  @protected
+  ClipProvenanceKind dco_decode_clip_provenance_kind(dynamic raw);
+
+  @protected
   ClipQuery dco_decode_clip_query(dynamic raw);
 
   @protected
@@ -146,10 +270,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipTags dco_decode_clip_tags(dynamic raw);
 
   @protected
+  ClipTransformStamp dco_decode_clip_transform_stamp(dynamic raw);
+
+  @protected
   CloudAccountStatus dco_decode_cloud_account_status(dynamic raw);
 
   @protected
   CloudSyncSummary dco_decode_cloud_sync_summary(dynamic raw);
+
+  @protected
+  DeliveredText dco_decode_delivered_text(dynamic raw);
 
   @protected
   DeviceClass dco_decode_device_class(dynamic raw);
@@ -217,7 +347,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<AiAccessEntryView> dco_decode_list_ai_access_entry_view(dynamic raw);
+
+  @protected
+  List<AiApprovalView> dco_decode_list_ai_approval_view(dynamic raw);
+
+  @protected
+  List<AiClientConfigSnippet> dco_decode_list_ai_client_config_snippet(
+    dynamic raw,
+  );
+
+  @protected
+  List<AiContentKind> dco_decode_list_ai_content_kind(dynamic raw);
+
+  @protected
+  List<AiGrantView> dco_decode_list_ai_grant_view(dynamic raw);
+
+  @protected
+  List<AiScope> dco_decode_list_ai_scope(dynamic raw);
+
+  @protected
   List<Clip> dco_decode_list_clip(dynamic raw);
+
+  @protected
+  List<ClipAnnotationEntry> dco_decode_list_clip_annotation_entry(dynamic raw);
 
   @protected
   List<ClipContentClass> dco_decode_list_clip_content_class(dynamic raw);
@@ -227,6 +380,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ClipTags> dco_decode_list_clip_tags(dynamic raw);
+
+  @protected
+  List<ClipTransformStamp> dco_decode_list_clip_transform_stamp(dynamic raw);
 
   @protected
   List<DiscoveredDevice> dco_decode_list_discovered_device(dynamic raw);
@@ -243,10 +399,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HistoryTag> dco_decode_list_history_tag(dynamic raw);
 
   @protected
+  List<PasteQueueEntryView> dco_decode_list_paste_queue_entry_view(dynamic raw);
+
+  @protected
+  List<PasteQueueSourceInput> dco_decode_list_paste_queue_source_input(
+    dynamic raw,
+  );
+
+  @protected
   List<Peer> dco_decode_list_peer(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<RuleConflictView> dco_decode_list_rule_conflict_view(dynamic raw);
+
+  @protected
+  List<RuleErrorView> dco_decode_list_rule_error_view(dynamic raw);
+
+  @protected
+  List<RulePreviewItemView> dco_decode_list_rule_preview_item_view(dynamic raw);
+
+  @protected
+  List<RuleSkipEvent> dco_decode_list_rule_skip_event(dynamic raw);
+
+  @protected
+  List<RuleTraceConditionView> dco_decode_list_rule_trace_condition_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<RuleTraceStepView> dco_decode_list_rule_trace_step_view(dynamic raw);
+
+  @protected
+  List<RuleView> dco_decode_list_rule_view(dynamic raw);
 
   @protected
   List<RuntimePeerSyncStatus> dco_decode_list_runtime_peer_sync_status(
@@ -260,16 +447,99 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RuntimeSyncLogEntry> dco_decode_list_runtime_sync_log_entry(dynamic raw);
 
   @protected
+  List<SnippetCollectionView> dco_decode_list_snippet_collection_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<SnippetHitView> dco_decode_list_snippet_hit_view(dynamic raw);
+
+  @protected
+  List<SnippetImportRow> dco_decode_list_snippet_import_row(dynamic raw);
+
+  @protected
+  List<SnippetSummaryView> dco_decode_list_snippet_summary_view(dynamic raw);
+
+  @protected
   List<SyncOutcome> dco_decode_list_sync_outcome(dynamic raw);
 
   @protected
+  List<TemplateFieldView> dco_decode_list_template_field_view(dynamic raw);
+
+  @protected
+  List<TemplateLintView> dco_decode_list_template_lint_view(dynamic raw);
+
+  @protected
+  List<TemplateValue> dco_decode_list_template_value(dynamic raw);
+
+  @protected
+  List<TransformAppDefaultView> dco_decode_list_transform_app_default_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<TransformFavoriteView> dco_decode_list_transform_favorite_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<TransformInfoView> dco_decode_list_transform_info_view(dynamic raw);
+
+  @protected
+  List<TransformParamDefaultsView>
+  dco_decode_list_transform_param_defaults_view(dynamic raw);
+
+  @protected
+  List<TransformParamOptionView> dco_decode_list_transform_param_option_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<TransformParamView> dco_decode_list_transform_param_view(dynamic raw);
+
+  @protected
+  List<TransformPipelineView> dco_decode_list_transform_pipeline_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<TransformStepResultView> dco_decode_list_transform_step_result_view(
+    dynamic raw,
+  );
+
+  @protected
+  List<TransformStepView> dco_decode_list_transform_step_view(dynamic raw);
+
+  @protected
+  List<TransformWarningView> dco_decode_list_transform_warning_view(
+    dynamic raw,
+  );
+
+  @protected
+  OperationProgressView dco_decode_operation_progress_view(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  AiLookback? dco_decode_opt_box_autoadd_ai_lookback(dynamic raw);
+
+  @protected
+  AiSessionState? dco_decode_opt_box_autoadd_ai_session_state(dynamic raw);
 
   @protected
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
   CaptureState? dco_decode_opt_box_autoadd_capture_state(dynamic raw);
+
+  @protected
+  Clip? dco_decode_opt_box_autoadd_clip(dynamic raw);
+
+  @protected
+  ClipAnnotationState? dco_decode_opt_box_autoadd_clip_annotation_state(
+    dynamic raw,
+  );
 
   @protected
   ClipFileDetails? dco_decode_opt_box_autoadd_clip_file_details(dynamic raw);
@@ -286,7 +556,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipProvenance? dco_decode_opt_box_autoadd_clip_provenance(dynamic raw);
+
+  @protected
   ClipSemanticKind? dco_decode_opt_box_autoadd_clip_semantic_kind(dynamic raw);
+
+  @protected
+  DeliveredText? dco_decode_opt_box_autoadd_delivered_text(dynamic raw);
 
   @protected
   DeviceDetails? dco_decode_opt_box_autoadd_device_details(dynamic raw);
@@ -315,7 +591,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  OperationProgressView? dco_decode_opt_box_autoadd_operation_progress_view(
+    dynamic raw,
+  );
+
+  @protected
   PairingCeremony? dco_decode_opt_box_autoadd_pairing_ceremony(dynamic raw);
+
+  @protected
+  PasteQueueNothingToPaste?
+  dco_decode_opt_box_autoadd_paste_queue_nothing_to_paste(dynamic raw);
 
   @protected
   RuntimeSettingsHealth? dco_decode_opt_box_autoadd_runtime_settings_health(
@@ -324,6 +609,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RuntimeSyncStatus? dco_decode_opt_box_autoadd_runtime_sync_status(
+    dynamic raw,
+  );
+
+  @protected
+  SnippetDetailView? dco_decode_opt_box_autoadd_snippet_detail_view(
+    dynamic raw,
+  );
+
+  @protected
+  TransformFailureView? dco_decode_opt_box_autoadd_transform_failure_view(
     dynamic raw,
   );
 
@@ -337,13 +632,112 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String>? dco_decode_opt_list_String(dynamic raw);
 
   @protected
+  List<AiScope>? dco_decode_opt_list_ai_scope(dynamic raw);
+
+  @protected
   PairingCeremony dco_decode_pairing_ceremony(dynamic raw);
 
   @protected
   PairingInvitation dco_decode_pairing_invitation(dynamic raw);
 
   @protected
+  PasteQueueAddedVia dco_decode_paste_queue_added_via(dynamic raw);
+
+  @protected
+  PasteQueueContentKind dco_decode_paste_queue_content_kind(dynamic raw);
+
+  @protected
+  PasteQueueDeliveryMode dco_decode_paste_queue_delivery_mode(dynamic raw);
+
+  @protected
+  PasteQueueDeliveryView dco_decode_paste_queue_delivery_view(dynamic raw);
+
+  @protected
+  PasteQueueEndBehavior dco_decode_paste_queue_end_behavior(dynamic raw);
+
+  @protected
+  PasteQueueEntryStatus dco_decode_paste_queue_entry_status(dynamic raw);
+
+  @protected
+  PasteQueueEntryView dco_decode_paste_queue_entry_view(dynamic raw);
+
+  @protected
+  PasteQueueNothingToPaste dco_decode_paste_queue_nothing_to_paste(dynamic raw);
+
+  @protected
+  PasteQueuePhase dco_decode_paste_queue_phase(dynamic raw);
+
+  @protected
+  PasteQueuePreferences dco_decode_paste_queue_preferences(dynamic raw);
+
+  @protected
+  PasteQueueSeparator dco_decode_paste_queue_separator(dynamic raw);
+
+  @protected
+  PasteQueueSourceInput dco_decode_paste_queue_source_input(dynamic raw);
+
+  @protected
+  PasteQueueSourceKind dco_decode_paste_queue_source_kind(dynamic raw);
+
+  @protected
+  PasteQueueTargetKind dco_decode_paste_queue_target_kind(dynamic raw);
+
+  @protected
+  PasteQueueView dco_decode_paste_queue_view(dynamic raw);
+
+  @protected
   Peer dco_decode_peer(dynamic raw);
+
+  @protected
+  RenderedSnippet dco_decode_rendered_snippet(dynamic raw);
+
+  @protected
+  RuleApplyReportView dco_decode_rule_apply_report_view(dynamic raw);
+
+  @protected
+  RuleConflictView dco_decode_rule_conflict_view(dynamic raw);
+
+  @protected
+  RuleDraftInput dco_decode_rule_draft_input(dynamic raw);
+
+  @protected
+  RuleErrorView dco_decode_rule_error_view(dynamic raw);
+
+  @protected
+  RuleListView dco_decode_rule_list_view(dynamic raw);
+
+  @protected
+  RulePreviewCountsView dco_decode_rule_preview_counts_view(dynamic raw);
+
+  @protected
+  RulePreviewItemView dco_decode_rule_preview_item_view(dynamic raw);
+
+  @protected
+  RulePreviewView dco_decode_rule_preview_view(dynamic raw);
+
+  @protected
+  RulePrivacyDefaults dco_decode_rule_privacy_defaults(dynamic raw);
+
+  @protected
+  RuleSkipEvent dco_decode_rule_skip_event(dynamic raw);
+
+  @protected
+  RuleStatsView dco_decode_rule_stats_view(dynamic raw);
+
+  @protected
+  RuleTraceConditionView dco_decode_rule_trace_condition_view(dynamic raw);
+
+  @protected
+  RuleTraceResult dco_decode_rule_trace_result(dynamic raw);
+
+  @protected
+  RuleTraceStepView dco_decode_rule_trace_step_view(dynamic raw);
+
+  @protected
+  RuleTraceView dco_decode_rule_trace_view(dynamic raw);
+
+  @protected
+  RuleView dco_decode_rule_view(dynamic raw);
 
   @protected
   RuntimeError dco_decode_runtime_error(dynamic raw);
@@ -373,6 +767,71 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSyncStatus dco_decode_runtime_sync_status(dynamic raw);
 
   @protected
+  SnippetAbbreviationPolicy dco_decode_snippet_abbreviation_policy(dynamic raw);
+
+  @protected
+  SnippetCollectionDraft dco_decode_snippet_collection_draft(dynamic raw);
+
+  @protected
+  SnippetCollectionNamePolicy dco_decode_snippet_collection_name_policy(
+    dynamic raw,
+  );
+
+  @protected
+  SnippetCollectionView dco_decode_snippet_collection_view(dynamic raw);
+
+  @protected
+  SnippetDetailView dco_decode_snippet_detail_view(dynamic raw);
+
+  @protected
+  SnippetDraftInput dco_decode_snippet_draft_input(dynamic raw);
+
+  @protected
+  SnippetExportScopeKind dco_decode_snippet_export_scope_kind(dynamic raw);
+
+  @protected
+  SnippetHitView dco_decode_snippet_hit_view(dynamic raw);
+
+  @protected
+  SnippetImportCounts dco_decode_snippet_import_counts(dynamic raw);
+
+  @protected
+  SnippetImportFormat dco_decode_snippet_import_format(dynamic raw);
+
+  @protected
+  SnippetImportPlanView dco_decode_snippet_import_plan_view(dynamic raw);
+
+  @protected
+  SnippetImportPolicies dco_decode_snippet_import_policies(dynamic raw);
+
+  @protected
+  SnippetImportReportView dco_decode_snippet_import_report_view(dynamic raw);
+
+  @protected
+  SnippetImportRow dco_decode_snippet_import_row(dynamic raw);
+
+  @protected
+  SnippetImportRowOutcome dco_decode_snippet_import_row_outcome(dynamic raw);
+
+  @protected
+  SnippetMatchTier dco_decode_snippet_match_tier(dynamic raw);
+
+  @protected
+  SnippetPageView dco_decode_snippet_page_view(dynamic raw);
+
+  @protected
+  SnippetSameIdPolicy dco_decode_snippet_same_id_policy(dynamic raw);
+
+  @protected
+  SnippetSaveResult dco_decode_snippet_save_result(dynamic raw);
+
+  @protected
+  SnippetScopeKind dco_decode_snippet_scope_kind(dynamic raw);
+
+  @protected
+  SnippetSummaryView dco_decode_snippet_summary_view(dynamic raw);
+
+  @protected
   SpoilerState dco_decode_spoiler_state(dynamic raw);
 
   @protected
@@ -382,10 +841,102 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SyncPhase dco_decode_sync_phase(dynamic raw);
 
   @protected
+  TemplateClipboard dco_decode_template_clipboard(dynamic raw);
+
+  @protected
+  TemplateClipboardKind dco_decode_template_clipboard_kind(dynamic raw);
+
+  @protected
+  TemplateFieldKind dco_decode_template_field_kind(dynamic raw);
+
+  @protected
+  TemplateFieldView dco_decode_template_field_view(dynamic raw);
+
+  @protected
+  TemplateLintSeverity dco_decode_template_lint_severity(dynamic raw);
+
+  @protected
+  TemplateLintView dco_decode_template_lint_view(dynamic raw);
+
+  @protected
+  TemplateValue dco_decode_template_value(dynamic raw);
+
+  @protected
+  TextCountsView dco_decode_text_counts_view(dynamic raw);
+
+  @protected
+  TextDelivery dco_decode_text_delivery(dynamic raw);
+
+  @protected
   TextExportSummary dco_decode_text_export_summary(dynamic raw);
 
   @protected
   ThisDevice dco_decode_this_device(dynamic raw);
+
+  @protected
+  TransformAction dco_decode_transform_action(dynamic raw);
+
+  @protected
+  TransformAppDefaultView dco_decode_transform_app_default_view(dynamic raw);
+
+  @protected
+  TransformFailureView dco_decode_transform_failure_view(dynamic raw);
+
+  @protected
+  TransformFavoriteKind dco_decode_transform_favorite_kind(dynamic raw);
+
+  @protected
+  TransformFavoriteView dco_decode_transform_favorite_view(dynamic raw);
+
+  @protected
+  TransformFlagsView dco_decode_transform_flags_view(dynamic raw);
+
+  @protected
+  TransformInfoView dco_decode_transform_info_view(dynamic raw);
+
+  @protected
+  TransformParamDefaultsView dco_decode_transform_param_defaults_view(
+    dynamic raw,
+  );
+
+  @protected
+  TransformParamKind dco_decode_transform_param_kind(dynamic raw);
+
+  @protected
+  TransformParamOptionView dco_decode_transform_param_option_view(dynamic raw);
+
+  @protected
+  TransformParamView dco_decode_transform_param_view(dynamic raw);
+
+  @protected
+  TransformPipelineDraft dco_decode_transform_pipeline_draft(dynamic raw);
+
+  @protected
+  TransformPipelineView dco_decode_transform_pipeline_view(dynamic raw);
+
+  @protected
+  TransformPreferencesView dco_decode_transform_preferences_view(dynamic raw);
+
+  @protected
+  TransformPreviewView dco_decode_transform_preview_view(dynamic raw);
+
+  @protected
+  TransformRunResult dco_decode_transform_run_result(dynamic raw);
+
+  @protected
+  TransformSourceInput dco_decode_transform_source_input(dynamic raw);
+
+  @protected
+  TransformSourceKind dco_decode_transform_source_kind(dynamic raw);
+
+  @protected
+  TransformStepResultView dco_decode_transform_step_result_view(dynamic raw);
+
+  @protected
+  TransformStepView dco_decode_transform_step_view(dynamic raw);
+
+  @protected
+  TransformWarningView dco_decode_transform_warning_view(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -411,16 +962,74 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  AiAccessEntryView sse_decode_ai_access_entry_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AiApprovalKind sse_decode_ai_approval_kind(SseDeserializer deserializer);
+
+  @protected
+  AiApprovalView sse_decode_ai_approval_view(SseDeserializer deserializer);
+
+  @protected
+  AiClientConfigSnippet sse_decode_ai_client_config_snippet(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AiContentKind sse_decode_ai_content_kind(SseDeserializer deserializer);
+
+  @protected
+  AiGrantCreatedView sse_decode_ai_grant_created_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AiGrantView sse_decode_ai_grant_view(SseDeserializer deserializer);
+
+  @protected
+  AiLookback sse_decode_ai_lookback(SseDeserializer deserializer);
+
+  @protected
+  AiPolicyView sse_decode_ai_policy_view(SseDeserializer deserializer);
+
+  @protected
+  AiScope sse_decode_ai_scope(SseDeserializer deserializer);
+
+  @protected
+  AiSessionState sse_decode_ai_session_state(SseDeserializer deserializer);
+
+  @protected
+  AiStatusView sse_decode_ai_status_view(SseDeserializer deserializer);
+
+  @protected
   BackupSummary sse_decode_backup_summary(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  AiLookback sse_decode_box_autoadd_ai_lookback(SseDeserializer deserializer);
+
+  @protected
+  AiSessionState sse_decode_box_autoadd_ai_session_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   CaptureState sse_decode_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Clip sse_decode_box_autoadd_clip(SseDeserializer deserializer);
+
+  @protected
+  ClipAnnotationState sse_decode_box_autoadd_clip_annotation_state(
     SseDeserializer deserializer,
   );
 
@@ -445,10 +1054,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipProvenance sse_decode_box_autoadd_clip_provenance(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipQuery sse_decode_box_autoadd_clip_query(SseDeserializer deserializer);
 
   @protected
   ClipSemanticKind sse_decode_box_autoadd_clip_semantic_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeliveredText sse_decode_box_autoadd_delivered_text(
     SseDeserializer deserializer,
   );
 
@@ -491,7 +1110,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  OperationProgressView sse_decode_box_autoadd_operation_progress_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PairingCeremony sse_decode_box_autoadd_pairing_ceremony(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueNothingToPaste sse_decode_box_autoadd_paste_queue_nothing_to_paste(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueuePreferences sse_decode_box_autoadd_paste_queue_preferences(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuleDraftInput sse_decode_box_autoadd_rule_draft_input(
     SseDeserializer deserializer,
   );
 
@@ -511,6 +1150,46 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  SnippetCollectionDraft sse_decode_box_autoadd_snippet_collection_draft(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetDetailView sse_decode_box_autoadd_snippet_detail_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetDraftInput sse_decode_box_autoadd_snippet_draft_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportPolicies sse_decode_box_autoadd_snippet_import_policies(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TemplateClipboard sse_decode_box_autoadd_template_clipboard(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFailureView sse_decode_box_autoadd_transform_failure_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformPipelineDraft sse_decode_box_autoadd_transform_pipeline_draft(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformSourceInput sse_decode_box_autoadd_transform_source_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -521,6 +1200,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Clip sse_decode_clip(SseDeserializer deserializer);
+
+  @protected
+  ClipAnnotationEntry sse_decode_clip_annotation_entry(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ClipAnnotationState sse_decode_clip_annotation_state(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ClipContentClass sse_decode_clip_content_class(SseDeserializer deserializer);
@@ -543,6 +1232,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipPage sse_decode_clip_page(SseDeserializer deserializer);
 
   @protected
+  ClipProvenance sse_decode_clip_provenance(SseDeserializer deserializer);
+
+  @protected
+  ClipProvenanceKind sse_decode_clip_provenance_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipQuery sse_decode_clip_query(SseDeserializer deserializer);
 
   @protected
@@ -555,12 +1252,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipTags sse_decode_clip_tags(SseDeserializer deserializer);
 
   @protected
+  ClipTransformStamp sse_decode_clip_transform_stamp(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   CloudAccountStatus sse_decode_cloud_account_status(
     SseDeserializer deserializer,
   );
 
   @protected
   CloudSyncSummary sse_decode_cloud_sync_summary(SseDeserializer deserializer);
+
+  @protected
+  DeliveredText sse_decode_delivered_text(SseDeserializer deserializer);
 
   @protected
   DeviceClass sse_decode_device_class(SseDeserializer deserializer);
@@ -638,7 +1343,38 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<AiAccessEntryView> sse_decode_list_ai_access_entry_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<AiApprovalView> sse_decode_list_ai_approval_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<AiClientConfigSnippet> sse_decode_list_ai_client_config_snippet(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<AiContentKind> sse_decode_list_ai_content_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<AiGrantView> sse_decode_list_ai_grant_view(SseDeserializer deserializer);
+
+  @protected
+  List<AiScope> sse_decode_list_ai_scope(SseDeserializer deserializer);
+
+  @protected
   List<Clip> sse_decode_list_clip(SseDeserializer deserializer);
+
+  @protected
+  List<ClipAnnotationEntry> sse_decode_list_clip_annotation_entry(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<ClipContentClass> sse_decode_list_clip_content_class(
@@ -652,6 +1388,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ClipTags> sse_decode_list_clip_tags(SseDeserializer deserializer);
+
+  @protected
+  List<ClipTransformStamp> sse_decode_list_clip_transform_stamp(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<DiscoveredDevice> sse_decode_list_discovered_device(
@@ -672,10 +1413,53 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HistoryTag> sse_decode_list_history_tag(SseDeserializer deserializer);
 
   @protected
+  List<PasteQueueEntryView> sse_decode_list_paste_queue_entry_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PasteQueueSourceInput> sse_decode_list_paste_queue_source_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<Peer> sse_decode_list_peer(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<RuleConflictView> sse_decode_list_rule_conflict_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RuleErrorView> sse_decode_list_rule_error_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RulePreviewItemView> sse_decode_list_rule_preview_item_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RuleSkipEvent> sse_decode_list_rule_skip_event(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RuleTraceConditionView> sse_decode_list_rule_trace_condition_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RuleTraceStepView> sse_decode_list_rule_trace_step_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<RuleView> sse_decode_list_rule_view(SseDeserializer deserializer);
 
   @protected
   List<RuntimePeerSyncStatus> sse_decode_list_runtime_peer_sync_status(
@@ -693,16 +1477,123 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<SnippetCollectionView> sse_decode_list_snippet_collection_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SnippetHitView> sse_decode_list_snippet_hit_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SnippetImportRow> sse_decode_list_snippet_import_row(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SnippetSummaryView> sse_decode_list_snippet_summary_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<SyncOutcome> sse_decode_list_sync_outcome(SseDeserializer deserializer);
 
   @protected
+  List<TemplateFieldView> sse_decode_list_template_field_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TemplateLintView> sse_decode_list_template_lint_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TemplateValue> sse_decode_list_template_value(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformAppDefaultView> sse_decode_list_transform_app_default_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformFavoriteView> sse_decode_list_transform_favorite_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformInfoView> sse_decode_list_transform_info_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformParamDefaultsView>
+  sse_decode_list_transform_param_defaults_view(SseDeserializer deserializer);
+
+  @protected
+  List<TransformParamOptionView> sse_decode_list_transform_param_option_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformParamView> sse_decode_list_transform_param_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformPipelineView> sse_decode_list_transform_pipeline_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformStepResultView> sse_decode_list_transform_step_result_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformStepView> sse_decode_list_transform_step_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<TransformWarningView> sse_decode_list_transform_warning_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  OperationProgressView sse_decode_operation_progress_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  AiLookback? sse_decode_opt_box_autoadd_ai_lookback(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AiSessionState? sse_decode_opt_box_autoadd_ai_session_state(
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   CaptureState? sse_decode_opt_box_autoadd_capture_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Clip? sse_decode_opt_box_autoadd_clip(SseDeserializer deserializer);
+
+  @protected
+  ClipAnnotationState? sse_decode_opt_box_autoadd_clip_annotation_state(
     SseDeserializer deserializer,
   );
 
@@ -727,7 +1618,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipProvenance? sse_decode_opt_box_autoadd_clip_provenance(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipSemanticKind? sse_decode_opt_box_autoadd_clip_semantic_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeliveredText? sse_decode_opt_box_autoadd_delivered_text(
     SseDeserializer deserializer,
   );
 
@@ -770,7 +1671,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  OperationProgressView? sse_decode_opt_box_autoadd_operation_progress_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PairingCeremony? sse_decode_opt_box_autoadd_pairing_ceremony(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueNothingToPaste?
+  sse_decode_opt_box_autoadd_paste_queue_nothing_to_paste(
     SseDeserializer deserializer,
   );
 
@@ -785,6 +1697,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  SnippetDetailView? sse_decode_opt_box_autoadd_snippet_detail_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFailureView? sse_decode_opt_box_autoadd_transform_failure_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -794,13 +1716,150 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
 
   @protected
+  List<AiScope>? sse_decode_opt_list_ai_scope(SseDeserializer deserializer);
+
+  @protected
   PairingCeremony sse_decode_pairing_ceremony(SseDeserializer deserializer);
 
   @protected
   PairingInvitation sse_decode_pairing_invitation(SseDeserializer deserializer);
 
   @protected
+  PasteQueueAddedVia sse_decode_paste_queue_added_via(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueContentKind sse_decode_paste_queue_content_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueDeliveryMode sse_decode_paste_queue_delivery_mode(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueDeliveryView sse_decode_paste_queue_delivery_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueEndBehavior sse_decode_paste_queue_end_behavior(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueEntryStatus sse_decode_paste_queue_entry_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueEntryView sse_decode_paste_queue_entry_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueNothingToPaste sse_decode_paste_queue_nothing_to_paste(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueuePhase sse_decode_paste_queue_phase(SseDeserializer deserializer);
+
+  @protected
+  PasteQueuePreferences sse_decode_paste_queue_preferences(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueSeparator sse_decode_paste_queue_separator(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueSourceInput sse_decode_paste_queue_source_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueSourceKind sse_decode_paste_queue_source_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueTargetKind sse_decode_paste_queue_target_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PasteQueueView sse_decode_paste_queue_view(SseDeserializer deserializer);
+
+  @protected
   Peer sse_decode_peer(SseDeserializer deserializer);
+
+  @protected
+  RenderedSnippet sse_decode_rendered_snippet(SseDeserializer deserializer);
+
+  @protected
+  RuleApplyReportView sse_decode_rule_apply_report_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuleConflictView sse_decode_rule_conflict_view(SseDeserializer deserializer);
+
+  @protected
+  RuleDraftInput sse_decode_rule_draft_input(SseDeserializer deserializer);
+
+  @protected
+  RuleErrorView sse_decode_rule_error_view(SseDeserializer deserializer);
+
+  @protected
+  RuleListView sse_decode_rule_list_view(SseDeserializer deserializer);
+
+  @protected
+  RulePreviewCountsView sse_decode_rule_preview_counts_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RulePreviewItemView sse_decode_rule_preview_item_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RulePreviewView sse_decode_rule_preview_view(SseDeserializer deserializer);
+
+  @protected
+  RulePrivacyDefaults sse_decode_rule_privacy_defaults(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuleSkipEvent sse_decode_rule_skip_event(SseDeserializer deserializer);
+
+  @protected
+  RuleStatsView sse_decode_rule_stats_view(SseDeserializer deserializer);
+
+  @protected
+  RuleTraceConditionView sse_decode_rule_trace_condition_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuleTraceResult sse_decode_rule_trace_result(SseDeserializer deserializer);
+
+  @protected
+  RuleTraceStepView sse_decode_rule_trace_step_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuleTraceView sse_decode_rule_trace_view(SseDeserializer deserializer);
+
+  @protected
+  RuleView sse_decode_rule_view(SseDeserializer deserializer);
 
   @protected
   RuntimeError sse_decode_runtime_error(SseDeserializer deserializer);
@@ -842,6 +1901,101 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  SnippetAbbreviationPolicy sse_decode_snippet_abbreviation_policy(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetCollectionDraft sse_decode_snippet_collection_draft(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetCollectionNamePolicy sse_decode_snippet_collection_name_policy(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetCollectionView sse_decode_snippet_collection_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetDetailView sse_decode_snippet_detail_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetDraftInput sse_decode_snippet_draft_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetExportScopeKind sse_decode_snippet_export_scope_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetHitView sse_decode_snippet_hit_view(SseDeserializer deserializer);
+
+  @protected
+  SnippetImportCounts sse_decode_snippet_import_counts(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportFormat sse_decode_snippet_import_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportPlanView sse_decode_snippet_import_plan_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportPolicies sse_decode_snippet_import_policies(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportReportView sse_decode_snippet_import_report_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetImportRow sse_decode_snippet_import_row(SseDeserializer deserializer);
+
+  @protected
+  SnippetImportRowOutcome sse_decode_snippet_import_row_outcome(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetMatchTier sse_decode_snippet_match_tier(SseDeserializer deserializer);
+
+  @protected
+  SnippetPageView sse_decode_snippet_page_view(SseDeserializer deserializer);
+
+  @protected
+  SnippetSameIdPolicy sse_decode_snippet_same_id_policy(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetSaveResult sse_decode_snippet_save_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetScopeKind sse_decode_snippet_scope_kind(SseDeserializer deserializer);
+
+  @protected
+  SnippetSummaryView sse_decode_snippet_summary_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SpoilerState sse_decode_spoiler_state(SseDeserializer deserializer);
 
   @protected
@@ -851,12 +2005,150 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SyncPhase sse_decode_sync_phase(SseDeserializer deserializer);
 
   @protected
+  TemplateClipboard sse_decode_template_clipboard(SseDeserializer deserializer);
+
+  @protected
+  TemplateClipboardKind sse_decode_template_clipboard_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TemplateFieldKind sse_decode_template_field_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TemplateFieldView sse_decode_template_field_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TemplateLintSeverity sse_decode_template_lint_severity(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TemplateLintView sse_decode_template_lint_view(SseDeserializer deserializer);
+
+  @protected
+  TemplateValue sse_decode_template_value(SseDeserializer deserializer);
+
+  @protected
+  TextCountsView sse_decode_text_counts_view(SseDeserializer deserializer);
+
+  @protected
+  TextDelivery sse_decode_text_delivery(SseDeserializer deserializer);
+
+  @protected
   TextExportSummary sse_decode_text_export_summary(
     SseDeserializer deserializer,
   );
 
   @protected
   ThisDevice sse_decode_this_device(SseDeserializer deserializer);
+
+  @protected
+  TransformAction sse_decode_transform_action(SseDeserializer deserializer);
+
+  @protected
+  TransformAppDefaultView sse_decode_transform_app_default_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFailureView sse_decode_transform_failure_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFavoriteKind sse_decode_transform_favorite_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFavoriteView sse_decode_transform_favorite_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformFlagsView sse_decode_transform_flags_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformInfoView sse_decode_transform_info_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformParamDefaultsView sse_decode_transform_param_defaults_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformParamKind sse_decode_transform_param_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformParamOptionView sse_decode_transform_param_option_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformParamView sse_decode_transform_param_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformPipelineDraft sse_decode_transform_pipeline_draft(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformPipelineView sse_decode_transform_pipeline_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformPreferencesView sse_decode_transform_preferences_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformPreviewView sse_decode_transform_preview_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformRunResult sse_decode_transform_run_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformSourceInput sse_decode_transform_source_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformSourceKind sse_decode_transform_source_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformStepResultView sse_decode_transform_step_result_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformStepView sse_decode_transform_step_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TransformWarningView sse_decode_transform_warning_view(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -886,10 +2178,76 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ai_access_entry_view(
+    AiAccessEntryView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_approval_kind(
+    AiApprovalKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_approval_view(
+    AiApprovalView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_client_config_snippet(
+    AiClientConfigSnippet self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_content_kind(AiContentKind self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ai_grant_created_view(
+    AiGrantCreatedView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_grant_view(AiGrantView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ai_lookback(AiLookback self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ai_policy_view(AiPolicyView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ai_scope(AiScope self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ai_session_state(
+    AiSessionState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_ai_status_view(AiStatusView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_backup_summary(BackupSummary self, SseSerializer serializer);
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ai_lookback(
+    AiLookback self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_ai_session_state(
+    AiSessionState self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
@@ -897,6 +2255,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_capture_state(
     CaptureState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_clip(Clip self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_clip_annotation_state(
+    ClipAnnotationState self,
     SseSerializer serializer,
   );
 
@@ -925,6 +2292,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_clip_provenance(
+    ClipProvenance self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_clip_query(
     ClipQuery self,
     SseSerializer serializer,
@@ -933,6 +2306,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_clip_semantic_kind(
     ClipSemanticKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_delivered_text(
+    DeliveredText self,
     SseSerializer serializer,
   );
 
@@ -985,8 +2364,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_operation_progress_view(
+    OperationProgressView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_pairing_ceremony(
     PairingCeremony self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_paste_queue_nothing_to_paste(
+    PasteQueueNothingToPaste self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_paste_queue_preferences(
+    PasteQueuePreferences self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_rule_draft_input(
+    RuleDraftInput self,
     SseSerializer serializer,
   );
 
@@ -1009,6 +2412,54 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_snippet_collection_draft(
+    SnippetCollectionDraft self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_snippet_detail_view(
+    SnippetDetailView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_snippet_draft_input(
+    SnippetDraftInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_snippet_import_policies(
+    SnippetImportPolicies self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_template_clipboard(
+    TemplateClipboard self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_transform_failure_view(
+    TransformFailureView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_transform_pipeline_draft(
+    TransformPipelineDraft self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_transform_source_input(
+    TransformSourceInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -1019,6 +2470,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_clip(Clip self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_clip_annotation_entry(
+    ClipAnnotationEntry self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_clip_annotation_state(
+    ClipAnnotationState self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_clip_content_class(
@@ -1054,6 +2517,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_clip_page(ClipPage self, SseSerializer serializer);
 
   @protected
+  void sse_encode_clip_provenance(
+    ClipProvenance self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_clip_provenance_kind(
+    ClipProvenanceKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_clip_query(ClipQuery self, SseSerializer serializer);
 
   @protected
@@ -1069,6 +2544,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_clip_tags(ClipTags self, SseSerializer serializer);
 
   @protected
+  void sse_encode_clip_transform_stamp(
+    ClipTransformStamp self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_cloud_account_status(
     CloudAccountStatus self,
     SseSerializer serializer,
@@ -1079,6 +2560,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     CloudSyncSummary self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_delivered_text(DeliveredText self, SseSerializer serializer);
 
   @protected
   void sse_encode_device_class(DeviceClass self, SseSerializer serializer);
@@ -1174,7 +2658,46 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_ai_access_entry_view(
+    List<AiAccessEntryView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ai_approval_view(
+    List<AiApprovalView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ai_client_config_snippet(
+    List<AiClientConfigSnippet> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ai_content_kind(
+    List<AiContentKind> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ai_grant_view(
+    List<AiGrantView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_ai_scope(List<AiScope> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_clip(List<Clip> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_clip_annotation_entry(
+    List<ClipAnnotationEntry> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_clip_content_class(
@@ -1190,6 +2713,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_clip_tags(List<ClipTags> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_clip_transform_stamp(
+    List<ClipTransformStamp> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_discovered_device(
@@ -1216,6 +2745,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_paste_queue_entry_view(
+    List<PasteQueueEntryView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_paste_queue_source_input(
+    List<PasteQueueSourceInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_peer(List<Peer> self, SseSerializer serializer);
 
   @protected
@@ -1223,6 +2764,45 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     Uint8List self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_list_rule_conflict_view(
+    List<RuleConflictView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_error_view(
+    List<RuleErrorView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_preview_item_view(
+    List<RulePreviewItemView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_skip_event(
+    List<RuleSkipEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_trace_condition_view(
+    List<RuleTraceConditionView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_trace_step_view(
+    List<RuleTraceStepView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_rule_view(List<RuleView> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_runtime_peer_sync_status(
@@ -1243,8 +2823,116 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_snippet_collection_view(
+    List<SnippetCollectionView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_snippet_hit_view(
+    List<SnippetHitView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_snippet_import_row(
+    List<SnippetImportRow> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_snippet_summary_view(
+    List<SnippetSummaryView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_sync_outcome(
     List<SyncOutcome> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_template_field_view(
+    List<TemplateFieldView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_template_lint_view(
+    List<TemplateLintView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_template_value(
+    List<TemplateValue> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_app_default_view(
+    List<TransformAppDefaultView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_favorite_view(
+    List<TransformFavoriteView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_info_view(
+    List<TransformInfoView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_param_defaults_view(
+    List<TransformParamDefaultsView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_param_option_view(
+    List<TransformParamOptionView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_param_view(
+    List<TransformParamView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_pipeline_view(
+    List<TransformPipelineView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_step_result_view(
+    List<TransformStepResultView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_step_view(
+    List<TransformStepView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_transform_warning_view(
+    List<TransformWarningView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_operation_progress_view(
+    OperationProgressView self,
     SseSerializer serializer,
   );
 
@@ -1252,11 +2940,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_ai_lookback(
+    AiLookback? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_ai_session_state(
+    AiSessionState? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_capture_state(
     CaptureState? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_clip(Clip? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_clip_annotation_state(
+    ClipAnnotationState? self,
     SseSerializer serializer,
   );
 
@@ -1285,8 +2994,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_clip_provenance(
+    ClipProvenance? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_clip_semantic_kind(
     ClipSemanticKind? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_delivered_text(
+    DeliveredText? self,
     SseSerializer serializer,
   );
 
@@ -1339,8 +3060,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_operation_progress_view(
+    OperationProgressView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_pairing_ceremony(
     PairingCeremony? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_paste_queue_nothing_to_paste(
+    PasteQueueNothingToPaste? self,
     SseSerializer serializer,
   );
 
@@ -1357,6 +3090,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_snippet_detail_view(
+    SnippetDetailView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_transform_failure_view(
+    TransformFailureView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
@@ -1364,6 +3109,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_ai_scope(
+    List<AiScope>? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_pairing_ceremony(
@@ -1378,7 +3129,181 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_paste_queue_added_via(
+    PasteQueueAddedVia self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_content_kind(
+    PasteQueueContentKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_delivery_mode(
+    PasteQueueDeliveryMode self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_delivery_view(
+    PasteQueueDeliveryView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_end_behavior(
+    PasteQueueEndBehavior self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_entry_status(
+    PasteQueueEntryStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_entry_view(
+    PasteQueueEntryView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_nothing_to_paste(
+    PasteQueueNothingToPaste self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_phase(
+    PasteQueuePhase self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_preferences(
+    PasteQueuePreferences self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_separator(
+    PasteQueueSeparator self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_source_input(
+    PasteQueueSourceInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_source_kind(
+    PasteQueueSourceKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_target_kind(
+    PasteQueueTargetKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paste_queue_view(
+    PasteQueueView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_peer(Peer self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rendered_snippet(
+    RenderedSnippet self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_apply_report_view(
+    RuleApplyReportView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_conflict_view(
+    RuleConflictView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_draft_input(
+    RuleDraftInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_error_view(RuleErrorView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rule_list_view(RuleListView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rule_preview_counts_view(
+    RulePreviewCountsView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_preview_item_view(
+    RulePreviewItemView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_preview_view(
+    RulePreviewView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_privacy_defaults(
+    RulePrivacyDefaults self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_skip_event(RuleSkipEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rule_stats_view(RuleStatsView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rule_trace_condition_view(
+    RuleTraceConditionView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_trace_result(
+    RuleTraceResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_trace_step_view(
+    RuleTraceStepView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_rule_trace_view(RuleTraceView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rule_view(RuleView self, SseSerializer serializer);
 
   @protected
   void sse_encode_runtime_error(RuntimeError self, SseSerializer serializer);
@@ -1429,6 +3354,132 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_snippet_abbreviation_policy(
+    SnippetAbbreviationPolicy self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_collection_draft(
+    SnippetCollectionDraft self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_collection_name_policy(
+    SnippetCollectionNamePolicy self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_collection_view(
+    SnippetCollectionView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_detail_view(
+    SnippetDetailView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_draft_input(
+    SnippetDraftInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_export_scope_kind(
+    SnippetExportScopeKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_hit_view(
+    SnippetHitView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_counts(
+    SnippetImportCounts self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_format(
+    SnippetImportFormat self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_plan_view(
+    SnippetImportPlanView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_policies(
+    SnippetImportPolicies self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_report_view(
+    SnippetImportReportView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_row(
+    SnippetImportRow self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_import_row_outcome(
+    SnippetImportRowOutcome self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_match_tier(
+    SnippetMatchTier self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_page_view(
+    SnippetPageView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_same_id_policy(
+    SnippetSameIdPolicy self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_save_result(
+    SnippetSaveResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_scope_kind(
+    SnippetScopeKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_summary_view(
+    SnippetSummaryView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_spoiler_state(SpoilerState self, SseSerializer serializer);
 
   @protected
@@ -1438,6 +3489,54 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_sync_phase(SyncPhase self, SseSerializer serializer);
 
   @protected
+  void sse_encode_template_clipboard(
+    TemplateClipboard self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_clipboard_kind(
+    TemplateClipboardKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_field_kind(
+    TemplateFieldKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_field_view(
+    TemplateFieldView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_lint_severity(
+    TemplateLintSeverity self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_lint_view(
+    TemplateLintView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_template_value(TemplateValue self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_text_counts_view(
+    TextCountsView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_text_delivery(TextDelivery self, SseSerializer serializer);
+
+  @protected
   void sse_encode_text_export_summary(
     TextExportSummary self,
     SseSerializer serializer,
@@ -1445,6 +3544,132 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_this_device(ThisDevice self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_transform_action(
+    TransformAction self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_app_default_view(
+    TransformAppDefaultView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_failure_view(
+    TransformFailureView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_favorite_kind(
+    TransformFavoriteKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_favorite_view(
+    TransformFavoriteView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_flags_view(
+    TransformFlagsView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_info_view(
+    TransformInfoView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_param_defaults_view(
+    TransformParamDefaultsView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_param_kind(
+    TransformParamKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_param_option_view(
+    TransformParamOptionView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_param_view(
+    TransformParamView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_pipeline_draft(
+    TransformPipelineDraft self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_pipeline_view(
+    TransformPipelineView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_preferences_view(
+    TransformPreferencesView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_preview_view(
+    TransformPreviewView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_run_result(
+    TransformRunResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_source_input(
+    TransformSourceInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_source_kind(
+    TransformSourceKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_step_result_view(
+    TransformStepResultView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_step_view(
+    TransformStepView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_transform_warning_view(
+    TransformWarningView self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
