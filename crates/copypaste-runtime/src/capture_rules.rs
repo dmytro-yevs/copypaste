@@ -133,8 +133,13 @@ impl Runtime {
         );
         if let Some(skip) = &outcome.dont_save {
             self.record_skip(subject, &skip.rule_id);
-            if let Some(seconds) = skip.clear_clipboard_after_secs {
-                self.schedule_clipboard_clear(i64::from(seconds).saturating_mul(1000));
+            // The skipped copy is still on the clipboard: a pending restore
+            // must not overwrite it, only the rule's own clear may.
+            match skip.clear_clipboard_after_secs {
+                Some(seconds) => {
+                    self.schedule_clipboard_clear(i64::from(seconds).saturating_mul(1000));
+                }
+                None => self.note_clipboard_changed(),
             }
             return CaptureDecision::Skip;
         }
