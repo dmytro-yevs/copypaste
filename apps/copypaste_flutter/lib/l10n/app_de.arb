@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Optional. Erforderlich, damit Quick Paste zur vorherigen App zurückkehren kann.",
   "onboardingLinuxWaylandClipboardUnavailable": "In dieser Wayland-Sitzung ist kein Zugriff auf die Zwischenablage verfügbar. Die signierte Begleiterweiterung für GNOME oder KDE aktivieren, dann erneut prüfen.",
   "historyMoreActions": "Weitere Aktionen",
-  "historyTagsAction": "Tags …"
+  "historyTagsAction": "Tags …",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{geheime Einträge zu entsperren} other{Geheime Einträge entsperren}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{ein verborgenes Snippet zu verwenden} other{Verborgenes Snippet verwenden}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{einen geheimen Eintrag zu kopieren} other{Geheimen Eintrag kopieren}}",
+  "deviceAuthUnavailable": "Auf diesem System nicht verfügbar",
+  "deviceAuthNotConfigured": "Zuerst ein Gerätepasswort, eine PIN oder Biometrie einrichten"
 }

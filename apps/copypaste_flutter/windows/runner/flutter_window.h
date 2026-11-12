@@ -14,6 +14,7 @@
 
 #include "win32_window.h"
 #include "app_update_channel.h"
+#include "device_authentication.h"
 #include "memory_pressure_monitor.h"
 #include "startup_channel.h"
 
@@ -164,6 +165,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       quick_paste_channel_;
   std::unique_ptr<AppUpdateChannel> app_update_channel_;
+  std::unique_ptr<DeviceAuthentication> device_authentication_;
   std::unique_ptr<MemoryPressureMonitor> memory_pressure_monitor_;
   std::unique_ptr<FlutterWindow> protected_pairing_window_;
   std::unique_ptr<FlutterWindow> quick_paste_window_;

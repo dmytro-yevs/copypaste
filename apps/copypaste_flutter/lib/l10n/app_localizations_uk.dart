@@ -3643,4 +3643,38 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Теги…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'розблокувати секретні елементи',
+      'other': 'Розблокувати секретні елементи',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'використати прихований фрагмент',
+      'other': 'Використати прихований фрагмент',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'скопіювати секретний елемент',
+      'other': 'Скопіювати секретний елемент',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Недоступно в цій системі';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Спершу налаштуйте пароль, PIN-код або біометрію пристрою';
 }

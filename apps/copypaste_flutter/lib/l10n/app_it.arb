@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Facoltativo. Necessario affinché Quick Paste possa tornare all'app precedente.",
   "onboardingLinuxWaylandClipboardUnavailable": "L'accesso agli appunti non è disponibile in questa sessione Wayland. Attiva l'estensione firmata per GNOME o KDE, poi verifica di nuovo.",
   "historyMoreActions": "Altre azioni",
-  "historyTagsAction": "Tag…"
+  "historyTagsAction": "Tag…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{sbloccare gli elementi segreti} other{Sblocca gli elementi segreti}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{usare uno snippet nascosto} other{Usa uno snippet nascosto}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copiare un elemento segreto} other{Copia un elemento segreto}}",
+  "deviceAuthUnavailable": "Non disponibile su questo sistema",
+  "deviceAuthNotConfigured": "Configura prima una password, un PIN o la biometria del dispositivo"
 }

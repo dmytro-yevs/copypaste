@@ -3383,4 +3383,37 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'タグ…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '機密項目のロック解除',
+      'other': '機密項目のロックを解除',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '非表示スニペットの使用',
+      'other': '非表示スニペットを使用',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '機密項目のコピー',
+      'other': '機密項目をコピー',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'このシステムでは利用できません';
+
+  @override
+  String get deviceAuthNotConfigured => '先にデバイスのパスワード、PIN、または生体認証を設定してください';
 }

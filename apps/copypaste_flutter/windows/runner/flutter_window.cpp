@@ -172,6 +172,10 @@ bool FlutterWindow::OnCreate() {
           }
         });
   }
+  if (!is_protected_pairing_context_) {
+    device_authentication_ = std::make_unique<DeviceAuthentication>(
+        flutter_controller_->engine()->messenger(), GetHandle());
+  }
   if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
     app_update_channel_ = std::make_unique<AppUpdateChannel>(
         flutter_controller_->engine()->messenger(), GetHandle());
@@ -458,6 +462,7 @@ void FlutterWindow::OnDestroy() {
   DetachProtectedPairingContext();
   ScreenshotProtection::Unregister(GetHandle());
   security_channel_.reset();
+  device_authentication_.reset();
   pairing_presentation_channel_.reset();
   pairing_links_channel_.reset();
   quick_paste_channel_.reset();

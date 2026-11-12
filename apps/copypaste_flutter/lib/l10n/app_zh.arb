@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "可选。Quick Paste 需要此权限才能返回上一个应用。",
   "onboardingLinuxWaylandClipboardUnavailable": "此 Wayland 会话无法访问剪贴板。请启用已签名的 GNOME 或 KDE 配套组件，然后再次检查。",
   "historyMoreActions": "更多操作",
-  "historyTagsAction": "标签…"
+  "historyTagsAction": "标签…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{解锁机密项目} other{解锁机密项目}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{使用隐藏的片段} other{使用隐藏的片段}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{复制机密项目} other{复制机密项目}}",
+  "deviceAuthUnavailable": "此系统不支持",
+  "deviceAuthNotConfigured": "请先设置设备密码、PIN 或生物识别"
 }

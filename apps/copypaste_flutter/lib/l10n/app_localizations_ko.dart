@@ -3362,4 +3362,37 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyTagsAction => '태그…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '기밀 항목 잠금 해제',
+      'other': '기밀 항목 잠금 해제',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '숨김 스니펫 사용',
+      'other': '숨김 스니펫 사용',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '기밀 항목 복사',
+      'other': '기밀 항목 복사',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => '이 시스템에서는 사용할 수 없음';
+
+  @override
+  String get deviceAuthNotConfigured => '먼저 기기 암호, PIN 또는 생체 인증을 설정하세요';
 }

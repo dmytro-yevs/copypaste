@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "オプション。Quick Paste で前のアプリに戻るために必要です。",
   "onboardingLinuxWaylandClipboardUnavailable": "この Wayland セッションではクリップボードにアクセスできません。署名済みの GNOME または KDE コンパニオンを有効にしてから、再確認してください。",
   "historyMoreActions": "その他の操作",
-  "historyTagsAction": "タグ…"
+  "historyTagsAction": "タグ…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{機密項目のロック解除} other{機密項目のロックを解除}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{非表示スニペットの使用} other{非表示スニペットを使用}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{機密項目のコピー} other{機密項目をコピー}}",
+  "deviceAuthUnavailable": "このシステムでは利用できません",
+  "deviceAuthNotConfigured": "先にデバイスのパスワード、PIN、または生体認証を設定してください"
 }

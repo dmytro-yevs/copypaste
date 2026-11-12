@@ -985,5 +985,10 @@
   "onboardingLinuxKeyboardOptional": "Opcjonalne. Wymagane, aby funkcja Quick Paste mogła wracać do poprzedniej aplikacji.",
   "onboardingLinuxWaylandClipboardUnavailable": "Dostęp do schowka jest niedostępny w tej sesji Wayland. Włącz podpisany komponent towarzyszący dla GNOME lub KDE, a następnie sprawdź ponownie.",
   "historyMoreActions": "Więcej działań",
-  "historyTagsAction": "Tagi…"
+  "historyTagsAction": "Tagi…",
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{odblokować poufne elementy} other{Odblokuj poufne elementy}}",
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{użyć ukrytego fragmentu} other{Użyj ukrytego fragmentu}}",
+  "deviceAuthReasonCopySecret": "{platform, select, macos{skopiować poufny element} other{Skopiuj poufny element}}",
+  "deviceAuthUnavailable": "Niedostępne w tym systemie",
+  "deviceAuthNotConfigured": "Najpierw skonfiguruj hasło, PIN lub biometrię urządzenia"
 }

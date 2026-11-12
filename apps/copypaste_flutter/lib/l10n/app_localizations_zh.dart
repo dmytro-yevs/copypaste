@@ -3270,4 +3270,37 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyTagsAction => '标签…';
+
+  @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '解锁机密项目',
+      'other': '解锁机密项目',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '使用隐藏的片段',
+      'other': '使用隐藏的片段',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '复制机密项目',
+      'other': '复制机密项目',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => '此系统不支持';
+
+  @override
+  String get deviceAuthNotConfigured => '请先设置设备密码、PIN 或生物识别';
 }
