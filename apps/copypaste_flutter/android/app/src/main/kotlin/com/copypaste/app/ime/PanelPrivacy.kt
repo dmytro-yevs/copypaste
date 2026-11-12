@@ -19,6 +19,8 @@ internal data class FieldPolicy(
     val imeAction: Int = EditorInfo.IME_ACTION_UNSPECIFIED,
     val noEnterAction: Boolean = false,
     val contentMimeTypes: List<String> = emptyList(),
+    /** The editor's app, the key of a per-app default transform. */
+    val packageName: String? = null,
 ) {
     val maskedMode: Boolean get() = password
     val allowsCapture: Boolean get() = !password && !incognito
@@ -49,6 +51,7 @@ internal data class FieldPolicy(
                 } else {
                     emptyList()
                 },
+                packageName = info.packageName,
             )
         }
 

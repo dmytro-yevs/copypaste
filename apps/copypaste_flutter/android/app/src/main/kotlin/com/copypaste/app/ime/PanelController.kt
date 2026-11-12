@@ -59,6 +59,16 @@ internal interface PanelTabHost {
     fun selectTab(tab: PanelTab)
     fun queueChanged()
     fun startActivity(intent: Intent)
+    /** Inserts a history item as it is, bypassing the default transform. */
+    fun insertOriginal(item: PanelItem)
+}
+
+/** The default transform applied to history text inserts (per app, or global). */
+internal interface InsertDefault {
+    /** Resolves the default for [field]; [onResolved] gets its chip label, or null when none applies. */
+    fun resolve(field: FieldPolicy, onResolved: (String?) -> Unit)
+    /** Runs the resolved default on [item]; [then] gets the result, or null to insert the original. */
+    fun apply(item: PanelItem, then: (String?) -> Unit)
 }
 
 /**
@@ -85,6 +95,8 @@ internal class PanelController(
     private val capture = PanelCapture(clipboard, whenRuntimeReady = ::whenRuntimeReady, onSaved = ::onCaptured)
     private val tabContents = linkedMapOf<PanelTab, PanelTabContent>()
     private val itemActions = mutableListOf<(PanelItem) -> PanelAction?>()
+    private var insertDefault: InsertDefault? = null
+    private var defaultLabel: String? = null
     private var view: PanelView? = null
     private var keypad: PanelKeypad? = null
     private var keypadTarget: KeypadTarget? = null
@@ -115,6 +127,8 @@ internal class PanelController(
 
     /** An extra item action from another package (transform, add to queue). */
     fun registerItemAction(action: (PanelItem) -> PanelAction?) { itemActions += action }
+
+    fun registerInsertDefault(default: InsertDefault) { insertDefault = default }
 
     fun onCreate() = capture.refreshListening()
 
@@ -159,6 +173,10 @@ internal class PanelController(
         view.setQueueCount(queueCount)
         showFieldNotice()
         showTab()
+        insertDefault?.resolve(field) { label ->
+            defaultLabel = label
+            if (shown && !locked()) showFieldNotice()
+        }
         refreshQueue {
             if (!shown) return@refreshQueue
             capture.catchUp()
@@ -186,6 +204,7 @@ internal class PanelController(
         }
         closeKeypad()
         autoReturnSuspended = false
+        defaultLabel = null
         query = ""
         insert.forget()
         applySecureWindow()
@@ -277,6 +296,8 @@ internal class PanelController(
     override fun queueChanged() = refreshQueue()
 
     override fun startActivity(intent: Intent) = host.startActivity(intent)
+
+    override fun insertOriginal(item: PanelItem) = withSecret(item) { insertText(item, plain = false, original = true) }
 
     override fun onTabSelected(tab: PanelTab) {
         if (tab == this.tab) return
@@ -441,7 +462,14 @@ internal class PanelController(
         }
     }
 
-    private fun insertText(item: PanelItem, plain: Boolean) {
+    private fun insertText(item: PanelItem, plain: Boolean, original: Boolean = false) {
+        val default = insertDefault?.takeIf { !plain && !original && defaultLabel != null }
+        if (default != null) {
+            default.apply(item) { text ->
+                if (text != null) onInserted(insert.insertText(text, field), item) else insertText(item, plain, original = true)
+            }
+            return
+        }
         worker.request("get", JSONObject().put("id", item.id)) { reply ->
             val content = itemContent(reply, item) ?: return@request
             val text: CharSequence = if (item.isHtml) {
@@ -611,7 +639,7 @@ internal class PanelController(
             field.incognito -> R.string.ime_private_field
             else -> null
         }
-        view?.setNotice(text?.let(context::getString))
+        view?.setNotice(listOfNotNull(text?.let(context::getString), defaultLabel).joinToString(" · ").ifEmpty { null })
     }
 
     private fun showNotice(text: Int, action: Int? = null, run: (() -> Unit)? = null) =

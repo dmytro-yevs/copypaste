@@ -22,6 +22,8 @@ internal fun registerPanelFeatures(context: Context, panel: PanelController, wor
     panel.registerTab(PanelSnippetsTab(context, panel, worker, transforms, queue))
     panel.registerTab(queue)
     panel.registerTab(transforms)
+    panel.registerInsertDefault(transforms)
+    panel.registerItemAction(transforms::originalAction)
     panel.registerItemAction(transforms::itemAction)
     panel.registerItemAction(queue::itemAction)
 }
@@ -52,10 +54,10 @@ internal fun JSONArray?.strings(): List<String> =
 
 /** The one loading, empty, error and unavailable state of the feature tabs. */
 internal class FeatureState(root: View) {
-    private val view: View = root.findViewById(R.id.ime_feature_state)
-    private val icon: ImageView = root.findViewById(R.id.ime_feature_state_icon)
-    private val title: TextView = root.findViewById(R.id.ime_feature_state_title)
-    private val action: TextView = root.findViewById(R.id.ime_feature_state_action)
+    private val view: View = root.findViewById(R.id.ime_state)
+    private val icon: ImageView = root.findViewById(R.id.ime_state_icon)
+    private val title: TextView = root.findViewById(R.id.ime_state_title)
+    private val action: TextView = root.findViewById(R.id.ime_state_action)
 
     init {
         action.background = PanelStyle.control(root.context, filled = true)

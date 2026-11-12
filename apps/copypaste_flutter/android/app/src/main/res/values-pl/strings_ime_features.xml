@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">Dodaj do kolejki</string>
     <string name="ime_action_copy_short">Kopiuj</string>
+    <string name="ime_action_insert_original">Wstaw oryginał</string>
     <string name="ime_action_open_in_app">Otwórz w aplikacji</string>
     <string name="ime_action_save">Zapisz</string>
     <string name="ime_action_transform">Przekształć…</string>
     <string name="ime_form_missing">Najpierw wypełnij wymagane pola</string>
     <string name="ime_form_new_line">Nowy wiersz</string>
-    <string name="ime_form_preview_hidden">Podgląd ukryty dla ukrytego fragmentu</string>
+    <string name="ime_form_preview_hidden">Podgląd ukryty</string>
     <string name="ime_form_required">Wymagane</string>
     <string name="ime_form_required_label">%1$s (wymagane)</string>
     <string name="ime_form_title">Wypełnij: %1$s</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">Tutaj nie można wstawiać plików</string>
     <string name="ime_queue_finished">Kolejka zakończona</string>
     <string name="ime_queue_full">Kolejka pełna</string>
-    <string name="ime_queue_include_secrets">Uwierzytelnij i wklej wszystko</string>
+    <string name="ime_queue_include_secret">Uwzględnij we Wklej wszystko</string>
     <string name="ime_queue_insert_entry">Wstaw ten wpis</string>
     <string name="ime_queue_insert_next">Wstaw następny</string>
     <string name="ime_queue_loading">Wczytywanie kolejki…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">Usuń z kolejki</string>
     <string name="ime_queue_rendered_at">Wygenerowano o %1$s</string>
     <string name="ime_queue_reverse">Odwróć</string>
+    <string name="ime_queue_secret_confirm">Wklej wszystko: uwzględnić tajny wpis %1$d (%2$s)?</string>
     <string name="ime_queue_separator">Separator: %1$s</string>
     <string name="ime_queue_stale">Kolejka sprzed: %1$s</string>
     <string name="ime_queue_status_pasted">Wklejono</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV i XML</string>
     <string name="ime_transforms_category_url">Linki</string>
     <string name="ime_transforms_counts">Wiersze: %1$d · Słowa: %2$d · Znaki: %3$d</string>
+    <string name="ime_transforms_default_chip">Wstawianie z: %1$s</string>
+    <string name="ime_transforms_default_skipped">Pominięto domyślne przekształcenie</string>
     <string name="ime_transforms_error">Nie udało się wczytać przekształceń.</string>
     <string name="ime_transforms_failed">Nie można przekształcić tego tekstu</string>
     <string name="ime_transforms_favorites">Ulubione</string>
@@ -107,12 +111,6 @@
     <string name="ime_transforms_source_snippet">Fragment</string>
     <string name="ime_transforms_too_large">Za duże, by wstawić tutaj. Skopiuj zamiast tego.</string>
     <string name="ime_transforms_too_large_input">Za duże do przekształcenia</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="one">Wklej wszystko obejmuje %d tajny element</item>
-        <item quantity="few">Wklej wszystko obejmuje %d tajne elementy</item>
-        <item quantity="many">Wklej wszystko obejmuje %d tajnych elementów</item>
-        <item quantity="other">Wklej wszystko obejmuje %d tajnego elementu</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="one">%d element nie jest już dostępny</item>
         <item quantity="few">%d elementy nie są już dostępne</item>

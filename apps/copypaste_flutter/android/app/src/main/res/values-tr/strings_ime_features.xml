@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">Kuyruğa ekle</string>
     <string name="ime_action_copy_short">Kopyala</string>
+    <string name="ime_action_insert_original">Orijinali ekle</string>
     <string name="ime_action_open_in_app">Uygulamada aç</string>
     <string name="ime_action_save">Kaydet</string>
     <string name="ime_action_transform">Dönüştür…</string>
     <string name="ime_form_missing">Önce zorunlu alanları doldurun</string>
     <string name="ime_form_new_line">Yeni satır</string>
-    <string name="ime_form_preview_hidden">Gizli parçacığın önizlemesi gizlendi</string>
+    <string name="ime_form_preview_hidden">Önizleme gizli</string>
     <string name="ime_form_required">Zorunlu</string>
     <string name="ime_form_required_label">%1$s (zorunlu)</string>
     <string name="ime_form_title">%1$s doldur</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">Buraya dosya eklenemez</string>
     <string name="ime_queue_finished">Kuyruk tamamlandı</string>
     <string name="ime_queue_full">Kuyruk dolu</string>
-    <string name="ime_queue_include_secrets">Doğrula ve tümünü yapıştır</string>
+    <string name="ime_queue_include_secret">Tümünü yapıştıra dahil et</string>
     <string name="ime_queue_insert_entry">Bu girdiyi ekle</string>
     <string name="ime_queue_insert_next">Sonrakini ekle</string>
     <string name="ime_queue_loading">Kuyruk yükleniyor…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">Kuyruktan kaldır</string>
     <string name="ime_queue_rendered_at">%1$s itibarıyla oluşturuldu</string>
     <string name="ime_queue_reverse">Ters çevir</string>
+    <string name="ime_queue_secret_confirm">Tümünü yapıştır: %1$d. gizli girdi (%2$s) dahil edilsin mi?</string>
     <string name="ime_queue_separator">Ayırıcı: %1$s</string>
     <string name="ime_queue_stale">%1$s tarihli kuyruk</string>
     <string name="ime_queue_status_pasted">Yapıştırıldı</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV ve XML</string>
     <string name="ime_transforms_category_url">Bağlantılar</string>
     <string name="ime_transforms_counts">Satır: %1$d · Sözcük: %2$d · Karakter: %3$d</string>
+    <string name="ime_transforms_default_chip">Şununla ekleniyor: %1$s</string>
+    <string name="ime_transforms_default_skipped">Varsayılan dönüştürme atlandı</string>
     <string name="ime_transforms_error">Dönüşümler yüklenemedi.</string>
     <string name="ime_transforms_failed">Bu metin dönüştürülemiyor</string>
     <string name="ime_transforms_favorites">Favoriler</string>
@@ -107,10 +111,6 @@
     <string name="ime_transforms_source_snippet">Parçacık</string>
     <string name="ime_transforms_too_large">Buraya eklenemeyecek kadar büyük. Bunun yerine kopyalayın.</string>
     <string name="ime_transforms_too_large_input">Dönüştürmek için çok büyük</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="one">Tümünü yapıştır %d gizli öğe içeriyor</item>
-        <item quantity="other">Tümünü yapıştır %d gizli öğe içeriyor</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="one">%d öğe artık kullanılamıyor</item>
         <item quantity="other">%d öğe artık kullanılamıyor</item>

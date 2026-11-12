@@ -122,6 +122,49 @@ class PanelTransformsTest {
         assertEquals("", editor.text.toString())
     }
 
+    @Test fun theDefaultTransformAppliesToHistoryInsertsAndAFailureInsertsTheOriginal() {
+        val editor = EditText(activity).apply { activity.setContentView(this) }
+        val info = EditorInfo()
+        val connection = editor.onCreateInputConnection(info)
+        info.packageName = "com.example.chat"
+        val item = FakeRuntime.item("a", "https://example.test/?utm_source=x")
+        var fails = false
+        val runtime = FeatureRuntime { method, op ->
+            when {
+                method == "get" -> FeatureRuntime.Answer.Ok("item", item)
+                method != "transforms" -> FeatureRuntime.empty
+                op.optString("op") == "default_for" -> FeatureRuntime.Answer.Ok("pipeline_default", "p1")
+                op.optString("op") == "pipelines" -> FeatureRuntime.Answer.Ok(
+                    "pipelines",
+                    JSONArray().put(JSONObject().put("id", "p1").put("name", "Clean links").put("steps", JSONArray())),
+                )
+                op.optString("op") != "run" -> FeatureRuntime.empty
+                fails -> FeatureRuntime.Answer.Fail("unsupported_content")
+                else -> FeatureRuntime.Answer.Ok("delivered", JSONObject().put("text", "https://example.test/"))
+            }
+        }
+        val panel = PanelController(
+            activity, FakeHost(connection), runtime.worker, FakeClipboard(), PanelPreferences(activity),
+            locked = { false }, authenticationAvailable = { true }, screenshotsBlocked = { false },
+        )
+        registerPanelFeatures(activity, panel, runtime.worker)
+        val root = panel.createView()
+        panel.onShow(FieldPolicy.of(info))
+        val clip = PanelItem.parse(item)!!
+
+        assertTrue(renderedText(root).any { "Clean links" in it })
+        panel.onItemTapped(clip)
+        assertEquals("https://example.test/", editor.text.toString())
+        assertEquals("com.example.chat", runtime.op("transforms", "default_for")!!.getJSONObject("app_identity").getString("identifier"))
+
+        fails = true
+        editor.setText("")
+        panel.onItemTapped(clip)
+
+        assertEquals("https://example.test/?utm_source=x", editor.text.toString())
+        assertTrue(activity.getString(R.string.ime_transforms_default_skipped) in renderedText(root))
+    }
+
     @Test fun passwordFieldsOfferNoTransformAction() {
         val runtime = FakeRuntime(listOf(FakeRuntime.item("a", "token")))
         val panel = controller(activity, runtime)

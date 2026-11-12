@@ -155,13 +155,18 @@ internal class PanelQueueTab(
         val pending = state?.pending.orEmpty()
         if (pending.isEmpty()) return host.showNotice(context.getString(R.string.ime_queue_nothing))
         if (!pending.all(PanelQueueEntry::textual)) return host.showNotice(context.getString(R.string.ime_queue_paste_all_mixed))
-        val secrets = pending.count(PanelQueueEntry::masked)
         val all = JSONObject().put("kind", "all")
-        if (secrets == 0) return deliverAndCommit(all)
-        // Secrets join a multi-paste only with explicit consent and the device owner (K22).
+        val secrets = pending.filter(PanelQueueEntry::masked)
+        if (secrets.isEmpty()) deliverAndCommit(all) else confirmSecrets(secrets, 0) { host.unlockSecrets { deliverAndCommit(all) } }
+    }
+
+    /** Secrets join a multi-paste only with consent for each one, then the device owner (K22). */
+    private fun confirmSecrets(secrets: List<PanelQueueEntry>, index: Int, then: () -> Unit) {
+        val secret = secrets.getOrNull(index) ?: return then()
+        val position = entries().indexOf(secret) + 1
         host.showActions(
-            context.resources.getQuantityString(R.plurals.ime_queue_secret_confirm, secrets, secrets),
-            listOf(PanelAction(context.getString(R.string.ime_queue_include_secrets)) { host.unlockSecrets { deliverAndCommit(all) } }),
+            context.getString(R.string.ime_queue_secret_confirm, position, kindLabel(secret)),
+            listOf(PanelAction(context.getString(R.string.ime_queue_include_secret)) { confirmSecrets(secrets, index + 1, then) }),
         )
     }
 
@@ -402,10 +407,13 @@ internal class PanelQueueTab(
     }
 
     private fun summary(entry: PanelQueueEntry): String = when {
-        entry.masked -> context.getString(R.string.ime_masked_summary, kindLabel(entry))
+        hidden(entry) -> context.getString(R.string.ime_masked_summary, kindLabel(entry))
         entry.preview.isBlank() -> kindLabel(entry)
         else -> entry.preview.trim().take(PREVIEW_CHARS)
     }
+
+    /** Secrets, and every entry while a password field is focused (K26), show no text. */
+    private fun hidden(entry: PanelQueueEntry): Boolean = entry.masked || host.field.maskedMode
 
     private fun kindLabel(entry: PanelQueueEntry): String = context.getString(
         when (entry.kind) {
@@ -442,7 +450,7 @@ internal class PanelQueueTab(
             val text = summary(entry)
             val description = listOfNotNull(
                 if (entry.masked) context.getString(R.string.ime_secret_item) else kindLabel(entry),
-                text.takeIf { !entry.masked },
+                text.takeIf { !hidden(entry) },
                 meta,
             ).joinToString(", ")
             bindFeatureRow(row, text, meta, if (entry.masked) R.drawable.ic_lucide_lock else 0, description, usable = entry.pending)

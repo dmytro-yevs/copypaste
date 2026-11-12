@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">Add to queue</string>
     <string name="ime_action_copy_short">Copy</string>
+    <string name="ime_action_insert_original">Insert original</string>
     <string name="ime_action_open_in_app">Open in app</string>
     <string name="ime_action_save">Save</string>
     <string name="ime_action_transform">Transform…</string>
     <string name="ime_form_missing">Fill in the required fields first</string>
     <string name="ime_form_new_line">New line</string>
-    <string name="ime_form_preview_hidden">Preview hidden for a concealed snippet</string>
+    <string name="ime_form_preview_hidden">Preview hidden</string>
     <string name="ime_form_required">Required</string>
     <string name="ime_form_required_label">%1$s (required)</string>
     <string name="ime_form_title">Fill in %1$s</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">Files can\'t be inserted here</string>
     <string name="ime_queue_finished">Queue finished</string>
     <string name="ime_queue_full">Queue full</string>
-    <string name="ime_queue_include_secrets">Authenticate and paste all</string>
+    <string name="ime_queue_include_secret">Include in Paste all</string>
     <string name="ime_queue_insert_entry">Insert this entry</string>
     <string name="ime_queue_insert_next">Insert next</string>
     <string name="ime_queue_loading">Loading the queue…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">Remove from queue</string>
     <string name="ime_queue_rendered_at">Rendered at %1$s</string>
     <string name="ime_queue_reverse">Reverse</string>
+    <string name="ime_queue_secret_confirm">Paste all: include secret entry %1$d (%2$s)?</string>
     <string name="ime_queue_separator">Separator: %1$s</string>
     <string name="ime_queue_stale">Queue from %1$s</string>
     <string name="ime_queue_status_pasted">Pasted</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV and XML</string>
     <string name="ime_transforms_category_url">Links</string>
     <string name="ime_transforms_counts">Lines: %1$d · Words: %2$d · Characters: %3$d</string>
+    <string name="ime_transforms_default_chip">Inserting with: %1$s</string>
+    <string name="ime_transforms_default_skipped">Default transform skipped</string>
     <string name="ime_transforms_error">Transforms could not be loaded.</string>
     <string name="ime_transforms_failed">Can\'t transform this text</string>
     <string name="ime_transforms_favorites">Favorites</string>
@@ -107,10 +111,6 @@
     <string name="ime_transforms_source_snippet">Snippet</string>
     <string name="ime_transforms_too_large">Too large to insert here. Copy it instead.</string>
     <string name="ime_transforms_too_large_input">Too large to transform</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="one">Paste all includes %d secret item</item>
-        <item quantity="other">Paste all includes %d secret items</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="one">%d item is no longer available</item>
         <item quantity="other">%d items are no longer available</item>

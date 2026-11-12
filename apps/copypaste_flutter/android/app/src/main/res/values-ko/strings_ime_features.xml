@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">대기열에 추가</string>
     <string name="ime_action_copy_short">복사</string>
+    <string name="ime_action_insert_original">원본 삽입</string>
     <string name="ime_action_open_in_app">앱에서 열기</string>
     <string name="ime_action_save">저장</string>
     <string name="ime_action_transform">변환…</string>
     <string name="ime_form_missing">필수 항목을 먼저 입력하세요</string>
     <string name="ime_form_new_line">줄바꿈</string>
-    <string name="ime_form_preview_hidden">숨긴 스니펫은 미리보기가 숨겨집니다</string>
+    <string name="ime_form_preview_hidden">미리보기 숨김</string>
     <string name="ime_form_required">필수</string>
     <string name="ime_form_required_label">%1$s (필수)</string>
     <string name="ime_form_title">%1$s 입력</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">여기에는 파일을 삽입할 수 없습니다</string>
     <string name="ime_queue_finished">대기열 완료</string>
     <string name="ime_queue_full">대기열이 가득 참</string>
-    <string name="ime_queue_include_secrets">인증하고 모두 붙여넣기</string>
+    <string name="ime_queue_include_secret">모두 붙여넣기에 포함</string>
     <string name="ime_queue_insert_entry">이 항목 삽입</string>
     <string name="ime_queue_insert_next">다음 삽입</string>
     <string name="ime_queue_loading">대기열을 불러오는 중…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">대기열에서 제거</string>
     <string name="ime_queue_rendered_at">%1$s에 생성됨</string>
     <string name="ime_queue_reverse">역순</string>
+    <string name="ime_queue_secret_confirm">모두 붙여넣기: 비밀 항목 %1$d(%2$s)을(를) 포함할까요?</string>
     <string name="ime_queue_separator">구분자: %1$s</string>
     <string name="ime_queue_stale">%1$s의 대기열</string>
     <string name="ime_queue_status_pasted">붙여넣음</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV 및 XML</string>
     <string name="ime_transforms_category_url">링크</string>
     <string name="ime_transforms_counts">줄: %1$d · 단어: %2$d · 문자: %3$d</string>
+    <string name="ime_transforms_default_chip">삽입 시 적용: %1$s</string>
+    <string name="ime_transforms_default_skipped">기본 변환을 건너뛰었습니다</string>
     <string name="ime_transforms_error">변환을 불러올 수 없습니다.</string>
     <string name="ime_transforms_failed">이 텍스트를 변환할 수 없습니다</string>
     <string name="ime_transforms_favorites">즐겨찾기</string>
@@ -107,9 +111,6 @@
     <string name="ime_transforms_source_snippet">스니펫</string>
     <string name="ime_transforms_too_large">너무 커서 여기에 삽입할 수 없습니다. 대신 복사하세요.</string>
     <string name="ime_transforms_too_large_input">너무 커서 변환할 수 없습니다</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="other">모두 붙여넣기에 비밀 항목 %d개가 포함됩니다</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="other">%d개 항목을 더 이상 사용할 수 없습니다</item>
     </plurals>

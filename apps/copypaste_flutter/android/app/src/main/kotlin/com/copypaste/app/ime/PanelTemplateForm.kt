@@ -218,7 +218,7 @@ internal class PanelTemplateForm(
             missing = result?.missingRequired.orEmpty()
             previewText.text = when {
                 result == null -> ""
-                concealed -> context.getString(R.string.ime_form_preview_hidden)
+                concealed || host.field.maskedMode -> context.getString(R.string.ime_form_preview_hidden)
                 else -> result.text.orEmpty().trim()
             }
             render()

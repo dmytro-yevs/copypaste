@@ -33,7 +33,7 @@
             android:divider="@null"
             android:scrollbarStyle="outsideOverlay" />
 
-        <include layout="@layout/ime_feature_state" />
+        <include layout="@layout/ime_state" />
     </FrameLayout>
 
     <LinearLayout

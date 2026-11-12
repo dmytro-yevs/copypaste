@@ -74,4 +74,5 @@ internal class FakeTabHost(
     override fun selectTab(tab: PanelTab) = Unit
     override fun queueChanged() = Unit
     override fun startActivity(intent: Intent) = Unit
+    override fun insertOriginal(item: PanelItem) = Unit
 }

@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">Додати до черги</string>
     <string name="ime_action_copy_short">Копіювати</string>
+    <string name="ime_action_insert_original">Вставити оригінал</string>
     <string name="ime_action_open_in_app">Відкрити в застосунку</string>
     <string name="ime_action_save">Зберегти</string>
     <string name="ime_action_transform">Перетворити…</string>
     <string name="ime_form_missing">Спершу заповніть обов\'язкові поля</string>
     <string name="ime_form_new_line">Новий рядок</string>
-    <string name="ime_form_preview_hidden">Попередній перегляд прихованого фрагмента вимкнено</string>
+    <string name="ime_form_preview_hidden">Попередній перегляд приховано</string>
     <string name="ime_form_required">Обов\'язкове</string>
     <string name="ime_form_required_label">%1$s (обов\'язкове)</string>
     <string name="ime_form_title">Заповніть: %1$s</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">Сюди не можна вставляти файли</string>
     <string name="ime_queue_finished">Чергу завершено</string>
     <string name="ime_queue_full">Черга заповнена</string>
-    <string name="ime_queue_include_secrets">Підтвердити особу й вставити все</string>
+    <string name="ime_queue_include_secret">Додати до «Вставити все»</string>
     <string name="ime_queue_insert_entry">Вставити цей запис</string>
     <string name="ime_queue_insert_next">Вставити наступний</string>
     <string name="ime_queue_loading">Завантаження черги…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">Вилучити з черги</string>
     <string name="ime_queue_rendered_at">Створено о %1$s</string>
     <string name="ime_queue_reverse">Обернути</string>
+    <string name="ime_queue_secret_confirm">«Вставити все»: додати секретний запис %1$d (%2$s)?</string>
     <string name="ime_queue_separator">Роздільник: %1$s</string>
     <string name="ime_queue_stale">Черга від %1$s</string>
     <string name="ime_queue_status_pasted">Вставлено</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV і XML</string>
     <string name="ime_transforms_category_url">Посилання</string>
     <string name="ime_transforms_counts">Рядків: %1$d · Слів: %2$d · Символів: %3$d</string>
+    <string name="ime_transforms_default_chip">Вставлення з: %1$s</string>
+    <string name="ime_transforms_default_skipped">Типове перетворення пропущено</string>
     <string name="ime_transforms_error">Не вдалося завантажити перетворення.</string>
     <string name="ime_transforms_failed">Не вдається перетворити цей текст</string>
     <string name="ime_transforms_favorites">Улюблені</string>
@@ -107,12 +111,6 @@
     <string name="ime_transforms_source_snippet">Фрагмент</string>
     <string name="ime_transforms_too_large">Завелике, щоб вставити сюди. Скопіюйте натомість.</string>
     <string name="ime_transforms_too_large_input">Завеликий для перетворення</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="one">«Вставити все» містить %d секретний елемент</item>
-        <item quantity="few">«Вставити все» містить %d секретні елементи</item>
-        <item quantity="many">«Вставити все» містить %d секретних елементів</item>
-        <item quantity="other">«Вставити все» містить %d секретного елемента</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="one">%d елемент більше недоступний</item>
         <item quantity="few">%d елементи більше недоступні</item>

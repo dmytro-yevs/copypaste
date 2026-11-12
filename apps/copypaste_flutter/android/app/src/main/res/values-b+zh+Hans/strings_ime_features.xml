@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">加入队列</string>
     <string name="ime_action_copy_short">复制</string>
+    <string name="ime_action_insert_original">插入原文</string>
     <string name="ime_action_open_in_app">在应用中打开</string>
     <string name="ime_action_save">保存</string>
     <string name="ime_action_transform">转换…</string>
     <string name="ime_form_missing">请先填写必填字段</string>
     <string name="ime_form_new_line">换行</string>
-    <string name="ime_form_preview_hidden">隐藏片段不显示预览</string>
+    <string name="ime_form_preview_hidden">预览已隐藏</string>
     <string name="ime_form_required">必填</string>
     <string name="ime_form_required_label">%1$s（必填）</string>
     <string name="ime_form_title">填写 %1$s</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">此处无法插入文件</string>
     <string name="ime_queue_finished">队列已完成</string>
     <string name="ime_queue_full">队列已满</string>
-    <string name="ime_queue_include_secrets">验证并全部粘贴</string>
+    <string name="ime_queue_include_secret">包含在全部粘贴中</string>
     <string name="ime_queue_insert_entry">插入此项</string>
     <string name="ime_queue_insert_next">插入下一项</string>
     <string name="ime_queue_loading">正在加载队列…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">从队列移除</string>
     <string name="ime_queue_rendered_at">生成于 %1$s</string>
     <string name="ime_queue_reverse">倒序</string>
+    <string name="ime_queue_secret_confirm">全部粘贴：包含第 %1$d 个机密条目（%2$s）？</string>
     <string name="ime_queue_separator">分隔符：%1$s</string>
     <string name="ime_queue_stale">%1$s 的队列</string>
     <string name="ime_queue_status_pasted">已粘贴</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON、YAML、CSV 和 XML</string>
     <string name="ime_transforms_category_url">链接</string>
     <string name="ime_transforms_counts">行：%1$d · 词：%2$d · 字符：%3$d</string>
+    <string name="ime_transforms_default_chip">插入时使用：%1$s</string>
+    <string name="ime_transforms_default_skipped">已跳过默认转换</string>
     <string name="ime_transforms_error">无法加载转换。</string>
     <string name="ime_transforms_failed">无法转换此文本</string>
     <string name="ime_transforms_favorites">收藏</string>
@@ -107,9 +111,6 @@
     <string name="ime_transforms_source_snippet">片段</string>
     <string name="ime_transforms_too_large">内容太大，无法在此插入。请改为复制。</string>
     <string name="ime_transforms_too_large_input">内容过大，无法转换</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="other">全部粘贴包含 %d 个机密条目</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="other">%d 个条目已不可用</item>
     </plurals>

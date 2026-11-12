@@ -12,7 +12,7 @@
         android:divider="@null"
         android:scrollbarStyle="outsideOverlay" />
 
-    <include layout="@layout/ime_feature_state" />
+    <include layout="@layout/ime_state" />
 
     <FrameLayout
         android:id="@+id/ime_snippets_form_slot"

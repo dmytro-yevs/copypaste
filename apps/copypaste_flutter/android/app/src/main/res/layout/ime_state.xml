@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The one loading, empty, error and unavailable state of the snippets, queue
-     and transforms tabs. Sizes and colors come from design_tokens.xml. -->
+<!-- The one loading, empty, error, locked and unavailable state of every panel
+     tab. Sizes and colors come from design_tokens.xml. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/ime_feature_state"
+    android:id="@+id/ime_state"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:accessibilityLiveRegion="polite"
@@ -12,13 +12,13 @@
     android:visibility="gone">
 
     <ImageView
-        android:id="@+id/ime_feature_state_icon"
+        android:id="@+id/ime_state_icon"
         android:layout_width="@dimen/app_icon_size_lg"
         android:layout_height="@dimen/app_icon_size_lg"
         android:importantForAccessibility="no" />
 
     <TextView
-        android:id="@+id/ime_feature_state_title"
+        android:id="@+id/ime_state_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/app_spacing_sm"
@@ -27,7 +27,7 @@
         android:textSize="@dimen/app_text_size_small" />
 
     <TextView
-        android:id="@+id/ime_feature_state_action"
+        android:id="@+id/ime_state_action"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/app_spacing_sm"

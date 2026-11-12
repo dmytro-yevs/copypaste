@@ -129,13 +129,14 @@ internal data class TransformLibrary(
  * history item or snippet output. Insert commits the result (replacing the
  * selection); Copy and Save go through the runtime. Nothing is kept once
  * the panel hides, and nothing is offered in password fields (K26).
+ * It also applies the default transform to history inserts (T-D1 to T-D3).
  */
 internal class PanelTransforms(
     private val context: Context,
     private val host: PanelTabHost,
     private val worker: RuntimeAccessWorker,
     private val preferences: SharedPreferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE),
-) : PanelTabContent {
+) : PanelTabContent, InsertDefault {
     override val tab = PanelTab.TRANSFORMS
 
     private sealed interface Source {
@@ -167,6 +168,9 @@ internal class PanelTransforms(
     private var oversized = false
     private var session = 0
     private var previews = 0
+    /** The default pipeline for the focused editor's app: its id and name. */
+    private var defaultPipeline: Pair<String, String>? = null
+    private var defaults = 0
 
     private class Views(root: View) {
         val sources: LinearLayout = root.findViewById(R.id.ime_transforms_sources)
@@ -185,6 +189,40 @@ internal class PanelTransforms(
         return PanelAction(context.getString(R.string.ime_action_transform)) {
             val pick = { open(Source.Clip(item.id, item.visibility.masked)) }
             if (item.visibility.masked) host.unlockSecrets(pick) else pick()
+        }
+    }
+
+    /** "Insert original" while a default transform applies (T-D2). */
+    fun originalAction(item: PanelItem): PanelAction? {
+        if (defaultPipeline == null || !host.field.allowsTransform || !item.isText) return null
+        return PanelAction(context.getString(R.string.ime_action_insert_original)) { host.insertOriginal(item) }
+    }
+
+    override fun resolve(field: FieldPolicy, onResolved: (String?) -> Unit) {
+        val requested = ++defaults
+        defaultPipeline = null
+        val app = field.packageName
+        if (!field.allowsTransform || !field.textEditor || app == null) return onResolved(null)
+        worker.perform({ access -> resolveDefault(access, app) }) { resolved ->
+            if (requested != defaults) return@perform
+            defaultPipeline = resolved
+            onResolved(resolved?.let { context.getString(R.string.ime_transforms_default_chip, it.second) })
+        }
+    }
+
+    /** A failing default never blocks the insert: the original goes in with a notice (T-D3). */
+    override fun apply(item: PanelItem, then: (String?) -> Unit) {
+        val pipeline = defaultPipeline?.takeIf { host.field.allowsTransform && item.isText } ?: return then(null)
+        val op = opOf("run").put("source", JSONObject().put("kind", "clip").put("id", item.id))
+            .put("steps_or_pipeline", JSONObject().put("kind", "pipeline").put("id", pipeline.first))
+            .put("action", ACTION_RETURN).put("bypass_default", false)
+        worker.op("transforms", op) { reply ->
+            val data = (reply as? RuntimeReply.Ok)?.objectData()
+            if (data != null && data.has("text")) return@op then(data.optString("text"))
+            if ((reply as? RuntimeReply.Failure)?.code != RuntimeErrorCode.NOT_FOUND) {
+                host.showNotice(context.getString(R.string.ime_transforms_default_skipped))
+            }
+            then(null)
         }
     }
 
@@ -222,6 +260,8 @@ internal class PanelTransforms(
 
     override fun release() {
         session += 1
+        defaults += 1
+        defaultPipeline = null
         main.removeCallbacks(runPreview)
         views = null
         library = null
@@ -424,7 +464,8 @@ internal class PanelTransforms(
         val op = opOf("run").put("source", sourceJson()).put("steps_or_pipeline", steps).put("action", action).put("bypass_default", false)
         worker.op("transforms", op) { reply ->
             if (reply !is RuntimeReply.Ok) return@op host.showNotice(context.getString(failureMessage(reply)))
-            remember(choice)
+            // Private fields leave no trace, recents included (K27).
+            if (host.field.recordsUsage) remember(choice)
             when (action) {
                 ACTION_RETURN -> insertResult(reply.objectData()?.optString("text").orEmpty())
                 ACTION_COPY -> host.announce(context.getString(R.string.ime_copied))
@@ -443,7 +484,7 @@ internal class PanelTransforms(
                 offerCopyInstead()
             }
             bytes > WARN_INSERT_BYTES -> host.showActions(
-                context.getString(R.string.ime_transforms_large, Formatter.formatShortFileSize(context, bytes)),
+                context.getString(R.string.ime_transforms_large, Formatter.formatShortFileSize(context, bytes.toLong())),
                 listOf(PanelAction(context.getString(R.string.ime_transforms_insert_anyway)) { commit(text) }),
             )
             else -> commit(text)
@@ -527,6 +568,7 @@ internal class PanelTransforms(
 
     companion object {
         const val PREFERENCES = "quick-access-transforms"
+        private const val PLATFORM = "android"
         private const val RECENT = "recent"
         private const val MAX_RECENTS = 5
         private const val PREVIEW_DEBOUNCE_MS = 120L
@@ -548,6 +590,15 @@ internal class PanelTransforms(
             "markup" -> R.string.ime_transforms_category_markup
             "dev" -> R.string.ime_transforms_category_dev
             else -> R.string.ime_transforms_category_other
+        }
+
+        /** The default pipeline for [app] with its name, or null when none applies. */
+        fun resolveDefault(access: RuntimeAccess, app: String): Pair<String, String>? {
+            val identity = JSONObject().put("platform", PLATFORM).put("identifier", app)
+            val reply = access.request("transforms", JSONObject().put("op", opOf("default_for").put("app_identity", identity)))
+            val id = ((reply as? RuntimeReply.Ok)?.data as? String) ?: return null
+            val pipelines = (access.request("transforms", JSONObject().put("op", opOf("pipelines"))) as? RuntimeReply.Ok)?.arrayData()
+            return pipelines.objects().mapNotNull(TransformChoice::pipeline).firstOrNull { it.id == id }?.let { id to it.name }
         }
 
         /** UTF-8 size without encoding a copy of a possibly multi-megabyte result. */

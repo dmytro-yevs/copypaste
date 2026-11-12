@@ -2,12 +2,13 @@
 <resources>
     <string name="ime_action_add_to_queue">Aggiungi alla coda</string>
     <string name="ime_action_copy_short">Copia</string>
+    <string name="ime_action_insert_original">Inserisci originale</string>
     <string name="ime_action_open_in_app">Apri nell\'app</string>
     <string name="ime_action_save">Salva</string>
     <string name="ime_action_transform">Trasforma…</string>
     <string name="ime_form_missing">Compila prima i campi obbligatori</string>
     <string name="ime_form_new_line">Nuova riga</string>
-    <string name="ime_form_preview_hidden">Anteprima nascosta per uno snippet nascosto</string>
+    <string name="ime_form_preview_hidden">Anteprima nascosta</string>
     <string name="ime_form_required">Obbligatorio</string>
     <string name="ime_form_required_label">%1$s (obbligatorio)</string>
     <string name="ime_form_title">Compila %1$s</string>
@@ -24,7 +25,7 @@
     <string name="ime_queue_files_not_insertable">Qui non si possono inserire file</string>
     <string name="ime_queue_finished">Coda completata</string>
     <string name="ime_queue_full">Coda piena</string>
-    <string name="ime_queue_include_secrets">Autenticati e incolla tutto</string>
+    <string name="ime_queue_include_secret">Includi in Incolla tutto</string>
     <string name="ime_queue_insert_entry">Inserisci questa voce</string>
     <string name="ime_queue_insert_next">Inserisci il successivo</string>
     <string name="ime_queue_loading">Caricamento della coda…</string>
@@ -40,6 +41,7 @@
     <string name="ime_queue_remove">Rimuovi dalla coda</string>
     <string name="ime_queue_rendered_at">Generato alle %1$s</string>
     <string name="ime_queue_reverse">Inverti</string>
+    <string name="ime_queue_secret_confirm">Incolla tutto: includere la voce segreta %1$d (%2$s)?</string>
     <string name="ime_queue_separator">Separatore: %1$s</string>
     <string name="ime_queue_stale">Coda di %1$s</string>
     <string name="ime_queue_status_pasted">Incollato</string>
@@ -81,6 +83,8 @@
     <string name="ime_transforms_category_structure">JSON, YAML, CSV e XML</string>
     <string name="ime_transforms_category_url">Link</string>
     <string name="ime_transforms_counts">Righe: %1$d · Parole: %2$d · Caratteri: %3$d</string>
+    <string name="ime_transforms_default_chip">Inserimento con: %1$s</string>
+    <string name="ime_transforms_default_skipped">Trasformazione predefinita saltata</string>
     <string name="ime_transforms_error">Impossibile caricare le trasformazioni.</string>
     <string name="ime_transforms_failed">Impossibile trasformare questo testo</string>
     <string name="ime_transforms_favorites">Preferite</string>
@@ -107,10 +111,6 @@
     <string name="ime_transforms_source_snippet">Snippet</string>
     <string name="ime_transforms_too_large">Troppo grande per inserirlo qui. Copialo invece.</string>
     <string name="ime_transforms_too_large_input">Troppo grande da trasformare</string>
-    <plurals name="ime_queue_secret_confirm">
-        <item quantity="one">Incolla tutto include %d elemento segreto</item>
-        <item quantity="other">Incolla tutto include %d elementi segreti</item>
-    </plurals>
     <plurals name="ime_queue_unavailable">
         <item quantity="one">%d elemento non è più disponibile</item>
         <item quantity="other">%d elementi non sono più disponibili</item>

@@ -24,9 +24,9 @@ import org.robolectric.annotation.Config
 class PanelQueueTabTest {
     private val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
 
-    private fun entry(id: String, kind: String = "text", preview: String = id) = JSONObject()
+    private fun entry(id: String, kind: String = "text", preview: String = id, masked: Boolean = false) = JSONObject()
         .put("entry_id", id).put("position_label", "1").put("status", "pending").put("content_kind", kind)
-        .put("preview", preview).put("masked", false).put("edited", false).put("added_via", "history_add")
+        .put("preview", preview).put("masked", masked).put("edited", false).put("added_via", "history_add")
 
     private fun state(vararg entries: JSONObject) = JSONObject()
         .put("revision", 1).put("collecting", false).put("phase", "active").put("full", false)
@@ -73,6 +73,26 @@ class PanelQueueTabTest {
 
         assertEquals("rejected", refused.op("paste_queue", "confirm")!!.getString("outcome"))
         assertEquals(listOf(InsertOutcome.REJECTED), host.outcomes)
+    }
+
+    @Test fun pasteAllAsksForEachSecretThenAuthenticatesBeforeDelivering() {
+        val runtime = runtime(state(entry("a"), entry("b", masked = true), entry("c", masked = true)))
+        val host = FakeTabHost(FieldPolicy(textEditor = true)) { null }
+        val tab = PanelQueueTab(activity, host, runtime.worker)
+        tab.createView(FrameLayout(activity))
+        tab.onShown("")
+
+        tab.pasteAll()
+        assertEquals(1, host.sheets.size)
+        host.sheets.last().second.single().run()
+        assertEquals(2, host.sheets.size)
+        assertEquals(0, host.unlocks)
+        assertNull(runtime.op("paste_queue", "deliver"))
+
+        host.sheets.last().second.single().run()
+
+        assertEquals(1, host.unlocks)
+        assertEquals("all", runtime.op("paste_queue", "deliver")!!.getJSONObject("target").getString("kind"))
     }
 
     @Test fun insertNextOnAnImageIsUnavailableWithItsReasonInAFieldWithoutImageSupport() {
