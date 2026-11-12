@@ -3888,4 +3888,132 @@ class AppLocalizationsIt extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Apri CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Apri Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Apri Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Nuovo frammento';
+
+  @override
+  String get trayRecent => 'Recenti';
+
+  @override
+  String get trayRecentLoading => 'Caricamento…';
+
+  @override
+  String get trayRecentFailed => 'Impossibile caricare i clip';
+
+  @override
+  String get trayRecentEmpty => 'Ancora nessun clip';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clip recenti nascosti',
+      one: '1 clip recente nascosto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Segreto';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Copia l\'ultimo da un altro dispositivo';
+
+  @override
+  String get trayCaptureNow => 'Acquisisci ora';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'In pausa fino alle $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Sospendi per…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minuti';
+
+  @override
+  String get trayPauseForOneHour => '1 ora';
+
+  @override
+  String get trayPauseUntilResumed => 'Finché non riprendo';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count elementi',
+      one: 'Paste Queue: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Raccolta: $count elementi',
+      one: 'Raccolta: 1 elemento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Saltati di recente ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Apri le regole sui contenuti';
+
+  @override
+  String get trayRecentSettingsTitle => 'Barra dei menu e area di notifica';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Cosa mostra il menu della barra dei menu o dell\'area di notifica in Recenti.';
+
+  @override
+  String get trayRecentCountTitle => 'Clip recenti';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Quanti dei clip più recenti mostra il menu.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Anteprima dei clip recenti';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Il sistema conserva il testo dei menu fuori dalla cifratura di CopyPaste. Mostra meno per tenerne fuori il contenuto dei clip. I segreti sono sempre mascherati.';
+
+  @override
+  String get trayRecentPreviewFull => 'Anteprima completa';
+
+  @override
+  String get trayRecentPreviewTitles => 'Solo tipo e origine';
+
+  @override
+  String get trayRecentPreviewHidden => 'Nascosto';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'area di notifica barra dei menu recenti anteprima privacy numero';
 }

@@ -6332,6 +6332,192 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 clip} other{{count} clips}}'**
   String historySectionClipCount(int count);
+
+  /// Tray and menu-bar menu item that shows the main window.
+  ///
+  /// In en, this message translates to:
+  /// **'Open CopyPaste'**
+  String get trayOpenApp;
+
+  /// Tray and menu-bar menu item that opens the Quick Paste window. Quick Paste is a product name.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Quick Paste'**
+  String get trayOpenQuickPaste;
+
+  /// Same as trayOpenQuickPaste, followed by its global shortcut.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Quick Paste ({shortcut})'**
+  String trayOpenQuickPasteWithShortcut(String shortcut);
+
+  /// Tray and menu-bar menu item that opens the snippet editor for a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'New snippet'**
+  String get trayNewSnippet;
+
+  /// Tray and menu-bar submenu that lists the newest clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get trayRecent;
+
+  /// Shown in the Recent submenu while clips load.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading…'**
+  String get trayRecentLoading;
+
+  /// Shown in the Recent submenu when clips could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load clips'**
+  String get trayRecentFailed;
+
+  /// Shown in the Recent submenu when History is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No clips yet'**
+  String get trayRecentEmpty;
+
+  /// Shown in the Recent submenu when previews are set to Hidden: only the number of clips.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 recent clip hidden} other{{count} recent clips hidden}}'**
+  String trayRecentHidden(int count);
+
+  /// Replaces the content of a secret clip in the Recent submenu, followed by its source and time.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret'**
+  String get trayRecentSecret;
+
+  /// Tray and menu-bar menu item that copies the newest clip received from another device.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy latest from other device'**
+  String get trayCopyLatestFromOtherDevice;
+
+  /// Tray and menu-bar menu item that stores the current clipboard in History now, even while capture is paused.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture now'**
+  String get trayCaptureNow;
+
+  /// Disabled tray row while capture is paused for a while. time is a clock time.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused until {time}'**
+  String trayPausedUntil(String time);
+
+  /// Tray and menu-bar submenu with pause durations.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause for…'**
+  String get trayPauseFor;
+
+  /// Pause duration in the Pause for submenu.
+  ///
+  /// In en, this message translates to:
+  /// **'15 minutes'**
+  String get trayPauseFor15Minutes;
+
+  /// Pause duration in the Pause for submenu.
+  ///
+  /// In en, this message translates to:
+  /// **'1 hour'**
+  String get trayPauseForOneHour;
+
+  /// Pause option in the Pause for submenu: no automatic resume.
+  ///
+  /// In en, this message translates to:
+  /// **'Until I resume'**
+  String get trayPauseUntilResumed;
+
+  /// Tray row with the number of items in the Paste Queue. Paste Queue is a product name.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Paste Queue: 1 item} other{Paste Queue: {count} items}}'**
+  String trayPasteQueue(int count);
+
+  /// Tray row while the Paste Queue collects copies, with its number of items.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Collecting: 1 item} other{Collecting: {count} items}}'**
+  String trayPasteQueueCollecting(int count);
+
+  /// Tray submenu listing captures that content rules did not save, with their number.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently skipped ({count})'**
+  String trayRecentlySkipped(int count);
+
+  /// Item in the Recently skipped submenu that opens the content rules settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open content rules'**
+  String get trayOpenContentRules;
+
+  /// Heading of the settings for the menu-bar (macOS) or tray (Windows, Linux) menu.
+  ///
+  /// In en, this message translates to:
+  /// **'Menu bar and tray'**
+  String get trayRecentSettingsTitle;
+
+  /// Description under trayRecentSettingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What the menu bar or tray menu lists under Recent.'**
+  String get trayRecentSettingsDescription;
+
+  /// Setting title: how many clips the Recent submenu lists.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clips'**
+  String get trayRecentCountTitle;
+
+  /// Description of trayRecentCountTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How many of the newest clips the menu lists.'**
+  String get trayRecentCountDescription;
+
+  /// Setting title: how much of each clip the Recent submenu shows.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clip previews'**
+  String get trayRecentPreviewTitle;
+
+  /// Description of trayRecentPreviewTitle: menu text leaves the encrypted store.
+  ///
+  /// In en, this message translates to:
+  /// **'The system keeps menu text outside CopyPaste\'s encryption. Show less to keep clip content out of it. Secrets are always masked.'**
+  String get trayRecentPreviewDescription;
+
+  /// Option of trayRecentPreviewTitle: the beginning of the clip text.
+  ///
+  /// In en, this message translates to:
+  /// **'Full preview'**
+  String get trayRecentPreviewFull;
+
+  /// Option of trayRecentPreviewTitle: clip type, source app and time, no content.
+  ///
+  /// In en, this message translates to:
+  /// **'Type and source only'**
+  String get trayRecentPreviewTitles;
+
+  /// Option of trayRecentPreviewTitle: only the number of clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden'**
+  String get trayRecentPreviewHidden;
+
+  /// Space-separated search keywords for the menu-bar and tray settings.
+  ///
+  /// In en, this message translates to:
+  /// **'tray menu bar recent preview privacy count'**
+  String get trayRecentSettingsKeywords;
 }
 
 class _AppLocalizationsDelegate

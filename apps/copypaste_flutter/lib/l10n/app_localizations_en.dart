@@ -3767,4 +3767,131 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Open CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Open Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Open Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'New snippet';
+
+  @override
+  String get trayRecent => 'Recent';
+
+  @override
+  String get trayRecentLoading => 'Loading…';
+
+  @override
+  String get trayRecentFailed => 'Couldn\'t load clips';
+
+  @override
+  String get trayRecentEmpty => 'No clips yet';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count recent clips hidden',
+      one: '1 recent clip hidden',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Secret';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => 'Copy latest from other device';
+
+  @override
+  String get trayCaptureNow => 'Capture now';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'Paused until $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Pause for…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minutes';
+
+  @override
+  String get trayPauseForOneHour => '1 hour';
+
+  @override
+  String get trayPauseUntilResumed => 'Until I resume';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count items',
+      one: 'Paste Queue: 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Collecting: $count items',
+      one: 'Collecting: 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Recently skipped ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Open content rules';
+
+  @override
+  String get trayRecentSettingsTitle => 'Menu bar and tray';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'What the menu bar or tray menu lists under Recent.';
+
+  @override
+  String get trayRecentCountTitle => 'Recent clips';
+
+  @override
+  String get trayRecentCountDescription =>
+      'How many of the newest clips the menu lists.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Recent clip previews';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'The system keeps menu text outside CopyPaste\'s encryption. Show less to keep clip content out of it. Secrets are always masked.';
+
+  @override
+  String get trayRecentPreviewFull => 'Full preview';
+
+  @override
+  String get trayRecentPreviewTitles => 'Type and source only';
+
+  @override
+  String get trayRecentPreviewHidden => 'Hidden';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'tray menu bar recent preview privacy count';
 }

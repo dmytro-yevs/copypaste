@@ -465,6 +465,27 @@ impl Store {
         Ok(facets)
     }
 
+    /// The id, origin device and capture time of the newest live clip that
+    /// another device captured. Local captures store an empty origin, and
+    /// synced versions may carry the explicit local id; both are excluded.
+    pub fn latest_from_other_device(
+        &self,
+        local_device_id: &str,
+    ) -> Result<Option<(String, String, i64)>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ci.id, ci.origin_device_id, ci.created_at FROM clipboard_items ci \
+             WHERE ci.deleted = 0 AND ci.origin_device_id NOT IN ('', ?1) AND ",
+            unexpired!("ci."),
+            " ORDER BY ci.created_at DESC, ci.id DESC LIMIT 1"
+        ))?;
+        let mut rows = stmt.query([local_device_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some((row.get(0)?, row.get(1)?, row.get(2)?))),
+            None => Ok(None),
+        }
+    }
+
     /// Read a byte-bounded page of the whole history after applying `query`.
     ///
     /// Search runs against FTS before filtering and pagination. Every other
