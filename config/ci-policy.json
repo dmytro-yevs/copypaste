@@ -71,6 +71,9 @@
       "android": "android",
       "android-native": "android-native",
       "publish": "publish"
+    },
+    "ubuntu-arm64.yml": {
+      "portable-rust": "Portable Rust (Ubuntu ARM64)"
     }
   },
   "required_dependencies": {
