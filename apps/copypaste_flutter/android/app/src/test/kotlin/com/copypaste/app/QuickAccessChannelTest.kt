@@ -4,7 +4,9 @@ import android.app.Application
 import android.app.StatusBarManager
 import android.content.ComponentName
 import android.provider.Settings
+import com.copypaste.app.ime.PanelPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -20,7 +22,7 @@ class QuickAccessChannelTest {
 
     @Before fun setup() {
         app = RuntimeEnvironment.getApplication()
-        app.getSharedPreferences("copypaste_quick_access", 0).edit().clear().commit()
+        app.getSharedPreferences(PanelPreferences.NAME, 0).edit().clear().commit()
     }
 
     @Test fun panelOptionsDefaultToAutoReturnAndPersistTheUserChoice() {
@@ -30,6 +32,7 @@ class QuickAccessChannelTest {
             mapOf("autoReturn" to false, "focusSearchOnOpen" to false),
             QuickAccessStatus.read(app)["panelOptions"],
         )
+        assertFalse(PanelPreferences(app).autoReturn)
     }
 
     @Test fun reportsTheClipsKeyboardAsCurrentWhenItIsTheDefaultInputMethod() {

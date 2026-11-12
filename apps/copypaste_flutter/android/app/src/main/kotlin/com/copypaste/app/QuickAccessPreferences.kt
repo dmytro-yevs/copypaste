@@ -1,13 +1,14 @@
 package com.copypaste.app
 
 import android.content.Context
+import com.copypaste.app.ime.PanelPreferences
 
-/** Device-local keyboard panel options: the app's settings write them and the panel reads them. */
+/** Keyboard panel options in the panel's own store: the app's settings write them, the panel reads them. */
 internal object QuickAccessPreferences {
-    private const val STORE = "copypaste_quick_access"
+    private const val STORE = PanelPreferences.NAME
 
     enum class PanelOption(val wire: String, val key: String, val default: Boolean) {
-        AUTO_RETURN("autoReturn", "auto-return", true),
+        AUTO_RETURN("autoReturn", PanelPreferences.AUTO_RETURN, true),
         FOCUS_SEARCH_ON_OPEN("focusSearchOnOpen", "focus-search-on-open", false);
 
         companion object {
