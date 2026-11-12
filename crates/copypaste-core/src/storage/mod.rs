@@ -34,10 +34,13 @@
 //! The schema is created only for a newly reserved file. Every existing file
 //! must match it exactly before connection pragmas or application queries run.
 
+pub mod ai_view;
+pub mod clip_edit;
 mod connection;
 mod content_bytes;
 mod creation;
 mod dbfile;
+pub mod expiry;
 mod file_operations;
 mod file_payloads;
 mod file_transfers;
@@ -46,20 +49,25 @@ mod history;
 mod history_preview;
 mod identity;
 mod items;
+pub mod local_state;
 mod merge_page;
 mod migrations;
 mod model;
-pub(crate) mod organization;
+pub mod organization;
 mod page;
+pub mod paste_queue;
 mod pinning;
 mod privacy;
+mod receipt;
 mod resource_revisions;
 mod retention;
+pub mod rules;
 pub use resource_revisions::ResourceRevisions;
 mod schema;
 mod schema_verify;
 mod search;
 mod semantic_index;
+pub mod snippets;
 mod space;
 pub use semantic_index::{SemanticMatches, SemanticWork};
 mod source_icons;
@@ -67,6 +75,7 @@ mod state;
 mod store;
 mod summary_workspace;
 mod summary_workspace_cleanup;
+pub mod transforms;
 mod versions;
 
 #[cfg(test)]

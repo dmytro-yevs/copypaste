@@ -1,0 +1,3 @@
+//! Snippet export.
+
+const _: () = ();

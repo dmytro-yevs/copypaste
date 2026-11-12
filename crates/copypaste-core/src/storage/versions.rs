@@ -90,7 +90,7 @@ macro_rules! version_columns {
     };
 }
 
-const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, 0 AS deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
+const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
 
 fn summary_query(predicate: &str) -> String {
     format!("SELECT {} FROM clipboard_items WHERE {predicate} UNION ALL SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records WHERE {predicate}", version_columns!())
@@ -408,6 +408,15 @@ impl Store {
     }
 }
 
+fn locally_expired(tx: &rusqlite::Connection, id: &str) -> Result<bool, StoreError> {
+    Ok(tx
+        .query_row("SELECT 1 FROM expired_ids WHERE clip_id = ?1", [id], |_| {
+            Ok(())
+        })
+        .optional()?
+        .is_some())
+}
+
 /// The body of one upsert, inside a caller-owned transaction or savepoint.
 ///
 /// `Ok(false)` is the dedup-index refusal, and the caller must discard this
@@ -421,6 +430,13 @@ pub(super) fn upsert_in_tx(
     }
     if super::organization::is_record_id(incoming.id) {
         return Ok(false);
+    }
+    // A clip this device purged on expiry stays gone; reporting the
+    // re-arrival as stored lets the sender's cursor move past it.
+    if locally_expired(tx, incoming.id)?
+        || super::receipt::on_received(tx, incoming)? == super::receipt::ReceiptOutcome::Discard
+    {
+        return Ok(true);
     }
     // Before the write below clears `fts_rowid`, and rolled back with it if
     // the dedup index refuses the version.
@@ -586,6 +602,18 @@ mod tests {
             search_text: Some("remote text"),
             payload_metadata: None,
         }
+    }
+
+    #[test]
+    fn a_rearrival_of_a_locally_expired_clip_is_reported_stored_and_not_kept() {
+        let s = store();
+        s.conn()
+            .unwrap()
+            .execute("INSERT INTO expired_ids VALUES ('gone', 1)", [])
+            .unwrap();
+        assert!(s.upsert(&incoming("gone", "hash", T0)).unwrap());
+        assert!(s.version("gone").unwrap().is_none());
+        assert!(s.search("remote text", 10).unwrap().is_empty());
     }
 
     #[test]

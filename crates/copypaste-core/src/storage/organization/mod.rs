@@ -1,7 +1,10 @@
 //! Replicated organization records and their transactional query projections.
 //!
-//! Each tag, membership, and pin has an independent LWW record. Existing P2P
-//! and encrypted cloud transports carry them without changing clip timestamps.
+//! Each tag, membership, pin and library record is an independent LWW record.
+//! Existing P2P and encrypted cloud transports carry them without changing
+//! clip timestamps. Kinds added after tags, memberships and pins are stored
+//! with `kind_class = 2`, so a sender can withhold them from older peers that
+//! would decline them on every session.
 use std::collections::BTreeMap;
 
 use copypaste_ipc::{
@@ -14,13 +17,32 @@ use sha2::{Digest, Sha256};
 
 use super::{connection::write_tx, IncomingItem, Store, StoreError};
 
+mod ai;
+mod clip_notes;
+mod preferences;
+mod rules;
+mod snippets;
+mod transforms;
+
+pub use ai::AiGrantRecord;
+pub use clip_notes::{ClipNoteRecord, Provenance, ProvenanceKind, TransformRef};
+pub use preferences::{PreferenceRecord, SetMemberRecord};
+pub use rules::{ContentRuleRecord, RuleOrigin, RulePlacementRecord};
+pub use snippets::{SnippetBodyRecord, SnippetCollectionRecord, SnippetRecord};
+pub use transforms::PipelineRecord;
+
 pub(crate) const CONTENT_TYPE: &str = "application/vnd.copypaste.organization+json";
 const PREFIX: &str = "org:v1:";
-const MAX_RECORD_BYTES: usize = 2048;
+/// Tags, memberships and pins: what every build with organization records reads.
+const LEGACY_KIND_CLASS: i64 = 1;
+const LIBRARY_KIND_CLASS: i64 = 2;
+const LEGACY_RECORD_BYTES: usize = 2048;
+/// The largest kind; each kind's own bound is checked once it is parsed.
+const MAX_RECORD_BYTES: usize = snippets::BODY_BYTES;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Record {
+pub enum Record {
     Tag {
         id: String,
         name: String,
@@ -36,27 +58,116 @@ enum Record {
         pinned: bool,
         order: Option<f64>,
     },
+    Snippet(SnippetRecord),
+    SnippetBody(SnippetBodyRecord),
+    SnippetCollection(SnippetCollectionRecord),
+    ContentRule(ContentRuleRecord),
+    ContentRulePlacement(RulePlacementRecord),
+    Pipeline(PipelineRecord),
+    Preference(PreferenceRecord),
+    SetMember(SetMemberRecord),
+    AiGrant(AiGrantRecord),
+    ClipNote(ClipNoteRecord),
+}
+
+/// The identity of one library record, for reading its projection back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordKey<'a> {
+    Snippet(&'a str),
+    SnippetBody(&'a str),
+    SnippetCollection(&'a str),
+    ContentRule(&'a str),
+    ContentRulePlacement(&'a str),
+    Pipeline(&'a str),
+    Preference { namespace: &'a str, key: &'a str },
+    SetMember { set: &'a str, member: &'a str },
+    AiGrant(&'a str),
+    ClipNote(&'a str),
+}
+
+impl RecordKey<'_> {
+    fn key(self) -> String {
+        match self {
+            Self::Snippet(id) => snippets::snippet_key(id),
+            Self::SnippetBody(id) => snippets::body_key(id),
+            Self::SnippetCollection(id) => snippets::collection_key(id),
+            Self::ContentRule(id) => rules::rule_key(id),
+            Self::ContentRulePlacement(id) => rules::placement_key(id),
+            Self::Pipeline(id) => transforms::pipeline_key(id),
+            Self::Preference { namespace, key } => preferences::preference_key(namespace, key),
+            Self::SetMember { set, member } => preferences::member_key(set, member),
+            Self::AiGrant(id) => ai::grant_key(id),
+            Self::ClipNote(clip_id) => clip_notes::note_key(clip_id),
+        }
+    }
 }
 
 pub(crate) fn is_record_id(id: &str) -> bool {
     id.starts_with(PREFIX)
 }
 
+fn record_id(key: &str) -> String {
+    format!("{PREFIX}{}", hex::encode(Sha256::digest(key.as_bytes())))
+}
+
+fn identifier(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && !is_record_id(id)
+}
+
+/// Single-line user text: bounded, and free of control characters.
+fn line(text: &str, max_chars: usize) -> bool {
+    text.chars().count() <= max_chars && !text.chars().any(char::is_control)
+}
+
+fn required_line(text: &str, max_chars: usize) -> bool {
+    !text.trim().is_empty() && line(text, max_chars)
+}
+
 impl Record {
-    fn id(&self) -> String {
-        let key = match self {
+    fn key(&self) -> String {
+        match self {
             Self::Tag { id, .. } => format!("tag:{id}"),
             Self::Membership {
                 clip_id, tag_id, ..
             } => format!("membership:{}:{clip_id}:{tag_id}", clip_id.len()),
             Self::Pin { clip_id, .. } => format!("pin:{clip_id}"),
-        };
-        format!("{PREFIX}{}", hex::encode(Sha256::digest(key.as_bytes())))
+            Self::Snippet(r) => snippets::snippet_key(&r.id),
+            Self::SnippetBody(r) => snippets::body_key(&r.id),
+            Self::SnippetCollection(r) => snippets::collection_key(&r.id),
+            Self::ContentRule(r) => rules::rule_key(&r.id),
+            Self::ContentRulePlacement(r) => rules::placement_key(&r.id),
+            Self::Pipeline(r) => transforms::pipeline_key(&r.id),
+            Self::Preference(r) => preferences::preference_key(&r.namespace, &r.key),
+            Self::SetMember(r) => preferences::member_key(&r.set, &r.member),
+            Self::AiGrant(r) => ai::grant_key(&r.id),
+            Self::ClipNote(r) => clip_notes::note_key(&r.clip_id),
+        }
+    }
+    fn id(&self) -> String {
+        record_id(&self.key())
+    }
+    fn kind_class(&self) -> i64 {
+        match self {
+            Self::Tag { .. } | Self::Membership { .. } | Self::Pin { .. } => LEGACY_KIND_CLASS,
+            _ => LIBRARY_KIND_CLASS,
+        }
+    }
+    fn max_bytes(&self) -> usize {
+        match self {
+            Self::Tag { .. } | Self::Membership { .. } | Self::Pin { .. } => LEGACY_RECORD_BYTES,
+            Self::Snippet(_) => snippets::SNIPPET_BYTES,
+            Self::SnippetBody(_) => snippets::BODY_BYTES,
+            Self::SnippetCollection(_) => snippets::COLLECTION_BYTES,
+            Self::ContentRule(_) => rules::RULE_BYTES,
+            Self::ContentRulePlacement(_) => rules::PLACEMENT_BYTES,
+            Self::Pipeline(_) => transforms::PIPELINE_BYTES,
+            Self::Preference(_) => preferences::PREFERENCE_BYTES,
+            Self::SetMember(_) => preferences::MEMBER_BYTES,
+            Self::AiGrant(_) => ai::GRANT_BYTES,
+            Self::ClipNote(_) => clip_notes::NOTE_BYTES,
+        }
     }
     fn valid(&self) -> bool {
-        fn identifier(id: &str) -> bool {
-            !id.is_empty() && id.len() <= 128 && !is_record_id(id)
-        }
         match self {
             Self::Tag { id, name, .. } => {
                 identifier(id)
@@ -80,9 +191,29 @@ impl Record {
                         order.is_none()
                     })
             }
+            Self::Snippet(r) => r.valid(),
+            Self::SnippetBody(r) => r.valid(),
+            Self::SnippetCollection(r) => r.valid(),
+            Self::ContentRule(r) => r.valid(),
+            Self::ContentRulePlacement(r) => r.valid(),
+            Self::Pipeline(r) => r.valid(),
+            Self::Preference(r) => r.valid(),
+            Self::SetMember(r) => r.valid(),
+            Self::AiGrant(r) => r.valid(),
+            Self::ClipNote(r) => r.valid(),
         }
     }
-    fn project(&self, tx: &Connection, stamp: i64) -> Result<(), StoreError> {
+    /// Whether the local version holds a value that may only tighten (a purge,
+    /// a revocation, a concurrent hide) which this version would loosen.
+    fn yields_to_local(&self, tx: &Connection) -> Result<bool, StoreError> {
+        match self {
+            Self::Snippet(r) => snippets::keeps_purge(tx, r),
+            Self::AiGrant(r) => ai::keeps_revocation(tx, r),
+            Self::ClipNote(r) => clip_notes::keeps_hidden(tx, r),
+            _ => Ok(false),
+        }
+    }
+    fn project(&self, tx: &Connection, record_id: &str, stamp: i64) -> Result<(), StoreError> {
         match self {
             Self::Tag { id, name, deleted } => {
                 tx.execute("INSERT INTO history_tags(id,name,deleted) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET name=excluded.name, deleted=excluded.deleted", params![id,name,deleted])?;
@@ -102,6 +233,16 @@ impl Record {
                 tx.execute("INSERT INTO history_pin_state(clip_id,pinned,pin_order,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(clip_id) DO UPDATE SET pinned=excluded.pinned,pin_order=excluded.pin_order,updated_at=excluded.updated_at", params![clip_id,pinned,order,stamp])?;
                 apply_pin_projection(tx, clip_id)?;
             }
+            Self::Snippet(r) => r.project(tx, record_id, stamp)?,
+            Self::SnippetBody(r) => r.project(tx, record_id, stamp)?,
+            Self::SnippetCollection(r) => r.project(tx, record_id)?,
+            Self::ContentRule(r) => r.project(tx, record_id, stamp)?,
+            Self::ContentRulePlacement(r) => r.project(tx, record_id)?,
+            Self::Pipeline(r) => r.project(tx, record_id, stamp)?,
+            Self::Preference(r) => r.project(tx, record_id, stamp)?,
+            Self::SetMember(r) => r.project(tx, record_id, stamp)?,
+            Self::AiGrant(r) => r.project(tx, record_id)?,
+            Self::ClipNote(r) => r.project(tx, record_id)?,
         }
         Ok(())
     }
@@ -112,49 +253,89 @@ pub(super) fn apply_pin_projection(tx: &Connection, id: &str) -> Result<(), Stor
     Ok(())
 }
 
+fn parse(id: &str, text: &str) -> Option<Record> {
+    if text.len() > MAX_RECORD_BYTES {
+        return None;
+    }
+    let record: Record = serde_json::from_str(text).ok()?;
+    (text.len() <= record.max_bytes() && record.valid() && record.id() == id).then_some(record)
+}
+
+/// A tombstone carries no content, so only its id and shape are checked here;
+/// the store accepts it only for a clip note (see `clip_notes`).
 pub(crate) fn valid_wire(id: &str, content_type: &str, content: &str, deleted: bool) -> bool {
     if content_type != CONTENT_TYPE {
         return !is_record_id(id);
     }
-    !deleted
-        && content.len() <= MAX_RECORD_BYTES
-        && serde_json::from_str::<Record>(content)
-            .is_ok_and(|record| record.valid() && record.id() == id)
+    if deleted {
+        return is_record_id(id) && content.is_empty();
+    }
+    parse(id, content).is_some()
 }
 
 pub(super) fn upsert_in_tx(
     tx: &Connection,
     incoming: &IncomingItem<'_>,
 ) -> Result<bool, StoreError> {
-    let Some(text) = incoming.search_text else {
+    if incoming.deleted {
+        return clip_notes::apply_tombstone(tx, incoming);
+    }
+    let Some(record) = incoming
+        .search_text
+        .and_then(|text| parse(incoming.id, text))
+    else {
         return Ok(false);
     };
-    if !valid_wire(incoming.id, incoming.content_type, text, incoming.deleted) {
-        return Ok(false);
+    if record.yields_to_local(tx)? {
+        restamp(tx, incoming.id, incoming.created_at)?;
+        return Ok(true);
     }
-    let record: Record = serde_json::from_str(text).map_err(|_| StoreError::InvalidHistoryQuery)?;
-    tx.execute("INSERT INTO organization_records(id,content_ciphertext,nonce,content_hash,created_at,origin_device_id) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET content_ciphertext=excluded.content_ciphertext,nonce=excluded.nonce,content_hash=excluded.content_hash,created_at=excluded.created_at,origin_device_id=excluded.origin_device_id", params![incoming.id,incoming.content_ciphertext,incoming.nonce,incoming.content_hash,incoming.created_at,incoming.origin_device_id])?;
-    record.project(tx, incoming.created_at)?;
+    tx.execute("INSERT INTO organization_records(id,content_ciphertext,nonce,content_hash,created_at,origin_device_id,kind_class,deleted) VALUES (?1,?2,?3,?4,?5,?6,?7,0) ON CONFLICT(id) DO UPDATE SET content_ciphertext=excluded.content_ciphertext,nonce=excluded.nonce,content_hash=excluded.content_hash,created_at=excluded.created_at,origin_device_id=excluded.origin_device_id,kind_class=excluded.kind_class,deleted=0", params![incoming.id,incoming.content_ciphertext,incoming.nonce,incoming.content_hash,incoming.created_at,incoming.origin_device_id,record.kind_class()])?;
+    record.project(tx, incoming.id, incoming.created_at)?;
     Ok(true)
 }
 
-fn write(tx: &Connection, key: &crate::ItemKey, record: Record) -> Result<(), StoreError> {
+/// Writes the local version back, unchanged, as newer than `beaten`: the
+/// sealed content binds only the id, so no key is needed, and every peer that
+/// took the loosening version receives the restrictive one after it.
+fn restamp(tx: &Connection, id: &str, beaten: i64) -> Result<(), StoreError> {
+    let local: i64 = tx.query_row(
+        "SELECT created_at FROM organization_records WHERE id=?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    let stamp = local.max(beaten).saturating_add(1).max(crate::now_ms());
+    tx.execute(
+        "UPDATE organization_records SET created_at=?2, origin_device_id='' WHERE id=?1",
+        params![id, stamp],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn write(
+    tx: &Connection,
+    key: &crate::ItemKey,
+    record: Record,
+) -> Result<(), StoreError> {
     if !record.valid() {
         return Err(StoreError::InvalidHistoryQuery);
     }
     let id = record.id();
     let text = serde_json::to_string(&record).map_err(|_| StoreError::InvalidHistoryQuery)?;
+    if text.len() > record.max_bytes() {
+        return Err(StoreError::InvalidHistoryQuery);
+    }
     let hash = super::compute_content_hash(text.as_bytes());
-    let previous: Option<(i64, String)> = tx
+    let previous: Option<(i64, String, bool)> = tx
         .query_row(
-            "SELECT created_at,content_hash FROM organization_records WHERE id=?1",
+            "SELECT created_at,content_hash,deleted FROM organization_records WHERE id=?1",
             [&id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
     if previous
         .as_ref()
-        .is_some_and(|(_, previous_hash)| previous_hash == &hash)
+        .is_some_and(|(_, previous_hash, deleted)| !deleted && previous_hash == &hash)
     {
         return Ok(());
     }
@@ -170,7 +351,7 @@ fn write(tx: &Connection, key: &crate::ItemKey, record: Record) -> Result<(), St
         0
     };
     let stamp = previous
-        .map_or(crate::now_ms(), |(stamp, _)| {
+        .map_or(crate::now_ms(), |(stamp, _, _)| {
             stamp.saturating_add(1).max(crate::now_ms())
         })
         .max(pin_stamp);
@@ -471,4 +652,143 @@ pub(super) fn catalogue(conn: &Connection) -> Result<Vec<HistoryTag>, StoreError
         return Err(StoreError::InvalidHistoryQuery);
     }
     Ok(tags)
+}
+
+impl Store {
+    /// Writes one library record. Tags, memberships and pins have their own
+    /// invariants and go through their dedicated operations instead.
+    pub fn write_organization_record(
+        &self,
+        key: &crate::ItemKey,
+        record: Record,
+    ) -> Result<(), StoreError> {
+        self.write_organization_records(key, [record])
+    }
+
+    /// Writes library records in one transaction: all of them or none.
+    pub fn write_organization_records(
+        &self,
+        key: &crate::ItemKey,
+        records: impl IntoIterator<Item = Record>,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        for record in records {
+            if record.kind_class() == LEGACY_KIND_CLASS {
+                return Err(StoreError::InvalidHistoryQuery);
+            }
+            write(&tx, key, record)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The stamp of the stored version of one library record: the base an
+    /// edit records, so a concurrent restrictive change is recognised.
+    pub fn organization_record_stamp(&self, key: RecordKey<'_>) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT created_at FROM organization_records WHERE id=?1 AND deleted=0",
+                [record_id(&key.key())],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The projected value of one library record, as every query sees it.
+    pub fn organization_record(&self, key: RecordKey<'_>) -> Result<Option<Record>, StoreError> {
+        let conn = self.conn()?;
+        Ok(match key {
+            RecordKey::Snippet(id) => snippets::snippet(&conn, id)?.map(Record::Snippet),
+            RecordKey::SnippetBody(id) => snippets::body(&conn, id)?.map(Record::SnippetBody),
+            RecordKey::SnippetCollection(id) => {
+                snippets::collection(&conn, id)?.map(Record::SnippetCollection)
+            }
+            RecordKey::ContentRule(id) => rules::rule(&conn, id)?.map(Record::ContentRule),
+            RecordKey::ContentRulePlacement(id) => {
+                rules::placement(&conn, id)?.map(Record::ContentRulePlacement)
+            }
+            RecordKey::Pipeline(id) => transforms::pipeline(&conn, id)?.map(Record::Pipeline),
+            RecordKey::Preference { namespace, key } => {
+                preferences::preference(&conn, namespace, key)?.map(Record::Preference)
+            }
+            RecordKey::SetMember { set, member } => {
+                preferences::member(&conn, set, member)?.map(Record::SetMember)
+            }
+            RecordKey::AiGrant(id) => ai::grant(&conn, id)?.map(Record::AiGrant),
+            RecordKey::ClipNote(id) => clip_notes::note(&conn, id)?.map(Record::ClipNote),
+        })
+    }
+
+    /// Tombstones the synced note of `clip_id`; `false` when it has none.
+    pub fn tombstone_clip_note(&self, clip_id: &str) -> Result<bool, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let changed = clip_notes::tombstone(&tx, clip_id)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// Drops notes whose clip has been missing for the orphan window.
+    pub fn prune_orphan_clip_notes(&self, now_ms: i64) -> Result<usize, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let pruned = clip_notes::prune_orphans(&tx, now_ms)?;
+        tx.commit()?;
+        Ok(pruned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::{item, store, T0};
+    use super::*;
+
+    fn kind_classes(store: &Store) -> Vec<i64> {
+        store
+            .conn()
+            .unwrap()
+            .prepare("SELECT kind_class FROM organization_records ORDER BY kind_class")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn library_kinds_are_written_in_their_own_class_and_reject_unknown_fields() {
+        let store = store();
+        let key = crate::Keyring::from_secret(&[5; 32]).item_key();
+        let clip = store.insert(item("pinned", T0)).unwrap();
+        store.set_pinned_synced(&clip.id, true, &key).unwrap();
+        let preference = Record::Preference(PreferenceRecord {
+            namespace: "transforms".into(),
+            key: "default".into(),
+            value_json: "null".into(),
+        });
+        store
+            .write_organization_record(&key, preference.clone())
+            .unwrap();
+        assert_eq!(
+            kind_classes(&store),
+            [LEGACY_KIND_CLASS, LIBRARY_KIND_CLASS]
+        );
+        assert!(store
+            .write_organization_record(
+                &key,
+                Record::Pin {
+                    clip_id: clip.id,
+                    pinned: false,
+                    order: None,
+                }
+            )
+            .is_err());
+
+        let text = serde_json::to_string(&preference).unwrap();
+        assert!(parse(&preference.id(), &text).is_some());
+        let extended = text.replacen('{', r#"{"added":1,"#, 1);
+        assert!(parse(&preference.id(), &extended).is_none());
+    }
 }
