@@ -4721,5 +4721,190 @@
         "type": "int"
       }
     }
+  },
+  "quickAccessUnavailableTitle": "Quick access status unavailable",
+  "@quickAccessUnavailableTitle": {
+    "description": "Error title in Android Settings > Quick access when the keyboard, tile and widget status cannot be read."
+  },
+  "quickAccessUnavailableMessage": "CopyPaste couldn't read the keyboard, tile, and widget status. Try again.",
+  "@quickAccessUnavailableMessage": {
+    "description": "Error message under quickAccessUnavailableTitle; a Retry button follows."
+  },
+  "quickAccessActionFailedTitle": "Couldn't complete that",
+  "@quickAccessActionFailedTitle": {
+    "description": "Notice title in Android Settings > Quick access when a system screen could not be opened or an option could not be saved."
+  },
+  "quickAccessActionFailedMessage": "Android didn't open the requested screen or save the change. Try again.",
+  "@quickAccessActionFailedMessage": {
+    "description": "Notice message under quickAccessActionFailedTitle."
+  },
+  "quickAccessKeyboardTitle": "Clips keyboard",
+  "@quickAccessKeyboardTitle": {
+    "description": "Setting row title: the CopyPaste clips keyboard panel (an Android input method that inserts saved clips)."
+  },
+  "quickAccessKeyboardDescription": "Turn on CopyPaste clips in the system keyboard settings. Android warns that a keyboard can see what you type: the clips panel never records keystrokes, has no typing keys for other apps, and inserts only the items you tap.",
+  "@quickAccessKeyboardDescription": {
+    "description": "Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes."
+  },
+  "quickAccessKeyboardOn": "Turned on",
+  "@quickAccessKeyboardOn": {
+    "description": "Status under the clips keyboard row: the keyboard is turned on in system settings."
+  },
+  "quickAccessKeyboardOff": "Turned off",
+  "@quickAccessKeyboardOff": {
+    "description": "Status under the clips keyboard row: the keyboard is turned off in system settings."
+  },
+  "quickAccessOpenKeyboardSettings": "Open keyboard settings",
+  "@quickAccessOpenKeyboardSettings": {
+    "description": "Button that opens the Android system screen where keyboards are turned on."
+  },
+  "quickAccessKeyboardSearchDescription": "Turn on the CopyPaste clips keyboard panel.",
+  "@quickAccessKeyboardSearchDescription": {
+    "description": "Settings search result description for the clips keyboard row."
+  },
+  "quickAccessKeyboardKeywords": "keyboard input method ime panel enable",
+  "@quickAccessKeyboardKeywords": {
+    "description": "Space-separated search keywords for the clips keyboard row; translate and add local synonyms."
+  },
+  "quickAccessSwitchKeyboardTitle": "Switch to the clips keyboard",
+  "@quickAccessSwitchKeyboardTitle": {
+    "description": "Setting row title: make the clips keyboard the current keyboard."
+  },
+  "quickAccessSwitchKeyboardDescription": "Choose CopyPaste clips as the current keyboard. While it stays selected, each copy is saved.",
+  "@quickAccessSwitchKeyboardDescription": {
+    "description": "Setting row description for switching to the clips keyboard."
+  },
+  "quickAccessSwitchKeyboardAction": "Choose keyboard",
+  "@quickAccessSwitchKeyboardAction": {
+    "description": "Button that shows the Android keyboard picker."
+  },
+  "quickAccessKeyboardCurrent": "Current keyboard",
+  "@quickAccessKeyboardCurrent": {
+    "description": "Status: the clips keyboard is the current keyboard."
+  },
+  "quickAccessCaptureTierTitle": "Capture mode",
+  "@quickAccessCaptureTierTitle": {
+    "description": "Setting row title: how copies made in other apps are saved on this device."
+  },
+  "quickAccessCaptureTierDescription": "Without Shizuku or ADB access, copies are saved only when the clips panel opens, while it stays selected, or from the CopyPaste app, a tile, the widget, or Share.",
+  "@quickAccessCaptureTierDescription": {
+    "description": "Setting row description explaining capture without Shizuku or ADB access."
+  },
+  "quickAccessCaptureTierSearchDescription": "See how copies from other apps are saved.",
+  "@quickAccessCaptureTierSearchDescription": {
+    "description": "Settings search result description for the capture mode row."
+  },
+  "quickAccessCaptureTierKeywords": "capture tier full panel manual shizuku collect",
+  "@quickAccessCaptureTierKeywords": {
+    "description": "Space-separated search keywords for the capture mode row; translate and add local synonyms."
+  },
+  "quickAccessTierFull": "Full: every copy is saved in the background",
+  "@quickAccessTierFull": {
+    "description": "Capture mode status: background capture granted through Shizuku or ADB saves every copy."
+  },
+  "quickAccessTierPanelCollecting": "Panel selected: collecting",
+  "@quickAccessTierPanelCollecting": {
+    "description": "Capture mode status: the clips keyboard is the current keyboard and saves each copy."
+  },
+  "quickAccessTierPanelCatchUp": "Panel mode: catch-up on open",
+  "@quickAccessTierPanelCatchUp": {
+    "description": "Capture mode status: the clips keyboard is turned on and saves the clipboard when it opens."
+  },
+  "quickAccessTierManual": "Manual: save from the app, a tile, the widget, or Share",
+  "@quickAccessTierManual": {
+    "description": "Capture mode status: copies are saved only by an explicit action."
+  },
+  "quickAccessTierPaused": "Capture paused",
+  "@quickAccessTierPaused": {
+    "description": "Capture mode status: the user paused clipboard capture."
+  },
+  "quickAccessAutoReturnTitle": "Return to previous keyboard after inserting",
+  "@quickAccessAutoReturnTitle": {
+    "description": "Switch title: after inserting a clip, the panel switches back to the keyboard used before."
+  },
+  "quickAccessAutoReturnDescription": "Switches back after a single insert. The panel stays open while you use the Queue tab or item actions. Turn off to keep collecting copies.",
+  "@quickAccessAutoReturnDescription": {
+    "description": "Switch description for returning to the previous keyboard after inserting."
+  },
+  "quickAccessAutoReturnKeywords": "switch back previous keyboard auto return insert",
+  "@quickAccessAutoReturnKeywords": {
+    "description": "Space-separated search keywords for the return-to-previous-keyboard switch; translate and add local synonyms."
+  },
+  "quickAccessFocusSearchTitle": "Focus search when the panel opens",
+  "@quickAccessFocusSearchTitle": {
+    "description": "Switch title: the clips panel opens with its search field focused."
+  },
+  "quickAccessFocusSearchDescription": "Opens the panel on its search field. When off, your clips are one tap away.",
+  "@quickAccessFocusSearchDescription": {
+    "description": "Switch description for focusing search when the clips panel opens."
+  },
+  "quickAccessTilesTitle": "Quick Settings tiles",
+  "@quickAccessTilesTitle": {
+    "description": "Setting row title for the Android Quick Settings tiles; also the search result label."
+  },
+  "quickAccessTilesSearchDescription": "Add the Save clipboard and Clipboard capture tiles.",
+  "@quickAccessTilesSearchDescription": {
+    "description": "Settings search result description for the Quick Settings tile rows."
+  },
+  "quickAccessTilesKeywords": "quick settings tile shade save pause",
+  "@quickAccessTilesKeywords": {
+    "description": "Space-separated search keywords for the Quick Settings tile rows; translate and add local synonyms."
+  },
+  "quickAccessTileInstructions": "Swipe down twice from the top of the screen, tap Edit, and drag a CopyPaste tile into Quick Settings.",
+  "@quickAccessTileInstructions": {
+    "description": "How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt."
+  },
+  "quickAccessSaveTileTitle": "Save clipboard tile",
+  "@quickAccessSaveTileTitle": {
+    "description": "Setting row title for the Save clipboard Quick Settings tile."
+  },
+  "quickAccessSaveTileDescription": "Saves what's on the clipboard from Quick Settings.",
+  "@quickAccessSaveTileDescription": {
+    "description": "Setting row description for the Save clipboard tile."
+  },
+  "quickAccessCaptureTileTitle": "Clipboard capture tile",
+  "@quickAccessCaptureTileTitle": {
+    "description": "Setting row title for the Clipboard capture Quick Settings tile."
+  },
+  "quickAccessCaptureTileDescription": "Pauses and resumes capture from Quick Settings.",
+  "@quickAccessCaptureTileDescription": {
+    "description": "Setting row description for the Clipboard capture tile."
+  },
+  "quickAccessAddTile": "Add tile",
+  "@quickAccessAddTile": {
+    "description": "Button that asks Android to add the tile to Quick Settings."
+  },
+  "quickAccessTileAdded": "Added to Quick Settings",
+  "@quickAccessTileAdded": {
+    "description": "Status: the tile is in Quick Settings."
+  },
+  "quickAccessWidgetTitle": "Recent clips widget",
+  "@quickAccessWidgetTitle": {
+    "description": "Setting row title for the Recent clips home-screen widget."
+  },
+  "quickAccessWidgetDescription": "Shows your latest clips on the home screen. Tap one to copy it.",
+  "@quickAccessWidgetDescription": {
+    "description": "Setting row description for the Recent clips widget."
+  },
+  "quickAccessWidgetInstructions": "Touch and hold the home screen, tap Widgets, and drag Recent clips from CopyPaste.",
+  "@quickAccessWidgetInstructions": {
+    "description": "How to add the widget by hand, shown when the launcher cannot pin widgets."
+  },
+  "quickAccessWidgetCount": "{count, plural, =0{Not added} =1{1 widget added} other{{count} widgets added}}",
+  "@quickAccessWidgetCount": {
+    "description": "Status: how many Recent clips widgets are on the home screen.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "quickAccessAddWidget": "Add widget",
+  "@quickAccessAddWidget": {
+    "description": "Button that asks the launcher to add the Recent clips widget."
+  },
+  "quickAccessWidgetKeywords": "home screen widget launcher recent",
+  "@quickAccessWidgetKeywords": {
+    "description": "Space-separated search keywords for the widget row; translate and add local synonyms."
   }
 }

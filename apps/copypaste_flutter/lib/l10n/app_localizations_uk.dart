@@ -3853,4 +3853,175 @@ class AppLocalizationsUk extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle => 'Стан швидкого доступу недоступний';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste не вдалося прочитати стан клавіатури, плиток і віджета. Спробуйте ще раз.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Не вдалося виконати дію';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android не відкрив потрібний екран або не зберіг зміну. Спробуйте ще раз.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Клавіатура кліпів';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Увімкніть «Кліпи CopyPaste» в системних налаштуваннях клавіатури. Android попередить, що клавіатура може бачити введений текст: панель кліпів ніколи не записує натискання клавіш, не має клавіш для введення в інших застосунках і вставляє лише ті елементи, яких ви торкаєтеся.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Увімкнено';
+
+  @override
+  String get quickAccessKeyboardOff => 'Вимкнено';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Налаштування клавіатури';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Увімкнути панель клавіатури «Кліпи CopyPaste».';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'клавіатура метод введення ime панель увімкнути';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Перейти на клавіатуру кліпів';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Виберіть «Кліпи CopyPaste» поточною клавіатурою. Поки її вибрано, кожну копію буде збережено.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Вибрати клавіатуру';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Поточна клавіатура';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Режим запису';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Без доступу через Shizuku або ADB копії зберігаються лише тоді, коли відкривається панель кліпів, поки її вибрано, або із застосунку CopyPaste, плитки, віджета чи меню «Поділитися».';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Як зберігаються копії з інших застосунків.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'запис рівень повний панель вручну shizuku збирати';
+
+  @override
+  String get quickAccessTierFull =>
+      'Повний: кожна копія зберігається у фоновому режимі';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Панель вибрано: збирання';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Режим панелі: синхронізація під час відкриття';
+
+  @override
+  String get quickAccessTierManual =>
+      'Вручну: зберігайте із застосунку, плитки, віджета або меню «Поділитися»';
+
+  @override
+  String get quickAccessTierPaused => 'Запис призупинено';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Повертатися до попередньої клавіатури після вставлення';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Після одного вставлення клавіатура перемикається назад. Панель лишається відкритою, поки ви працюєте на вкладці «Черга» або з діями елемента. Вимкніть, щоб і далі збирати копії.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'повернутися попередня клавіатура автоматично вставлення';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Фокус на пошуку під час відкриття панелі';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Панель відкривається з полем пошуку. Якщо вимкнено, кліпи доступні одним дотиком.';
+
+  @override
+  String get quickAccessTilesTitle => 'Плитки швидких налаштувань';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Додати плитки «Зберегти буфер обміну» та «Запис буфера обміну».';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'швидкі налаштування плитка шторка зберегти пауза';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Двічі проведіть униз від верхнього краю екрана, торкніться «Змінити» та перетягніть плитку CopyPaste у швидкі налаштування.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Плитка «Зберегти буфер обміну»';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Зберігає вміст буфера обміну зі швидких налаштувань.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Плитка «Запис буфера обміну»';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Призупиняє та відновлює запис зі швидких налаштувань.';
+
+  @override
+  String get quickAccessAddTile => 'Додати плитку';
+
+  @override
+  String get quickAccessTileAdded => 'Додано до швидких налаштувань';
+
+  @override
+  String get quickAccessWidgetTitle => 'Віджет «Останні кліпи»';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Показує ваші останні кліпи на головному екрані. Торкніться кліпу, щоб скопіювати його.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Натисніть і утримуйте головний екран, торкніться «Віджети» та перетягніть «Останні кліпи» з CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Додано $count віджета',
+      many: 'Додано $count віджетів',
+      few: 'Додано $count віджети',
+      one: 'Додано 1 віджет',
+      zero: 'Не додано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Додати віджет';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'головний екран віджет лаунчер останні';
 }

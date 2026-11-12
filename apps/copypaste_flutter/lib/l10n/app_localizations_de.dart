@@ -3856,4 +3856,174 @@ class AppLocalizationsDe extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Schnellzugriffsstatus nicht verfügbar';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste konnte den Status von Tastatur, Kacheln und Widget nicht lesen. Versuche es erneut.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Aktion nicht abgeschlossen';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android hat den gewünschten Bildschirm nicht geöffnet oder die Änderung nicht gespeichert. Versuche es erneut.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Einträge-Tastatur';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Aktiviere „CopyPaste-Einträge“ in den Tastatureinstellungen des Systems. Android warnt, dass eine Tastatur deine Eingaben sehen kann: Das Eintragsfeld zeichnet niemals Tastenanschläge auf, hat keine Tipptasten für andere Apps und fügt nur die Einträge ein, die du antippst.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Aktiviert';
+
+  @override
+  String get quickAccessKeyboardOff => 'Deaktiviert';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Tastatureinstellungen öffnen';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Das Tastaturfeld „CopyPaste-Einträge“ aktivieren.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'tastatur eingabemethode ime feld aktivieren';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Zur Einträge-Tastatur wechseln';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Wähle „CopyPaste-Einträge“ als aktuelle Tastatur. Solange sie ausgewählt bleibt, wird jede Kopie gespeichert.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Tastatur wählen';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Aktuelle Tastatur';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Erfassungsmodus';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Ohne Zugriff über Shizuku oder ADB werden Kopien nur gespeichert, wenn sich das Eintragsfeld öffnet, solange es ausgewählt bleibt, oder über die CopyPaste-App, eine Kachel, das Widget oder „Teilen“.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Sieh, wie Kopien aus anderen Apps gespeichert werden.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'erfassung stufe vollständig feld manuell shizuku sammeln';
+
+  @override
+  String get quickAccessTierFull =>
+      'Vollständig: Jede Kopie wird im Hintergrund gespeichert';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Feld ausgewählt: sammelt';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Feldmodus: Abgleich beim Öffnen';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuell: über die App, eine Kachel, das Widget oder „Teilen“ speichern';
+
+  @override
+  String get quickAccessTierPaused => 'Erfassung pausiert';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Nach dem Einfügen zur vorherigen Tastatur zurückkehren';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Wechselt nach einem einzelnen Einfügen zurück. Das Feld bleibt offen, während du den Tab „Warteschlange“ oder Eintragsaktionen nutzt. Deaktiviere es, um weiter Kopien zu sammeln.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'zurück vorherige tastatur automatisch einfügen';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Suche beim Öffnen des Felds fokussieren';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Öffnet das Feld mit dem Suchfeld. Wenn deaktiviert, sind deine Einträge nur einen Tipp entfernt.';
+
+  @override
+  String get quickAccessTilesTitle => 'Schnelleinstellungs-Kacheln';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Die Kacheln „Zwischenablage speichern“ und „Erfassung der Zwischenablage“ hinzufügen.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'schnelleinstellungen kachel benachrichtigungsleiste speichern pause';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Wische zweimal vom oberen Bildschirmrand nach unten, tippe auf „Bearbeiten“ und ziehe eine CopyPaste-Kachel in die Schnelleinstellungen.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Kachel „Zwischenablage speichern“';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Speichert den Inhalt der Zwischenablage über die Schnelleinstellungen.';
+
+  @override
+  String get quickAccessCaptureTileTitle =>
+      'Kachel „Erfassung der Zwischenablage“';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Pausiert und setzt die Erfassung über die Schnelleinstellungen fort.';
+
+  @override
+  String get quickAccessAddTile => 'Kachel hinzufügen';
+
+  @override
+  String get quickAccessTileAdded => 'Zu den Schnelleinstellungen hinzugefügt';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget „Letzte Einträge“';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Zeigt deine neuesten Einträge auf dem Startbildschirm. Tippe auf einen Eintrag, um ihn zu kopieren.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Halte den Startbildschirm gedrückt, tippe auf „Widgets“ und ziehe „Letzte Einträge“ von CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Widgets hinzugefügt',
+      one: '1 Widget hinzugefügt',
+      zero: 'Nicht hinzugefügt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Widget hinzufügen';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'startbildschirm widget launcher letzte';
 }

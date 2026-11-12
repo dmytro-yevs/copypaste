@@ -3895,4 +3895,177 @@ class AppLocalizationsFr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'État de l\'accès rapide indisponible';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste n\'a pas pu lire l\'état du clavier, des vignettes et du widget. Réessayez.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Action impossible';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android n\'a pas ouvert l\'écran demandé ou n\'a pas enregistré la modification. Réessayez.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Clavier d\'éléments';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Activez Éléments CopyPaste dans les paramètres de clavier du système. Android prévient qu\'un clavier peut voir ce que vous saisissez : le panneau d\'éléments n\'enregistre jamais les frappes, n\'a aucune touche de saisie pour les autres applis et n\'insère que les éléments que vous touchez.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Activé';
+
+  @override
+  String get quickAccessKeyboardOff => 'Désactivé';
+
+  @override
+  String get quickAccessOpenKeyboardSettings =>
+      'Ouvrir les paramètres du clavier';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Activer le panneau de clavier Éléments CopyPaste.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'clavier mode de saisie ime panneau activer';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Passer au clavier d\'éléments';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Choisissez Éléments CopyPaste comme clavier actuel. Tant qu\'il reste sélectionné, chaque copie est enregistrée.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Choisir le clavier';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Clavier actuel';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Mode de capture';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Sans accès via Shizuku ou ADB, les copies ne sont enregistrées qu\'à l\'ouverture du panneau d\'éléments, tant qu\'il reste sélectionné, ou depuis l\'appli CopyPaste, une vignette, le widget ou Partager.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Voir comment les copies des autres applis sont enregistrées.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'capture niveau complet panneau manuel shizuku collecter';
+
+  @override
+  String get quickAccessTierFull =>
+      'Complet : chaque copie est enregistrée en arrière-plan';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panneau sélectionné : collecte';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Mode panneau : rattrapage à l\'ouverture';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuel : enregistrez depuis l\'appli, une vignette, le widget ou Partager';
+
+  @override
+  String get quickAccessTierPaused => 'Capture en pause';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Revenir au clavier précédent après l\'insertion';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Revient après une seule insertion. Le panneau reste ouvert pendant que vous utilisez l\'onglet File d\'attente ou les actions d\'un élément. Désactivez pour continuer à collecter des copies.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'revenir clavier précédent automatique insérer';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Activer la recherche à l\'ouverture du panneau';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Ouvre le panneau sur son champ de recherche. Désactivé, vos éléments sont à portée d\'un seul geste.';
+
+  @override
+  String get quickAccessTilesTitle => 'Vignettes des Réglages rapides';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Ajouter les vignettes Enregistrer le presse-papiers et Capture du presse-papiers.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'réglages rapides vignette volet enregistrer pause';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Balayez deux fois vers le bas depuis le haut de l\'écran, appuyez sur Modifier et faites glisser une vignette CopyPaste dans les Réglages rapides.';
+
+  @override
+  String get quickAccessSaveTileTitle =>
+      'Vignette Enregistrer le presse-papiers';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Enregistre le contenu du presse-papiers depuis les Réglages rapides.';
+
+  @override
+  String get quickAccessCaptureTileTitle =>
+      'Vignette Capture du presse-papiers';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Met en pause et reprend la capture depuis les Réglages rapides.';
+
+  @override
+  String get quickAccessAddTile => 'Ajouter la vignette';
+
+  @override
+  String get quickAccessTileAdded => 'Ajoutée aux Réglages rapides';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget Éléments récents';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Affiche vos derniers éléments sur l\'écran d\'accueil. Touchez-en un pour le copier.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Appuyez de manière prolongée sur l\'écran d\'accueil, touchez Widgets et faites glisser Éléments récents de CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widgets ajoutés',
+      one: '1 widget ajouté',
+      zero: 'Non ajouté',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Ajouter le widget';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'écran d\'accueil widget lanceur récents';
 }

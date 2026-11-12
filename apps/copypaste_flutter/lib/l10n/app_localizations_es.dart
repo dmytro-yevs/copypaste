@@ -3884,4 +3884,174 @@ class AppLocalizationsEs extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Estado del acceso rápido no disponible';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste no pudo leer el estado del teclado, los mosaicos y el widget. Inténtalo de nuevo.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'No se pudo completar';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android no abrió la pantalla solicitada ni guardó el cambio. Inténtalo de nuevo.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Teclado de recortes';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Activa Recortes de CopyPaste en los ajustes de teclado del sistema. Android avisa de que un teclado puede ver lo que escribes: el panel de recortes nunca registra pulsaciones, no tiene teclas para escribir en otras apps y solo inserta los elementos que tocas.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Activado';
+
+  @override
+  String get quickAccessKeyboardOff => 'Desactivado';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Abrir ajustes de teclado';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Activa el panel de teclado Recortes de CopyPaste.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'teclado método de entrada ime panel activar';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Cambiar al teclado de recortes';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Elige Recortes de CopyPaste como teclado actual. Mientras siga seleccionado, se guarda cada copia.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Elegir teclado';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Teclado actual';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Modo de captura';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Sin acceso mediante Shizuku o ADB, las copias solo se guardan cuando se abre el panel de recortes, mientras siga seleccionado, o desde la app CopyPaste, un mosaico, el widget o Compartir.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Consulta cómo se guardan las copias de otras apps.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'captura nivel completo panel manual shizuku recopilar';
+
+  @override
+  String get quickAccessTierFull =>
+      'Completo: cada copia se guarda en segundo plano';
+
+  @override
+  String get quickAccessTierPanelCollecting =>
+      'Panel seleccionado: recopilando';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Modo panel: recuperación al abrir';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manual: guarda desde la app, un mosaico, el widget o Compartir';
+
+  @override
+  String get quickAccessTierPaused => 'Captura en pausa';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Volver al teclado anterior después de insertar';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Vuelve tras una sola inserción. El panel sigue abierto mientras usas la pestaña Cola o las acciones de un elemento. Desactívalo para seguir recopilando copias.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'volver teclado anterior automático insertar';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Enfocar la búsqueda al abrir el panel';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Abre el panel en su campo de búsqueda. Si está desactivado, tus recortes están a un toque.';
+
+  @override
+  String get quickAccessTilesTitle => 'Mosaicos de ajustes rápidos';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Añade los mosaicos Guardar portapapeles y Captura del portapapeles.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'ajustes rápidos mosaico panel guardar pausa';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Desliza dos veces hacia abajo desde la parte superior de la pantalla, toca Editar y arrastra un mosaico de CopyPaste a los ajustes rápidos.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Mosaico Guardar portapapeles';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Guarda el contenido del portapapeles desde los ajustes rápidos.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Mosaico Captura del portapapeles';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Pausa y reanuda la captura desde los ajustes rápidos.';
+
+  @override
+  String get quickAccessAddTile => 'Añadir mosaico';
+
+  @override
+  String get quickAccessTileAdded => 'Añadido a los ajustes rápidos';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget Recortes recientes';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Muestra tus recortes más recientes en la pantalla de inicio. Toca uno para copiarlo.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Mantén pulsada la pantalla de inicio, toca Widgets y arrastra Recortes recientes de CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widgets añadidos',
+      one: '1 widget añadido',
+      zero: 'No añadido',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Añadir widget';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'pantalla de inicio widget launcher recientes';
 }

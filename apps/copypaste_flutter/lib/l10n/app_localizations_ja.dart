@@ -3589,4 +3589,160 @@ class AppLocalizationsJa extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle => 'クイックアクセスの状態を取得できません';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste はキーボード、タイル、ウィジェットの状態を読み取れませんでした。もう一度お試しください。';
+
+  @override
+  String get quickAccessActionFailedTitle => '操作を完了できませんでした';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android が要求した画面を開けなかったか、変更を保存できませんでした。もう一度お試しください。';
+
+  @override
+  String get quickAccessKeyboardTitle => 'クリップキーボード';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'システムのキーボード設定で「CopyPaste クリップ」をオンにします。Android はキーボードが入力内容を見られると警告しますが、クリップパネルはキー入力を記録せず、他のアプリに入力するキーもなく、タップした項目だけを挿入します。';
+
+  @override
+  String get quickAccessKeyboardOn => 'オン';
+
+  @override
+  String get quickAccessKeyboardOff => 'オフ';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'キーボード設定を開く';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      '「CopyPaste クリップ」キーボードパネルをオンにします。';
+
+  @override
+  String get quickAccessKeyboardKeywords => 'キーボード 入力方法 ime パネル 有効';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'クリップキーボードに切り替え';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      '「CopyPaste クリップ」を現在のキーボードとして選択します。選択している間、コピーはすべて保存されます。';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'キーボードを選択';
+
+  @override
+  String get quickAccessKeyboardCurrent => '現在のキーボード';
+
+  @override
+  String get quickAccessCaptureTierTitle => '記録モード';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Shizuku または ADB によるアクセスがない場合、コピーが保存されるのは、クリップパネルを開いたとき、パネルを選択している間、または CopyPaste アプリ、タイル、ウィジェット、共有からの操作時のみです。';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      '他のアプリのコピーがどのように保存されるかを確認します。';
+
+  @override
+  String get quickAccessCaptureTierKeywords => '記録 段階 フル パネル 手動 shizuku 収集';
+
+  @override
+  String get quickAccessTierFull => 'フル: すべてのコピーをバックグラウンドで保存';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'パネル選択中: 収集中';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'パネルモード: 開いたときに取り込み';
+
+  @override
+  String get quickAccessTierManual => '手動: アプリ、タイル、ウィジェット、共有から保存';
+
+  @override
+  String get quickAccessTierPaused => '記録を一時停止中';
+
+  @override
+  String get quickAccessAutoReturnTitle => '挿入後に前のキーボードに戻る';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      '1 回挿入すると元のキーボードに戻ります。キュータブや項目の操作を使っている間はパネルが開いたままになります。コピーを収集し続けるにはオフにします。';
+
+  @override
+  String get quickAccessAutoReturnKeywords => '戻る 前のキーボード 自動 挿入';
+
+  @override
+  String get quickAccessFocusSearchTitle => 'パネルを開いたときに検索にフォーカス';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      '検索欄を選択した状態でパネルを開きます。オフの場合、クリップをワンタップで使えます。';
+
+  @override
+  String get quickAccessTilesTitle => 'クイック設定タイル';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      '「クリップボードを保存」と「クリップボードの記録」タイルを追加します。';
+
+  @override
+  String get quickAccessTilesKeywords => 'クイック設定 タイル 通知パネル 保存 一時停止';
+
+  @override
+  String get quickAccessTileInstructions =>
+      '画面の上部から 2 回下にスワイプし、[編集] をタップして CopyPaste のタイルをクイック設定にドラッグします。';
+
+  @override
+  String get quickAccessSaveTileTitle => '「クリップボードを保存」タイル';
+
+  @override
+  String get quickAccessSaveTileDescription => 'クイック設定からクリップボードの内容を保存します。';
+
+  @override
+  String get quickAccessCaptureTileTitle => '「クリップボードの記録」タイル';
+
+  @override
+  String get quickAccessCaptureTileDescription => 'クイック設定から記録を一時停止・再開します。';
+
+  @override
+  String get quickAccessAddTile => 'タイルを追加';
+
+  @override
+  String get quickAccessTileAdded => 'クイック設定に追加済み';
+
+  @override
+  String get quickAccessWidgetTitle => '「最近のクリップ」ウィジェット';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      '最新のクリップをホーム画面に表示します。タップするとコピーされます。';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'ホーム画面を長押しして [ウィジェット] をタップし、CopyPaste の「最近のクリップ」をドラッグします。';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 個のウィジェットを追加済み',
+      zero: '未追加',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'ウィジェットを追加';
+
+  @override
+  String get quickAccessWidgetKeywords => 'ホーム画面 ウィジェット ランチャー 最近';
 }

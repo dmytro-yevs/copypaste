@@ -3567,4 +3567,161 @@ class AppLocalizationsKo extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get quickAccessUnavailableTitle => '빠른 액세스 상태를 사용할 수 없음';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste가 키보드, 타일, 위젯 상태를 읽지 못했습니다. 다시 시도하세요.';
+
+  @override
+  String get quickAccessActionFailedTitle => '작업을 완료할 수 없음';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android가 요청한 화면을 열지 못했거나 변경 사항을 저장하지 못했습니다. 다시 시도하세요.';
+
+  @override
+  String get quickAccessKeyboardTitle => '클립 키보드';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      '시스템 키보드 설정에서 CopyPaste 클립을 켜세요. Android는 키보드가 입력 내용을 볼 수 있다고 경고하지만, 클립 패널은 키 입력을 기록하지 않고, 다른 앱에 입력하는 키가 없으며, 탭한 항목만 삽입합니다.';
+
+  @override
+  String get quickAccessKeyboardOn => '켜짐';
+
+  @override
+  String get quickAccessKeyboardOff => '꺼짐';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => '키보드 설정 열기';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'CopyPaste 클립 키보드 패널을 켭니다.';
+
+  @override
+  String get quickAccessKeyboardKeywords => '키보드 입력 방법 ime 패널 사용';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => '클립 키보드로 전환';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'CopyPaste 클립을 현재 키보드로 선택하세요. 선택된 동안 모든 복사 내용이 저장됩니다.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => '키보드 선택';
+
+  @override
+  String get quickAccessKeyboardCurrent => '현재 키보드';
+
+  @override
+  String get quickAccessCaptureTierTitle => '수집 모드';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Shizuku 또는 ADB 접근 권한이 없으면 클립 패널이 열릴 때, 패널이 선택된 동안, 또는 CopyPaste 앱, 타일, 위젯, 공유를 통해서만 복사 내용이 저장됩니다.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      '다른 앱의 복사 내용이 저장되는 방식을 확인합니다.';
+
+  @override
+  String get quickAccessCaptureTierKeywords => '수집 단계 전체 패널 수동 shizuku 모으기';
+
+  @override
+  String get quickAccessTierFull => '전체: 모든 복사 내용을 백그라운드에서 저장';
+
+  @override
+  String get quickAccessTierPanelCollecting => '패널 선택됨: 수집 중';
+
+  @override
+  String get quickAccessTierPanelCatchUp => '패널 모드: 열 때 가져오기';
+
+  @override
+  String get quickAccessTierManual => '수동: 앱, 타일, 위젯 또는 공유에서 저장';
+
+  @override
+  String get quickAccessTierPaused => '수집 일시중지됨';
+
+  @override
+  String get quickAccessAutoReturnTitle => '삽입 후 이전 키보드로 돌아가기';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      '한 번 삽입하면 이전 키보드로 돌아갑니다. 대기열 탭이나 항목 작업을 사용하는 동안에는 패널이 열려 있습니다. 계속 복사 내용을 모으려면 끄세요.';
+
+  @override
+  String get quickAccessAutoReturnKeywords => '돌아가기 이전 키보드 자동 삽입';
+
+  @override
+  String get quickAccessFocusSearchTitle => '패널을 열 때 검색에 포커스';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      '검색창이 선택된 상태로 패널을 엽니다. 끄면 한 번의 탭으로 클립을 사용할 수 있습니다.';
+
+  @override
+  String get quickAccessTilesTitle => '빠른 설정 타일';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      '클립보드 저장 및 클립보드 수집 타일을 추가합니다.';
+
+  @override
+  String get quickAccessTilesKeywords => '빠른 설정 타일 알림창 저장 일시중지';
+
+  @override
+  String get quickAccessTileInstructions =>
+      '화면 상단에서 아래로 두 번 스와이프하고 수정을 탭한 다음 CopyPaste 타일을 빠른 설정으로 드래그하세요.';
+
+  @override
+  String get quickAccessSaveTileTitle => '클립보드 저장 타일';
+
+  @override
+  String get quickAccessSaveTileDescription => '빠른 설정에서 클립보드 내용을 저장합니다.';
+
+  @override
+  String get quickAccessCaptureTileTitle => '클립보드 수집 타일';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      '빠른 설정에서 수집을 일시중지하고 다시 시작합니다.';
+
+  @override
+  String get quickAccessAddTile => '타일 추가';
+
+  @override
+  String get quickAccessTileAdded => '빠른 설정에 추가됨';
+
+  @override
+  String get quickAccessWidgetTitle => '최근 클립 위젯';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      '홈 화면에 최근 클립을 표시합니다. 클립을 탭하면 복사됩니다.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      '홈 화면을 길게 누르고 위젯을 탭한 다음 CopyPaste의 최근 클립을 드래그하세요.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '위젯 $count개 추가됨',
+      zero: '추가되지 않음',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => '위젯 추가';
+
+  @override
+  String get quickAccessWidgetKeywords => '홈 화면 위젯 런처 최근';
 }
