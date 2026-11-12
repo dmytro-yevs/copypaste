@@ -63,22 +63,31 @@ class LinuxPortal {
 
   bool remote_desktop_active() const;
   bool remote_desktop_available() const;
+  // True when any shortcut, or the shortcut with `id`, is bound.
   bool shortcut_registered() const;
+  bool shortcut_registered(const std::string& id) const;
 
   // Starts a keyboard-only RemoteDesktop request. The caller must invoke this
   // from an explicit Settings action, because Start may present consent UI.
   void request_remote_desktop(std::function<void(bool)> done);
 
-  // Registers one portal shortcut. A successful result contains the portal's
-  // actual user-facing trigger description, not the preferred trigger.
+  // Adds or replaces the shortcut with `request.id`. BindShortcuts runs once
+  // per session, so every registered shortcut is bound again together in one
+  // new session. A successful result contains the portal's actual
+  // user-facing trigger description, not the preferred trigger.
   void register_shortcut(const ShortcutRequest& request,
                          std::function<void(ShortcutResult)> done);
+  // Stops reporting `id` at once. The remaining shortcuts are bound again
+  // after a short delay, so a following register needs one session only.
   void unregister_shortcut(const std::string& id,
                            std::function<void(bool)> done);
 
   // Sends Ctrl+V through an active keyboard RemoteDesktop grant. Returns false
   // until the grant is active; it never falls back to an unprivileged injector.
   bool send_ctrl_v();
+
+  // Queues `count` Left-arrow presses through the same grant, in order.
+  bool send_caret_left(int count);
 
  private:
   struct Impl;

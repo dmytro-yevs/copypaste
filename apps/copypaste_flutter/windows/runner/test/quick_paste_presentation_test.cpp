@@ -548,4 +548,23 @@ TEST_F(QuickPasteTarget, DelayedOpenedFailureOnlyClosesCurrentLiveGenerationAndS
   fail(generation, current_id, false);
   EXPECT_EQ(hide_calls, 1);
 }
+TEST_F(QuickPasteTarget, ForegroundInputNeedsAnExternalWindow) {
+  for (HWND window : {popup, own_main, static_cast<HWND>(nullptr)}) {
+    foreground = window;
+    EXPECT_EQ(ForegroundInputBlocked(api), std::optional<std::string>("noTarget"));
+  }
+  EXPECT_EQ(input_calls, 0);
+}
+TEST_F(QuickPasteTarget, CaretMoveNeverLeavesAnInjectedArrowHeld) {
+  EXPECT_TRUE(SendCaretLeft(api, 2));
+  ASSERT_EQ(input_batches.size(), 1u);
+  EXPECT_EQ(input_batches[0].size(), 4u);
+  input_batches.clear();
+  recovery_inserted = 3;
+  EXPECT_FALSE(SendCaretLeft(api, 2));
+  ASSERT_EQ(input_batches.size(), 2u);
+  ASSERT_EQ(input_batches[1].size(), 1u);
+  EXPECT_EQ(input_batches[1][0].ki.wVk, VK_LEFT);
+  EXPECT_NE(input_batches[1][0].ki.dwFlags & KEYEVENTF_KEYUP, 0u);
+}
 }  // namespace
