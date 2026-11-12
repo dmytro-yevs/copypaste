@@ -551,7 +551,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "Remover parâmetros de rastreamento",
+      "description": "Remove os parâmetros utm_ e de ID de clique de todos os links e mantém os links assinados intactos.",
+      "keywords": [
+        "rastreamento",
+        "limpar link",
+        "privacidade"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Desembrulhar links de redirecionamento",
+      "description": "Substitui offline os redirecionamentos de buscadores, redes sociais e Safe Links pelo destino real.",
+      "keywords": [
+        "redirecionamento"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Texto formatado para texto simples",
+      "description": "Mantém o texto do conteúdo formatado com os parágrafos e quebras de linha.",
+      "keywords": [
+        "texto simples",
+        "remover formatação"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML para Markdown",
+      "description": "Converte títulos, links, listas, tabelas e blocos de código em Markdown, mantendo os espaços do código.",
+      "keywords": [
+        "converter"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown para texto simples",
+      "description": "Remove a sintaxe Markdown e mantém o texto; as tabelas ficam separadas por tabulações.",
+      "keywords": [
+        "texto simples"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Links",
+          "options": {
+            "text": "Somente texto",
+            "text_url": "Texto e URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Manter marcadores de lista"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Decodificar",
+      "description": "Mostra o cabeçalho e a carga do token como JSON. A assinatura não é verificada.",
+      "keywords": [
+        "token"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Carimbo de data/hora para data",
+      "description": "Converte um carimbo de data/hora Unix em data, detectando segundos, milissegundos, microssegundos ou nanossegundos.",
+      "keywords": [
+        "carimbo de data/hora",
+        "hora"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unidade",
+          "options": {
+            "auto": "Detectar",
+            "seconds": "Segundos",
+            "milliseconds": "Milissegundos",
+            "microseconds": "Microssegundos",
+            "nanoseconds": "Nanossegundos"
+          }
+        },
+        "format": {
+          "label": "Formato",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (hora local)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Data para carimbo de data/hora",
+      "description": "Converte uma data ISO 8601, RFC 2822 ou simples em carimbo Unix; sem deslocamento, usa a hora local.",
+      "keywords": [
+        "carimbo de data/hora",
+        "hora"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unidade",
+          "options": {
+            "seconds": "Segundos",
+            "milliseconds": "Milissegundos"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Localizar e substituir",
+      "description": "Substitui texto ou correspondências de uma expressão regular; $1 na substituição insere um grupo.",
+      "keywords": [
+        "substituir",
+        "procurar"
+      ],
+      "params": {
+        "find": {
+          "label": "Localizar"
+        },
+        "replace": {
+          "label": "Substituir por"
+        },
+        "regex": {
+          "label": "Expressão regular"
+        },
+        "case_sensitive": {
+          "label": "Diferenciar maiúsculas"
+        },
+        "whole_word": {
+          "label": "Somente palavras inteiras"
+        },
+        "multiline": {
+          "label": "^ e $ valem em cada linha"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Extrair correspondências",
+      "description": "Lista cada URL, e-mail, número, endereço, cor, UUID ou correspondência de padrão, um por linha.",
+      "keywords": [
+        "extrair"
+      ],
+      "params": {
+        "preset": {
+          "label": "Procurar",
+          "options": {
+            "urls": "Links",
+            "emails": "Endereços de e-mail",
+            "numbers": "Números",
+            "ipv4": "Endereços IPv4",
+            "ipv6": "Endereços IPv6",
+            "hex_colors": "Cores hexadecimais",
+            "uuids": "UUIDs (identificadores)",
+            "custom": "Padrão personalizado"
+          }
+        },
+        "pattern": {
+          "label": "Padrão"
+        },
+        "dedupe": {
+          "label": "Remover duplicados"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Remover caracteres",
+      "description": "Apaga dígitos, pontuação, caracteres não ASCII, emojis ou os caracteres que você indicar.",
+      "keywords": [
+        "apagar",
+        "dígitos"
+      ],
+      "params": {
+        "class": {
+          "label": "Remover",
+          "options": {
+            "digits": "Dígitos",
+            "punctuation": "Pontuação",
+            "non_ascii": "Caracteres não ASCII",
+            "emoji": "Emojis",
+            "custom": "Caracteres indicados"
+          }
+        },
+        "chars": {
+          "label": "Caracteres"
+        }
+      }
+    }
+  }
 }

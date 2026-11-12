@@ -843,7 +843,221 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "Remove tracking parameters",
+      "description": "Strips utm_ and click-ID parameters from every link and leaves signed links untouched.",
+      "keywords": [
+        "utm",
+        "fbclid",
+        "gclid",
+        "clean link",
+        "privacy"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Unwrap redirect links",
+      "description": "Replaces search, social and Safe Links redirect wrappers with their real target, offline.",
+      "keywords": [
+        "redirect",
+        "safe links",
+        "outlook",
+        "google url",
+        "unwrap"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Rich text to plain text",
+      "description": "Keeps the text of formatted content with its paragraphs and line breaks.",
+      "keywords": [
+        "plain",
+        "unformatted",
+        "strip formatting",
+        "html"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML to Markdown",
+      "description": "Converts headings, links, lists, tables and code blocks to Markdown, keeping code whitespace.",
+      "keywords": [
+        "markdown",
+        "md",
+        "html",
+        "convert"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown to plain text",
+      "description": "Removes Markdown syntax and keeps the text; tables become tab-separated.",
+      "keywords": [
+        "markdown",
+        "md",
+        "strip",
+        "plain"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Links",
+          "options": {
+            "text": "Text only",
+            "text_url": "Text and URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Keep list markers"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Decode",
+      "description": "Shows the token header and payload as JSON. The signature is not verified.",
+      "keywords": [
+        "jwt",
+        "token",
+        "bearer",
+        "claims"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Timestamp to date",
+      "description": "Turns a Unix timestamp into a date, detecting seconds, milliseconds, microseconds or nanoseconds.",
+      "keywords": [
+        "epoch",
+        "unix",
+        "time",
+        "iso 8601"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unit",
+          "options": {
+            "auto": "Detect",
+            "seconds": "Seconds",
+            "milliseconds": "Milliseconds",
+            "microseconds": "Microseconds",
+            "nanoseconds": "Nanoseconds"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (local time)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Date to timestamp",
+      "description": "Turns an ISO 8601, RFC 2822 or plain date into a Unix timestamp; dates without an offset use local time.",
+      "keywords": [
+        "epoch",
+        "unix",
+        "time",
+        "iso 8601"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unit",
+          "options": {
+            "seconds": "Seconds",
+            "milliseconds": "Milliseconds"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Find and replace",
+      "description": "Replaces text or regular-expression matches; $1 in the replacement inserts a group.",
+      "keywords": [
+        "replace",
+        "regex",
+        "substitute",
+        "search"
+      ],
+      "params": {
+        "find": {
+          "label": "Find"
+        },
+        "replace": {
+          "label": "Replace with"
+        },
+        "regex": {
+          "label": "Regular expression"
+        },
+        "case_sensitive": {
+          "label": "Match case"
+        },
+        "whole_word": {
+          "label": "Whole words only"
+        },
+        "multiline": {
+          "label": "^ and $ match at line breaks"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Extract matches",
+      "description": "Lists every URL, email, number, address, color, UUID or pattern match, one per line.",
+      "keywords": [
+        "extract",
+        "grep",
+        "emails",
+        "urls",
+        "regex"
+      ],
+      "params": {
+        "preset": {
+          "label": "Find",
+          "options": {
+            "urls": "Links",
+            "emails": "Email addresses",
+            "numbers": "Numbers",
+            "ipv4": "IPv4 addresses",
+            "ipv6": "IPv6 addresses",
+            "hex_colors": "Hex colors",
+            "uuids": "UUIDs",
+            "custom": "Custom pattern"
+          }
+        },
+        "pattern": {
+          "label": "Pattern"
+        },
+        "dedupe": {
+          "label": "Remove duplicates"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Remove characters",
+      "description": "Deletes digits, punctuation, non-ASCII characters, emoji or characters you list.",
+      "keywords": [
+        "delete",
+        "strip",
+        "digits",
+        "emoji",
+        "punctuation"
+      ],
+      "params": {
+        "class": {
+          "label": "Remove",
+          "options": {
+            "digits": "Digits",
+            "punctuation": "Punctuation",
+            "non_ascii": "Non-ASCII characters",
+            "emoji": "Emoji",
+            "custom": "Characters I list"
+          }
+        },
+        "chars": {
+          "label": "Characters"
+        }
+      }
+    }
+  }
 }

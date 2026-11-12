@@ -551,7 +551,191 @@
       }
     }
   },
-  "url": {},
-  "markup": {},
-  "dev": {}
+  "url": {
+    "url.remove_tracking": {
+      "name": "Rimuovi parametri di tracciamento",
+      "description": "Toglie i parametri utm_ e gli ID di clic da ogni link e lascia intatti i link firmati.",
+      "keywords": [
+        "tracciamento",
+        "pulisci link",
+        "privacy"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Risolvi i link di reindirizzamento",
+      "description": "Sostituisce offline i reindirizzamenti di motori di ricerca, social e Safe Links con la loro vera destinazione.",
+      "keywords": [
+        "reindirizzamento"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Testo formattato in testo semplice",
+      "description": "Mantiene il testo dei contenuti formattati con paragrafi e a capo.",
+      "keywords": [
+        "testo semplice",
+        "rimuovi formattazione"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML in Markdown",
+      "description": "Converte titoli, link, elenchi, tabelle e blocchi di codice in Markdown mantenendo gli spazi del codice.",
+      "keywords": [
+        "converti"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown in testo semplice",
+      "description": "Rimuove la sintassi Markdown e mantiene il testo; le tabelle sono separate da tabulazioni.",
+      "keywords": [
+        "testo semplice"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Link",
+          "options": {
+            "text": "Solo testo",
+            "text_url": "Testo e URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Mantieni i punti elenco"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Decodifica",
+      "description": "Mostra intestazione e payload del token come JSON. La firma non viene verificata.",
+      "keywords": [
+        "token"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Timestamp in data",
+      "description": "Converte un timestamp Unix in data riconoscendo secondi, millisecondi, microsecondi o nanosecondi.",
+      "keywords": [
+        "timestamp",
+        "ora"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unità",
+          "options": {
+            "auto": "Rileva",
+            "seconds": "Secondi",
+            "milliseconds": "Millisecondi",
+            "microseconds": "Microsecondi",
+            "nanoseconds": "Nanosecondi"
+          }
+        },
+        "format": {
+          "label": "Formato",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (ora locale)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Data in timestamp",
+      "description": "Converte una data ISO 8601, RFC 2822 o semplice in timestamp Unix; senza fuso orario usa l'ora locale.",
+      "keywords": [
+        "timestamp",
+        "ora"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unità",
+          "options": {
+            "seconds": "Secondi",
+            "milliseconds": "Millisecondi"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Trova e sostituisci",
+      "description": "Sostituisce testo o corrispondenze di un'espressione regolare; $1 nella sostituzione inserisce un gruppo.",
+      "keywords": [
+        "sostituisci",
+        "cerca"
+      ],
+      "params": {
+        "find": {
+          "label": "Trova"
+        },
+        "replace": {
+          "label": "Sostituisci con"
+        },
+        "regex": {
+          "label": "Espressione regolare"
+        },
+        "case_sensitive": {
+          "label": "Maiuscole/minuscole"
+        },
+        "whole_word": {
+          "label": "Solo parole intere"
+        },
+        "multiline": {
+          "label": "^ e $ valgono per ogni riga"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Estrai corrispondenze",
+      "description": "Elenca ogni URL, email, numero, indirizzo, colore, UUID o corrispondenza del modello, uno per riga.",
+      "keywords": [
+        "estrai"
+      ],
+      "params": {
+        "preset": {
+          "label": "Cerca",
+          "options": {
+            "urls": "Link",
+            "emails": "Indirizzi email",
+            "numbers": "Numeri",
+            "ipv4": "Indirizzi IPv4",
+            "ipv6": "Indirizzi IPv6",
+            "hex_colors": "Colori esadecimali",
+            "uuids": "UUID",
+            "custom": "Modello personalizzato"
+          }
+        },
+        "pattern": {
+          "label": "Modello"
+        },
+        "dedupe": {
+          "label": "Rimuovi duplicati"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Rimuovi caratteri",
+      "description": "Elimina cifre, punteggiatura, caratteri non ASCII, emoji o i caratteri che indichi.",
+      "keywords": [
+        "elimina",
+        "cifre"
+      ],
+      "params": {
+        "class": {
+          "label": "Rimuovi",
+          "options": {
+            "digits": "Cifre",
+            "punctuation": "Punteggiatura",
+            "non_ascii": "Caratteri non ASCII",
+            "emoji": "Emoji (simboli)",
+            "custom": "Caratteri indicati"
+          }
+        },
+        "chars": {
+          "label": "Caratteri"
+        }
+      }
+    }
+  }
 }

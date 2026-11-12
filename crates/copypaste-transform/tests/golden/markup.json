@@ -1,0 +1,173 @@
+[
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>hello\nworld</p><pre>  a\n    b</pre>",
+    "output": "hello world\n\n```\n  a\n    b\n```"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<h1>T</h1><h3>Sub <i>title</i></h3>",
+    "output": "# T\n\n### Sub *title*"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>Go <a href=\"https://x.test/a b\">here</a></p>",
+    "output": "Go [here](<https://x.test/a b>)"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p><a href=\"https://x.test\"></a><a href=\"javascript:void(0)\">click</a></p>",
+    "output": "<https://x.test>click"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<img src=\"a.png\" alt=\"Logo\">",
+    "output": "![Logo](a.png)"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<ol><li>one</li><li>two</li></ol><ul><li>x</li></ul>",
+    "output": "1. one\n2. two\n\n- x"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<pre><code class=\"language-rust\">fn main() {\n    let x = 1;\n}\n</code></pre>",
+    "output": "```rust\nfn main() {\n    let x = 1;\n}\n```"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<pre>a ``` b</pre>",
+    "output": "````\na ``` b\n````"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>Run <code>ls  -la</code> now</p>",
+    "output": "Run `ls -la` now"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p><strong>Bold</strong> and <em>it</em> and <del>gone</del></p>",
+    "output": "**Bold** and *it* and ~~gone~~"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>a <span class=x>b</span> <custom-el>c</custom-el></p>",
+    "output": "a b c"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<div>one</div><div>two</div>",
+    "output": "one\ntwo"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<blockquote>quoted <b>text</b></blockquote>",
+    "output": "> quoted **text**"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>a</p><hr><p>b</p>",
+    "output": "a\n\n---\n\nb"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p>&copy; 2024 &amp; &quot;x&quot; 1 &lt; 2</p>",
+    "output": "© 2024 & \"x\" 1 < 2"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<html><head><title>T</title><style>p{}</style></head><body><p>Body</p><script>x()</script></body></html>",
+    "output": "Body"
+  },
+  {
+    "transform": "markup.html_to_markdown",
+    "input": "<p># not a heading</p>",
+    "output": "\\# not a heading"
+  },
+  {
+    "transform": "markup.rich_to_plain",
+    "input": "<p>Hello <b>world</b></p><p>Second<br>line</p>",
+    "output": "Hello world\n\nSecond\nline"
+  },
+  {
+    "transform": "markup.rich_to_plain",
+    "input": "<ul><li>one</li></ul><p>word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word </p>",
+    "output": "one\n\nword word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word"
+  },
+  {
+    "transform": "markup.rich_to_plain",
+    "input": "<style>x{}</style><p>a &amp; b</p>",
+    "output": "a & b"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "# Title\n\nSome **bold** and _it_ text.",
+    "output": "Title\n\nSome bold and it text."
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "See [docs](https://x.test/d).",
+    "output": "See docs (https://x.test/d)."
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "params": {
+      "link_style": "text"
+    },
+    "input": "See [docs](https://x.test/d).",
+    "output": "See docs."
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "params": {
+      "keep_list_markers": false
+    },
+    "input": "- a\n- b\n1. c",
+    "output": "a\nb\nc"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "* a\n  * b",
+    "output": "* a\n  * b"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "```\n**not bold**\n```",
+    "output": "**not bold**"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "| a | b |\n| - | - |\n| 1 | 2 |",
+    "output": "a\tb\n1\t2"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "# A\r\n**b**",
+    "output": "A\r\nb"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "use snake_case_name and 2 * 3 here",
+    "output": "use snake_case_name and 2 * 3 here"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "![alt text](img.png) <https://x.test>",
+    "output": "alt text https://x.test"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "> quoted\n> more",
+    "output": "quoted\nmore"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "Line one  \nline two\\\nend",
+    "output": "Line one\nline two\nend"
+  },
+  {
+    "transform": "markup.markdown_to_plain",
+    "input": "Heading\n---\ntext\n\n***",
+    "output": "Heading\ntext\n\n"
+  }
+]
