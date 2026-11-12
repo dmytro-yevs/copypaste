@@ -461,6 +461,7 @@ abstract class RustLibApi extends BaseApi {
     required List<TemplateValue> values,
     required TemplateClipboard clipboard,
     required bool finalRender,
+    String? locale,
   });
 
   Future<void> crateApiRulesReorderContentRule({
@@ -695,6 +696,7 @@ abstract class RustLibApi extends BaseApi {
     required List<TemplateValue> values,
     required TemplateClipboard clipboard,
     required TextDelivery delivery,
+    String? locale,
   });
 
   Future<List<RuleErrorView>> crateApiRulesValidateContentRule({
@@ -4096,6 +4098,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required List<TemplateValue> values,
     required TemplateClipboard clipboard,
     required bool finalRender,
+    String? locale,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -4106,6 +4109,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_list_template_value(values, serializer);
           sse_encode_box_autoadd_template_clipboard(clipboard, serializer);
           sse_encode_bool(finalRender, serializer);
+          sse_encode_opt_String(locale, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -4118,7 +4122,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_runtime_error,
         ),
         constMeta: kCrateApiSnippetsRenderSnippetConstMeta,
-        argValues: [snippetId, body, values, clipboard, finalRender],
+        argValues: [snippetId, body, values, clipboard, finalRender, locale],
         apiImpl: this,
       ),
     );
@@ -4127,7 +4131,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSnippetsRenderSnippetConstMeta =>
       const TaskConstMeta(
         debugName: "render_snippet",
-        argNames: ["snippetId", "body", "values", "clipboard", "finalRender"],
+        argNames: [
+          "snippetId",
+          "body",
+          "values",
+          "clipboard",
+          "finalRender",
+          "locale",
+        ],
       );
 
   @override
@@ -6097,6 +6108,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required List<TemplateValue> values,
     required TemplateClipboard clipboard,
     required TextDelivery delivery,
+    String? locale,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -6106,6 +6118,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_list_template_value(values, serializer);
           sse_encode_box_autoadd_template_clipboard(clipboard, serializer);
           sse_encode_text_delivery(delivery, serializer);
+          sse_encode_opt_String(locale, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -6118,7 +6131,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_runtime_error,
         ),
         constMeta: kCrateApiSnippetsUseSnippetConstMeta,
-        argValues: [id, values, clipboard, delivery],
+        argValues: [id, values, clipboard, delivery, locale],
         apiImpl: this,
       ),
     );
@@ -6126,7 +6139,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSnippetsUseSnippetConstMeta => const TaskConstMeta(
     debugName: "use_snippet",
-    argNames: ["id", "values", "clipboard", "delivery"],
+    argNames: ["id", "values", "clipboard", "delivery", "locale"],
   );
 
   @override

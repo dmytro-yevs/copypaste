@@ -121,19 +121,21 @@ Future<List<SnippetHitView>> quickSearchSnippets({
 );
 
 /// Render a saved snippet (`snippet_id`) or an unsaved body (`body`); exactly
-/// one must be set.
+/// one must be set. `locale` is the app's BCP 47 locale.
 Future<RenderedSnippet> renderSnippet({
   String? snippetId,
   String? body,
   required List<TemplateValue> values,
   required TemplateClipboard clipboard,
   required bool finalRender,
+  String? locale,
 }) => RustLib.instance.api.crateApiSnippetsRenderSnippet(
   snippetId: snippetId,
   body: body,
   values: values,
   clipboard: clipboard,
   finalRender: finalRender,
+  locale: locale,
 );
 
 Future<DeliveredText> useSnippet({
@@ -141,11 +143,13 @@ Future<DeliveredText> useSnippet({
   required List<TemplateValue> values,
   required TemplateClipboard clipboard,
   required TextDelivery delivery,
+  String? locale,
 }) => RustLib.instance.api.crateApiSnippetsUseSnippet(
   id: id,
   values: values,
   clipboard: clipboard,
   delivery: delivery,
+  locale: locale,
 );
 
 /// Release the template cache and any import plan when a surface closes.

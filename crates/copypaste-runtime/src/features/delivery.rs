@@ -118,6 +118,19 @@ impl ClipboardOwner {
         self.lock().item.clone()
     }
 
+    /// What the user's clipboard holds: while a restorable delivery is still
+    /// on the clipboard, the item it replaced. `None` inside when unknown;
+    /// `None` outside when nothing was observed since start.
+    fn user_item(&self) -> Option<Option<String>> {
+        let owner = self.lock();
+        match &owner.pending {
+            Some(pending) if pending.generation == owner.generation => {
+                Some(pending.previous.clone())
+            }
+            _ => (owner.generation != 0).then(|| owner.item.clone()),
+        }
+    }
+
     fn retarget(&self, token: &str, previous: Option<String>) {
         if let Some(pending) = self.lock().pending.as_mut() {
             if pending.token == token {
@@ -280,6 +293,19 @@ impl Runtime {
     /// The history item the clipboard holds, as far as this runtime observed.
     pub(crate) fn clipboard_item(&self) -> Option<String> {
         self.changes.clipboard.current()
+    }
+
+    /// The history item the user's own clipboard holds, looking past this
+    /// runtime's own pending delivery. Before any clipboard change was seen,
+    /// the newest history item stands in for it.
+    pub(crate) fn user_clipboard_item(&self) -> Option<String> {
+        self.changes.clipboard.user_item().unwrap_or_else(|| {
+            self.store
+                .newest_live_key()
+                .ok()
+                .flatten()
+                .map(|(id, _)| id)
+        })
     }
 
     /// Make `token`'s pending restore put back `previous` rather than what

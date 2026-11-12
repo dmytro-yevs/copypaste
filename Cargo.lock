@@ -1076,11 +1076,13 @@ dependencies = [
  "copypaste-sync",
  "copypaste-template",
  "copypaste-transform",
+ "jiff",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2845,6 +2847,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-link",
 ]
 
 [[package]]
