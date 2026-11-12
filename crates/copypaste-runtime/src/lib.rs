@@ -87,6 +87,7 @@ pub struct Runtime {
     /// The content rules compiled for one rules revision.
     compiled_rules: Mutex<Option<(i64, Arc<CompiledRuleSet>)>>,
     paste_queue: features::PasteQueue,
+    ai: features::AiState,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
@@ -361,6 +362,7 @@ impl Runtime {
             deadlines,
             compiled_rules: Mutex::default(),
             paste_queue: features::PasteQueue::default(),
+            ai: features::AiState::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
