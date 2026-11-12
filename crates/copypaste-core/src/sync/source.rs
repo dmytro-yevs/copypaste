@@ -586,12 +586,13 @@ impl SyncSource for StoreSource {
         since_ms: i64,
         after_id: Option<&str>,
         limit: usize,
+        organization_kinds: u32,
     ) -> Result<Vec<ItemSummary>, SyncError> {
         self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
-                .summaries_since(since_ms, after_id, limit as i64)
+                .summaries_since_for(since_ms, after_id, limit as i64, organization_kinds)
                 .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
             Ok(rows
                 .into_iter()

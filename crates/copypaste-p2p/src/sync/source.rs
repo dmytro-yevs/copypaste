@@ -135,6 +135,10 @@ pub trait SyncSource {
 
     /// One summary page for wire exchange, keyset-paged after `(stamp, id)`.
     ///
+    /// `organization_kinds` is what the peer accepts
+    /// ([`DeviceProfile::accepted_organization_kinds`]); a source that stores
+    /// organization records omits every class above it.
+    ///
     /// Default slices [`summaries`](Self::summaries). Store backends override
     /// to a bounded SQLite read so a catch-up round never materialises the
     /// whole history before the first page goes on the wire.
@@ -143,6 +147,7 @@ pub trait SyncSource {
         since_ms: i64,
         after_id: Option<&str>,
         limit: usize,
+        _organization_kinds: u32,
     ) -> Result<Vec<ItemSummary>, SyncError> {
         let all = self.summaries(since_ms)?;
         let start = match after_id {

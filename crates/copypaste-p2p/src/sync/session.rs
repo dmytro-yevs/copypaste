@@ -39,6 +39,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         chan,
         source,
         cursor.advertise_from(peer.4),
+        crate::DeviceProfile::accepted_organization_kinds(peer.2.as_ref()),
         source.summary_workspace()?,
         true,
     )
@@ -108,6 +109,7 @@ pub async fn run_responder_from_first<C: SyncChannel, S: SyncSource>(
         chan,
         source,
         cursor.advertise_from(peer.4),
+        crate::DeviceProfile::accepted_organization_kinds(peer.2.as_ref()),
         source.summary_workspace()?,
         false,
     )
@@ -461,6 +463,36 @@ mod tests {
 
         assert!(initiator.get("creator-live").is_some());
         assert_eq!(third_i.stats.received, 1);
+    }
+
+    /// More newer-class records than one session may request must not keep an
+    /// older peer from its clips: it is never offered them at all.
+    #[tokio::test]
+    async fn a_legacy_peer_gets_its_clips_in_one_session_and_no_newer_records() {
+        use crate::sync::testutil::library_item;
+
+        let mut history: Vec<_> = (0..1_200)
+            .map(|n| library_item(&format!("library-{n:04}"), 1_000 + n, "dev-a"))
+            .collect();
+        history
+            .extend((0..50).map(|n| item(&format!("clip-{n:02}"), 1_100 + n * 10, "c", "dev-a")));
+        let a = TestSource::new("dev-a", history);
+        let legacy = TestSource::legacy("dev-b", vec![]);
+
+        let (_, first) = session(&a, &legacy).await;
+        assert_eq!(first.stats.received, 50);
+        assert_eq!(legacy.snapshot().len(), 50);
+        assert!(legacy.get("library-0000").is_none());
+        let (_, second) = session_with(&a, &legacy, CONVERGED, first.cursor).await;
+        assert_eq!(second.stats.received, 0);
+
+        let current = TestSource::new("dev-c", vec![]);
+        let (_, modern) = session(&a, &current).await;
+        assert_eq!(modern.stats.received, MAX_REQUEST_IDS_PER_MESSAGE);
+        assert!(current
+            .snapshot()
+            .iter()
+            .any(|item| item.item_id.starts_with("library-")));
     }
 
     #[tokio::test]
@@ -1159,6 +1191,7 @@ mod tests {
                 since_ms: i64,
                 after_id: Option<&str>,
                 limit: usize,
+                _organization_kinds: u32,
             ) -> Result<Vec<ItemSummary>, SyncError> {
                 self.page_loads.fetch_add(1, Ordering::SeqCst);
                 Ok(self.inner.page(since_ms, after_id, limit))

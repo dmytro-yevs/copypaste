@@ -5,6 +5,7 @@ use std::sync::RwLock;
 use copypaste_fs::Visibility;
 
 use crate::sync::SyncCursor;
+use crate::ORGANIZATION_KINDS;
 
 pub const DEFAULT_CURSOR_FILE_NAME: &str = "sync-cursors.json";
 
@@ -14,12 +15,21 @@ struct Record {
     since_ms: i64,
     #[serde(default)]
     relay_floor_ms: Option<i64>,
+    /// The organization record classes this device declared when it earned
+    /// `since_ms`. Peers withhold newer classes from a device that declares
+    /// fewer, so a cursor earned under fewer classes is not a cursor for them.
+    #[serde(default)]
+    organization_kinds: u32,
 }
 
 impl From<Record> for SyncCursor {
     fn from(record: Record) -> Self {
         Self {
-            since_ms: record.since_ms,
+            since_ms: if record.organization_kinds < ORGANIZATION_KINDS {
+                0
+            } else {
+                record.since_ms
+            },
             relay_floor_ms: record.relay_floor_ms,
         }
     }
@@ -88,6 +98,7 @@ impl CursorStore {
             let record = Record {
                 since_ms: since_ms.max(0),
                 relay_floor_ms: None,
+                organization_kinds: ORGANIZATION_KINDS,
             };
             if state.get(pairing_id) == Some(&record) {
                 return false;
@@ -221,6 +232,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         store(&dir).record_session("laptop", 1_700);
         assert_eq!(store(&dir).get("laptop").since_ms, 1_700);
+    }
+
+    #[test]
+    fn a_cursor_earned_before_library_records_reads_as_a_full_exchange_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DEFAULT_CURSOR_FILE_NAME);
+        std::fs::write(&path, br#"{"peers":{"laptop":{"since_ms":1700}}}"#).unwrap();
+        let cursors = CursorStore::open(&path);
+        assert_eq!(cursors.get("laptop").since_ms, 0);
+
+        cursors.record_session("laptop", 1_800);
+        assert_eq!(CursorStore::open(&path).get("laptop").since_ms, 1_800);
     }
 
     #[test]

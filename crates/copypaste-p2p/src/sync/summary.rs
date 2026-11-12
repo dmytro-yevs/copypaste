@@ -40,8 +40,14 @@ fn next_page<S: SyncSource>(
     source: &S,
     since_ms: i64,
     after_id: Option<&str>,
+    organization_kinds: u32,
 ) -> Result<(Vec<ItemSummary>, bool), SyncError> {
-    let mut items = source.summary_page(since_ms, after_id, MAX_SUMMARIES_PER_MESSAGE + 1)?;
+    let mut items = source.summary_page(
+        since_ms,
+        after_id,
+        MAX_SUMMARIES_PER_MESSAGE + 1,
+        organization_kinds,
+    )?;
     let more = items.len() > MAX_SUMMARIES_PER_MESSAGE;
     if more {
         items.truncate(MAX_SUMMARIES_PER_MESSAGE);
@@ -50,10 +56,12 @@ fn next_page<S: SyncSource>(
 }
 
 /// Exchange directly into a session workspace while preserving wire order.
+/// Pages offer only the organization record classes the peer accepts.
 pub(super) async fn exchange_workspace<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
     since_ms: i64,
+    organization_kinds: u32,
     mut workspace: Box<dyn SummaryWorkspace>,
     initiator: bool,
 ) -> Result<Box<dyn SummaryWorkspace>, SyncError> {
@@ -65,7 +73,7 @@ pub(super) async fn exchange_workspace<C: SyncChannel, S: SyncSource>(
         } else {
             Some(receive_page(chan).await?)
         };
-        let (items, more) = next_page(source, cursor_ms, after_id.as_deref())?;
+        let (items, more) = next_page(source, cursor_ms, after_id.as_deref(), organization_kinds)?;
         if let Some(last) = items.last() {
             cursor_ms = summary_key(last);
             after_id = Some(last.item_id.clone());
@@ -251,6 +259,7 @@ mod tests {
                 since_ms: i64,
                 after_id: Option<&str>,
                 limit: usize,
+                _organization_kinds: u32,
             ) -> Result<Vec<ItemSummary>, SyncError> {
                 self.page_loads.fetch_add(1, Ordering::SeqCst);
                 Ok(self.inner.page(since_ms, after_id, limit))
@@ -278,6 +287,7 @@ mod tests {
             &mut channel,
             &source,
             0,
+            crate::ORGANIZATION_KINDS,
             source.summary_workspace().unwrap(),
             true,
         )

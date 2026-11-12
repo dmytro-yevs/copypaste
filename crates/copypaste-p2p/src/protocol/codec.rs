@@ -632,6 +632,7 @@ mod tests {
             os_name: Some("Linux".into()),
             os_version: Some("6.12".into()),
             model: Some("fixture".into()),
+            organization_kinds: None,
         }
     }
 

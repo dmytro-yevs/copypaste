@@ -452,9 +452,11 @@ impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
         since_ms: i64,
         after_id: Option<&str>,
         limit: usize,
+        organization_kinds: u32,
     ) -> Result<Vec<ItemSummary>, SyncError> {
         let _operation = self.operation()?;
-        self.source.summary_page(since_ms, after_id, limit)
+        self.source
+            .summary_page(since_ms, after_id, limit, organization_kinds)
     }
 }
 
