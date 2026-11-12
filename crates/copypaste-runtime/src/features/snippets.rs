@@ -16,6 +16,10 @@ impl Runtime {
                 render::handle(self, id, op)
             }
             SnippetOp::Use { .. } => usage::handle(self, id, op),
+            SnippetOp::SaveFromClip {
+                clip_id,
+                collection_id,
+            } => self.save_clip_as_snippet(id, &clip_id, collection_id.as_deref()),
             SnippetOp::ImportPreview { .. }
             | SnippetOp::ImportCommit { .. }
             | SnippetOp::ImportCancel { .. }
