@@ -15,6 +15,7 @@ mod meta;
 mod notify;
 #[cfg(test)]
 mod p2p;
+mod power;
 mod runtime;
 #[cfg(test)]
 mod runtime_tests;
@@ -195,6 +196,18 @@ async fn run() -> anyhow::Result<()> {
     let module_sync = state
         .start_module_sync()
         .context("start module sync once")?;
+    let deadlines = state
+        .runtime
+        .start_deadlines()
+        .context("start the deadline task once")?;
+    let waker = state.runtime.resume_waker();
+    let resume = tokio::task::spawn_blocking(move || power::install(waker))
+        .await
+        .unwrap_or(false);
+    if !resume {
+        warn!("no system resume signal; deadlines due within the hour are re-checked every minute");
+    }
+    state.runtime.set_resume_signal(resume);
     // Peer sync on a cadence. Without it a paired device only ever syncs when
     // the *other* side dials in or a human runs `copypaste sync`.
     let peer_sync = tokio::spawn(Arc::clone(&state.runtime).run_peer_sync(shutdown_rx.clone()));
@@ -218,6 +231,7 @@ async fn run() -> anyhow::Result<()> {
         ("module sync", module_sync),
         ("peer sync", peer_sync),
         ("pairing events", pairing_events),
+        ("deadlines", deadlines),
     ];
     let mut loops = loops;
     loops.extend(peers_task.map(|task| ("peer listener", task)));

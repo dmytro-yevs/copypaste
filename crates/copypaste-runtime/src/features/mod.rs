@@ -13,6 +13,8 @@ mod rules;
 mod snippets;
 mod transforms;
 
+pub(crate) use delivery::ClipboardOwner;
+
 use copypaste_ipc::{ErrorCode, Response};
 
 const MSG_UNSUPPORTED: &str = "This feature is not available yet.";

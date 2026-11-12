@@ -84,6 +84,12 @@ pub trait RuntimeHost: Send + Sync {
     /// Native effects of an applied settings change, run before the next one
     /// may begin.
     fn settings_applied(&self, _transition: &SettingsTransition) {}
+
+    /// History was cleared: native surfaces that show history empty now.
+    fn history_cleared(&self) {}
+
+    /// A paired device was removed: native surfaces drop what came from it.
+    fn device_removed(&self, _device_id: &str) {}
 }
 
 /// The writer-only host contract an in-process platform supplies.
@@ -107,6 +113,12 @@ pub trait ClipboardWriter: Send + Sync {
     ) -> Result<(), ClipboardWriteError> {
         self.write(payload, content_type, WriteOptions::copy(secret))
     }
+
+    /// See [`RuntimeHost::history_cleared`].
+    fn history_cleared(&self) {}
+
+    /// See [`RuntimeHost::device_removed`].
+    fn device_removed(&self, _device_id: &str) {}
 }
 
 /// The Android host: native capture and feedback stay in the platform
@@ -136,6 +148,14 @@ impl RuntimeHost for InProcessHost {
 
     fn writes_content_uris(&self) -> bool {
         true
+    }
+
+    fn history_cleared(&self) {
+        self.0.history_cleared();
+    }
+
+    fn device_removed(&self, device_id: &str) {
+        self.0.device_removed(device_id);
     }
 
     fn platform_status(&self) -> PlatformStatus {

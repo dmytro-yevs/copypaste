@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use copypaste_core::history_actions::{self, CopyOptions};
+use copypaste_core::history_actions;
 use copypaste_core::{
     now_ms, p2p_contract, ClipboardPayload, HistoryCursor, IngestError, ItemCursor, StoreError,
     StoredItem,
@@ -117,6 +117,16 @@ impl Runtime {
     }
 
     async fn request_async(&self, id: u64, method: Method) -> Response {
+        // Named before the pairing is gone, so hosts can drop what it sent.
+        let removed_device = match &method {
+            Method::Unpair { pairing_id } | Method::Revoke { pairing_id } => self
+                .p2p
+                .peers()
+                .get(pairing_id)
+                .and_then(|peer| peer.device_id.clone())
+                .unwrap_or_else(|| pairing_id.clone()),
+            _ => String::new(),
+        };
         match method {
             Method::SaveFile {
                 id: item_id,
@@ -182,6 +192,7 @@ impl Runtime {
             Method::PairCancel => self.pairing_progress(id, self.p2p.node().pair_cancel()),
             Method::Unpair { pairing_id } => match self.p2p.node().unpair(&pairing_id) {
                 Ok(true) => {
+                    self.on_device_removed(&removed_device);
                     self.note_peers_changed();
                     tracing::info!(%pairing_id, "unpaired a device");
                     Response::ok(id, ResponseData::Empty {})
@@ -193,6 +204,7 @@ impl Runtime {
             // device has not seen yet is what revoking a lost device needs.
             Method::Revoke { pairing_id } => match self.p2p.node().revoke(&pairing_id, now_ms()) {
                 Ok(removed) => {
+                    self.on_device_removed(&removed_device);
                     self.note_peers_changed();
                     tracing::info!(%pairing_id, removed, "revoked a pairing");
                     Response::ok(id, ResponseData::Empty {})
@@ -229,6 +241,7 @@ impl Runtime {
     /// The blocking half of the dispatch: SQLite, AEAD and the native
     /// clipboard. Exhaustive over `Method` by design.
     pub fn request_blocking(&self, id: u64, method: Method) -> Response {
+        self.note_activity();
         match method {
             Method::Status => Response::ok(id, ResponseData::Status(self.status_data())),
             Method::SetDeviceName { name } => self.set_device_name(id, &name),
@@ -867,12 +880,26 @@ impl Runtime {
                 Ok((_, payload)) if history_actions::oversized_text(&payload) => {
                     Response::err(id, ErrorCode::ContentTooLarge, MSG_CONTENT_TOO_LARGE)
                 }
-                Ok((item, _)) => Response::ok(id, ResponseData::Item(item)),
+                Ok((mut item, _)) => {
+                    item.annotations = self.annotations_of(&item.id);
+                    Response::ok(id, ResponseData::Item(item))
+                }
                 Err(error) => decrypt_error(id, &error),
             },
             Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
             Err(error) => storage_error(id, "get", &error),
         }
+    }
+
+    /// Annotations of one clip; a failed read shows the clip without them.
+    fn annotations_of(&self, item_id: &str) -> Option<copypaste_ipc::ItemAnnotations> {
+        self.store
+            .item_annotations(&[item_id.to_owned()])
+            .unwrap_or_else(|error| {
+                tracing::warn!(?error, "showing an item without annotations");
+                Default::default()
+            })
+            .remove(item_id)
     }
 
     /// The row a mutation just changed. The change is already applied, so an
@@ -922,6 +949,7 @@ impl Runtime {
                 if deleted > 0 {
                     self.note_local_change_since(started);
                 }
+                self.on_history_cleared();
                 Response::ok(id, ResponseData::Count(deleted))
             }
             Err(error) => storage_error(id, "delete_all", &error),
@@ -993,40 +1021,13 @@ impl Runtime {
         )
     }
 
+    /// An own write of a stored item: written, then promoted (K33).
     pub(crate) fn copy(&self, id: u64, item_id: &str, plain_text: bool) -> Response {
-        let key = self.keyring.item_key();
-        let result = (|| {
-            let opened = history_actions::open(&self.store, &key, item_id)?;
-            let origin = self.meta.origin_of(opened.row());
-            let prepared = history_actions::prepare_copy(
-                &self.store,
-                &key,
-                opened,
-                CopyOptions {
-                    origin: &origin,
-                    local_device_id: self.meta.device_id(),
-                    plain_text,
-                    allow_content_uri: self.host.writes_content_uris(),
-                    max_file_size_bytes: self.settings.get().max_file_size_bytes,
-                },
-            )?;
-            self.host
-                .write(
-                    &prepared.item.id,
-                    prepared.payload(),
-                    &prepared.content_type,
-                    crate::host::WriteOptions::copy(prepared.item.privacy.secret),
-                )
-                .map_err(copypaste_core::history_error::HistoryError::from)?;
-            self.host.copy_feedback();
-            let item = history_actions::finish_copy(&self.store, prepared)?;
-            self.instant_clipboard
-                .note_local(&self.store, item.created_at);
-            self.note_local_change_since(item.created_at);
-            Ok::<_, copypaste_core::history_error::HistoryError>(item)
-        })();
-        match result {
-            Ok(item) => Response::ok(id, ResponseData::Item(item)),
+        match self.deliver_item(item_id, plain_text, true) {
+            Ok(delivered) => match delivered.item {
+                Some(item) => Response::ok(id, ResponseData::Item(item)),
+                None => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+            },
             Err(error) => error.response(id),
         }
     }
@@ -1044,6 +1045,7 @@ impl Runtime {
             },
         ) {
             Ok(stamp) => {
+                self.changes.clipboard.changed(None);
                 self.instant_clipboard.note_local(&self.store, stamp);
                 self.note_local_change_since(stamp);
                 Response::ok(id, ResponseData::Empty {})
@@ -1320,7 +1322,7 @@ impl Runtime {
     ) -> ItemPage {
         let (rows, previews): (Vec<_>, Vec<_>) = entries
             .into_iter()
-            .map(|entry| (entry.row, entry.preview))
+            .map(|entry| (entry.row, (entry.preview, entry.annotations)))
             .unzip();
         let origins = self.meta.origins_for(&rows);
         let mut page = ItemPage {
@@ -1341,12 +1343,13 @@ impl Runtime {
                 Default::default()
             })
         };
-        for (row, preview) in rows.into_iter().zip(previews) {
+        for (row, (preview, annotations)) in rows.into_iter().zip(previews) {
             match preview {
                 Some(preview) => {
                     let mut item =
                         preview.into_item(&row, &origins[&row.id], self.meta.device_id());
                     item.tag_ids = tags.remove(&row.id).unwrap_or_default();
+                    item.annotations = annotations;
                     page.items.push(item);
                 }
                 None => page.skipped_undecryptable += 1,
@@ -1357,6 +1360,11 @@ impl Runtime {
 
     pub(crate) fn decrypt_page(&self, rows: Vec<StoredItem>) -> ItemPage {
         let origins = self.meta.origins_for(&rows);
+        let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        let mut annotations = self.store.item_annotations(&ids).unwrap_or_else(|error| {
+            tracing::warn!(?error, "showing a page without annotations");
+            Default::default()
+        });
         // One key derivation for the page, scoped no wider than its plaintexts.
         let key = self.keyring.item_key();
         let mut page = ItemPage {
@@ -1373,7 +1381,10 @@ impl Runtime {
                 &key,
                 true,
             ) {
-                Ok((item, _)) => page.items.push(item),
+                Ok((mut item, _)) => {
+                    item.annotations = annotations.remove(&row_id);
+                    page.items.push(item);
+                }
                 Err(error) => {
                     tracing::warn!(id = %row_id, ?error, "skipping an item that failed to decrypt");
                     page.skipped_undecryptable += 1;
