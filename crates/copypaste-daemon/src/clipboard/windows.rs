@@ -22,7 +22,7 @@ mod two_writers;
 
 use super::change::{Change, ChangeTracker};
 use super::windows_attribution::{is_excluded, Attribution};
-use super::{Capture, CapturePolicy, ClipboardSource};
+use super::{Capture, CapturePolicy, ClipboardSource, WriteOptions};
 use read::{Reading, Representation};
 
 /// `OpenClipboard` fails while another process holds the clipboard open, which
@@ -166,22 +166,33 @@ impl WindowsClipboard {
     }
 }
 
-/// Marks the contents just written as secret: monitors skip them, and Windows
-/// keeps them out of clipboard history and cloud clipboard. Capture reads the
-/// same formats as `privacy.secret`.
-fn conceal(concealed: bool) -> clipboard_win::SysResult<()> {
-    if !concealed {
-        return Ok(());
+/// The documented monitor, history and cloud clipboard exclusion formats.
+/// Capture reads the monitor exclusion as `privacy.secret` and the history
+/// opt-out as `privacy.transient`.
+const EXCLUSION_FORMATS: [&str; 3] = [
+    "ExcludeClipboardContentFromMonitorProcessing",
+    "CanIncludeInClipboardHistory",
+    "CanUploadToCloudClipboard",
+];
+
+/// A secret and a transient delivery are both kept out of monitors, clipboard
+/// history and cloud clipboard; an ordinary copy is not.
+fn exclusion_formats(options: WriteOptions) -> &'static [&'static str] {
+    if options.secret || options.transient {
+        &EXCLUSION_FORMATS
+    } else {
+        &[]
     }
+}
+
+/// Adds the exclusion formats `options` asks for to the contents just
+/// written, each with the value 0.
+fn mark(options: WriteOptions) -> clipboard_win::SysResult<()> {
     let off = 0u32.to_le_bytes();
-    for (name, value) in [
-        ("ExcludeClipboardContentFromMonitorProcessing", &off[..]),
-        ("CanIncludeInClipboardHistory", &off[..]),
-        ("CanUploadToCloudClipboard", &off[..]),
-    ] {
+    for name in exclusion_formats(options) {
         let format =
             raw::register_format(name).ok_or_else(clipboard_win::ErrorCode::last_system)?;
-        raw::set_without_clear(format.get(), value)?;
+        raw::set_without_clear(format.get(), &off)?;
     }
     Ok(())
 }
@@ -333,10 +344,10 @@ impl ClipboardSource for WindowsClipboard {
             .unwrap_or(true)
     }
 
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         self.write(|| {
             raw::set_string(text)?;
-            conceal(concealed)
+            mark(options)
         })
     }
 
@@ -346,7 +357,7 @@ impl ClipboardSource for WindowsClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
@@ -375,7 +386,7 @@ impl ClipboardSource for WindowsClipboard {
                     } else {
                         raw::set_without_clear(format, bytes)?;
                     }
-                    conceal(concealed)
+                    mark(options)
                 })
                 .map_err(|_| ClipboardWriteError::Failed);
         }
@@ -390,7 +401,7 @@ impl ClipboardSource for WindowsClipboard {
                 .write(move || {
                     raw::empty()?;
                     raw::set_file_list(&[path])?;
-                    conceal(concealed)
+                    mark(options)
                 })
                 .map_err(|_| ClipboardWriteError::Failed);
         }
@@ -412,7 +423,7 @@ impl ClipboardSource for WindowsClipboard {
             raw::empty()?;
             raw::set_bitmap(&image.bitmap)?;
             raw::set_without_clear(format, &image.encoded)?;
-            conceal(concealed)
+            mark(options)
         })
         .map_err(|_| ClipboardWriteError::Failed)
     }
@@ -458,6 +469,38 @@ mod tests {
 
     pub(super) fn serialised() -> MutexGuard<'static, ()> {
         CLIPBOARD.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    #[test]
+    fn a_transient_write_is_excluded_from_history_like_a_secret_one() {
+        let formats = |secret, transient| exclusion_formats(WriteOptions { secret, transient });
+        assert!(formats(false, false).is_empty());
+        assert_eq!(formats(false, true), EXCLUSION_FORMATS);
+        assert_eq!(formats(true, false), EXCLUSION_FORMATS);
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn a_transient_self_write_carries_the_exclusion_formats() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+        write_text("something copied earlier");
+        let _ = clipboard.poll();
+        let transient = WriteOptions {
+            secret: false,
+            transient: true,
+        };
+        clipboard
+            .set_contents("delivered by us", transient)
+            .expect("the write failed");
+        {
+            let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
+            for name in EXCLUSION_FORMATS {
+                let format = raw::register_format(name).expect("register the format");
+                assert!(raw::is_format_avail(format.get()), "{name} is missing");
+            }
+        }
+        assert!(clipboard.poll().is_none(), "our own delivery was captured");
     }
 
     fn sequence_number() -> i64 {
@@ -819,7 +862,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"synthetic bytes",
                 Some(&metadata),
-                false,
+                WriteOptions::default(),
             )
             .expect("file paste-back must publish a file list");
         let mut paths = Vec::new();
@@ -856,7 +899,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"synthetic bytes",
                 Some(&metadata),
-                false,
+                WriteOptions::default(),
             )
             .unwrap();
 
@@ -901,7 +944,7 @@ if ([IO.File]::ReadAllText($paths[0]) -cne 'synthetic bytes') {
 
         let before = sequence_number();
         clipboard
-            .set_contents("pasted by us", false)
+            .set_contents("pasted by us", WriteOptions::default())
             .expect("the write failed");
         let after = sequence_number();
         assert!(
@@ -922,7 +965,7 @@ if ([IO.File]::ReadAllText($paths[0]) -cne 'synthetic bytes') {
         let _ = clipboard.poll();
 
         clipboard
-            .set_contents("pasted by us", false)
+            .set_contents("pasted by us", WriteOptions::default())
             .expect("the write failed");
         if let Some(capture) = clipboard.poll() {
             panic!(

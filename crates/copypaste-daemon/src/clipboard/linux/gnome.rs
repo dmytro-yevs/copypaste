@@ -16,7 +16,9 @@ use tracing::debug;
 use zbus::blocking::{connection::Builder, Connection, Proxy};
 use zbus::fdo::RequestNameFlags;
 
-use super::super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
+use super::super::{
+    Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence, WriteOptions,
+};
 
 const DAEMON: &str = "app.copypaste.Daemon";
 const GNOME_BRIDGE: &str = "app.copypaste.GnomeIntegration";
@@ -348,10 +350,10 @@ impl ClipboardSource for GnomeClipboard {
             .map(|state| state.active && state.watching)
             .unwrap_or(false)
     }
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         self.write(concealed_values(
             HashMap::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]),
-            concealed,
+            options.secret,
         ))
     }
     fn set_binary_contents(
@@ -360,7 +362,7 @@ impl ClipboardSource for GnomeClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (mime, _) = super::formats::write_format(content_type)
@@ -379,7 +381,7 @@ impl ClipboardSource for GnomeClipboard {
         };
         self.write(concealed_values(
             HashMap::from([(mime.into(), bytes)]),
-            concealed,
+            options.secret,
         ))
         .map_err(|_| ClipboardWriteError::Failed)
     }
@@ -1252,7 +1254,7 @@ mod tests {
         );
 
         clipboard
-            .set_contents("written bridge text", false)
+            .set_contents("written bridge text", WriteOptions::default())
             .expect("bridge write");
         let state = fixture.state.lock().expect("fixture bridge state");
         assert_eq!(state.writes.len(), 1);

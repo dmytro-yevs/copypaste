@@ -1015,7 +1015,7 @@ impl Runtime {
                     &prepared.item.id,
                     prepared.payload(),
                     &prepared.content_type,
-                    prepared.item.privacy.secret,
+                    crate::host::WriteOptions::copy(prepared.item.privacy.secret),
                 )
                 .map_err(copypaste_core::history_error::HistoryError::from)?;
             self.host.copy_feedback();
@@ -1037,8 +1037,9 @@ impl Runtime {
             item_id,
             text,
             |payload, secret| {
+                let options = crate::host::WriteOptions::copy(secret);
                 self.host
-                    .write(item_id, payload, copypaste_ipc::content_type::TEXT, secret)
+                    .write(item_id, payload, copypaste_ipc::content_type::TEXT, options)
                     .inspect(|()| self.host.copy_feedback())
             },
         ) {

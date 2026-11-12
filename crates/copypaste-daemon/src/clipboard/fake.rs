@@ -294,7 +294,7 @@ impl ClipboardSource for FakeClipboard {
         !self.tracker.is_current(self.change_count)
     }
 
-    fn set_contents(&mut self, text: &str, _concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, _options: super::WriteOptions) -> anyhow::Result<()> {
         let pre = self.change_count;
         // §3.3 step 2, from the count the write will land in — the fake's stand
         // in for what `clearContents` returns.
@@ -401,7 +401,8 @@ mod tests {
         assert!(cb.poll().is_some());
         assert!(!cb.changed(), "poll consumed it");
 
-        cb.set_contents("ours", false).unwrap();
+        cb.set_contents("ours", crate::clipboard::WriteOptions::default())
+            .unwrap();
         assert!(cb.changed(), "a self-write must still reach poll");
         assert!(cb.poll().is_none(), "and poll is what suppresses it");
         assert!(!cb.changed());
@@ -412,7 +413,7 @@ mod tests {
     #[test]
     fn set_contents_does_not_self_capture() {
         let mut cb = fake();
-        cb.set_contents("pasted by us", false)
+        cb.set_contents("pasted by us", crate::clipboard::WriteOptions::default())
             .expect("in-memory write");
 
         assert_eq!(cb.poll(), None, "our own write must not be re-captured");
@@ -516,7 +517,8 @@ mod tests {
         let path = dir.path().join("clip");
         let mut cb = FakeClipboard::watching_file(path.clone());
 
-        cb.set_contents("pasted by us", false).expect("file write");
+        cb.set_contents("pasted by us", crate::clipboard::WriteOptions::default())
+            .expect("file write");
         assert_eq!(
             std::fs::read_to_string(&path).expect("read back"),
             "pasted by us"
