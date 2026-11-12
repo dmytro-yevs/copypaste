@@ -56,6 +56,9 @@ regex.workspace = true
 # Snippet abbreviation normalization (NFKC, then case folding).
 icu_normalizer.workspace = true
 icu_casemap.workspace = true
+# Abbreviation length is counted in grapheme clusters. Already linked through
+# `copypaste-ipc`, so no crate is added to any binary.
+unicode-segmentation.workspace = true
 # Snippet import and export: CSV rows and passphrase-encrypted bundles.
 csv.workspace = true
 argon2.workspace = true

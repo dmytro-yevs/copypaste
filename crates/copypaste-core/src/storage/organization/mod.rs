@@ -208,6 +208,7 @@ impl Record {
     fn yields_to_local(&self, tx: &Connection) -> Result<bool, StoreError> {
         match self {
             Self::Snippet(r) => snippets::keeps_purge(tx, r),
+            Self::SnippetBody(r) => snippets::keeps_purged_body(tx, r),
             Self::AiGrant(r) => ai::keeps_revocation(tx, r),
             Self::ClipNote(r) => clip_notes::keeps_hidden(tx, r),
             _ => Ok(false),
@@ -290,8 +291,9 @@ pub(super) fn upsert_in_tx(
         restamp(tx, incoming.id, incoming.created_at)?;
         return Ok(true);
     }
-    tx.execute("INSERT INTO organization_records(id,content_ciphertext,nonce,content_hash,created_at,origin_device_id,kind_class,deleted) VALUES (?1,?2,?3,?4,?5,?6,?7,0) ON CONFLICT(id) DO UPDATE SET content_ciphertext=excluded.content_ciphertext,nonce=excluded.nonce,content_hash=excluded.content_hash,created_at=excluded.created_at,origin_device_id=excluded.origin_device_id,kind_class=excluded.kind_class,deleted=0", params![incoming.id,incoming.content_ciphertext,incoming.nonce,incoming.content_hash,incoming.created_at,incoming.origin_device_id,record.kind_class()])?;
+    // Projected first, so a projection sees the version it replaces.
     record.project(tx, incoming.id, incoming.created_at)?;
+    tx.execute("INSERT INTO organization_records(id,content_ciphertext,nonce,content_hash,created_at,origin_device_id,kind_class,deleted) VALUES (?1,?2,?3,?4,?5,?6,?7,0) ON CONFLICT(id) DO UPDATE SET content_ciphertext=excluded.content_ciphertext,nonce=excluded.nonce,content_hash=excluded.content_hash,created_at=excluded.created_at,origin_device_id=excluded.origin_device_id,kind_class=excluded.kind_class,deleted=0", params![incoming.id,incoming.content_ciphertext,incoming.nonce,incoming.content_hash,incoming.created_at,incoming.origin_device_id,record.kind_class()])?;
     Ok(true)
 }
 
@@ -699,26 +701,7 @@ impl Store {
     /// The projected value of one library record, as every query sees it.
     pub fn organization_record(&self, key: RecordKey<'_>) -> Result<Option<Record>, StoreError> {
         let conn = self.conn()?;
-        Ok(match key {
-            RecordKey::Snippet(id) => snippets::snippet(&conn, id)?.map(Record::Snippet),
-            RecordKey::SnippetBody(id) => snippets::body(&conn, id)?.map(Record::SnippetBody),
-            RecordKey::SnippetCollection(id) => {
-                snippets::collection(&conn, id)?.map(Record::SnippetCollection)
-            }
-            RecordKey::ContentRule(id) => rules::rule(&conn, id)?.map(Record::ContentRule),
-            RecordKey::ContentRulePlacement(id) => {
-                rules::placement(&conn, id)?.map(Record::ContentRulePlacement)
-            }
-            RecordKey::Pipeline(id) => transforms::pipeline(&conn, id)?.map(Record::Pipeline),
-            RecordKey::Preference { namespace, key } => {
-                preferences::preference(&conn, namespace, key)?.map(Record::Preference)
-            }
-            RecordKey::SetMember { set, member } => {
-                preferences::member(&conn, set, member)?.map(Record::SetMember)
-            }
-            RecordKey::AiGrant(id) => ai::grant(&conn, id)?.map(Record::AiGrant),
-            RecordKey::ClipNote(id) => clip_notes::note(&conn, id)?.map(Record::ClipNote),
-        })
+        read(&conn, key)
     }
 
     /// Tombstones the synced note of `clip_id`; `false` when it has none.
@@ -738,6 +721,30 @@ impl Store {
         tx.commit()?;
         Ok(pruned)
     }
+}
+
+/// [`Store::organization_record`] inside a caller's transaction.
+pub(crate) fn read(conn: &Connection, key: RecordKey<'_>) -> Result<Option<Record>, StoreError> {
+    Ok(match key {
+        RecordKey::Snippet(id) => snippets::snippet(conn, id)?.map(Record::Snippet),
+        RecordKey::SnippetBody(id) => snippets::body(conn, id)?.map(Record::SnippetBody),
+        RecordKey::SnippetCollection(id) => {
+            snippets::collection(conn, id)?.map(Record::SnippetCollection)
+        }
+        RecordKey::ContentRule(id) => rules::rule(conn, id)?.map(Record::ContentRule),
+        RecordKey::ContentRulePlacement(id) => {
+            rules::placement(conn, id)?.map(Record::ContentRulePlacement)
+        }
+        RecordKey::Pipeline(id) => transforms::pipeline(conn, id)?.map(Record::Pipeline),
+        RecordKey::Preference { namespace, key } => {
+            preferences::preference(conn, namespace, key)?.map(Record::Preference)
+        }
+        RecordKey::SetMember { set, member } => {
+            preferences::member(conn, set, member)?.map(Record::SetMember)
+        }
+        RecordKey::AiGrant(id) => ai::grant(conn, id)?.map(Record::AiGrant),
+        RecordKey::ClipNote(id) => clip_notes::note(conn, id)?.map(Record::ClipNote),
+    })
 }
 
 #[cfg(test)]

@@ -804,6 +804,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "unicode-segmentation",
  "url",
  "uuid",
  "whoami",
