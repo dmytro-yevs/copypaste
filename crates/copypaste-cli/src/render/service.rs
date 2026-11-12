@@ -326,6 +326,7 @@ mod tests {
                 ..Default::default()
             },
             restart_required: Vec::new(),
+            storage_usage: None,
         };
         let text = config_text(&applied);
         assert!(text.contains("max text size    10485760 bytes"), "{text}");

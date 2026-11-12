@@ -108,7 +108,9 @@ pub(super) enum Reading {
 }
 
 /// A native file reference wins over its textual fallback. The remaining
-/// precedence is Unicode text, RTF, HTML, PNG, TIFF, then a native bitmap.
+/// precedence is Unicode text, PNG, TIFF, a native bitmap, RTF, then HTML:
+/// without plain text an image wins over formatted text, because browsers
+/// publish a copied image beside an HTML fragment that only references it.
 /// Availability is checked before each read, so an
 /// earlier representation never materialises a later one.
 pub(super) fn representation(
@@ -121,23 +123,6 @@ pub(super) fn representation(
     }
     if raw::is_format_avail(formats::CF_UNICODETEXT) {
         return text(policy, clipboard);
-    }
-    if let Some(format) = registered
-        .rtf
-        .filter(|format| raw::is_format_avail(*format))
-    {
-        return formatted_text(
-            policy,
-            format,
-            copypaste_ipc::content_type::RICH_TEXT,
-            clipboard,
-        );
-    }
-    if let Some(format) = registered
-        .html
-        .filter(|format| raw::is_format_avail(*format))
-    {
-        return html(policy, format, clipboard);
     }
     if let Some(format) = registered
         .png
@@ -155,6 +140,23 @@ pub(super) fn representation(
         if raw::is_format_avail(format) {
             return dib(policy, format, clipboard);
         }
+    }
+    if let Some(format) = registered
+        .rtf
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return formatted_text(
+            policy,
+            format,
+            copypaste_ipc::content_type::RICH_TEXT,
+            clipboard,
+        );
+    }
+    if let Some(format) = registered
+        .html
+        .filter(|format| raw::is_format_avail(*format))
+    {
+        return html(policy, format, clipboard);
     }
     Reading::Nothing
 }

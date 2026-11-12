@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
@@ -148,6 +149,25 @@ void main() {
       expect(repository.requestedTarget, AppUpdateTarget.android);
     },
   );
+
+  test('the installed version is known before and without a lookup', () async {
+    final lookup = Completer<AppRelease?>();
+    final controller = AppUpdateController(
+      repository: _PendingUpdateRepository(lookup.future),
+      platform: _FakeUpdatePlatform(target: AppUpdateTarget.windows),
+    );
+    addTearDown(controller.dispose);
+
+    final check = controller.check();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.checking);
+    expect(controller.currentVersion, Version.parse('1.0.0'));
+
+    lookup.completeError(const SocketException('offline'));
+    await check;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.currentVersion, Version.parse('1.0.0'));
+  });
 
   test(
     'Linux selects an update only for its installed package format',
@@ -583,4 +603,16 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   Future<void> openReleasePage(Uri uri) async {
     openedReleasePages.add(uri);
   }
+}
+
+class _PendingUpdateRepository extends _FakeUpdateRepository {
+  _PendingUpdateRepository(this.lookup);
+
+  final Future<AppRelease?> lookup;
+
+  @override
+  Future<AppRelease?> findUpdate({
+    required Version currentVersion,
+    required AppUpdateTarget target,
+  }) => lookup;
 }

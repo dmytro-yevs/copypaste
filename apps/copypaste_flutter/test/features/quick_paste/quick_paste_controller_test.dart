@@ -32,8 +32,29 @@ import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import 'package:copypaste_flutter/features/transfers/file_operations_controller.dart';
 
 import '../modules/modules_test_support.dart';
+import '../../support/focus_traversal.dart';
 
 void main() {
+  testWidgets('Tab moves on from the Quick Paste search field', (tester) async {
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    await tester.binding.setSurfaceSize(const Size(448, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await expectTabLeaves(
+      tester,
+      find.byKey(const ValueKey('quick-paste-search')),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   test(
     'inspector refreshes completed metadata on each opening, not in the background',
     () async {

@@ -185,7 +185,7 @@ void main() {
     expect(AppTheme.dark.colorScheme.brightness, Brightness.dark);
   });
 
-  test('uses the shared surface palette and no focus ring', () {
+  test('uses the shared surface palette', () {
     final light = AppTheme.light.colorScheme;
     final dark = AppTheme.dark.colorScheme;
 
@@ -198,7 +198,6 @@ void main() {
     expect(AppTheme.navigationAccent, const Color(0xFF0285FF));
     expect(light.primary, const Color(0xFF1A1C1F));
     expect(light.mutedForeground, const Color(0xFF5D5D5D));
-    expect(light.ring, Colors.transparent);
     expect(dark.background, const Color(0xFF181818));
     expect(dark.foreground, const Color(0xFFDFDFDF));
     expect(dark.card, const Color(0xFF181818));
@@ -212,7 +211,30 @@ void main() {
     expect(dark.chart2, const Color(0xFF04B84C));
     expect(dark.chart3, const Color(0xFFFB6A22));
     expect(dark.chart4, const Color(0xFF924FF7));
-    expect(dark.ring, Colors.transparent);
+  });
+
+  test('the keyboard focus ring reads on every surface', () {
+    for (final colors in [
+      AppTheme.light.colorScheme,
+      AppTheme.dark.colorScheme,
+    ]) {
+      for (final surface in [
+        colors.background,
+        colors.card,
+        colors.popover,
+        colors.secondary,
+        colors.muted,
+        colors.accent,
+      ]) {
+        // The library paints the ring at half opacity over its surroundings.
+        final ring = Color.alphaBlend(colors.ring.scaleAlpha(0.5), surface);
+        expect(
+          _contrast(ring, surface),
+          greaterThanOrEqualTo(3),
+          reason: '${colors.brightness} ring on $surface',
+        );
+      }
+    }
   });
 
   test('keeps normal text color pairs at WCAG AA contrast', () {
@@ -334,7 +356,6 @@ void main() {
   testWidgets('installs shared component themes for every state', (
     tester,
   ) async {
-    FocusOutlineTheme? focusTheme;
     TextFieldTheme? textFieldTheme;
     SelectTheme? selectTheme;
     InputOTPTheme? inputOtpTheme;
@@ -365,7 +386,6 @@ void main() {
         home: Builder(
           builder: (context) {
             themedContext = context;
-            focusTheme = ComponentTheme.maybeOf<FocusOutlineTheme>(context);
             textFieldTheme = ComponentTheme.maybeOf<TextFieldTheme>(context);
             selectTheme = ComponentTheme.maybeOf<SelectTheme>(context);
             inputOtpTheme = ComponentTheme.maybeOf<InputOTPTheme>(context);
@@ -406,7 +426,6 @@ void main() {
       ),
     );
 
-    expect(focusTheme?.border?.top.style, BorderStyle.none);
     expect(textFieldTheme?.filled, isTrue);
     expect(textFieldTheme?.border?.top.style, BorderStyle.none);
     for (final states in <Set<WidgetState>>[
@@ -543,8 +562,6 @@ void main() {
         ];
         final navigationStyles = <AbstractButtonStyle>[
           AppTheme.navigationIconButtonStyle,
-          AppTheme.navigationRailButtonStyle(context, selected: false),
-          AppTheme.navigationRailButtonStyle(context, selected: true),
           AppTheme.mobileNavigationButtonStyle(selected: false),
           AppTheme.mobileNavigationButtonStyle(selected: true),
           AppTheme.settingsCategoryButtonStyle,

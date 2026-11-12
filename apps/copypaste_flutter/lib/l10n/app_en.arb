@@ -132,10 +132,6 @@
   "@settingsRuntimeExcludedAppsLimit": {
     "description": "Settings error message shown when the exclusion list already holds the maximum number of applications."
   },
-  "settingsRuntimeQuickPastePrepareFailed": "Quick Paste could not be prepared.",
-  "@settingsRuntimeQuickPastePrepareFailed": {
-    "description": "Settings error message shown when the Quick Paste window and its keyboard shortcut cannot be set up. Quick Paste is a feature name."
-  },
   "settingsRuntimeAutoPasteUpdateFailed": "Auto-paste could not be updated.",
   "@settingsRuntimeAutoPasteUpdateFailed": {
     "description": "Settings error message shown when turning automatic pasting after selection on or off fails."
@@ -1329,38 +1325,6 @@
   "@settingsRestoreFailed": {
     "description": "Error shown in the restore dialog when restoring fails."
   },
-  "settingsExportIncompleteTitle": "Text export is incomplete",
-  "@settingsExportIncompleteTitle": {
-    "description": "Toast title when some clips were left out of a text export."
-  },
-  "settingsExportIncompleteMessage": "{saved}; {omissions}.",
-  "@settingsExportIncompleteMessage": {
-    "description": "Toast message when some clips were left out of a text export. {saved} says how many clips were saved; {omissions} lists what was left out.",
-    "placeholders": {
-      "saved": {
-        "type": "String",
-        "example": "4 text clips were saved"
-      },
-      "omissions": {
-        "type": "String",
-        "example": "2 text clips could not be read"
-      }
-    }
-  },
-  "settingsExportOmissionsJoin": "{first} and {second}",
-  "@settingsExportOmissionsJoin": {
-    "description": "Joins two parts of the text export omission list in a sentence.",
-    "placeholders": {
-      "first": {
-        "type": "String",
-        "example": "1 non-text clip was excluded"
-      },
-      "second": {
-        "type": "String",
-        "example": "2 text clips could not be read"
-      }
-    }
-  },
   "settingsSyncSwitchTitle": "Sync",
   "@settingsSyncSwitchTitle": {
     "description": "Settings row title for the master synchronization switch. Noun, short for synchronization."
@@ -1804,63 +1768,6 @@
   "settingsRetentionDays": "{count, plural, =1{1 day} other{{count} days}}",
   "@settingsRetentionDays": {
     "description": "Retention option: keep history for this many days.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "settingsStorageQuotaGigabytes": "{size} GB",
-  "@settingsStorageQuotaGigabytes": {
-    "description": "Storage quota option in gigabytes. {size} is an already formatted number such as 5 or 2.5.",
-    "placeholders": {
-      "size": {
-        "type": "String",
-        "example": "5"
-      }
-    }
-  },
-  "settingsFileSizeMebibytes": "{size} MiB",
-  "@settingsFileSizeMebibytes": {
-    "description": "Maximum file size option in mebibytes.",
-    "placeholders": {
-      "size": {
-        "type": "int",
-        "example": "16"
-      }
-    }
-  },
-  "settingsFileSizeGibibytes": "{size} GiB",
-  "@settingsFileSizeGibibytes": {
-    "description": "Maximum file size option in gibibytes.",
-    "placeholders": {
-      "size": {
-        "type": "int",
-        "example": "4"
-      }
-    }
-  },
-  "settingsExportSavedClips": "{count, plural, =1{1 text clip was saved} other{{count} text clips were saved}}",
-  "@settingsExportSavedClips": {
-    "description": "Part of the incomplete text export toast: how many text clips were exported.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "settingsExportSkippedNonText": "{count, plural, =1{1 non-text clip was excluded} other{{count} non-text clips were excluded}}",
-  "@settingsExportSkippedNonText": {
-    "description": "Part of the incomplete text export toast: how many non-text clips were left out.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "settingsExportSkippedUnreadable": "{count, plural, =1{1 text clip could not be read} other{{count} text clips could not be read}}",
-  "@settingsExportSkippedUnreadable": {
-    "description": "Part of the incomplete text export toast: how many text clips could not be decrypted.",
     "placeholders": {
       "count": {
         "type": "int"
@@ -3358,14 +3265,6 @@
   "@appWindowSetupTitle": {
     "description": "Error title shown when the desktop window could not be configured."
   },
-  "appCollapseNavigation": "Collapse navigation",
-  "@appCollapseNavigation": {
-    "description": "Tooltip of the button that narrows the side navigation bar to icons only."
-  },
-  "appExpandNavigation": "Expand navigation",
-  "@appExpandNavigation": {
-    "description": "Tooltip of the button that widens the side navigation bar to show labels."
-  },
   "appOpenHistory": "Open History",
   "@appOpenHistory": {
     "description": "Screen reader label of the app logo button that opens the History screen. History is the name of the clipboard history screen."
@@ -3474,24 +3373,6 @@
   "sharedSizeBytes": "{size} B",
   "@sharedSizeBytes": {
     "description": "File size in bytes; {size} is the number. B is the abbreviation for bytes.",
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "sharedSizeKilobytes": "{size} KB",
-  "@sharedSizeKilobytes": {
-    "description": "File size in kilobytes; {size} is the number. KB is the abbreviation for kilobytes.",
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "sharedSizeMegabytes": "{size} MB",
-  "@sharedSizeMegabytes": {
-    "description": "File size in megabytes; {size} is the number. MB is the abbreviation for megabytes.",
     "placeholders": {
       "size": {
         "type": "String"
@@ -4041,19 +3922,6 @@
   "@modulesDownloadingModel": {
     "description": "Progress text shown while a module downloads a language model."
   },
-  "modulesInstalling": "Installing…",
-  "@modulesInstalling": {
-    "description": "Progress text shown on the install button while a module is installed."
-  },
-  "modulesDownloadingProgress": "Downloading {percent}%",
-  "@modulesDownloadingProgress": {
-    "description": "Progress text shown on the install button while a module downloads; {percent} is a number from 0 to 100.",
-    "placeholders": {
-      "percent": {
-        "type": "int"
-      }
-    }
-  },
   "modulesRun": "Run",
   "@modulesRun": {
     "description": "Verb. Button in a module command dialog that runs the command."
@@ -4434,5 +4302,424 @@
   "deviceAuthNotConfigured": "Set up a device password, PIN or biometrics first",
   "@deviceAuthNotConfigured": {
     "description": "Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up."
+  },
+  "commonOn": "On",
+  "@commonOn": {
+    "description": "State word shown beside a switch that is turned on. Adjective; keep it as short as possible."
+  },
+  "commonOff": "Off",
+  "@commonOff": {
+    "description": "State word shown beside a switch that is turned off. Adjective; keep it as short as possible."
+  },
+  "settingsQuickPasteStartFailed": "Quick Paste could not start, so its shortcut does not work.",
+  "@settingsQuickPasteStartFailed": {
+    "description": "Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name."
+  },
+  "settingsQuickPasteShortcutInUse": "{shortcut} is used by another app. Choose another shortcut.",
+  "@settingsQuickPasteShortcutInUse": {
+    "description": "Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "Shift+⌘+C"
+      }
+    }
+  },
+  "devicesEmptyTitle": "No other devices paired yet",
+  "@devicesEmptyTitle": {
+    "description": "Empty state title on the Devices screen when no other device has been paired yet."
+  },
+  "devicesEmptyMessage": "Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.",
+  "@devicesEmptyMessage": {
+    "description": "Empty state message on the Devices screen explaining what pairing another device gives and requires."
+  },
+  "pairingStateNotCompleted": "Pairing not completed",
+  "@pairingStateNotCompleted": {
+    "description": "Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it."
+  },
+  "pairingStepInvite": "Invite",
+  "@pairingStepInvite": {
+    "description": "Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words."
+  },
+  "pairingStepScan": "Scan",
+  "@pairingStepScan": {
+    "description": "Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words."
+  },
+  "pairingStepCode": "Code",
+  "@pairingStepCode": {
+    "description": "Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words."
+  },
+  "pairingStepRequest": "Request",
+  "@pairingStepRequest": {
+    "description": "Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words."
+  },
+  "pairingStepConnect": "Connect",
+  "@pairingStepConnect": {
+    "description": "Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words."
+  },
+  "pairingStepConfirm": "Confirm",
+  "@pairingStepConfirm": {
+    "description": "Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words."
+  },
+  "pairingStepPaired": "Paired",
+  "@pairingStepPaired": {
+    "description": "Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words."
+  },
+  "pairingOtherDevice": "Other device",
+  "@pairingOtherDevice": {
+    "description": "Label for the other device in the pairing confirmation status when its name is not known."
+  },
+  "pairingDecisionNotConfirmed": "Not confirmed yet",
+  "@pairingDecisionNotConfirmed": {
+    "description": "Pairing confirmation status of this device before the user has confirmed or rejected."
+  },
+  "pairingDecisionSending": "Sending your decision…",
+  "@pairingDecisionSending": {
+    "description": "Pairing confirmation status of this device while its confirmation or rejection is being sent."
+  },
+  "pairingDecisionConfirmed": "Confirmed",
+  "@pairingDecisionConfirmed": {
+    "description": "Pairing confirmation status of a device that confirmed the pairing."
+  },
+  "pairingDecisionRejected": "Rejected",
+  "@pairingDecisionRejected": {
+    "description": "Pairing confirmation status of a device that rejected the pairing."
+  },
+  "pairingDecisionWaiting": "Waiting for confirmation",
+  "@pairingDecisionWaiting": {
+    "description": "Pairing confirmation status of the other device after this device confirmed and the other has not answered yet."
+  },
+  "pairingDecisionUnknown": "Answer not known",
+  "@pairingDecisionUnknown": {
+    "description": "Pairing confirmation status of the other device when this device has not been told its answer."
+  },
+  "syncHeaderDeviceCount": "{count, plural, =1{1 device} other{{count} devices}}",
+  "@syncHeaderDeviceCount": {
+    "description": "Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyClipLineCount": "{count, plural, =1{1 line} other{{count} lines}}",
+  "@historyClipLineCount": {
+    "description": "Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "appNavigationLabel": "Main navigation",
+  "@appNavigationLabel": {
+    "description": "Screen reader label of the application header region that holds the History, Devices and Settings destinations."
+  },
+  "sharedStepPosition": "{step} / {count} · {name}",
+  "@sharedStepPosition": {
+    "description": "Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "example": "1"
+      },
+      "count": {
+        "type": "int",
+        "example": "2"
+      },
+      "name": {
+        "type": "String",
+        "example": "Download"
+      }
+    }
+  },
+  "sharedStepSemantics": "Step {step} of {count}: {name}",
+  "@sharedStepSemantics": {
+    "description": "Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "example": "1"
+      },
+      "count": {
+        "type": "int",
+        "example": "2"
+      },
+      "name": {
+        "type": "String",
+        "example": "Download"
+      }
+    }
+  },
+  "modulesPhaseDownload": "Download",
+  "@modulesPhaseDownload": {
+    "description": "Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible."
+  },
+  "modulesPhaseInstall": "Install",
+  "@modulesPhaseInstall": {
+    "description": "Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible."
+  },
+  "modulesInstallingModule": "Installing {module}",
+  "@modulesInstallingModule": {
+    "description": "Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesUpdatingModule": "Updating {module}",
+  "@modulesUpdatingModule": {
+    "description": "Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "commonDismiss": "Dismiss",
+  "@commonDismiss": {
+    "description": "Screen reader name of the button that closes a transient message before it leaves by itself."
+  },
+  "settingsRetentionConfirmTitle": "Remove older history?",
+  "@settingsRetentionConfirmTitle": {
+    "description": "Title of the confirmation shown before a shorter retention period deletes history."
+  },
+  "settingsRetentionConfirmMessage": "New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.",
+  "@settingsRetentionConfirmMessage": {
+    "description": "Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.",
+    "placeholders": {
+      "limit": {
+        "type": "String",
+        "example": "7 days"
+      }
+    }
+  },
+  "settingsStorageQuotaConfirmTitle": "Reduce the storage quota?",
+  "@settingsStorageQuotaConfirmTitle": {
+    "description": "Title of the confirmation shown before a smaller storage quota deletes history."
+  },
+  "settingsStorageQuotaConfirmMessage": "New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.",
+  "@settingsStorageQuotaConfirmMessage": {
+    "description": "Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "5 GiB"
+      }
+    }
+  },
+  "settingsLimitConfirmAction": "Apply limit",
+  "@settingsLimitConfirmAction": {
+    "description": "Button that confirms a stricter history limit which deletes history."
+  },
+  "settingsHideEverywhereTitle": "Hide CopyPaste completely?",
+  "@settingsHideEverywhereTitle": {
+    "description": "Title of the confirmation shown before the last visible entry point of the application (Dock or taskbar icon, menu bar or tray icon) is turned off."
+  },
+  "settingsHideEverywhereMessage": "With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.",
+  "@settingsHideEverywhereMessage": {
+    "description": "Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice."
+  },
+  "settingsHideEverywhereShortcutMessage": "With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.",
+  "@settingsHideEverywhereShortcutMessage": {
+    "description": "Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "Ctrl+Shift+C"
+      }
+    }
+  },
+  "settingsHideEverywhereAction": "Hide",
+  "@settingsHideEverywhereAction": {
+    "description": "Verb. Button that confirms hiding the application's last visible icon."
+  },
+  "settingsExportDoneTitle": "Text history exported",
+  "@settingsExportDoneTitle": {
+    "description": "Title of the confirmation shown after the text history was exported."
+  },
+  "settingsBackupDoneTitle": "Backup created",
+  "@settingsBackupDoneTitle": {
+    "description": "Title of the confirmation shown after an encrypted backup was created."
+  },
+  "settingsRestoreDoneTitle": "History restored",
+  "@settingsRestoreDoneTitle": {
+    "description": "Title of the confirmation shown after history was restored from a backup."
+  },
+  "settingsExportedTextClips": "{count, plural, =1{Exported 1 text clip} other{Exported {count} text clips}}",
+  "@settingsExportedTextClips": {
+    "description": "Message of the confirmation shown after the text history was exported: how many text clips the file holds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsExportUnreadableClips": "{count, plural, =1{1 could not be read} other{{count} could not be read}}",
+  "@settingsExportUnreadableClips": {
+    "description": "Short addition to the export confirmation: how many text clips could not be read and were left out of the file.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsOutcomeDetail": "{outcome} · {detail}",
+  "@settingsOutcomeDetail": {
+    "description": "Joins the outcome of an action with a detail about it, for example 'Exported 214 text clips · 3 could not be read'.",
+    "placeholders": {
+      "outcome": {
+        "type": "String",
+        "example": "Exported 214 text clips"
+      },
+      "detail": {
+        "type": "String",
+        "example": "3 could not be read"
+      }
+    }
+  },
+  "settingsBackupDoneMessage": "Encrypted backup saved · {size}",
+  "@settingsBackupDoneMessage": {
+    "description": "Message of the confirmation shown after an encrypted backup was created. size is the file size, for example '12.4 MiB'.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "12.4 MiB"
+      }
+    }
+  },
+  "settingsRestoreDoneMessage": "The clipboard history on this device now matches the backup.",
+  "@settingsRestoreDoneMessage": {
+    "description": "Message of the confirmation shown after history was restored from an encrypted backup."
+  },
+  "sharedSizeKibibytes": "{size} KiB",
+  "@sharedSizeKibibytes": {
+    "description": "A size in kibibytes (binary units of 1024); size is an already formatted number.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "512.0"
+      }
+    }
+  },
+  "sharedSizeMebibytes": "{size} MiB",
+  "@sharedSizeMebibytes": {
+    "description": "A size in mebibytes (binary units of 1024); size is an already formatted number.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "12.4"
+      }
+    }
+  },
+  "sharedSizeGibibytes": "{size} GiB",
+  "@sharedSizeGibibytes": {
+    "description": "A size in gibibytes (binary units of 1024); size is an already formatted number.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "1.5"
+      }
+    }
+  },
+  "storageUsageShort": "{used} of {quota}",
+  "@storageUsageShort": {
+    "description": "Short storage usage in the application header, such as '2.1 of 5 GiB'. used is the used amount, without its unit when it shares the quota's unit; quota is the storage quota with its unit.",
+    "placeholders": {
+      "used": {
+        "type": "String",
+        "example": "2.1"
+      },
+      "quota": {
+        "type": "String",
+        "example": "5 GiB"
+      }
+    }
+  },
+  "storageUsageOfQuota": "{used} used of {quota}",
+  "@storageUsageOfQuota": {
+    "description": "Storage used by unpinned history against the storage quota, such as '2.1 GiB used of 5 GiB'.",
+    "placeholders": {
+      "used": {
+        "type": "String",
+        "example": "2.1 GiB"
+      },
+      "quota": {
+        "type": "String",
+        "example": "5 GiB"
+      }
+    }
+  },
+  "storageUsageNoQuota": "{used} used",
+  "@storageUsageNoQuota": {
+    "description": "Storage used by unpinned history when no storage quota applies, such as '2.1 GiB used'.",
+    "placeholders": {
+      "used": {
+        "type": "String",
+        "example": "2.1 GiB"
+      }
+    }
+  },
+  "storageUsageOverQuota": "Over quota",
+  "@storageUsageOverQuota": {
+    "description": "Status words shown when unpinned history uses more storage than the quota allows."
+  },
+  "storageUsageOldestClip": "Oldest clip {date}",
+  "@storageUsageOldestClip": {
+    "description": "Capture date of the oldest unpinned clip, shown after the storage usage.",
+    "placeholders": {
+      "date": {
+        "type": "String",
+        "example": "14 Aug 2026"
+      }
+    }
+  },
+  "storageUsageDetail": "{usage} · {detail}",
+  "@storageUsageDetail": {
+    "description": "Joins a storage usage summary with a detail about it, such as '2.1 GiB used of 5 GiB · Oldest clip 14 Aug 2026'.",
+    "placeholders": {
+      "usage": {
+        "type": "String",
+        "example": "2.1 GiB used of 5 GiB"
+      },
+      "detail": {
+        "type": "String",
+        "example": "Oldest clip 14 Aug 2026"
+      }
+    }
+  },
+  "storageHeaderSemanticsLabel": "Storage: {usage}",
+  "@storageHeaderSemanticsLabel": {
+    "description": "Screen reader label of the header button that shows storage usage and opens the storage settings; usage is the usage summary.",
+    "placeholders": {
+      "usage": {
+        "type": "String",
+        "example": "2.1 GiB used of 5 GiB"
+      }
+    }
+  },
+  "settingsStorageQuotaConfirmRemovesMessage": "New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.",
+  "@settingsStorageQuotaConfirmRemovesMessage": {
+    "description": "Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "example": "1 GiB"
+      },
+      "used": {
+        "type": "String",
+        "example": "2.1 GiB"
+      }
+    }
+  },
+  "historySectionClipCount": "{count, plural, =1{1 clip} other{{count} clips}}",
+  "@historySectionClipCount": {
+    "description": "Number of clips in a History group, shown after the group name and date, such as: Today · Wednesday, November 11 · 14 clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

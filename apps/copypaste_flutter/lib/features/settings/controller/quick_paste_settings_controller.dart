@@ -39,12 +39,19 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool _disposed = false;
   Future<void> _registrationOperation = Future<void>.value();
   String? _errorMessage;
+  bool _startFailed = false;
+  DesktopShortcutRefusal? _shortcutRefusal;
 
   bool get supported => _supported;
   bool get initialized => _initialized;
   bool get busy => _busy;
   bool get autoPaste => _preferences.autoPaste;
   DesktopShortcut get shortcut => _preferences.shortcut;
+
+  /// The shortcut that currently opens Quick Paste, or null while none is
+  /// registered (unsupported, recording, or registration failed).
+  DesktopShortcut? get registeredShortcut =>
+      _supported ? _registeredShortcut : null;
   bool get accessibilityGranted => _accessibilityGranted;
   LinuxIntegrationStatus? get linuxIntegration => _linuxIntegration;
   String? get registeredShortcutDescription => switch (_registrar) {
@@ -52,7 +59,17 @@ class QuickPasteSettingsController extends ChangeNotifier
       registrar.registeredTriggerDescription(DesktopShortcutId.quickPaste),
     _ => null,
   };
-  String? get errorMessage => _errorMessage;
+
+  /// The last failed action, or else why Quick Paste could not start.
+  String? get errorMessage =>
+      _errorMessage ??
+      (_startFailed ? AppStrings.current.settingsQuickPasteStartFailed : null);
+
+  /// Whether Quick Paste could not start; [retry] starts it again.
+  bool get startFailed => _startFailed;
+
+  /// The shortcut the system last refused; the rest of Quick Paste still works.
+  DesktopShortcutRefusal? get shortcutRefusal => _shortcutRefusal;
 
   Future<void> initialize() async {
     if (_disposed || _initialized || _busy) return;
@@ -69,7 +86,7 @@ class QuickPasteSettingsController extends ChangeNotifier
       if (_disposed) return;
       _supported = _quickPasteSupported;
       if (_supported) {
-        if (!await _changeRegistration(_preferences.shortcut)) return;
+        if (!await _registerSavedShortcut()) return;
         if (_linuxIntegrationPort != null) {
           await _refreshLinuxIntegration();
         }
@@ -77,10 +94,11 @@ class QuickPasteSettingsController extends ChangeNotifier
         if (_disposed) return;
       }
       _errorMessage = null;
-    } catch (_) {
+      _startFailed = false;
+    } catch (error) {
       if (!_disposed) {
-        _errorMessage =
-            AppStrings.current.settingsRuntimeQuickPastePrepareFailed;
+        _log('could not start', error);
+        _startFailed = true;
       }
     } finally {
       _initialized = true;
@@ -90,6 +108,13 @@ class QuickPasteSettingsController extends ChangeNotifier
       _busy = false;
       if (!_disposed) notifyListeners();
     }
+  }
+
+  /// Starts Quick Paste again after it could not start.
+  Future<void> retry() async {
+    if (_disposed || _busy || !_startFailed) return;
+    _initialized = false;
+    await initialize();
   }
 
   Future<bool> setAutoPaste(bool value) async {
@@ -137,14 +162,15 @@ class QuickPasteSettingsController extends ChangeNotifier
       if (_disposed) return false;
       _preferences = next;
       return true;
-    } catch (_) {
+    } catch (error) {
       if (_disposed) return false;
       try {
         if (!await _changeRegistration(before.shortcut)) return false;
       } catch (_) {
         // The visible error remains the only safe claim when registration fails.
       }
-      if (!_disposed) {
+      if (!_disposed && !_recordRefusal(shortcut, error)) {
+        _log('could not change the shortcut', error);
         _errorMessage =
             AppStrings.current.settingsRuntimeShortcutRegisterFailed;
       }
@@ -188,7 +214,7 @@ class QuickPasteSettingsController extends ChangeNotifier
     _busy = true;
     notifyListeners();
     try {
-      if (!await _changeRegistration(_preferences.shortcut)) return;
+      if (!await _registerSavedShortcut()) return;
       _recordingShortcut = false;
       _errorMessage = null;
     } catch (_) {
@@ -215,6 +241,7 @@ class QuickPasteSettingsController extends ChangeNotifier
           description: AppStrings.current.platformGlobalShortcutDescription,
         );
         _registeredShortcut = shortcut;
+        _shortcutRefusal = null;
       }
       return !_disposed;
     });
@@ -225,6 +252,29 @@ class QuickPasteSettingsController extends ChangeNotifier
     );
     return operation;
   }
+
+  /// Registers the saved shortcut. A shortcut the system refuses is recorded
+  /// for the shortcut row instead of failing the caller.
+  Future<bool> _registerSavedShortcut() async {
+    final shortcut = _preferences.shortcut;
+    try {
+      return await _changeRegistration(shortcut);
+    } catch (error) {
+      if (_disposed || !_recordRefusal(shortcut, error)) rethrow;
+      return true;
+    }
+  }
+
+  bool _recordRefusal(DesktopShortcut shortcut, Object error) {
+    final reason = DesktopShortcutRefusal.reasonOf(error);
+    if (reason == null) return false;
+    _log('shortcut was refused', error);
+    _shortcutRefusal = DesktopShortcutRefusal(shortcut, reason);
+    return true;
+  }
+
+  void _log(String event, Object error) =>
+      debugPrint('Quick Paste $event: $error');
 
   Future<void> _disposeRegistration() async {
     try {
@@ -368,7 +418,7 @@ class QuickPasteSettingsController extends ChangeNotifier
       return;
     }
     _supported = true;
-    await _changeRegistration(_preferences.shortcut);
+    await _registerSavedShortcut();
     _accessibilityGranted = await _windowHost.accessibilityGranted();
   }
 

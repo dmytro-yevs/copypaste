@@ -116,10 +116,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsRuntimeExcludedAppsLimit => '최대 256개의 앱을 제외할 수 있습니다.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Quick Paste를 준비할 수 없습니다.';
-
-  @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
       '자동 붙여넣기 설정을 업데이트할 수 없습니다.';
 
@@ -1042,19 +1038,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsRestoreFailed => '백업을 복원할 수 없습니다.';
 
   @override
-  String get settingsExportIncompleteTitle => '텍스트 내보내기가 완료되지 않음';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved. $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first. $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => '동기화';
 
   @override
@@ -1386,51 +1369,6 @@ class AppLocalizationsKo extends AppLocalizations {
       count,
       locale: localeName,
       other: '$count일',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '텍스트 클립 $count개를 저장했습니다',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '텍스트가 아닌 클립 $count개는 제외되었습니다',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '텍스트 클립 $count개를 읽을 수 없었습니다',
     );
     return '$_temp0';
   }
@@ -2577,12 +2515,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get appWindowSetupTitle => '창 설정 확인 필요';
 
   @override
-  String get appCollapseNavigation => '탐색 접기';
-
-  @override
-  String get appExpandNavigation => '탐색 펼치기';
-
-  @override
   String get appOpenHistory => '기록 열기';
 
   @override
@@ -2663,16 +2595,6 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
-  }
-
-  @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
   }
 
   @override
@@ -3107,14 +3029,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesDownloadingModel => '언어 모델 다운로드 중…';
 
   @override
-  String get modulesInstalling => '설치 중…';
-
-  @override
-  String modulesDownloadingProgress(int percent) {
-    return '다운로드 중 $percent%';
-  }
-
-  @override
   String get modulesRun => '실행';
 
   @override
@@ -3395,4 +3309,262 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get deviceAuthNotConfigured => '먼저 기기 암호, PIN 또는 생체 인증을 설정하세요';
+
+  @override
+  String get commonOn => '켜짐';
+
+  @override
+  String get commonOff => '꺼짐';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste를 시작할 수 없어 단축키가 작동하지 않습니다.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut은(는) 다른 앱에서 사용 중입니다. 다른 단축키를 선택하세요.';
+  }
+
+  @override
+  String get devicesEmptyTitle => '아직 페어링된 다른 기기가 없습니다';
+
+  @override
+  String get devicesEmptyMessage =>
+      '다른 기기를 페어링하면 기기 간에 클립보드 기록이 동기화됩니다. 두 기기가 같은 네트워크에 있어야 하며, 모든 페어링은 두 기기에서 확인합니다.';
+
+  @override
+  String get pairingStateNotCompleted => '페어링이 완료되지 않음';
+
+  @override
+  String get pairingStepInvite => '초대';
+
+  @override
+  String get pairingStepScan => '스캔';
+
+  @override
+  String get pairingStepCode => '코드';
+
+  @override
+  String get pairingStepRequest => '요청';
+
+  @override
+  String get pairingStepConnect => '연결';
+
+  @override
+  String get pairingStepConfirm => '확인';
+
+  @override
+  String get pairingStepPaired => '페어링됨';
+
+  @override
+  String get pairingOtherDevice => '다른 기기';
+
+  @override
+  String get pairingDecisionNotConfirmed => '아직 확인되지 않음';
+
+  @override
+  String get pairingDecisionSending => '결정을 보내는 중…';
+
+  @override
+  String get pairingDecisionConfirmed => '확인됨';
+
+  @override
+  String get pairingDecisionRejected => '거부됨';
+
+  @override
+  String get pairingDecisionWaiting => '확인을 기다리는 중';
+
+  @override
+  String get pairingDecisionUnknown => '응답을 알 수 없음';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '기기 $count대',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count줄',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => '기본 탐색';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return '$count단계 중 $step단계: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => '다운로드';
+
+  @override
+  String get modulesPhaseInstall => '설치';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '$module 설치 중';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '$module 업데이트 중';
+  }
+
+  @override
+  String get commonDismiss => '닫기';
+
+  @override
+  String get settingsRetentionConfirmTitle => '오래된 기록을 제거하시겠습니까?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return '새 한도: $limit. 이보다 오래된 고정되지 않은 항목은 지금 이 기기에서 제거되며 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle => '저장 공간 할당량을 줄이시겠습니까?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return '새 할당량: $size. 고정되지 않은 기록이 이보다 많은 공간을 사용하면 가장 오래된 항목부터 지금 제거되며 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => '한도 적용';
+
+  @override
+  String get settingsHideEverywhereTitle => 'CopyPaste를 완전히 숨기시겠습니까?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      '둘 다 끄면 CopyPaste 아이콘이 어디에도 표시되지 않습니다. 다시 열려면 CopyPaste를 다시 실행하십시오.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return '둘 다 끄면 CopyPaste 아이콘이 어디에도 표시되지 않습니다. 다시 열려면 $shortcut 키를 누르거나 CopyPaste를 다시 실행하십시오.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => '숨기기';
+
+  @override
+  String get settingsExportDoneTitle => '텍스트 기록을 내보냈습니다';
+
+  @override
+  String get settingsBackupDoneTitle => '백업을 생성했습니다';
+
+  @override
+  String get settingsRestoreDoneTitle => '기록을 복원했습니다';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '텍스트 클립 $count개를 내보냈습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개는 읽을 수 없었습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return '암호화된 백업을 저장했습니다 · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage => '이 기기의 클립보드 기록이 백업 내용으로 바뀌었습니다.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used / $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$quota 중 $used 사용';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used 사용';
+  }
+
+  @override
+  String get storageUsageOverQuota => '할당량 초과';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return '가장 오래된 클립: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return '저장 공간: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return '새 할당량: $size. 고정되지 않은 기록이 $used를 사용하므로 할당량에 맞을 때까지 가장 오래된 클립부터 지금 제거됩니다. 제거된 클립은 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개',
+    );
+    return '$_temp0';
+  }
 }

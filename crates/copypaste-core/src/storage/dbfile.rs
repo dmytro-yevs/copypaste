@@ -14,10 +14,14 @@
 use std::io::Write;
 use std::path::Path;
 
+use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
-use super::connection::{apply_connection_pragmas, apply_key, validate_key};
+use super::connection::{apply_connection_pragmas, apply_key, run_pragma, validate_key};
+
+/// Pages one backup step copies: 1 MiB at the default page size.
+const BACKUP_STEP_PAGES: i32 = 256;
 use super::content_bytes::content_bytes_sql;
 use super::model::{stored_item_columns, StoreError};
 
@@ -176,21 +180,52 @@ pub fn attach_key_literal(db_key: &[u8; 32]) -> Zeroizing<String> {
 }
 
 impl super::Store {
-    /// Write a consistent encrypted snapshot of the database to `dest`.
+    /// Copy a consistent encrypted snapshot of the database into the empty
+    /// file at `dest`, reporting copied and total pages after every step.
     ///
-    /// `VACUUM INTO` rather than a file copy: it takes the snapshot through the
-    /// pager while other connections are writing, and under SQLCipher the copy
-    /// carries the same key — so a backup is as unreadable without the device
-    /// secret as the original.
-    ///
-    /// SQLite refuses to write onto an existing file, which is the guard that
-    /// matters: the obvious mistake is naming the live database, and a copy
-    /// onto it would be a wipe. A caller that wants a nicer message should
-    /// check first; this cannot destroy data either way.
-    pub fn backup_to(&self, dest: &Path) -> Result<(), StoreError> {
+    /// SQLite's online backup keyed with `db_key`, so the copy is as unreadable
+    /// without the device secret as the original. The source holds one read
+    /// transaction throughout: concurrent writes neither enter the copy nor
+    /// restart it. `progress` returning `false` stops the copy with
+    /// [`std::io::ErrorKind::Interrupted`], leaving `dest` incomplete for the
+    /// caller to discard.
+    pub fn backup_to(
+        &self,
+        dest: &Path,
+        db_key: &[u8; 32],
+        mut progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<(), StoreError> {
+        // Never onto existing content: the obvious mistake is naming the live
+        // database, and a copy onto it would be a wipe.
+        if std::fs::metadata(dest).is_ok_and(|metadata| metadata.len() > 0) {
+            return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into());
+        }
         let conn = self.conn()?;
-        conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])?;
-        Ok(())
+        let snapshot = conn.unchecked_transaction()?;
+        snapshot.query_row("SELECT count(*) FROM sqlite_schema", [], |_| Ok(()))?;
+        let mut target = Connection::open_with_flags(
+            dest,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        apply_key(&target, db_key)?;
+        run_pragma(&target, "PRAGMA journal_mode = OFF")?;
+        let backup = Backup::new(&snapshot, &mut target)?;
+        loop {
+            let step = backup.step(BACKUP_STEP_PAGES)?;
+            let pages = backup.progress();
+            let total = u64::try_from(pages.pagecount).unwrap_or(0);
+            let remaining = u64::try_from(pages.remaining).unwrap_or(0);
+            if !progress(total.saturating_sub(remaining), total) {
+                return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+            }
+            match step {
+                StepResult::Done => return Ok(()),
+                StepResult::More => {}
+                _ => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
     }
 
     /// Stage and validate a same-device encrypted backup, then atomically replace history.
@@ -496,7 +531,7 @@ mod tests {
         store.insert(item("worth keeping", T0)).unwrap();
 
         let dest = dir.path().join("history.backup");
-        store.backup_to(&dest).unwrap();
+        store.backup_to(&dest, &KEY, |_, _| true).unwrap();
         assert!(dest.is_file());
 
         let restored = Store::open(&dest, &KEY).unwrap();
@@ -514,7 +549,7 @@ mod tests {
         let (store, path) = file_store(&dir);
         store.insert(item("still here", T0)).unwrap();
 
-        assert!(store.backup_to(&path).is_err());
+        assert!(store.backup_to(&path, &KEY, |_, _| true).is_err());
         assert_eq!(store.count().unwrap(), 1, "the database was damaged");
     }
 
@@ -545,7 +580,7 @@ mod tests {
         let (store, path) = file_store(&dir);
         store.insert(item("attached", T0)).unwrap();
         let other = dir.path().join("second.db");
-        store.backup_to(&other).unwrap();
+        store.backup_to(&other, &KEY, |_, _| true).unwrap();
 
         let conn = open_validated(&path, &KEY).unwrap();
         let attach = format!(
@@ -567,7 +602,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         store.insert(item("backup row", T0)).unwrap();
         let backup = dir.path().join("history.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
         store.insert(item("later row", T0 + 1)).unwrap();
         let generation = store.resource_revisions().unwrap().generation;
         store
@@ -596,7 +631,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         store.insert(item("backup row", T0)).unwrap();
         let backup = dir.path().join("history.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
 
         let candidate = open_validated(&backup, &KEY).unwrap();
         candidate
@@ -632,7 +667,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         store.insert(item("restored payload", T0)).unwrap();
         let backup = dir.path().join("drifted.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
 
         // Corrupt the source's derived column the way a stale writer would.
         let conn = open_validated(&backup, &KEY).unwrap();
@@ -662,7 +697,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         store.insert(item("backup row", T0)).unwrap();
         let backup = dir.path().join("invalid-schema.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
 
         let conn = open_validated(&backup, &KEY).unwrap();
         conn.execute("CREATE TABLE future_schema_object (value INTEGER)", [])
@@ -683,7 +718,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         let identity = store.device_identity("Backup name").unwrap();
         let backup = dir.path().join("old-name.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
         store
             .set_device_name(&identity.device_id, "Current name")
             .unwrap();
@@ -703,7 +738,7 @@ mod tests {
         let (store, _path) = file_store(&dir);
         let restored = store.insert(item("AKIAIOSFODNN7EXAMPLE", T0)).unwrap();
         let backup = dir.path().join("text-index.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
         store.delete_all().unwrap();
         store.restore_from(&backup, &KEY).unwrap();
         assert!(store.get(&restored.id).unwrap().is_some());
@@ -717,7 +752,7 @@ mod tests {
         store.device_identity("Backup name").unwrap();
         store.insert(item("restored row", T0)).unwrap();
         let backup = dir.path().join("rollback.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
 
         store.delete_all().unwrap();
         store.insert(item("live rollback anchor", T0 + 1)).unwrap();
@@ -788,7 +823,7 @@ mod tests {
         library_rows(&store, &clip.id);
         let before: Vec<i64> = RESTORED_TABLES.iter().map(|t| count(&store, t)).collect();
         let backup = dir.path().join("library.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
 
         store.delete_all().unwrap();
         assert_eq!(count(&store, "clip_local_state"), 0);
@@ -811,7 +846,7 @@ mod tests {
         let clip = store.insert(item("described", T0)).unwrap();
         library_rows(&store, &clip.id);
         let backup = dir.path().join("grant.backup");
-        store.backup_to(&backup).unwrap();
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
         store
             .conn()
             .unwrap()

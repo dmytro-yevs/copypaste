@@ -132,6 +132,49 @@ abstract final class DesktopShortcutId {
   static const quickPaste = 'copypaste.quick-paste';
 }
 
+enum DesktopShortcutRefusalReason { inUse, rejected }
+
+/// A global shortcut the system refused, as opposed to a registration that
+/// failed for any other reason.
+class DesktopShortcutRefusal {
+  const DesktopShortcutRefusal(this.shortcut, this.reason);
+
+  // macOS eventHotKeyExistsErr and Windows ERROR_HOTKEY_ALREADY_REGISTERED.
+  static const _macosInUseStatus = -9878;
+  static const _windowsInUseError = 1409;
+
+  final DesktopShortcut shortcut;
+  final DesktopShortcutRefusalReason reason;
+
+  /// The refusal a registrar [error] reports, or null for any other failure.
+  static DesktopShortcutRefusalReason? reasonOf(Object error) {
+    if (error is! PlatformException) return null;
+    final details = error.details;
+    final macosStatus = details is Map ? details['osStatus'] : null;
+    final windowsError = details is Map ? details['win32Error'] : null;
+    return switch (error.code) {
+      'hotkey_registration_failed'
+          when macosStatus == _macosInUseStatus ||
+              windowsError == _windowsInUseError =>
+        DesktopShortcutRefusalReason.inUse,
+      'hotkey_registration_failed' when windowsError != null =>
+        DesktopShortcutRefusalReason.rejected,
+      'reserved_hotkey' ||
+      'shortcut_registration_failed' => DesktopShortcutRefusalReason.rejected,
+      _ => null,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DesktopShortcutRefusal &&
+      other.shortcut == shortcut &&
+      other.reason == reason;
+
+  @override
+  int get hashCode => Object.hash(shortcut, reason);
+}
+
 /// Another application shortcut already holds the requested key combination.
 class DesktopShortcutConflict implements Exception {
   const DesktopShortcutConflict(this.heldBy);

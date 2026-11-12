@@ -4,6 +4,7 @@ import 'package:pub_semver/pub_semver.dart';
 import '../../../l10n/l10n.dart';
 import '../models/module_marketplace_models.dart';
 import '../models/module_models.dart';
+import '../models/module_operation.dart';
 import '../repository/module_marketplace_repository.dart';
 import '../repository/modules_repository.dart';
 import '../repository/module_access_repository.dart';
@@ -54,16 +55,17 @@ class ModulesController extends ChangeNotifier {
   bool _catalogRequested = false;
   String _query = '';
   String? _activeModuleId;
-  double? _downloadProgress;
-  bool _installing = false;
+  ModuleOperation? _operation;
   bool _configuringModel = false;
   bool get configuringModel => _configuringModel;
   ModulesSection get section => _section;
   ModulesLoadState get catalogState => _catalogState;
   String? get catalogError => _catalogError;
   String? get activeModuleId => _activeModuleId;
-  double? get downloadProgress => _downloadProgress;
-  bool get installing => _installing;
+
+  /// The running install or update of [id], or its last failed attempt.
+  ModuleOperation? operationFor(String id) =>
+      _operation?.moduleId == id ? _operation : null;
   String get query => _query;
   List<MarketplaceModule> get catalog => List.unmodifiable(
     _catalog.where((module) => _matches(module.title, module.description)),
@@ -183,35 +185,43 @@ class ModulesController extends ChangeNotifier {
       return;
     }
     _activeModuleId = module.id;
-    _downloadProgress = 0;
-    _installing = false;
+    var operation = ModuleOperation.started(
+      moduleId: module.id,
+      kind: installed == null
+          ? ModuleOperationKind.install
+          : ModuleOperationKind.update,
+      totalBytes: module.artifact!.sizeBytes,
+    );
+    _operation = operation;
+    var installedPackage = false;
     try {
       await _perform(() async {
         final package = await _marketplace.download(
           module,
           onProgress: (progress) {
             if (_disposed) return;
-            final bounded = progress.clamp(0.0, 1.0);
-            if ((_downloadProgress! * 100).floor() == (bounded * 100).floor()) {
-              return;
-            }
-            _downloadProgress = bounded;
+            final next = operation.downloadedTo(progress);
+            if (identical(next, operation)) return;
+            _operation = operation = next;
             notifyListeners();
           },
         );
         try {
           if (_disposed) return;
-          _installing = true;
+          _operation = operation = operation.installing();
           notifyListeners();
           await _repository.install(package.path);
+          installedPackage = true;
         } finally {
           await package.dispose();
         }
       });
     } finally {
       _activeModuleId = null;
-      _downloadProgress = null;
-      _installing = false;
+      // A failure after activation is not a failed install phase.
+      _operation = _error != null && !installedPackage && !_disposed
+          ? operation.failedInPhase()
+          : null;
       if (!_disposed) notifyListeners();
     }
   }
@@ -322,6 +332,7 @@ class ModulesController extends ChangeNotifier {
     if (_busy || _disposed) return null;
     _busy = true;
     _error = null;
+    if (_operation?.failed ?? false) _operation = null;
     notifyListeners();
     T? result;
     try {

@@ -2,6 +2,8 @@ import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../app/shell/header_action_content.dart';
+import '../../app/shell/header_fit.dart';
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
@@ -41,14 +43,22 @@ class _NotificationsHeaderActionState extends State<NotificationsHeaderAction> {
       ),
       child: Button.secondary(
         key: const ValueKey('notifications-open'),
-        style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
+        style: AppTheme.headerActionButtonStyle(
+          const ButtonStyle.secondaryIcon(),
+        ),
         onPressed: _open,
-        child: AppIconFrame(
-          child: Icon(
-            widget.controller.unread > 0
-                ? LucideIcons.bellDot
-                : LucideIcons.bell,
+        child: HeaderActionContent(
+          icon: AppIconFrame(
+            child: Icon(
+              widget.controller.unread > 0
+                  ? LucideIcons.bellDot
+                  : LucideIcons.bell,
+            ),
           ),
+          label: widget.controller.unread > 0
+              ? '${widget.controller.unread}'
+              : null,
+          labelUntil: HeaderStage.bottomNavigation,
         ),
       ),
     ),

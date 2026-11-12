@@ -483,7 +483,9 @@ fn encrypted_backup_restores_tag_catalogue_assignments_and_pins() {
     assign(&store, &key, &id, &work, true);
     let directory = tempfile::tempdir().unwrap();
     let backup = directory.path().join("history.db");
-    store.backup_to(&backup).unwrap();
+    store
+        .backup_to(&backup, &key.db_key(), |_, _| true)
+        .unwrap();
     store
         .mutate_history_tags(
             &key.item_key(),

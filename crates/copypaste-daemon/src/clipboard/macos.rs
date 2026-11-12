@@ -256,16 +256,6 @@ impl ClipboardSource for MacOsClipboard {
                                 copypaste_ipc::content_type::TEXT,
                             ),
                             (
-                                &utis.rtf_probe,
-                                &utis.rtf,
-                                copypaste_ipc::content_type::RICH_TEXT,
-                            ),
-                            (
-                                &utis.html_probe,
-                                &utis.html,
-                                copypaste_ipc::content_type::HTML,
-                            ),
-                            (
                                 &utis.png_probe,
                                 &utis.png,
                                 copypaste_ipc::content_type::IMAGE_PNG,
@@ -274,6 +264,16 @@ impl ClipboardSource for MacOsClipboard {
                                 &utis.tiff_probe,
                                 &utis.tiff,
                                 copypaste_ipc::content_type::IMAGE_TIFF,
+                            ),
+                            (
+                                &utis.rtf_probe,
+                                &utis.rtf,
+                                copypaste_ipc::content_type::RICH_TEXT,
+                            ),
+                            (
+                                &utis.html_probe,
+                                &utis.html,
+                                copypaste_ipc::content_type::HTML,
                             ),
                         ] {
                             if !read_valid() {
@@ -860,6 +860,28 @@ mod tests {
         let capture = clipboard.poll().expect("plain text must win when offered");
         assert_eq!(capture.content, "plain fallback");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn an_image_wins_over_formatted_text_without_plain_text() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let image = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        // What a browser publishes for a copied image.
+        write_types(&[
+            (UTI_HTML, b"<img src=\"blob:https://example.invalid/1\"/>"),
+            (UTI_PNG, &image),
+        ]);
+        assert!(offers(UTI_HTML) && offers(UTI_PNG));
+        assert!(!offers(UTI_TEXT), "Cocoa derived plain text from HTML");
+        let capture = clipboard.poll().expect("the image must be captured");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::IMAGE_PNG);
+        assert_eq!(capture.binary_content.as_deref(), Some(image.as_slice()));
     }
 
     #[test]

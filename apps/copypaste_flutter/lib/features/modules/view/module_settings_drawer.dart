@@ -9,6 +9,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
+import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/forms/dynamic_form_draft.dart';
 import '../../../shared/forms/dynamic_form_fields.dart';
@@ -98,6 +99,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
     },
     child: Focus(
       autofocus: true,
+      skipTraversal: true,
       child: AnimatedBuilder(
         animation: Listenable.merge([controller, _draft]),
         builder: (context, _) {
@@ -329,6 +331,6 @@ Widget? _searchModelNote(BuildContext context, ModuleSearchModel? model) =>
             ? context.l10n.modulesModelReady(model.title)
             : context.l10n.modulesModelDownload(
                 model.title,
-                (model.sizeBytes / (1024 * 1024)).toStringAsFixed(1),
+                formatSizeNumber(model.sizeBytes / (1024 * 1024)),
               ),
       ).small().muted();

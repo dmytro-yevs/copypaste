@@ -116,10 +116,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsRuntimeExcludedAppsLimit => '除外できるアプリは 256 個までです。';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Quick Paste を準備できませんでした。';
-
-  @override
   String get settingsRuntimeAutoPasteUpdateFailed => '自動ペーストを更新できませんでした。';
 
   @override
@@ -1047,19 +1043,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsRestoreFailed => 'バックアップを復元できませんでした。';
 
   @override
-  String get settingsExportIncompleteTitle => 'テキストのエクスポートが完了していません';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved。$omissions。';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first。$second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => '同期';
 
   @override
@@ -1395,51 +1378,6 @@ class AppLocalizationsJa extends AppLocalizations {
       count,
       locale: localeName,
       other: '$count 日',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'テキストクリップ $count 件を保存しました',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'テキスト以外のクリップ $count 件を除外しました',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'テキストクリップ $count 件を読み取れませんでした',
     );
     return '$_temp0';
   }
@@ -2589,12 +2527,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get appWindowSetupTitle => 'ウインドウの設定に確認が必要です';
 
   @override
-  String get appCollapseNavigation => 'ナビゲーションを折りたたむ';
-
-  @override
-  String get appExpandNavigation => 'ナビゲーションを展開';
-
-  @override
   String get appOpenHistory => '履歴を開く';
 
   @override
@@ -2676,16 +2608,6 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
-  }
-
-  @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
   }
 
   @override
@@ -3125,14 +3047,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get modulesDownloadingModel => '言語モデルをダウンロードしています…';
 
   @override
-  String get modulesInstalling => 'インストール中…';
-
-  @override
-  String modulesDownloadingProgress(int percent) {
-    return 'ダウンロード中 $percent%';
-  }
-
-  @override
   String get modulesRun => '実行';
 
   @override
@@ -3416,4 +3330,263 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get deviceAuthNotConfigured => '先にデバイスのパスワード、PIN、または生体認証を設定してください';
+
+  @override
+  String get commonOn => 'オン';
+
+  @override
+  String get commonOff => 'オフ';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste を開始できなかったため、ショートカットは機能しません。';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut は別のアプリで使用されています。別のショートカットを選択してください。';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'ほかのデバイスはまだペアリングされていません';
+
+  @override
+  String get devicesEmptyMessage =>
+      '別のデバイスをペアリングすると、デバイス間でクリップボード履歴が同期されます。両方のデバイスが同じネットワーク上にある必要があり、ペアリングは両方のデバイスで確認します。';
+
+  @override
+  String get pairingStateNotCompleted => 'ペアリングは完了しませんでした';
+
+  @override
+  String get pairingStepInvite => '招待';
+
+  @override
+  String get pairingStepScan => 'スキャン';
+
+  @override
+  String get pairingStepCode => 'コード';
+
+  @override
+  String get pairingStepRequest => 'リクエスト';
+
+  @override
+  String get pairingStepConnect => '接続';
+
+  @override
+  String get pairingStepConfirm => '確認';
+
+  @override
+  String get pairingStepPaired => 'ペアリング済み';
+
+  @override
+  String get pairingOtherDevice => 'もう一方のデバイス';
+
+  @override
+  String get pairingDecisionNotConfirmed => '未確認';
+
+  @override
+  String get pairingDecisionSending => '決定を送信しています…';
+
+  @override
+  String get pairingDecisionConfirmed => '確認済み';
+
+  @override
+  String get pairingDecisionRejected => '拒否済み';
+
+  @override
+  String get pairingDecisionWaiting => '確認を待っています';
+
+  @override
+  String get pairingDecisionUnknown => '回答は不明';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 台のデバイス',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 行',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'メインナビゲーション';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'ステップ $step/$count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'ダウンロード';
+
+  @override
+  String get modulesPhaseInstall => 'インストール';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '$module をインストール中';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '$module をアップデート中';
+  }
+
+  @override
+  String get commonDismiss => '閉じる';
+
+  @override
+  String get settingsRetentionConfirmTitle => '古い履歴を削除しますか？';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return '新しい上限：$limit。これより古いピン留めされていない項目は、このデバイスから今すぐ削除され、復元できません。ピン留めした項目は保持されます。';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle => 'ストレージの上限を下げますか？';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return '新しい上限：$size。ピン留めされていない履歴がこれを超えている場合、古い項目から今すぐ削除され、復元できません。ピン留めした項目は保持されます。';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => '上限を適用';
+
+  @override
+  String get settingsHideEverywhereTitle => 'CopyPaste を完全に非表示にしますか？';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      '両方をオフにすると、CopyPaste のアイコンはどこにも表示されません。再び開くには、CopyPaste をもう一度起動してください。';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return '両方をオフにすると、CopyPaste のアイコンはどこにも表示されません。再び開くには、$shortcut を押すか、CopyPaste をもう一度起動してください。';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => '非表示にする';
+
+  @override
+  String get settingsExportDoneTitle => 'テキスト履歴をエクスポートしました';
+
+  @override
+  String get settingsBackupDoneTitle => 'バックアップを作成しました';
+
+  @override
+  String get settingsRestoreDoneTitle => '履歴を復元しました';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'テキストクリップ $count 件をエクスポートしました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件は読み取れませんでした',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return '暗号化バックアップを保存しました · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'このデバイスのクリップボード履歴がバックアップの内容に置き換わりました。';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used / $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$quota 中 $used を使用';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used を使用';
+  }
+
+  @override
+  String get storageUsageOverQuota => '上限超過';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return '最も古いクリップ：$date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'ストレージ：$usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return '新しい上限：$size。ピン留めされていない履歴は $used を使用しているため、収まるまで古いクリップから今すぐ削除されます。削除したクリップは復元できません。ピン留めした項目は保持されます。';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '$_temp0';
+  }
 }

@@ -47,6 +47,7 @@ class FakeSettingsRepository implements SettingsRepository {
   int exportSkippedNonText = 1;
   int exportSkippedUndecryptable = 0;
   int backupCalls = 0;
+  List<(int, int)> transferSteps = const [];
   int restoreCalls = 0;
 
   @override
@@ -59,8 +60,14 @@ class FakeSettingsRepository implements SettingsRepository {
   }
 
   @override
-  Future<BackupResult> backupHistory(String path) async {
+  Future<BackupResult> backupHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
     backupCalls += 1;
+    for (final (processed, total) in transferSteps) {
+      onProgress?.call(processed, total);
+    }
     return const BackupResult(sizeBytes: 2048);
   }
 
@@ -68,8 +75,14 @@ class FakeSettingsRepository implements SettingsRepository {
   Future<CaptureSettingsState> captureState() async => capture;
 
   @override
-  Future<TextExportResult> exportTextHistory(String path) async {
+  Future<TextExportResult> exportTextHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
     exportCalls += 1;
+    for (final (processed, total) in transferSteps) {
+      onProgress?.call(processed, total);
+    }
     return TextExportResult(
       exported: 4,
       skippedNonText: exportSkippedNonText,
@@ -120,6 +133,7 @@ class FakeSettingsRepository implements SettingsRepository {
       notificationPreview:
           change.notificationPreview ?? currentSettings.notificationPreview,
       soundOnCopy: change.soundOnCopy ?? currentSettings.soundOnCopy,
+      storageUsage: currentSettings.storageUsage,
     );
     return currentSettings;
   }

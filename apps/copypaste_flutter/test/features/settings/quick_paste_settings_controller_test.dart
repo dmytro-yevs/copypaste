@@ -1,5 +1,6 @@
 import 'package:copypaste_flutter/features/settings/controller/quick_paste_settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
+import 'package:copypaste_flutter/features/settings/models/desktop_presence.dart';
 import 'package:copypaste_flutter/features/settings/repository/quick_paste_preferences_store.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/platform/desktop/global_shortcut.dart';
@@ -85,6 +86,175 @@ void main() {
     expect(store.value.shortcut, replacement);
     expect(registrar.registered, replacement);
     controller.dispose();
+  });
+
+  group('startup failures', () {
+    const replacement = DesktopShortcut(
+      key: PhysicalKeyboardKey.keyV,
+      modifiers: [DesktopShortcutModifier.alt, DesktopShortcutModifier.shift],
+    );
+    late _Registrar registrar;
+    late _WindowHost host;
+    late MemoryQuickPastePreferencesStore store;
+    late QuickPasteSettingsController controller;
+
+    setUp(() {
+      registrar = _Registrar();
+      host = _WindowHost()..permissionGranted = true;
+      store = MemoryQuickPastePreferencesStore();
+      controller = QuickPasteSettingsController(
+        store: store,
+        registrar: registrar,
+        windowHost: host,
+      );
+      addTearDown(controller.dispose);
+    });
+
+    test('a shortcut in use is reported on the shortcut only', () async {
+      registrar.nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'osStatus': -9878},
+      );
+
+      await controller.initialize();
+
+      expect(
+        controller.shortcutRefusal,
+        DesktopShortcutRefusal(
+          DesktopShortcut.defaultForPlatform(),
+          DesktopShortcutRefusalReason.inUse,
+        ),
+      );
+      expect(controller.supported, isTrue);
+      expect(controller.errorMessage, isNull);
+      expect(controller.startFailed, isFalse);
+      expect(controller.accessibilityGranted, isTrue);
+
+      expect(await controller.setShortcut(replacement), isTrue);
+      expect(controller.shortcutRefusal, isNull);
+      expect(registrar.registered, replacement);
+    });
+
+    test('a rejected change keeps the saved shortcut working', () async {
+      await controller.initialize();
+      registrar.nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'win32Error': 87},
+      );
+
+      expect(await controller.setShortcut(replacement), isFalse);
+
+      expect(
+        controller.shortcutRefusal,
+        const DesktopShortcutRefusal(
+          replacement,
+          DesktopShortcutRefusalReason.rejected,
+        ),
+      );
+      expect(controller.errorMessage, isNull);
+      expect(registrar.registered, DesktopShortcut.defaultForPlatform());
+      expect(store.value.shortcut, DesktopShortcut.defaultForPlatform());
+    });
+
+    test('an unsupported system is not an error', () async {
+      host.supported = false;
+
+      await controller.initialize();
+
+      expect(controller.supported, isFalse);
+      expect(controller.startFailed, isFalse);
+      expect(controller.errorMessage, isNull);
+      expect(registrar.registerCalls, 0);
+    });
+
+    test('an unexpected failure is logged and can be retried', () async {
+      final logs = <String?>[];
+      final previous = debugPrint;
+      debugPrint = (message, {wrapWidth}) => logs.add(message);
+      addTearDown(() => debugPrint = previous);
+      registrar.nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'osStatus': -50},
+      );
+
+      await controller.initialize();
+
+      expect(controller.startFailed, isTrue);
+      expect(controller.shortcutRefusal, isNull);
+      expect(
+        controller.errorMessage,
+        'Quick Paste could not start, so its shortcut does not work.',
+      );
+      expect(logs.single, contains('osStatus: -50'));
+
+      await controller.retry();
+
+      expect(controller.startFailed, isFalse);
+      expect(controller.errorMessage, isNull);
+      expect(registrar.registered, DesktopShortcut.defaultForPlatform());
+    });
+  });
+
+  testWidgets('a shortcut in use is a warning in the shortcut row', (
+    tester,
+  ) async {
+    final registrar = _Registrar()
+      ..nextRegisterError = PlatformException(
+        code: 'hotkey_registration_failed',
+        details: {'osStatus': -9878},
+      );
+    final controller = QuickPasteSettingsController(
+      store: MemoryQuickPastePreferencesStore(),
+      registrar: registrar,
+      windowHost: _WindowHost()..permissionGranted = true,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+    final settingsController = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: FakeSettingsRepository(),
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: Duration.zero,
+    );
+    await settingsController.initialize();
+    addTearDown(settingsController.dispose);
+
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: SettingsScreen(
+          controller: settingsController,
+          quickPaste: controller,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-quick-paste')),
+        matching: find.text('Quick Paste'),
+      ),
+    );
+    await tester.pump();
+
+    final shortcut = DesktopPresence.shortcutText(
+      DesktopShortcut.defaultForPlatform().displayKeys,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-row-Open Quick Paste')),
+        matching: find.textContaining(
+          '$shortcut is used by another app. Choose another shortcut.',
+          findRichText: true,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byWidgetPredicate((widget) => widget is Alert && widget.destructive),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   test('rejects modifier-only shortcuts', () {
@@ -332,6 +502,7 @@ void main() {
 
 class _Registrar implements DesktopShortcutRegistrar {
   bool failRegister = false;
+  Object? nextRegisterError;
   DesktopShortcut? registered;
   int registerCalls = 0;
   int unregisterCalls = 0;
@@ -344,6 +515,10 @@ class _Registrar implements DesktopShortcutRegistrar {
     required String description,
   }) async {
     if (failRegister) throw PlatformException(code: 'registration_failed');
+    if (nextRegisterError case final error?) {
+      nextRegisterError = null;
+      throw error;
+    }
     registerCalls += 1;
     registered = shortcut;
   }
@@ -356,6 +531,7 @@ class _Registrar implements DesktopShortcutRegistrar {
 }
 
 class _WindowHost implements QuickPasteWindowHost {
+  bool supported = true;
   bool failPermission = false;
   int prepareCalls = 0;
   int permissionRequests = 0;
@@ -368,7 +544,7 @@ class _WindowHost implements QuickPasteWindowHost {
   Future<void> dispose() async {}
 
   @override
-  Future<bool> isSupported() async => true;
+  Future<bool> isSupported() async => supported;
 
   @override
   Future<void> open() async {}

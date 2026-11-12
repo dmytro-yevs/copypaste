@@ -183,13 +183,19 @@ class _RetainedDestinationState extends State<_RetainedDestination>
         widget.controller.visualPosition,
       ]),
       child: widget.child,
-      builder: (context, child) => TickerMode(
-        enabled:
-            widget.controller.selectedDestination == widget.destination ||
-            (widget.controller.visualPosition.value - widget.destination.index)
-                    .abs() <
-                1,
-        child: child!,
+      // A focused field in a hidden destination would take typing and pull
+      // its page back into view.
+      builder: (context, child) => ExcludeFocus(
+        excluding: widget.controller.selectedDestination != widget.destination,
+        child: TickerMode(
+          enabled:
+              widget.controller.selectedDestination == widget.destination ||
+              (widget.controller.visualPosition.value -
+                          widget.destination.index)
+                      .abs() <
+                  1,
+          child: child!,
+        ),
       ),
     );
   }

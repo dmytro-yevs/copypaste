@@ -122,10 +122,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Можна виключити до 256 програм.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Не вдалося підготувати Quick Paste.';
-
-  @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
       'Не вдалося змінити автовставлення.';
 
@@ -1140,19 +1136,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsRestoreFailed => 'Не вдалося відновити резервну копію.';
 
   @override
-  String get settingsExportIncompleteTitle => 'Експорт тексту неповний';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved; $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first і $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => 'Синхронізація';
 
   @override
@@ -1512,60 +1495,6 @@ class AppLocalizationsUk extends AppLocalizations {
       many: '$count днів',
       few: '$count дні',
       one: '$count день',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size ГБ';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size МіБ';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size ГіБ';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count текстового кліпу збережено',
-      many: '$count текстових кліпів збережено',
-      few: '$count текстові кліпи збережено',
-      one: '$count текстовий кліп збережено',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count нетекстового кліпу виключено',
-      many: '$count нетекстових кліпів виключено',
-      few: '$count нетекстові кліпи виключено',
-      one: '$count нетекстовий кліп виключено',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count текстового кліпу не вдалося прочитати',
-      many: '$count текстових кліпів не вдалося прочитати',
-      few: '$count текстові кліпи не вдалося прочитати',
-      one: '$count текстовий кліп не вдалося прочитати',
     );
     return '$_temp0';
   }
@@ -2798,12 +2727,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get appWindowSetupTitle => 'Налаштування вікна потребує уваги';
 
   @override
-  String get appCollapseNavigation => 'Згорнути навігацію';
-
-  @override
-  String get appExpandNavigation => 'Розгорнути навігацію';
-
-  @override
   String get appOpenHistory => 'Відкрити Історію';
 
   @override
@@ -2889,16 +2812,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size Б';
-  }
-
-  @override
-  String sharedSizeKilobytes(String size) {
-    return '$size КБ';
-  }
-
-  @override
-  String sharedSizeMegabytes(String size) {
-    return '$size МБ';
   }
 
   @override
@@ -3365,14 +3278,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesDownloadingModel => 'Завантаження мовної моделі…';
 
   @override
-  String get modulesInstalling => 'Встановлення…';
-
-  @override
-  String modulesDownloadingProgress(int percent) {
-    return 'Завантаження $percent%';
-  }
-
-  @override
   String get modulesRun => 'Виконати';
 
   @override
@@ -3677,4 +3582,275 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get deviceAuthNotConfigured =>
       'Спершу налаштуйте пароль, PIN-код або біометрію пристрою';
+
+  @override
+  String get commonOn => 'Увімкнено';
+
+  @override
+  String get commonOff => 'Вимкнено';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Не вдалося запустити Quick Paste, тому його скорочення не працює.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut використовує інша програма. Виберіть інше скорочення.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'Інших пристроїв ще не сполучено';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Сполучіть інший пристрій, щоб синхронізувати між ними історію буфера обміну. Обидва пристрої мають бути в одній мережі, а кожне сполучення підтверджується на обох пристроях.';
+
+  @override
+  String get pairingStateNotCompleted => 'Сполучення не завершено';
+
+  @override
+  String get pairingStepInvite => 'Запрошення';
+
+  @override
+  String get pairingStepScan => 'Сканування';
+
+  @override
+  String get pairingStepCode => 'Код';
+
+  @override
+  String get pairingStepRequest => 'Запит';
+
+  @override
+  String get pairingStepConnect => 'З’єднання';
+
+  @override
+  String get pairingStepConfirm => 'Підтвердження';
+
+  @override
+  String get pairingStepPaired => 'Сполучено';
+
+  @override
+  String get pairingOtherDevice => 'Інший пристрій';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Ще не підтверджено';
+
+  @override
+  String get pairingDecisionSending => 'Надсилання рішення…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Підтверджено';
+
+  @override
+  String get pairingDecisionRejected => 'Відхилено';
+
+  @override
+  String get pairingDecisionWaiting => 'Очікування підтвердження';
+
+  @override
+  String get pairingDecisionUnknown => 'Відповідь невідома';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count пристрою',
+      many: '$count пристроїв',
+      few: '$count пристрої',
+      one: '$count пристрій',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count рядка',
+      many: '$count рядків',
+      few: '$count рядки',
+      one: '$count рядок',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Головна навігація';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Крок $step з $count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'Завантаження';
+
+  @override
+  String get modulesPhaseInstall => 'Встановлення';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Встановлення модуля $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Оновлення модуля $module';
+  }
+
+  @override
+  String get commonDismiss => 'Закрити';
+
+  @override
+  String get settingsRetentionConfirmTitle => 'Вилучити старішу історію?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'Нове обмеження: $limit. Старіші незакріплені елементи буде зараз вилучено з цього пристрою, і відновити їх неможливо. Закріплені елементи збережуться.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle => 'Зменшити квоту сховища?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'Нова квота: $size. Якщо незакріплена історія займає більше, найстаріші елементи буде зараз вилучено, і відновити їх неможливо. Закріплені елементи збережуться.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Застосувати обмеження';
+
+  @override
+  String get settingsHideEverywhereTitle => 'Повністю приховати CopyPaste?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'Коли обидва параметри вимкнено, CopyPaste не має видимого значка. Щоб відкрити його знову, запустіть CopyPaste ще раз.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'Коли обидва параметри вимкнено, CopyPaste не має видимого значка. Щоб відкрити його знову, натисніть $shortcut або запустіть CopyPaste ще раз.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Приховати';
+
+  @override
+  String get settingsExportDoneTitle => 'Текстову історію експортовано';
+
+  @override
+  String get settingsBackupDoneTitle => 'Резервну копію створено';
+
+  @override
+  String get settingsRestoreDoneTitle => 'Історію відновлено';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Експортовано $count текстового кліпу',
+      many: 'Експортовано $count текстових кліпів',
+      few: 'Експортовано $count текстові кліпи',
+      one: 'Експортовано $count текстовий кліп',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count не вдалося прочитати',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Зашифровану резервну копію збережено · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'Історія буфера обміну на цьому пристрої тепер відповідає резервній копії.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size КіБ';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size МіБ';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size ГіБ';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used з $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return 'Використано $used з $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return 'Використано $used';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Квоту перевищено';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'Найстаріший кліп: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Сховище: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'Нова квота: $size. Незакріплена історія займає $used, тож її найстаріші кліпи буде зараз вилучено, доки вона не вміститься. Відновити їх неможливо. Закріплені елементи збережуться.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count кліпу',
+      many: '$count кліпів',
+      few: '$count кліпи',
+      one: '$count кліп',
+    );
+    return '$_temp0';
+  }
 }

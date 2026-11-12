@@ -56,6 +56,12 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         await tester.tap(tray);
         await tester.pump(const Duration(milliseconds: 300));
+        // Hiding the last icon asks first and names the way back.
+        expect(find.text('Hide CopyPaste completely?'), findsOneWidget);
+        expect(find.textContaining('start CopyPaste again'), findsOneWidget);
+        expect(host.tray, isTrue);
+        await tester.tap(find.text('Hide'));
+        await tester.pump(const Duration(milliseconds: 300));
         expect(tester.widget<Switch>(taskbar).value, isFalse);
         expect(tester.widget<Switch>(tray).value, isFalse);
         expect(host.taskbar, isFalse);

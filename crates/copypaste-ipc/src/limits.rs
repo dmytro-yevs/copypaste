@@ -297,6 +297,7 @@ mod tests {
             source_app_bundle_id: None,
             source_app_name: None,
             source_app_icon_id: None,
+            line_count: Some(u32::MAX),
             ..Item::default()
         }
     }

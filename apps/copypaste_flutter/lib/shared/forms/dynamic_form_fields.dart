@@ -2,6 +2,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_icon_frame.dart';
 import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_switch_frame.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../l10n/l10n.dart';
@@ -40,12 +41,22 @@ class DynamicFormFields extends StatelessWidget {
         ],
         for (final field in draft.fields) ...[
           if (field.kind == DynamicFormFieldKind.boolean)
-            Switch(
-              value: draft.values[field.id] as bool,
-              leading: Text(field.title),
-              onChanged: enabled
-                  ? (value) => draft.setValue(field.id, value)
-                  : null,
+            MergeSemantics(
+              child: Row(
+                children: [
+                  Expanded(child: Text(field.title)),
+                  const Gap(AppSpacing.md),
+                  AppSwitchFrame(
+                    child: Switch(
+                      value: draft.values[field.id] as bool,
+                      enabled: enabled,
+                      onChanged: enabled
+                          ? (value) => draft.setValue(field.id, value)
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
             )
           else ...[
             Text(field.title).small(),

@@ -8,8 +8,8 @@ import 'api/rules.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `request_data`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_text`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `request_data`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -152,10 +152,14 @@ Future<CloudAccountStatus> cloudSignOut() =>
 Future<CloudSyncSummary> cloudSyncNow() =>
     RustLib.instance.api.crateApiCloudSyncNow();
 
-Future<TextExportSummary> exportTextHistory({required String filePath}) =>
+/// Writes the text history to `file_path`, which must not exist, in this
+/// process, reporting progress at most every 250 ms.
+Stream<TextExportUpdate> exportTextHistory({required String filePath}) =>
     RustLib.instance.api.crateApiExportTextHistory(filePath: filePath);
 
-Future<BackupSummary> backupHistory({required String filePath}) =>
+/// Writes an encrypted backup to `file_path`, which must not exist, reporting
+/// progress at most every 250 ms.
+Stream<BackupUpdate> backupHistory({required String filePath}) =>
     RustLib.instance.api.crateApiBackupHistory(filePath: filePath);
 
 Future<void> restoreHistory({required String filePath}) =>
@@ -178,6 +182,15 @@ Future<ClipPage> queryClips({
   limit: limit,
   cursor: cursor,
 );
+
+/// Counts the pinned clips `query` lists and its unpinned clips in each
+/// range, from indexes only. `None` means the query has a filter that cannot
+/// be counted exactly (text search or a kind filter); it is never an estimate.
+Future<ClipGroupCounts?> countClipGroups({
+  required ClipQuery query,
+  required List<ClipCountRange> ranges,
+}) =>
+    RustLib.instance.api.crateApiCountClipGroups(query: query, ranges: ranges);
 
 Future<HistoryFacets> historyFacets() =>
     RustLib.instance.api.crateApiHistoryFacets();
@@ -409,6 +422,36 @@ class BackupSummary {
           sizeBytes == other.sizeBytes;
 }
 
+/// One update of a running backup: database pages copied of `total`. The last
+/// update carries the summary or the error, and the stream then ends.
+class BackupUpdate {
+  final BigInt processed;
+  final BigInt total;
+  final BackupSummary? summary;
+  final RuntimeError? error;
+
+  const BackupUpdate({
+    required this.processed,
+    required this.total,
+    this.summary,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      processed.hashCode ^ total.hashCode ^ summary.hashCode ^ error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BackupUpdate &&
+          runtimeType == other.runtimeType &&
+          processed == other.processed &&
+          total == other.total &&
+          summary == other.summary &&
+          error == other.error;
+}
+
 class CaptureState {
   final bool captureWatch;
   final BigInt captureRevision;
@@ -475,6 +518,9 @@ class Clip {
   final String? sourceAppName;
   final String? sourceAppIconId;
   final bool truncated;
+
+  /// Lines of the whole text when the runtime counted them.
+  final int? lineCount;
   final bool tooLargeToSync;
   final ClipFileDetails? fileDetails;
   final ClipImageDetails? imageDetails;
@@ -497,6 +543,7 @@ class Clip {
     this.sourceAppName,
     this.sourceAppIconId,
     required this.truncated,
+    this.lineCount,
     required this.tooLargeToSync,
     this.fileDetails,
     this.imageDetails,
@@ -521,6 +568,7 @@ class Clip {
       sourceAppName.hashCode ^
       sourceAppIconId.hashCode ^
       truncated.hashCode ^
+      lineCount.hashCode ^
       tooLargeToSync.hashCode ^
       fileDetails.hashCode ^
       imageDetails.hashCode ^
@@ -547,6 +595,7 @@ class Clip {
           sourceAppName == other.sourceAppName &&
           sourceAppIconId == other.sourceAppIconId &&
           truncated == other.truncated &&
+          lineCount == other.lineCount &&
           tooLargeToSync == other.tooLargeToSync &&
           fileDetails == other.fileDetails &&
           imageDetails == other.imageDetails &&
@@ -554,6 +603,26 @@ class Clip {
 }
 
 enum ClipContentClass { text, image, file, other }
+
+/// One displayed group of unpinned clips: `[from_ms, before_ms)` in Unix
+/// milliseconds, computed by the caller from its own calendar and time zone.
+class ClipCountRange {
+  final PlatformInt64 fromMs;
+  final PlatformInt64 beforeMs;
+
+  const ClipCountRange({required this.fromMs, required this.beforeMs});
+
+  @override
+  int get hashCode => fromMs.hashCode ^ beforeMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClipCountRange &&
+          runtimeType == other.runtimeType &&
+          fromMs == other.fromMs &&
+          beforeMs == other.beforeMs;
+}
 
 class ClipFileDetails {
   final String? filename;
@@ -592,6 +661,26 @@ class ClipFileDetails {
           sourceAvailable == other.sourceAvailable &&
           sizeBytes == other.sizeBytes &&
           fileCount == other.fileCount;
+}
+
+/// Exact sizes of the groups a History list shows; `ranges` follows the
+/// order of the request.
+class ClipGroupCounts {
+  final BigInt pinned;
+  final Uint64List ranges;
+
+  const ClipGroupCounts({required this.pinned, required this.ranges});
+
+  @override
+  int get hashCode => pinned.hashCode ^ ranges.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClipGroupCounts &&
+          runtimeType == other.runtimeType &&
+          pinned == other.pinned &&
+          ranges == other.ranges;
 }
 
 class ClipImageDetails {
@@ -1549,6 +1638,9 @@ class RuntimeSettingsData {
   final bool notificationPreview;
   final bool soundOnCopy;
 
+  /// Absent when the runtime did not report it; never an estimate.
+  final RuntimeStorageUsage? storageUsage;
+
   const RuntimeSettingsData({
     required this.maxFileSizeBytes,
     required this.skipSecret,
@@ -1562,6 +1654,7 @@ class RuntimeSettingsData {
     required this.notifyOnCopy,
     required this.notificationPreview,
     required this.soundOnCopy,
+    this.storageUsage,
   });
 
   @override
@@ -1577,7 +1670,8 @@ class RuntimeSettingsData {
       instantClipboard.hashCode ^
       notifyOnCopy.hashCode ^
       notificationPreview.hashCode ^
-      soundOnCopy.hashCode;
+      soundOnCopy.hashCode ^
+      storageUsage.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1595,7 +1689,8 @@ class RuntimeSettingsData {
           instantClipboard == other.instantClipboard &&
           notifyOnCopy == other.notifyOnCopy &&
           notificationPreview == other.notificationPreview &&
-          soundOnCopy == other.soundOnCopy;
+          soundOnCopy == other.soundOnCopy &&
+          storageUsage == other.storageUsage;
 }
 
 /// Safe diagnostic context for settings that were recovered with protective
@@ -1685,6 +1780,33 @@ class RuntimeSettingsPatch {
           notifyOnCopy == other.notifyOnCopy &&
           notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;
+}
+
+/// History weighed against the storage quota, from one settings reply.
+/// Pinned clips are outside the quota and outside these values.
+class RuntimeStorageUsage {
+  final BigInt usedBytes;
+  final BigInt quotaBytes;
+  final PlatformInt64? oldestUnpinnedAtMs;
+
+  const RuntimeStorageUsage({
+    required this.usedBytes,
+    required this.quotaBytes,
+    this.oldestUnpinnedAtMs,
+  });
+
+  @override
+  int get hashCode =>
+      usedBytes.hashCode ^ quotaBytes.hashCode ^ oldestUnpinnedAtMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimeStorageUsage &&
+          runtimeType == other.runtimeType &&
+          usedBytes == other.usedBytes &&
+          quotaBytes == other.quotaBytes &&
+          oldestUnpinnedAtMs == other.oldestUnpinnedAtMs;
 }
 
 class RuntimeSyncIssue {
@@ -1901,6 +2023,36 @@ class TextExportSummary {
           exported == other.exported &&
           skippedNonText == other.skippedNonText &&
           skippedUndecryptable == other.skippedUndecryptable;
+}
+
+/// One update of a running text export: rows read of `total`. The last update
+/// carries the summary or the error, and the stream then ends.
+class TextExportUpdate {
+  final BigInt processed;
+  final BigInt total;
+  final TextExportSummary? summary;
+  final RuntimeError? error;
+
+  const TextExportUpdate({
+    required this.processed,
+    required this.total,
+    this.summary,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      processed.hashCode ^ total.hashCode ^ summary.hashCode ^ error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TextExportUpdate &&
+          runtimeType == other.runtimeType &&
+          processed == other.processed &&
+          total == other.total &&
+          summary == other.summary &&
+          error == other.error;
 }
 
 class ThisDevice {

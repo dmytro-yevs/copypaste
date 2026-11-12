@@ -9,15 +9,18 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/equal_height_grid.dart';
+import '../../../shared/step_progress.dart';
 import '../controller/modules_controller.dart';
 import '../../../shared/forms/dynamic_form_draft.dart';
 import '../../../shared/forms/dynamic_form_fields.dart';
 import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
+import '../models/module_operation.dart';
 import 'sms_access_setup_drawer.dart';
 import 'module_settings_drawer.dart';
 
@@ -87,6 +90,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           initialValue: controller.query,
           placeholder: Text(context.l10n.modulesSearchPlaceholder),
           onChanged: controller.search,
+          skipInputFeatureFocusTraversal: true,
           features: const [
             InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
             InputFeature.clear(),
@@ -192,6 +196,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     final size = installed == null
         ? marketplace!.downloadSize
         : formatBytes(installed.sizeBytes);
+    final toggleable =
+        installed != null &&
+        !controller.busy &&
+        installed.error == null &&
+        !installed.restartRequired;
     return Card(
       key: ValueKey('module-$id'),
       child: Column(
@@ -211,17 +220,21 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                     child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
                   ),
                   if (installed != null)
-                    Semantics(
-                      label: context.l10n.modulesEnableModule(installed.title),
-                      child: Switch(
-                        key: ValueKey('module-enabled-$id'),
-                        value: installed.enabled,
-                        onChanged:
-                            controller.busy ||
-                                installed.error != null ||
-                                installed.restartRequired
-                            ? null
-                            : (value) => controller.setEnabled(id, value),
+                    Flexible(
+                      child: Semantics(
+                        label: context.l10n.modulesEnableModule(
+                          installed.title,
+                        ),
+                        child: AppSwitchFrame(
+                          child: Switch(
+                            key: ValueKey('module-enabled-$id'),
+                            value: installed.enabled,
+                            enabled: toggleable,
+                            onChanged: toggleable
+                                ? (value) => controller.setEnabled(id, value)
+                                : null,
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -266,12 +279,15 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (active) ...[
-                    LinearProgressIndicator(
-                      value: controller.installing
-                          ? null
-                          : controller.downloadProgress,
+                  if (controller.operationFor(id) case final operation?) ...[
+                    _operationProgress(
+                      context,
+                      operation,
+                      installed?.title ?? marketplace!.title,
                     ),
+                    const Gap(AppSpacing.md),
+                  ] else if (active) ...[
+                    const LinearProgressIndicator(),
                     const Gap(AppSpacing.sm),
                   ],
                   if (installed == null)
@@ -280,11 +296,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                       onPressed: controller.busy || !marketplace!.canInstall
                           ? null
                           : () => controller.install(marketplace),
-                      child: Text(
-                        active
-                            ? _installationLabel(context)
-                            : context.l10n.modulesInstall,
-                      ),
+                      child: Text(context.l10n.modulesInstall),
                     )
                   else
                     Row(
@@ -375,13 +387,35 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     );
   }
 
-  String _installationLabel(BuildContext context) => controller.configuringModel
-      ? context.l10n.modulesDownloadingModel
-      : controller.installing
-      ? context.l10n.modulesInstalling
-      : context.l10n.modulesDownloadingProgress(
-          ((controller.downloadProgress ?? 0) * 100).floor(),
-        );
+  Widget _operationProgress(
+    BuildContext context,
+    ModuleOperation operation,
+    String title,
+  ) {
+    final strings = context.l10n;
+    return StepProgress(
+      key: ValueKey('module-progress-${operation.moduleId}'),
+      steps: [
+        for (final phase in ModuleOperationPhase.values)
+          switch (phase) {
+            ModuleOperationPhase.download => strings.modulesPhaseDownload,
+            ModuleOperationPhase.install => strings.modulesPhaseInstall,
+          },
+      ],
+      current: operation.phase.index,
+      failure: operation.failed ? strings.modulesOperationFailed : null,
+      value: operation.progress,
+      valueLabel: strings.transfersProgressPercent(operation.downloadPercent),
+      detail: strings.transfersBytesProgress(
+        formatBytes(operation.downloadedBytes),
+        formatBytes(operation.totalBytes),
+      ),
+      semanticLabel: switch (operation.kind) {
+        ModuleOperationKind.install => strings.modulesInstallingModule(title),
+        ModuleOperationKind.update => strings.modulesUpdatingModule(title),
+      },
+    );
+  }
 
   Future<void> _settings(BuildContext context, String id) => showOverlay<void>(
     context,
@@ -498,7 +532,10 @@ class _ModuleFieldsDialog extends StatelessWidget {
     builder: (context, _) => AppOverlays.alertDialog(
       icon: LucideIcons.puzzle,
       title: Text(title),
-      content: SingleChildScrollView(child: DynamicFormFields(draft: draft)),
+      content: SingleChildScrollView(
+        clipBehavior: Clip.none,
+        child: DynamicFormFields(draft: draft),
+      ),
       actions: [
         Button.ghost(
           style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_motion.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 
@@ -51,32 +54,77 @@ class SettingsGroup extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const Divider(),
-            children[i],
+          for (final (index, slot) in _slots().indexed) ...[
+            if (index > 0) const Divider(),
+            slot,
           ],
         ],
       ),
     );
   }
+
+  /// Rows divide the group; notices that follow each other share one slot,
+  /// inset like a row's content.
+  List<Widget> _slots() {
+    final slots = <Widget>[];
+    var notices = <Widget>[];
+    void closeNotices() {
+      if (notices.isEmpty) return;
+      slots.add(
+        Padding(
+          padding: AppTheme.settingsRowPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (index, notice) in notices.indexed) ...[
+                if (index > 0) const Gap(AppTheme.settingsBlockSpacing),
+                notice,
+              ],
+            ],
+          ),
+        ),
+      );
+      notices = [];
+    }
+
+    for (final child in children) {
+      if (child is Alert) {
+        notices.add(child);
+      } else {
+        closeNotices();
+        slots.add(child);
+      }
+    }
+    closeNotices();
+    return slots;
+  }
 }
 
 /// A setting title and description with its control.
 ///
-/// Controls other than a switch stack below the copy when space is narrow or
-/// text is scaled up.
+/// A switch stays beside the copy in a narrow row; other controls stack below
+/// the copy when space is narrow, and every control does when text is scaled
+/// up.
 class SettingRow extends StatelessWidget {
   const SettingRow({
     super.key,
     required this.title,
     required this.description,
-    required this.trailing,
+    this.trailing,
+    this.footer,
+    this.status,
     this.highlighted = false,
   });
 
   final String title;
   final String description;
-  final Widget trailing;
+  final Widget? trailing;
+
+  /// The current state of what the row sets, under its description.
+  final Widget? status;
+
+  /// A full-width control under the copy, such as a scale.
+  final Widget? footer;
   final bool highlighted;
 
   @override
@@ -87,6 +135,7 @@ class SettingRow extends StatelessWidget {
         Text(title).medium(),
         const Gap(AppSpacing.xs),
         Text(description).muted().textSmall(),
+        if (status case final status?) ...[const Gap(AppSpacing.xs), status],
       ],
     );
     return OutlinedContainer(
@@ -96,30 +145,147 @@ class SettingRow extends StatelessWidget {
       clipBehavior: Clip.none,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final stack =
-              trailing is! Switch &&
-              (constraints.maxWidth <
-                      AppLayoutSize.settingsStackedControlWidth ||
-                  MediaQuery.textScalerOf(context).scale(1) > 1.3);
-          if (stack) {
+          final narrow =
+              constraints.maxWidth < AppLayoutSize.settingsStackedControlWidth;
+          final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+          final toggle = trailing;
+          final control = toggle is Switch
+              ? SettingSwitch(
+                  label: title,
+                  toggle: toggle,
+                  stacked: narrow && !largeText,
+                )
+              : toggle;
+          // A switch stays beside its copy in a narrow row, with the state
+          // word under it; only enlarged text moves it below the copy.
+          final stack = largeText || (control is! SettingSwitch && narrow);
+          final Widget header = control == null
+              ? copy
+              : stack
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    copy,
+                    const Gap(AppTheme.settingsBlockSpacing),
+                    Align(alignment: Alignment.centerRight, child: control),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: copy),
+                    const Gap(AppSpacing.lg),
+                    control,
+                  ],
+                );
+          if (footer case final footer?) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                copy,
-                const Gap(AppSpacing.md),
-                Align(alignment: Alignment.centerRight, child: trailing),
+                header,
+                const Gap(AppTheme.settingsBlockSpacing),
+                footer,
               ],
             );
           }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: copy),
-              const Gap(AppSpacing.lg),
-              trailing,
-            ],
-          );
+          return header;
         },
+      ),
+    );
+  }
+}
+
+/// A row switch named by its row; [AppSwitchFrame] reports and draws its
+/// state. A switch without `onChanged` (its change is pending, or another
+/// change excludes it) is disabled. Disabling drops keyboard focus, so focus
+/// returns to the switch when it can be used again, unless it moved meanwhile.
+class SettingSwitch extends StatefulWidget {
+  const SettingSwitch({
+    super.key,
+    required this.label,
+    required this.toggle,
+    this.showState = true,
+    this.stacked = false,
+  });
+
+  final String label;
+  final Switch toggle;
+  final bool showState;
+  final bool stacked;
+
+  @override
+  State<SettingSwitch> createState() => _SettingSwitchState();
+}
+
+class _SettingSwitchState extends State<SettingSwitch> {
+  final _focus = FocusNode(
+    debugLabel: 'setting-switch',
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+  bool _restoreFocus = false;
+  FocusNode? _focusedWhileDisabled;
+
+  bool _enabled(Switch toggle) =>
+      toggle.enabled != false && toggle.onChanged != null;
+
+  @override
+  void didUpdateWidget(SettingSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final was = _enabled(oldWidget.toggle);
+    final now = _enabled(widget.toggle);
+    if (was && !now && _focus.hasFocus) {
+      _restoreFocus = true;
+      _focusedWhileDisabled = null;
+      // The focus manager applies the loss in a microtask after this frame.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => scheduleMicrotask(() {
+          final primary = FocusManager.instance.primaryFocus;
+          if (_restoreFocus && primary != null && !_focus.hasFocus) {
+            _focusedWhileDisabled = primary;
+          }
+        }),
+      );
+    } else if (!was && now && _restoreFocus) {
+      final moved = _focusedWhileDisabled;
+      _restoreFocus = false;
+      _focusedWhileDisabled = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final primary = FocusManager.instance.primaryFocus;
+        if (!mounted || (moved != null && primary != moved)) return;
+        for (final node in _focus.descendants) {
+          if (node.canRequestFocus) return node.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final toggle = widget.toggle;
+    return MergeSemantics(
+      child: Semantics(
+        label: widget.label,
+        child: Focus(
+          focusNode: _focus,
+          includeSemantics: false,
+          child: AppSwitchFrame(
+            showState: widget.showState,
+            stacked: widget.stacked,
+            child: Switch(
+              key: toggle.key,
+              value: toggle.value,
+              onChanged: toggle.onChanged,
+              enabled: _enabled(toggle),
+            ),
+          ),
+        ),
       ),
     );
   }

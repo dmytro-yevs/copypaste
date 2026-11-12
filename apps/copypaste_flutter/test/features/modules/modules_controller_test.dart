@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
+import 'package:copypaste_flutter/features/modules/models/module_operation.dart';
 import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
 
 import 'modules_test_support.dart';
@@ -72,11 +73,16 @@ void main() {
       await controller.initialize();
       await controller.loadMarketplace();
       final progress = <double?>[];
-      controller.addListener(() => progress.add(controller.downloadProgress));
+      controller.addListener(
+        () => progress.add(controller.operationFor(testModule.id)?.progress),
+      );
       final install = controller.install(testMarketplaceModule);
       await Future<void>.delayed(Duration.zero);
       expect(controller.activeModuleId, testModule.id);
-      expect(controller.installing, isTrue);
+      final operation = controller.operationFor(testModule.id)!;
+      expect(operation.kind, ModuleOperationKind.install);
+      expect(operation.phase, ModuleOperationPhase.install);
+      expect(operation.progress, isNull);
       expect(controller.busy, isTrue);
       await controller.install(testMarketplaceModule);
       expect(marketplace.disposedPackages, 0);
@@ -84,10 +90,72 @@ void main() {
       await install;
       expect(progress, containsAll([0.5, 1.0]));
       expect(controller.activeModuleId, isNull);
+      expect(controller.operationFor(testModule.id), isNull);
       expect(controller.busy, isFalse);
       expect(marketplace.disposedPackages, 1);
     },
   );
+
+  test('a failed install or update keeps the phase that failed', () async {
+    final repository = MemoryModulesRepository();
+    final marketplace = MemoryModuleMarketplace()
+      ..downloadFailure = const ModulesException('Download failed.');
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: marketplace,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.loadMarketplace();
+    await controller.install(testMarketplaceModule);
+    var failure = controller.operationFor(testModule.id)!;
+    expect(failure.failed, isTrue);
+    expect(failure.kind, ModuleOperationKind.install);
+    expect(failure.phase, ModuleOperationPhase.download);
+    expect(controller.activeModuleId, isNull);
+    expect(controller.busy, isFalse);
+
+    marketplace.downloadFailure = null;
+    await controller.install(testMarketplaceModule);
+    expect(controller.operationFor(testModule.id), isNull);
+    expect(controller.modules.single.id, testModule.id);
+
+    marketplace.modules = [
+      MarketplaceModule(
+        id: testModule.id,
+        title: testModule.title,
+        description: testModule.description,
+        version: Version.parse('1.1.0'),
+        artifact: testMarketplaceModule.artifact,
+      ),
+    ];
+    await controller.loadMarketplace();
+    repository.failure = const ModulesException('Invalid signature.');
+    await controller.install(marketplace.modules.single);
+    failure = controller.operationFor(testModule.id)!;
+    expect(failure.failed, isTrue);
+    expect(failure.kind, ModuleOperationKind.update);
+    expect(failure.phase, ModuleOperationPhase.install);
+    expect(controller.errorMessage, 'Invalid signature.');
+
+    repository.failure = null;
+    await controller.setEnabled(testModule.id, false);
+    expect(controller.operationFor(testModule.id), isNull);
+  });
+
+  test('a refresh failure after activation is not a failed phase', () async {
+    final repository = _UnlistableAfterInstallRepository();
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.loadMarketplace();
+    await controller.install(testMarketplaceModule);
+    expect(controller.errorMessage, 'List failed.');
+    expect(controller.operationFor(testModule.id), isNull);
+  });
 
   test(
     'disposing during download cleans staging and prevents installation',
@@ -191,6 +259,14 @@ void main() {
       expect(marketplace.disposed, isTrue);
     },
   );
+}
+
+class _UnlistableAfterInstallRepository extends MemoryModulesRepository {
+  @override
+  Future<List<InstalledModule>> list() async {
+    if (calls.contains('install')) throw const ModulesException('List failed.');
+    return super.list();
+  }
 }
 
 class _PendingRepository extends MemoryModulesRepository {

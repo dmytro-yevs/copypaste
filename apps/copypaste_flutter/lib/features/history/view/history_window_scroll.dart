@@ -29,6 +29,7 @@ class HistoryWindowScroll extends StatelessWidget {
     required this.controller,
     required this.pages,
     this.viewportKey,
+    this.topPadding = 0,
     this.bottomPadding = 0,
     this.trailing,
   });
@@ -36,6 +37,7 @@ class HistoryWindowScroll extends StatelessWidget {
   final ScrollController controller;
   final List<HistoryWindowPageView> pages;
   final Key? viewportKey;
+  final double topPadding;
   final double bottomPadding;
   final Widget? trailing;
 
@@ -46,6 +48,8 @@ class HistoryWindowScroll extends StatelessWidget {
       controller: controller,
       primary: false,
       slivers: [
+        if (topPadding > 0)
+          SliverToBoxAdapter(child: SizedBox(height: topPadding)),
         for (final page in pages) _page(page),
         if (trailing != null) SliverToBoxAdapter(child: trailing),
         SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),

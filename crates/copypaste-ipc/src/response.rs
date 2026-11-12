@@ -3,9 +3,9 @@
 use crate::config::ConfigData;
 use crate::error::ErrorCode;
 use crate::payload::{
-    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, HistoryFacets,
-    ImagePreview, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData, PeerInfo,
-    PrivateModeData, StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportChunk, ExportData,
+    HistoryFacets, ImagePreview, ImportData, Item, ItemPage, PairingInviteData,
+    PairingProgressData, PeerInfo, PrivateModeData, StatusData, SyncResult, TransferProgress,
 };
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,24 @@ use serde::{Deserialize, Serialize};
 pub struct ConfigApplied {
     pub config: ConfigData,
     pub restart_required: Vec<String>,
+    /// History weighed against `config.storage_quota_bytes`, read after this
+    /// reply's settings took effect. Absent from an older runtime or when the
+    /// store could not answer; never a guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_usage: Option<StorageUsage>,
+}
+
+/// What the storage quota currently counts. Pinned clips are outside the
+/// quota and therefore outside both fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageUsage {
+    /// Retained encrypted bytes of live unpinned clips: the total the quota
+    /// sweep compares with the limit. One clip larger than the quota is kept,
+    /// so this can exceed it.
+    pub used_bytes: u64,
+    /// Capture time of the oldest live unpinned clip, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_unpinned_at: Option<i64>,
 }
 
 /// What changed. Coalesced: a burst of captures may produce one event.
@@ -426,14 +444,19 @@ pub enum ResponseData {
     DownloadedFile(Option<String>),
     Status(StatusData),
     Export(ExportData),
+    ExportChunk(ExportChunk),
     Import(ImportData),
     Backup(BackupData),
+    /// An interim frame of a streamed operation.
+    Progress(TransferProgress),
     Discovered(DiscoveredData),
     Config(ConfigApplied),
     Event(EventData),
     RuntimeEvent(Box<RuntimeEventData>),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
+    /// `None` when the query cannot be counted exactly from indexes.
+    HistoryCounts(Option<crate::HistoryGroupCounts>),
     HistoryTags(crate::HistoryTags),
     SpoilerState {
         revision: u64,
@@ -541,6 +564,32 @@ mod tests {
                 kinds: LibraryKinds::all()
             }
         );
+    }
+
+    #[test]
+    fn storage_usage_is_additive_and_omitted_when_absent() {
+        let old_wire = serde_json::json!({
+            "config": ConfigData::default(),
+            "restart_required": [],
+        });
+        let old: ConfigApplied = serde_json::from_value(old_wire.clone()).unwrap();
+        assert_eq!(old.storage_usage, None);
+        assert_eq!(serde_json::to_value(&old).unwrap(), old_wire);
+
+        let current = ConfigApplied {
+            storage_usage: Some(StorageUsage {
+                used_bytes: 2_048,
+                oldest_unpinned_at: None,
+            }),
+            ..old
+        };
+        let wire = serde_json::to_value(&current).unwrap();
+        assert_eq!(
+            wire["storage_usage"],
+            serde_json::json!({"used_bytes": 2_048})
+        );
+        let decoded: ConfigApplied = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded.storage_usage, current.storage_usage);
     }
 
     #[test]

@@ -316,12 +316,6 @@ abstract class AppLocalizations {
   /// **'You can exclude up to 256 applications.'**
   String get settingsRuntimeExcludedAppsLimit;
 
-  /// Settings error message shown when the Quick Paste window and its keyboard shortcut cannot be set up. Quick Paste is a feature name.
-  ///
-  /// In en, this message translates to:
-  /// **'Quick Paste could not be prepared.'**
-  String get settingsRuntimeQuickPastePrepareFailed;
-
   /// Settings error message shown when turning automatic pasting after selection on or off fails.
   ///
   /// In en, this message translates to:
@@ -1984,24 +1978,6 @@ abstract class AppLocalizations {
   /// **'The backup could not be restored.'**
   String get settingsRestoreFailed;
 
-  /// Toast title when some clips were left out of a text export.
-  ///
-  /// In en, this message translates to:
-  /// **'Text export is incomplete'**
-  String get settingsExportIncompleteTitle;
-
-  /// Toast message when some clips were left out of a text export. {saved} says how many clips were saved; {omissions} lists what was left out.
-  ///
-  /// In en, this message translates to:
-  /// **'{saved}; {omissions}.'**
-  String settingsExportIncompleteMessage(String saved, String omissions);
-
-  /// Joins two parts of the text export omission list in a sentence.
-  ///
-  /// In en, this message translates to:
-  /// **'{first} and {second}'**
-  String settingsExportOmissionsJoin(String first, String second);
-
   /// Settings row title for the master synchronization switch. Noun, short for synchronization.
   ///
   /// In en, this message translates to:
@@ -2583,42 +2559,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 day} other{{count} days}}'**
   String settingsRetentionDays(int count);
-
-  /// Storage quota option in gigabytes. {size} is an already formatted number such as 5 or 2.5.
-  ///
-  /// In en, this message translates to:
-  /// **'{size} GB'**
-  String settingsStorageQuotaGigabytes(String size);
-
-  /// Maximum file size option in mebibytes.
-  ///
-  /// In en, this message translates to:
-  /// **'{size} MiB'**
-  String settingsFileSizeMebibytes(int size);
-
-  /// Maximum file size option in gibibytes.
-  ///
-  /// In en, this message translates to:
-  /// **'{size} GiB'**
-  String settingsFileSizeGibibytes(int size);
-
-  /// Part of the incomplete text export toast: how many text clips were exported.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 text clip was saved} other{{count} text clips were saved}}'**
-  String settingsExportSavedClips(int count);
-
-  /// Part of the incomplete text export toast: how many non-text clips were left out.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 non-text clip was excluded} other{{count} non-text clips were excluded}}'**
-  String settingsExportSkippedNonText(int count);
-
-  /// Part of the incomplete text export toast: how many text clips could not be decrypted.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 text clip could not be read} other{{count} text clips could not be read}}'**
-  String settingsExportSkippedUnreadable(int count);
 
   /// Loading message on the Devices screen while the device list is read.
   ///
@@ -4629,18 +4569,6 @@ abstract class AppLocalizations {
   /// **'Window setup needs attention'**
   String get appWindowSetupTitle;
 
-  /// Tooltip of the button that narrows the side navigation bar to icons only.
-  ///
-  /// In en, this message translates to:
-  /// **'Collapse navigation'**
-  String get appCollapseNavigation;
-
-  /// Tooltip of the button that widens the side navigation bar to show labels.
-  ///
-  /// In en, this message translates to:
-  /// **'Expand navigation'**
-  String get appExpandNavigation;
-
   /// Screen reader label of the app logo button that opens the History screen. History is the name of the clipboard history screen.
   ///
   /// In en, this message translates to:
@@ -4796,18 +4724,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{size} B'**
   String sharedSizeBytes(String size);
-
-  /// File size in kilobytes; {size} is the number. KB is the abbreviation for kilobytes.
-  ///
-  /// In en, this message translates to:
-  /// **'{size} KB'**
-  String sharedSizeKilobytes(String size);
-
-  /// File size in megabytes; {size} is the number. MB is the abbreviation for megabytes.
-  ///
-  /// In en, this message translates to:
-  /// **'{size} MB'**
-  String sharedSizeMegabytes(String size);
 
   /// Window and header title of the first-run setup flow. CopyPaste is the product name.
   ///
@@ -5577,18 +5493,6 @@ abstract class AppLocalizations {
   /// **'Downloading language model…'**
   String get modulesDownloadingModel;
 
-  /// Progress text shown on the install button while a module is installed.
-  ///
-  /// In en, this message translates to:
-  /// **'Installing…'**
-  String get modulesInstalling;
-
-  /// Progress text shown on the install button while a module downloads; {percent} is a number from 0 to 100.
-  ///
-  /// In en, this message translates to:
-  /// **'Downloading {percent}%'**
-  String modulesDownloadingProgress(int percent);
-
   /// Verb. Button in a module command dialog that runs the command.
   ///
   /// In en, this message translates to:
@@ -6068,6 +5972,366 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Set up a device password, PIN or biometrics first'**
   String get deviceAuthNotConfigured;
+
+  /// State word shown beside a switch that is turned on. Adjective; keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get commonOn;
+
+  /// State word shown beside a switch that is turned off. Adjective; keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get commonOff;
+
+  /// Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Paste could not start, so its shortcut does not work.'**
+  String get settingsQuickPasteStartFailed;
+
+  /// Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'{shortcut} is used by another app. Choose another shortcut.'**
+  String settingsQuickPasteShortcutInUse(String shortcut);
+
+  /// Empty state title on the Devices screen when no other device has been paired yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No other devices paired yet'**
+  String get devicesEmptyTitle;
+
+  /// Empty state message on the Devices screen explaining what pairing another device gives and requires.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.'**
+  String get devicesEmptyMessage;
+
+  /// Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it.
+  ///
+  /// In en, this message translates to:
+  /// **'Pairing not completed'**
+  String get pairingStateNotCompleted;
+
+  /// Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Invite'**
+  String get pairingStepInvite;
+
+  /// Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan'**
+  String get pairingStepScan;
+
+  /// Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get pairingStepCode;
+
+  /// Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Request'**
+  String get pairingStepRequest;
+
+  /// Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get pairingStepConnect;
+
+  /// Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get pairingStepConfirm;
+
+  /// Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired'**
+  String get pairingStepPaired;
+
+  /// Label for the other device in the pairing confirmation status when its name is not known.
+  ///
+  /// In en, this message translates to:
+  /// **'Other device'**
+  String get pairingOtherDevice;
+
+  /// Pairing confirmation status of this device before the user has confirmed or rejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not confirmed yet'**
+  String get pairingDecisionNotConfirmed;
+
+  /// Pairing confirmation status of this device while its confirmation or rejection is being sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending your decision…'**
+  String get pairingDecisionSending;
+
+  /// Pairing confirmation status of a device that confirmed the pairing.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmed'**
+  String get pairingDecisionConfirmed;
+
+  /// Pairing confirmation status of a device that rejected the pairing.
+  ///
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get pairingDecisionRejected;
+
+  /// Pairing confirmation status of the other device after this device confirmed and the other has not answered yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation'**
+  String get pairingDecisionWaiting;
+
+  /// Pairing confirmation status of the other device when this device has not been told its answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Answer not known'**
+  String get pairingDecisionUnknown;
+
+  /// Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 device} other{{count} devices}}'**
+  String syncHeaderDeviceCount(int count);
+
+  /// Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 line} other{{count} lines}}'**
+  String historyClipLineCount(int count);
+
+  /// Screen reader label of the application header region that holds the History, Devices and Settings destinations.
+  ///
+  /// In en, this message translates to:
+  /// **'Main navigation'**
+  String get appNavigationLabel;
+
+  /// Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.
+  ///
+  /// In en, this message translates to:
+  /// **'{step} / {count} · {name}'**
+  String sharedStepPosition(int step, int count, String name);
+
+  /// Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.
+  ///
+  /// In en, this message translates to:
+  /// **'Step {step} of {count}: {name}'**
+  String sharedStepSemantics(int step, int count, String name);
+
+  /// Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get modulesPhaseDownload;
+
+  /// Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Install'**
+  String get modulesPhaseInstall;
+
+  /// Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Installing {module}'**
+  String modulesInstallingModule(String module);
+
+  /// Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating {module}'**
+  String modulesUpdatingModule(String module);
+
+  /// Screen reader name of the button that closes a transient message before it leaves by itself.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get commonDismiss;
+
+  /// Title of the confirmation shown before a shorter retention period deletes history.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove older history?'**
+  String get settingsRetentionConfirmTitle;
+
+  /// Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.
+  ///
+  /// In en, this message translates to:
+  /// **'New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.'**
+  String settingsRetentionConfirmMessage(String limit);
+
+  /// Title of the confirmation shown before a smaller storage quota deletes history.
+  ///
+  /// In en, this message translates to:
+  /// **'Reduce the storage quota?'**
+  String get settingsStorageQuotaConfirmTitle;
+
+  /// Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.
+  ///
+  /// In en, this message translates to:
+  /// **'New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.'**
+  String settingsStorageQuotaConfirmMessage(String size);
+
+  /// Button that confirms a stricter history limit which deletes history.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply limit'**
+  String get settingsLimitConfirmAction;
+
+  /// Title of the confirmation shown before the last visible entry point of the application (Dock or taskbar icon, menu bar or tray icon) is turned off.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide CopyPaste completely?'**
+  String get settingsHideEverywhereTitle;
+
+  /// Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice.
+  ///
+  /// In en, this message translates to:
+  /// **'With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.'**
+  String get settingsHideEverywhereMessage;
+
+  /// Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.
+  ///
+  /// In en, this message translates to:
+  /// **'With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.'**
+  String settingsHideEverywhereShortcutMessage(String shortcut);
+
+  /// Verb. Button that confirms hiding the application's last visible icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide'**
+  String get settingsHideEverywhereAction;
+
+  /// Title of the confirmation shown after the text history was exported.
+  ///
+  /// In en, this message translates to:
+  /// **'Text history exported'**
+  String get settingsExportDoneTitle;
+
+  /// Title of the confirmation shown after an encrypted backup was created.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup created'**
+  String get settingsBackupDoneTitle;
+
+  /// Title of the confirmation shown after history was restored from a backup.
+  ///
+  /// In en, this message translates to:
+  /// **'History restored'**
+  String get settingsRestoreDoneTitle;
+
+  /// Message of the confirmation shown after the text history was exported: how many text clips the file holds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Exported 1 text clip} other{Exported {count} text clips}}'**
+  String settingsExportedTextClips(int count);
+
+  /// Short addition to the export confirmation: how many text clips could not be read and were left out of the file.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 could not be read} other{{count} could not be read}}'**
+  String settingsExportUnreadableClips(int count);
+
+  /// Joins the outcome of an action with a detail about it, for example 'Exported 214 text clips · 3 could not be read'.
+  ///
+  /// In en, this message translates to:
+  /// **'{outcome} · {detail}'**
+  String settingsOutcomeDetail(String outcome, String detail);
+
+  /// Message of the confirmation shown after an encrypted backup was created. size is the file size, for example '12.4 MiB'.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted backup saved · {size}'**
+  String settingsBackupDoneMessage(String size);
+
+  /// Message of the confirmation shown after history was restored from an encrypted backup.
+  ///
+  /// In en, this message translates to:
+  /// **'The clipboard history on this device now matches the backup.'**
+  String get settingsRestoreDoneMessage;
+
+  /// A size in kibibytes (binary units of 1024); size is an already formatted number.
+  ///
+  /// In en, this message translates to:
+  /// **'{size} KiB'**
+  String sharedSizeKibibytes(String size);
+
+  /// A size in mebibytes (binary units of 1024); size is an already formatted number.
+  ///
+  /// In en, this message translates to:
+  /// **'{size} MiB'**
+  String sharedSizeMebibytes(String size);
+
+  /// A size in gibibytes (binary units of 1024); size is an already formatted number.
+  ///
+  /// In en, this message translates to:
+  /// **'{size} GiB'**
+  String sharedSizeGibibytes(String size);
+
+  /// Short storage usage in the application header, such as '2.1 of 5 GiB'. used is the used amount, without its unit when it shares the quota's unit; quota is the storage quota with its unit.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} of {quota}'**
+  String storageUsageShort(String used, String quota);
+
+  /// Storage used by unpinned history against the storage quota, such as '2.1 GiB used of 5 GiB'.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} used of {quota}'**
+  String storageUsageOfQuota(String used, String quota);
+
+  /// Storage used by unpinned history when no storage quota applies, such as '2.1 GiB used'.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} used'**
+  String storageUsageNoQuota(String used);
+
+  /// Status words shown when unpinned history uses more storage than the quota allows.
+  ///
+  /// In en, this message translates to:
+  /// **'Over quota'**
+  String get storageUsageOverQuota;
+
+  /// Capture date of the oldest unpinned clip, shown after the storage usage.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest clip {date}'**
+  String storageUsageOldestClip(String date);
+
+  /// Joins a storage usage summary with a detail about it, such as '2.1 GiB used of 5 GiB · Oldest clip 14 Aug 2026'.
+  ///
+  /// In en, this message translates to:
+  /// **'{usage} · {detail}'**
+  String storageUsageDetail(String usage, String detail);
+
+  /// Screen reader label of the header button that shows storage usage and opens the storage settings; usage is the usage summary.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage: {usage}'**
+  String storageHeaderSemanticsLabel(String usage);
+
+  /// Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.
+  ///
+  /// In en, this message translates to:
+  /// **'New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.'**
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used);
+
+  /// Number of clips in a History group, shown after the group name and date, such as: Today · Wednesday, November 11 · 14 clips.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip} other{{count} clips}}'**
+  String historySectionClipCount(int count);
 }
 
 class _AppLocalizationsDelegate

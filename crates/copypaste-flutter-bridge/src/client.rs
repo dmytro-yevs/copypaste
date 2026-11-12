@@ -11,7 +11,7 @@ use std::time::Duration;
 
 #[cfg(not(target_os = "android"))]
 use copypaste_ipc::{transport, Request, MAX_FRAME_BYTES, PROTOCOL_VERSION};
-use copypaste_ipc::{Method, Response};
+use copypaste_ipc::{Method, Response, ResponseData};
 #[cfg(not(target_os = "android"))]
 use futures_util::{SinkExt, StreamExt};
 #[cfg(not(target_os = "android"))]
@@ -97,6 +97,57 @@ async fn request_once_at(path: &std::path::Path, method: Method) -> Result<Respo
         return Err(RuntimeError::internal());
     }
     response_to_result(response)
+}
+
+/// One streamed request: interim frames go to `on_frame` in order, and the
+/// final reply is returned. An `on_frame` error closes the stream, which
+/// abandons the operation.
+#[cfg(target_os = "android")]
+pub(crate) async fn stream(
+    method: Method,
+    on_frame: impl FnMut(ResponseData) -> Result<(), RuntimeError>,
+) -> Result<Response, RuntimeError> {
+    crate::runtime_android::stream(method, on_frame)
+        .await
+        .and_then(response_to_result)
+}
+
+/// One streamed request over its own connection, with the long budget
+/// applied to each frame rather than to the whole operation.
+#[cfg(not(target_os = "android"))]
+pub(crate) async fn stream(
+    method: Method,
+    mut on_frame: impl FnMut(ResponseData) -> Result<(), RuntimeError>,
+) -> Result<Response, RuntimeError> {
+    let stream = transport::connect(&crate::runtime::socket_path()?)
+        .await
+        .map_err(|_| RuntimeError::daemon_unreachable())?;
+    let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let request = Request {
+        id,
+        protocol_version: PROTOCOL_VERSION,
+        method,
+    };
+    let line = serde_json::to_string(&request).map_err(|_| RuntimeError::internal())?;
+    framed
+        .send(line)
+        .await
+        .map_err(|_| RuntimeError::daemon_unreachable())?;
+    loop {
+        let mut response = timeout(TRANSFER_TIMEOUT, next_response(&mut framed, id))
+            .await
+            .map_err(|_| RuntimeError::timeout())??;
+        match response.data.take() {
+            Some(frame @ (ResponseData::ExportChunk(_) | ResponseData::Progress(_))) => {
+                on_frame(frame)?;
+            }
+            data => {
+                response.data = data;
+                return Ok(response);
+            }
+        }
+    }
 }
 
 fn response_to_result(response: Response) -> Result<Response, RuntimeError> {

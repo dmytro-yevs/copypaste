@@ -123,10 +123,6 @@ class AppLocalizationsPt extends AppLocalizations {
       'Você pode ignorar até 256 apps.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Não foi possível preparar o Quick Paste.';
-
-  @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
       'Não foi possível atualizar a colagem automática.';
 
@@ -1153,20 +1149,6 @@ class AppLocalizationsPt extends AppLocalizations {
   String get settingsRestoreFailed => 'Não foi possível restaurar o backup.';
 
   @override
-  String get settingsExportIncompleteTitle =>
-      'A exportação de texto está incompleta';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved; $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first e $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => 'Sincronização';
 
   @override
@@ -1527,57 +1509,6 @@ class AppLocalizationsPt extends AppLocalizations {
       other: '$count dias',
       many: '$count dias',
       one: '$count dia',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count clipes de texto foram salvos',
-      many: '$count clipes de texto foram salvos',
-      one: '$count clipe de texto foi salvo',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count clipes não textuais foram omitidos',
-      many: '$count clipes não textuais foram omitidos',
-      one: '$count clipe não textual foi omitido',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count clipes de texto não puderam ser lidos',
-      many: '$count clipes de texto não puderam ser lidos',
-      one: '$count clipe de texto não pôde ser lido',
     );
     return '$_temp0';
   }
@@ -2809,12 +2740,6 @@ class AppLocalizationsPt extends AppLocalizations {
       'A configuração da janela precisa de atenção';
 
   @override
-  String get appCollapseNavigation => 'Recolher navegação';
-
-  @override
-  String get appExpandNavigation => 'Expandir navegação';
-
-  @override
   String get appOpenHistory => 'Abrir Histórico';
 
   @override
@@ -2899,16 +2824,6 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
-  }
-
-  @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
   }
 
   @override
@@ -3380,14 +3295,6 @@ class AppLocalizationsPt extends AppLocalizations {
   String get modulesDownloadingModel => 'Baixando o modelo de idioma…';
 
   @override
-  String get modulesInstalling => 'Instalando…';
-
-  @override
-  String modulesDownloadingProgress(int percent) {
-    return 'Baixando $percent%';
-  }
-
-  @override
   String get modulesRun => 'Executar';
 
   @override
@@ -3698,4 +3605,276 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get deviceAuthNotConfigured =>
       'Primeiro configure uma senha, PIN ou biometria do dispositivo';
+
+  @override
+  String get commonOn => 'Ativado';
+
+  @override
+  String get commonOff => 'Desativado';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Não foi possível iniciar o Quick Paste, então o atalho dele não funciona.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut já é usado por outro app. Escolha outro atalho.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'Nenhum outro dispositivo pareado ainda';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Pareie outro dispositivo para manter o histórico da área de transferência sincronizado entre eles. Os dois dispositivos precisam estar na mesma rede, e cada pareamento é confirmado nos dois.';
+
+  @override
+  String get pairingStateNotCompleted => 'Pareamento não concluído';
+
+  @override
+  String get pairingStepInvite => 'Convite';
+
+  @override
+  String get pairingStepScan => 'Leitura';
+
+  @override
+  String get pairingStepCode => 'Código';
+
+  @override
+  String get pairingStepRequest => 'Solicitação';
+
+  @override
+  String get pairingStepConnect => 'Conexão';
+
+  @override
+  String get pairingStepConfirm => 'Confirmação';
+
+  @override
+  String get pairingStepPaired => 'Pareado';
+
+  @override
+  String get pairingOtherDevice => 'Outro dispositivo';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Ainda não confirmado';
+
+  @override
+  String get pairingDecisionSending => 'Enviando sua decisão…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Confirmado';
+
+  @override
+  String get pairingDecisionRejected => 'Recusado';
+
+  @override
+  String get pairingDecisionWaiting => 'Aguardando confirmação';
+
+  @override
+  String get pairingDecisionUnknown => 'Resposta desconhecida';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dispositivos',
+      many: '$count dispositivos',
+      one: '$count dispositivo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count linhas',
+      many: '$count linhas',
+      one: '$count linha',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Navegação principal';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Etapa $step de $count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'Download';
+
+  @override
+  String get modulesPhaseInstall => 'Instalação';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Instalando $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Atualizando $module';
+  }
+
+  @override
+  String get commonDismiss => 'Dispensar';
+
+  @override
+  String get settingsRetentionConfirmTitle =>
+      'Remover o histórico mais antigo?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'Novo limite: $limit. Os itens não fixados mais antigos são removidos deste dispositivo agora e não podem ser recuperados. Os itens fixados são mantidos.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle =>
+      'Reduzir a cota de armazenamento?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'Nova cota: $size. Se o histórico não fixado ocupar mais, os itens mais antigos são removidos agora e não podem ser recuperados. Os itens fixados são mantidos.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Aplicar limite';
+
+  @override
+  String get settingsHideEverywhereTitle =>
+      'Ocultar o CopyPaste completamente?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'Com as duas opções desativadas, o CopyPaste não tem nenhum ícone visível. Para abri-lo de novo, inicie o CopyPaste novamente.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'Com as duas opções desativadas, o CopyPaste não tem nenhum ícone visível. Para abri-lo de novo, pressione $shortcut ou inicie o CopyPaste novamente.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Ocultar';
+
+  @override
+  String get settingsExportDoneTitle => 'Histórico de texto exportado';
+
+  @override
+  String get settingsBackupDoneTitle => 'Backup criado';
+
+  @override
+  String get settingsRestoreDoneTitle => 'Histórico restaurado';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clipes de texto exportados',
+      many: '$count clipes de texto exportados',
+      one: '$count clipe de texto exportado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count não puderam ser lidos',
+      many: '$count não puderam ser lidos',
+      one: '$count não pôde ser lido',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Backup criptografado salvo · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'O histórico da área de transferência deste dispositivo agora corresponde ao backup.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used de $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$used usados de $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used usados';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Cota excedida';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'Clipe mais antigo: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Armazenamento: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'Nova cota: $size. O histórico não fixado ocupa $used, então os clipes mais antigos são removidos agora até caber. Eles não podem ser recuperados. Os itens fixados são mantidos.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clipes',
+      many: '$count clipes',
+      one: '$count clipe',
+    );
+    return '$_temp0';
+  }
 }
