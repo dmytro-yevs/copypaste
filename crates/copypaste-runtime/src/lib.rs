@@ -86,6 +86,7 @@ pub struct Runtime {
     deadlines: Arc<deadlines::Deadlines>,
     /// The content rules compiled for one rules revision.
     compiled_rules: Mutex<Option<(i64, Arc<CompiledRuleSet>)>>,
+    paste_queue: features::PasteQueue,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
@@ -358,6 +359,7 @@ impl Runtime {
             changes,
             deadlines,
             compiled_rules: Mutex::default(),
+            paste_queue: features::PasteQueue::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
@@ -968,15 +970,20 @@ impl Runtime {
     /// runtime remains the only owner of encryption, deduplication, retention,
     /// exclusions and History change events.
     pub fn capture_text(&self, content: &str) -> Result<(), RuntimeError> {
-        self.capture_text_with_policy(content, false)
+        self.capture_text_with_policy(content, false).map(|_| ())
     }
 
     /// Records text from an explicit Android Share or Process Text action.
     pub fn capture_explicit_text(&self, content: &str) -> Result<(), RuntimeError> {
-        self.capture_text_with_policy(content, true)
+        self.capture_text_with_policy(content, true).map(|_| ())
     }
 
-    fn capture_text_with_policy(&self, content: &str, explicit: bool) -> Result<(), RuntimeError> {
+    /// Captures text and returns the id of the history item that holds it.
+    fn capture_text_with_policy(
+        &self,
+        content: &str,
+        explicit: bool,
+    ) -> Result<String, RuntimeError> {
         let host = self
             .capture_admission()
             .open_host(if explicit {
@@ -990,7 +997,7 @@ impl Runtime {
             .begin(host, Arc::new(|| {}))
             .ok_or(RuntimeError::CaptureRefused)
             .and_then(|token| {
-                let result = self.capture_text_operation(token, content).map(|_| ());
+                let result = self.capture_text_item(token, content).map(|(id, _)| id);
                 self.capture_admission().abandon(token);
                 result
             });
