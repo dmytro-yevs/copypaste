@@ -960,6 +960,97 @@ pub(crate) async fn request(
     Ok(runtime.request(0, method).await)
 }
 
+/// Serves one IPC method for the native surfaces that run without a Flutter
+/// engine (keyboard panel, tiles, widget). Takes `{"method", "params"}` JSON and
+/// returns the response JSON with id 0. It never starts the P2P listener or
+/// module sync: reactor methods (network I/O) are refused as `unsupported`.
+/// Kotlin calls it from one worker thread, never the main thread.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeAccess_request<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    method: JString<'local>,
+) -> jni::sys::jstring {
+    let response = match env.get_string(&method) {
+        Ok(method) => native_request(&method.to_string_lossy()),
+        Err(_) => {
+            let _ = env.exception_clear();
+            invalid_native_request()
+        }
+    };
+    let encoded = serde_json::to_string(&response).unwrap_or_else(|_| {
+        serde_json::to_string(&copypaste_ipc::Response::err(
+            0,
+            copypaste_ipc::ErrorCode::Internal,
+            "The reply could not be encoded.",
+        ))
+        .unwrap_or_default()
+    });
+    match env.new_string(encoded) {
+        Ok(encoded) => encoded.into_raw(),
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+fn native_request(json: &str) -> copypaste_ipc::Response {
+    use copypaste_runtime::Route;
+    let Some(runtime) = RUNTIME.get() else {
+        return copypaste_ipc::Response::err(
+            0,
+            copypaste_ipc::ErrorCode::NotReady,
+            "CopyPaste is still starting.",
+        );
+    };
+    let Ok(method) = serde_json::from_str::<copypaste_ipc::Method>(json) else {
+        return invalid_native_request();
+    };
+    let admission = match block_on(runtime.route(&method)) {
+        Route::Blocking(admission) => admission,
+        Route::Reactor => {
+            return copypaste_ipc::Response::err(
+                0,
+                copypaste_ipc::ErrorCode::Unsupported,
+                "This action needs the CopyPaste app.",
+            )
+        }
+    };
+    let response = runtime.request_blocking(0, method);
+    drop(admission);
+    response
+}
+
+fn invalid_native_request() -> copypaste_ipc::Response {
+    copypaste_ipc::Response::err(
+        0,
+        copypaste_ipc::ErrorCode::InvalidRequest,
+        "The request is not a valid method.",
+    )
+}
+
+/// Drives [`copypaste_runtime::Runtime::route`] on the calling JNI thread.
+/// Its only await is a runtime-agnostic semaphore, so no reactor is needed.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+        std::thread::park();
+    }
+}
+
 async fn push_capture_snapshot(
     runtime: &Arc<copypaste_runtime::Runtime>,
     sink: &crate::frb_generated::StreamSink<crate::api::RuntimeEvent>,

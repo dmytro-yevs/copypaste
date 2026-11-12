@@ -12,3 +12,9 @@
 -keepclassmembers class * implements com.copypaste.app.CaptureCallback {
     public void run(long);
 }
+
+# Rust notifies the home-screen widget of runtime changes through a static
+# upcall on the provider; like CaptureCallback it has no managed call site.
+-keepclassmembers class com.copypaste.app.RecentClipsWidgetProvider {
+    public static *** notifyChanged(...);
+}

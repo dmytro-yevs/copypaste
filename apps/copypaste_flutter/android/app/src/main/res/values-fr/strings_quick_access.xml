@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Éléments CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Changer de clavier</string>
+    <string name="quick_access_tile_save_label">Enregistrer le presse-papiers</string>
+    <string name="quick_access_tile_capture_label">Capture du presse-papiers</string>
+    <string name="quick_access_widget_label">Éléments récents</string>
+    <string name="quick_access_widget_description">Vos derniers éléments. Touchez-en un pour le copier.</string>
+    <string name="quick_access_queue_intake_label">Ajouter à la file de collage</string>
+    <string name="quick_access_transform_label">Transformer</string>
+</resources>

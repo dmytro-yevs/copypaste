@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Recortes de CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Cambiar teclado</string>
+    <string name="quick_access_tile_save_label">Guardar portapapeles</string>
+    <string name="quick_access_tile_capture_label">Captura del portapapeles</string>
+    <string name="quick_access_widget_label">Recortes recientes</string>
+    <string name="quick_access_widget_description">Tus recortes más recientes. Toca uno para copiarlo.</string>
+    <string name="quick_access_queue_intake_label">Añadir a la cola de pegado</string>
+    <string name="quick_access_transform_label">Transformar</string>
+</resources>

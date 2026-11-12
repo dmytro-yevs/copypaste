@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">CopyPaste clips</string>
+    <string name="quick_access_ime_switch_back">Switch keyboard</string>
+    <string name="quick_access_tile_save_label">Save clipboard</string>
+    <string name="quick_access_tile_capture_label">Clipboard capture</string>
+    <string name="quick_access_widget_label">Recent clips</string>
+    <string name="quick_access_widget_description">Your latest clips. Tap one to copy it.</string>
+    <string name="quick_access_queue_intake_label">Add to Paste Queue</string>
+    <string name="quick_access_transform_label">Transform</string>
+</resources>
