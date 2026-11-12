@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64-Kodierung",
+      "description": "Kodiert die UTF-8-Bytes des Textes als Base64.",
+      "params": {
+        "variant": {
+          "label": "Alphabet",
+          "options": {
+            "standard": "Standard",
+            "url_safe": "URL-sicher"
+          }
+        },
+        "padding": {
+          "label": "Auffüllen (=)"
+        },
+        "wrap": {
+          "label": "Zeilen nach 76 Zeichen umbrechen"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64-Dekodierung",
+      "description": "Dekodiert Base64 oder URL-sicheres Base64 und ignoriert Zeilenumbrüche, fehlendes Auffüllen und ein data:-URI-Präfix.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "text": "Text",
+            "hex": "Hex-Bytes"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL-Komponente kodieren",
+      "description": "Prozentkodiert alles außer Buchstaben, Ziffern und - . _ ~, für Abfragewerte oder Pfadsegmente.",
+      "params": {
+        "space": {
+          "label": "Leerzeichen kodieren als",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (Formularstil)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Vollständige URL kodieren",
+      "description": "Kodiert nur Zeichen, die in einer URL nicht erlaubt sind, und behält Struktur und vorhandene %XX-Folgen bei."
+    },
+    "encode.url_decode": {
+      "name": "URL-Dekodierung",
+      "description": "Dekodiert %XX-Folgen und meldet eine fehlerhafte Folge an ihrer Position.",
+      "params": {
+        "plus_as_space": {
+          "label": "+ als Leerzeichen behandeln"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Hex-Kodierung",
+      "description": "Schreibt die UTF-8-Bytes des Textes als Hexadezimalziffern.",
+      "params": {
+        "separator": {
+          "label": "Trennzeichen",
+          "options": {
+            "none": "Keines",
+            "space": "Leerzeichen"
+          }
+        },
+        "case": {
+          "label": "Groß-/Kleinschreibung",
+          "options": {
+            "lower": "Kleinbuchstaben",
+            "upper": "Großbuchstaben"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Hex-Dekodierung",
+      "description": "Wandelt Hexadezimalziffern zurück in Text und ignoriert Leerzeichen und 0x-Präfixe."
+    },
+    "encode.html_encode": {
+      "name": "HTML-Entitäten kodieren",
+      "description": "Ersetzt & < > \" und ' durch HTML-Entitäten und optional jedes Nicht-ASCII-Zeichen durch eine numerische Referenz.",
+      "params": {
+        "scope": {
+          "label": "Zu kodierende Zeichen",
+          "options": {
+            "minimal": "Nur & < > \" '",
+            "non_ascii": "Auch alle Nicht-ASCII-Zeichen"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML-Entitäten dekodieren",
+      "description": "Dekodiert alle benannten HTML5-Entitäten und numerischen Referenzen; unbekannte bleiben unverändert."
+    },
+    "encode.backslash_escape": {
+      "name": "Backslash-Escape",
+      "description": "Maskiert Backslashes, doppelte Anführungszeichen, Zeilenumbrüche, Tabs und Steuerzeichen im C- und JSON-Stil."
+    },
+    "encode.backslash_unescape": {
+      "name": "Backslash-Escape auflösen",
+      "description": "Wandelt \\n, \\t, \\\", \\uXXXX, \\xXX und ähnliche Escapes zurück in Zeichen; unbekannte bleiben mit Warnung erhalten."
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode-Escape",
+      "description": "Schreibt jedes Nicht-ASCII-Zeichen als \\uXXXX-Escape.",
+      "params": {
+        "astral": {
+          "label": "Zeichen über U+FFFF",
+          "options": {
+            "surrogate_pair": "Surrogatpaar (\\uD83D\\uDE00)",
+            "braces": "Geschweifte Klammern (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode-Escape auflösen",
+      "description": "Wandelt \\uXXXX- und \\u{...}-Escapes zurück in Zeichen und lässt anderen Text unverändert."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "GROSSBUCHSTABEN",
@@ -109,7 +234,77 @@
       "description": "Macht Großbuchstaben klein und Kleinbuchstaben groß."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5-Hash",
+      "description": "MD5-Prüfsumme, nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "hex_lower": "Hex, Kleinbuchstaben",
+            "hex_upper": "Hex, Großbuchstaben",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1-Hash",
+      "description": "SHA-1-Prüfsumme, nicht für Sicherheitszwecke. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "hex_lower": "Hex, Kleinbuchstaben",
+            "hex_upper": "Hex, Großbuchstaben",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256-Hash",
+      "description": "SHA-256-Prüfsumme. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "hex_lower": "Hex, Kleinbuchstaben",
+            "hex_upper": "Hex, Großbuchstaben",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512-Hash",
+      "description": "SHA-512-Prüfsumme. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "hex_lower": "Hex, Kleinbuchstaben",
+            "hex_upper": "Hex, Großbuchstaben",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32-Prüfsumme",
+      "description": "CRC-32 mit dem IEEE-Polynom von ZIP und PNG. Hasht den Text als UTF-8 genau wie angezeigt, ohne angehängten Zeilenumbruch.",
+      "params": {
+        "output": {
+          "label": "Ausgabe",
+          "options": {
+            "hex": "Hex (8 Stellen)",
+            "decimal": "Dezimal"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Trimmen",

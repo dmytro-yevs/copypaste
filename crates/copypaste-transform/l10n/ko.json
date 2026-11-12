@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 인코딩",
+      "description": "텍스트의 UTF-8 바이트를 Base64로 인코딩합니다.",
+      "params": {
+        "variant": {
+          "label": "알파벳",
+          "options": {
+            "standard": "표준",
+            "url_safe": "URL 안전"
+          }
+        },
+        "padding": {
+          "label": "패딩(=) 추가"
+        },
+        "wrap": {
+          "label": "76자마다 줄바꿈"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 디코딩",
+      "description": "표준 또는 URL 안전 Base64를 디코딩하며 줄바꿈, 빠진 패딩, data: URI 접두사는 무시합니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "text": "텍스트",
+            "hex": "16진수 바이트"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL 구성 요소 인코딩",
+      "description": "문자, 숫자, - . _ ~ 를 제외한 모든 문자를 퍼센트 인코딩합니다. 쿼리 값이나 경로 조각에 사용합니다.",
+      "params": {
+        "space": {
+          "label": "공백 인코딩 방식",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (폼 형식)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "전체 URL 인코딩",
+      "description": "URL에 허용되지 않는 문자만 인코딩하고 구조와 기존 %XX 시퀀스는 유지합니다."
+    },
+    "encode.url_decode": {
+      "name": "URL 디코딩",
+      "description": "%XX 시퀀스를 디코딩하고 잘못된 시퀀스는 위치를 알려 줍니다.",
+      "params": {
+        "plus_as_space": {
+          "label": "+를 공백으로 처리"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "16진수 인코딩",
+      "description": "텍스트의 UTF-8 바이트를 16진수로 씁니다.",
+      "params": {
+        "separator": {
+          "label": "구분자",
+          "options": {
+            "none": "없음",
+            "space": "공백"
+          }
+        },
+        "case": {
+          "label": "대소문자",
+          "options": {
+            "lower": "소문자",
+            "upper": "대문자"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "16진수 디코딩",
+      "description": "16진수를 다시 텍스트로 바꾸며 공백과 0x 접두사는 무시합니다."
+    },
+    "encode.html_encode": {
+      "name": "HTML 엔티티 인코딩",
+      "description": "& < > \" '를 HTML 엔티티로 바꾸고, 선택하면 ASCII가 아닌 모든 문자를 숫자 참조로 바꿉니다.",
+      "params": {
+        "scope": {
+          "label": "인코딩할 문자",
+          "options": {
+            "minimal": "& < > \" '만",
+            "non_ascii": "ASCII가 아닌 문자도 모두"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML 엔티티 디코딩",
+      "description": "모든 HTML5 이름 엔티티와 숫자 참조를 디코딩합니다. 알 수 없는 엔티티는 그대로 둡니다."
+    },
+    "encode.backslash_escape": {
+      "name": "백슬래시 이스케이프",
+      "description": "백슬래시, 큰따옴표, 줄바꿈, 탭, 제어 문자를 C 및 JSON 방식으로 이스케이프합니다."
+    },
+    "encode.backslash_unescape": {
+      "name": "백슬래시 이스케이프 해제",
+      "description": "\\n, \\t, \\\", \\uXXXX, \\xXX 등의 이스케이프를 문자로 되돌립니다. 알 수 없는 이스케이프는 경고와 함께 그대로 둡니다."
+    },
+    "encode.unicode_escape": {
+      "name": "유니코드 이스케이프",
+      "description": "ASCII가 아닌 모든 문자를 \\uXXXX 이스케이프로 씁니다.",
+      "params": {
+        "astral": {
+          "label": "U+FFFF를 넘는 문자",
+          "options": {
+            "surrogate_pair": "서로게이트 쌍 (\\uD83D\\uDE00)",
+            "braces": "중괄호 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "유니코드 이스케이프 해제",
+      "description": "\\uXXXX와 \\u{...} 이스케이프를 문자로 되돌리고 나머지 텍스트는 그대로 둡니다."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "대문자",
@@ -109,7 +234,77 @@
       "description": "대문자는 소문자로, 소문자는 대문자로 바꿉니다."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 해시",
+      "description": "MD5 다이제스트입니다. 보안 용도로는 쓰지 마세요. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 해시",
+      "description": "SHA-1 다이제스트입니다. 보안 용도로는 쓰지 마세요. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 해시",
+      "description": "SHA-256 다이제스트입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 해시",
+      "description": "SHA-512 다이제스트입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex_lower": "16진수, 소문자",
+            "hex_upper": "16진수, 대문자",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 체크섬",
+      "description": "ZIP과 PNG에서 쓰는 IEEE 다항식의 CRC-32입니다. 표시된 그대로의 텍스트를 UTF-8로 해시하며 줄바꿈을 추가하지 않습니다.",
+      "params": {
+        "output": {
+          "label": "출력",
+          "options": {
+            "hex": "16진수 (8자리)",
+            "decimal": "10진수"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "앞뒤 공백 제거",

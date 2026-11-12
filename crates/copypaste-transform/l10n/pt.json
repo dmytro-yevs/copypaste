@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Codificar em Base64",
+      "description": "Codifica os bytes UTF-8 do texto em Base64.",
+      "params": {
+        "variant": {
+          "label": "Alfabeto",
+          "options": {
+            "standard": "Padrão",
+            "url_safe": "Seguro para URL"
+          }
+        },
+        "padding": {
+          "label": "Adicionar preenchimento (=)"
+        },
+        "wrap": {
+          "label": "Quebrar linhas a cada 76 caracteres"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Decodificar Base64",
+      "description": "Decodifica Base64 padrão ou seguro para URL, ignorando quebras de linha, preenchimento ausente e um prefixo data: URI.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "text": "Texto",
+            "hex": "Bytes em hex"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "Codificar componente de URL",
+      "description": "Codifica com porcentagem tudo exceto letras, dígitos e - . _ ~, para valores de consulta ou segmentos de caminho.",
+      "params": {
+        "space": {
+          "label": "Codificar espaços como",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (estilo formulário)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Codificar URL completa",
+      "description": "Codifica apenas caracteres não permitidos numa URL e mantém a estrutura e as sequências %XX existentes."
+    },
+    "encode.url_decode": {
+      "name": "Decodificar URL",
+      "description": "Decodifica sequências %XX e indica a posição de uma sequência malformada.",
+      "params": {
+        "plus_as_space": {
+          "label": "Tratar + como espaço"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Codificar em hex",
+      "description": "Escreve os bytes UTF-8 do texto como dígitos hexadecimais.",
+      "params": {
+        "separator": {
+          "label": "Separador",
+          "options": {
+            "none": "Nenhum",
+            "space": "Espaço"
+          }
+        },
+        "case": {
+          "label": "Maiúsculas/minúsculas",
+          "options": {
+            "lower": "Minúsculas",
+            "upper": "Maiúsculas"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Decodificar hex",
+      "description": "Converte dígitos hexadecimais de volta em texto, ignorando espaços e prefixos 0x."
+    },
+    "encode.html_encode": {
+      "name": "Codificar entidades HTML",
+      "description": "Substitui & < > \" e ' por entidades HTML e, opcionalmente, cada caractere não ASCII por uma referência numérica.",
+      "params": {
+        "scope": {
+          "label": "Caracteres a codificar",
+          "options": {
+            "minimal": "Só & < > \" '",
+            "non_ascii": "Também todos os não ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "Decodificar entidades HTML",
+      "description": "Decodifica todas as entidades HTML5 nomeadas e referências numéricas; entidades desconhecidas ficam como estão."
+    },
+    "encode.backslash_escape": {
+      "name": "Escapar com barra invertida",
+      "description": "Escapa barras invertidas, aspas duplas, quebras de linha, tabulações e caracteres de controle no estilo C e JSON."
+    },
+    "encode.backslash_unescape": {
+      "name": "Remover escapes de barra invertida",
+      "description": "Converte \\n, \\t, \\\", \\uXXXX, \\xXX e escapes semelhantes em caracteres; os desconhecidos ficam com um aviso."
+    },
+    "encode.unicode_escape": {
+      "name": "Escapar Unicode",
+      "description": "Escreve cada caractere não ASCII como um escape \\uXXXX.",
+      "params": {
+        "astral": {
+          "label": "Caracteres acima de U+FFFF",
+          "options": {
+            "surrogate_pair": "Par substituto (\\uD83D\\uDE00)",
+            "braces": "Chaves (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Remover escapes Unicode",
+      "description": "Converte escapes \\uXXXX e \\u{...} em caracteres e deixa o restante do texto inalterado."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "MAIÚSCULAS",
@@ -109,7 +234,77 @@
       "description": "Troca maiúsculas por minúsculas e minúsculas por maiúsculas."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "Hash MD5",
+      "description": "Resumo MD5, não serve para segurança. Calcula o hash do texto em UTF-8 exatamente como exibido, sem adicionar quebra de linha.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "hex_lower": "Hex, minúsculas",
+            "hex_upper": "Hex, maiúsculas",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "Hash SHA-1",
+      "description": "Resumo SHA-1, não serve para segurança. Calcula o hash do texto em UTF-8 exatamente como exibido, sem adicionar quebra de linha.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "hex_lower": "Hex, minúsculas",
+            "hex_upper": "Hex, maiúsculas",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "Hash SHA-256",
+      "description": "Resumo SHA-256. Calcula o hash do texto em UTF-8 exatamente como exibido, sem adicionar quebra de linha.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "hex_lower": "Hex, minúsculas",
+            "hex_upper": "Hex, maiúsculas",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "Hash SHA-512",
+      "description": "Resumo SHA-512. Calcula o hash do texto em UTF-8 exatamente como exibido, sem adicionar quebra de linha.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "hex_lower": "Hex, minúsculas",
+            "hex_upper": "Hex, maiúsculas",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "Soma de verificação CRC-32",
+      "description": "CRC-32 com o polinômio IEEE usado por ZIP e PNG. Calcula o hash do texto em UTF-8 exatamente como exibido, sem adicionar quebra de linha.",
+      "params": {
+        "output": {
+          "label": "Saída",
+          "options": {
+            "hex": "Hex (8 dígitos)",
+            "decimal": "Decimal"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Aparar",

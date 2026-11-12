@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 kodla",
+      "description": "Metnin UTF-8 baytlarını Base64 olarak kodlar.",
+      "params": {
+        "variant": {
+          "label": "Alfabe",
+          "options": {
+            "standard": "Standart",
+            "url_safe": "URL için güvenli"
+          }
+        },
+        "padding": {
+          "label": "Dolgu (=) ekle"
+        },
+        "wrap": {
+          "label": "Satırları 76 karakterde kaydır"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 çöz",
+      "description": "Standart veya URL için güvenli Base64'ü çözer; satır sonlarını, eksik dolguyu ve data: URI önekini yok sayar.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "text": "Metin",
+            "hex": "Onaltılık baytlar"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL bileşenini kodla",
+      "description": "Harfler, rakamlar ve - . _ ~ dışındaki her şeyi yüzde kodlamasıyla kodlar; sorgu değerleri veya yol parçaları içindir.",
+      "params": {
+        "space": {
+          "label": "Boşlukları şöyle kodla",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (form biçimi)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Tam URL'yi kodla",
+      "description": "Yalnızca URL'de izin verilmeyen karakterleri kodlar; yapıyı ve mevcut %XX dizilerini korur."
+    },
+    "encode.url_decode": {
+      "name": "URL çöz",
+      "description": "%XX dizilerini çözer ve hatalı bir diziyi konumuyla bildirir.",
+      "params": {
+        "plus_as_space": {
+          "label": "+ işaretini boşluk say"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Onaltılık kodla",
+      "description": "Metnin UTF-8 baytlarını onaltılık rakamlarla yazar.",
+      "params": {
+        "separator": {
+          "label": "Ayırıcı",
+          "options": {
+            "none": "Yok",
+            "space": "Boşluk"
+          }
+        },
+        "case": {
+          "label": "Harf büyüklüğü",
+          "options": {
+            "lower": "Küçük harf",
+            "upper": "Büyük harf"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Onaltılık çöz",
+      "description": "Onaltılık rakamları yeniden metne çevirir; boşlukları ve 0x öneklerini yok sayar."
+    },
+    "encode.html_encode": {
+      "name": "HTML varlıklarını kodla",
+      "description": "& < > \" ve ' karakterlerini HTML varlıklarıyla, isteğe bağlı olarak ASCII dışı her karakteri sayısal referansla değiştirir.",
+      "params": {
+        "scope": {
+          "label": "Kodlanacak karakterler",
+          "options": {
+            "minimal": "Yalnızca & < > \" '",
+            "non_ascii": "ASCII dışındakilerin tümü de"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML varlıklarını çöz",
+      "description": "Tüm HTML5 adlandırılmış varlıklarını ve sayısal referansları çözer; bilinmeyen varlıklar olduğu gibi kalır."
+    },
+    "encode.backslash_escape": {
+      "name": "Ters eğik çizgiyle kaçışla",
+      "description": "Ters eğik çizgileri, çift tırnakları, satır sonlarını, sekmeleri ve denetim karakterlerini C ve JSON biçiminde kaçışlar."
+    },
+    "encode.backslash_unescape": {
+      "name": "Ters eğik çizgi kaçışlarını çöz",
+      "description": "\\n, \\t, \\\", \\uXXXX, \\xXX ve benzeri kaçışları karakterlere çevirir; bilinmeyenler uyarıyla olduğu gibi kalır."
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode kaçışla",
+      "description": "ASCII dışı her karakteri \\uXXXX kaçışı olarak yazar.",
+      "params": {
+        "astral": {
+          "label": "U+FFFF üzerindeki karakterler",
+          "options": {
+            "surrogate_pair": "Vekil çift (\\uD83D\\uDE00)",
+            "braces": "Süslü ayraç (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode kaçışlarını çöz",
+      "description": "\\uXXXX ve \\u{...} kaçışlarını karakterlere çevirir, diğer metni değiştirmez."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "BÜYÜK HARF",
@@ -109,7 +234,77 @@
       "description": "Büyük harfleri küçük, küçük harfleri büyük yapar."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 özeti",
+      "description": "MD5 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 özeti",
+      "description": "SHA-1 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 özeti",
+      "description": "SHA-256 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 özeti",
+      "description": "SHA-512 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 sağlama toplamı",
+      "description": "ZIP ve PNG'nin kullandığı IEEE polinomuyla CRC-32. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex": "Onaltılık (8 basamak)",
+            "decimal": "Ondalık"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Kırp",

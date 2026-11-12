@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 エンコード",
+      "description": "テキストの UTF-8 バイト列を Base64 にエンコードします。",
+      "params": {
+        "variant": {
+          "label": "アルファベット",
+          "options": {
+            "standard": "標準",
+            "url_safe": "URL セーフ"
+          }
+        },
+        "padding": {
+          "label": "パディング (=) を付ける"
+        },
+        "wrap": {
+          "label": "76 文字で改行"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 デコード",
+      "description": "標準または URL セーフの Base64 をデコードします。改行、パディングの欠落、data: URI の接頭辞は無視します。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "text": "テキスト",
+            "hex": "16 進バイト"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL コンポーネントをエンコード",
+      "description": "英数字と - . _ ~ 以外をすべてパーセントエンコードします。クエリ値やパスの一部に使います。",
+      "params": {
+        "space": {
+          "label": "スペースの表記",
+          "options": {
+            "percent": "%20",
+            "plus": "+(フォーム形式)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "URL 全体をエンコード",
+      "description": "URL で使えない文字だけをエンコードし、構造と既存の %XX はそのまま残します。"
+    },
+    "encode.url_decode": {
+      "name": "URL デコード",
+      "description": "%XX をデコードし、不正なシーケンスはその位置を示します。",
+      "params": {
+        "plus_as_space": {
+          "label": "+ をスペースとして扱う"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "16 進エンコード",
+      "description": "テキストの UTF-8 バイト列を 16 進数で書き出します。",
+      "params": {
+        "separator": {
+          "label": "区切り",
+          "options": {
+            "none": "なし",
+            "space": "スペース"
+          }
+        },
+        "case": {
+          "label": "大文字・小文字",
+          "options": {
+            "lower": "小文字",
+            "upper": "大文字"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "16 進デコード",
+      "description": "16 進数をテキストに戻します。スペースと 0x 接頭辞は無視します。"
+    },
+    "encode.html_encode": {
+      "name": "HTML エンティティにエンコード",
+      "description": "& < > \" ' を HTML エンティティに置き換えます。必要に応じて ASCII 以外の文字も数値参照にします。",
+      "params": {
+        "scope": {
+          "label": "エンコードする文字",
+          "options": {
+            "minimal": "& < > \" ' のみ",
+            "non_ascii": "ASCII 以外もすべて"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML エンティティをデコード",
+      "description": "HTML5 のすべての名前付きエンティティと数値参照をデコードします。不明なエンティティはそのまま残します。"
+    },
+    "encode.backslash_escape": {
+      "name": "バックスラッシュでエスケープ",
+      "description": "バックスラッシュ、二重引用符、改行、タブ、制御文字を C や JSON の形式でエスケープします。"
+    },
+    "encode.backslash_unescape": {
+      "name": "バックスラッシュのエスケープを解除",
+      "description": "\\n、\\t、\\\"、\\uXXXX、\\xXX などを文字に戻します。不明なエスケープは警告付きでそのまま残します。"
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode エスケープ",
+      "description": "ASCII 以外の文字を \\uXXXX 形式で書き出します。",
+      "params": {
+        "astral": {
+          "label": "U+FFFF を超える文字",
+          "options": {
+            "surrogate_pair": "サロゲートペア (\\uD83D\\uDE00)",
+            "braces": "波括弧 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode エスケープを解除",
+      "description": "\\uXXXX と \\u{...} を文字に戻し、それ以外のテキストは変更しません。"
+    }
+  },
   "case": {
     "case.upper": {
       "name": "大文字",
@@ -109,7 +234,77 @@
       "description": "大文字を小文字に、小文字を大文字にします。"
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 ハッシュ",
+      "description": "MD5 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 ハッシュ",
+      "description": "SHA-1 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 ハッシュ",
+      "description": "SHA-256 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 ハッシュ",
+      "description": "SHA-512 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 チェックサム",
+      "description": "ZIP や PNG で使われる IEEE 多項式の CRC-32 です。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex": "16 進(8 桁)",
+            "decimal": "10 進"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "前後の空白を削除",

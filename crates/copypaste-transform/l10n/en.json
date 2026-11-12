@@ -1,6 +1,220 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 encode",
+      "description": "Encodes the UTF-8 bytes of the text as Base64.",
+      "keywords": [
+        "base64",
+        "b64",
+        "encode",
+        "mime"
+      ],
+      "params": {
+        "variant": {
+          "label": "Alphabet",
+          "options": {
+            "standard": "Standard",
+            "url_safe": "URL-safe"
+          }
+        },
+        "padding": {
+          "label": "Add padding (=)"
+        },
+        "wrap": {
+          "label": "Wrap lines at 76 characters"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 decode",
+      "description": "Decodes Base64 or URL-safe Base64, ignoring line breaks, missing padding and a data: URI prefix.",
+      "keywords": [
+        "base64",
+        "b64",
+        "decode",
+        "data uri"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "text": "Text",
+            "hex": "Hex bytes"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL encode component",
+      "description": "Percent-encodes everything except letters, digits and - . _ ~, for use inside a query value or path segment.",
+      "keywords": [
+        "url",
+        "percent",
+        "encode",
+        "uri",
+        "query",
+        "escape"
+      ],
+      "params": {
+        "space": {
+          "label": "Encode spaces as",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (form style)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "URL encode full URL",
+      "description": "Encodes only characters that are not allowed in a URL and keeps its structure and existing %XX sequences.",
+      "keywords": [
+        "url",
+        "uri",
+        "percent",
+        "encode",
+        "link"
+      ]
+    },
+    "encode.url_decode": {
+      "name": "URL decode",
+      "description": "Decodes %XX sequences and reports a malformed sequence at its position.",
+      "keywords": [
+        "url",
+        "percent",
+        "decode",
+        "unescape",
+        "uri"
+      ],
+      "params": {
+        "plus_as_space": {
+          "label": "Treat + as a space"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Hex encode",
+      "description": "Writes the UTF-8 bytes of the text as hexadecimal digits.",
+      "keywords": [
+        "hex",
+        "hexadecimal",
+        "bytes",
+        "encode"
+      ],
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "none": "None",
+            "space": "Space"
+          }
+        },
+        "case": {
+          "label": "Letter case",
+          "options": {
+            "lower": "Lowercase",
+            "upper": "Uppercase"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Hex decode",
+      "description": "Turns hexadecimal digits back into text, ignoring spaces and 0x prefixes.",
+      "keywords": [
+        "hex",
+        "hexadecimal",
+        "bytes",
+        "decode"
+      ]
+    },
+    "encode.html_encode": {
+      "name": "HTML entities encode",
+      "description": "Replaces & < > \" and ' with HTML entities, and optionally every non-ASCII character with a numeric reference.",
+      "keywords": [
+        "html",
+        "entities",
+        "escape",
+        "encode",
+        "xml"
+      ],
+      "params": {
+        "scope": {
+          "label": "Characters to encode",
+          "options": {
+            "minimal": "Only & < > \" '",
+            "non_ascii": "Also all non-ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML entities decode",
+      "description": "Decodes all HTML5 named entities and numeric references; unknown entities stay as written.",
+      "keywords": [
+        "html",
+        "entities",
+        "unescape",
+        "decode",
+        "amp"
+      ]
+    },
+    "encode.backslash_escape": {
+      "name": "Backslash escape",
+      "description": "Escapes backslashes, double quotes, line breaks, tabs and control characters, C and JSON style.",
+      "keywords": [
+        "escape",
+        "backslash",
+        "string",
+        "json",
+        "c",
+        "quote"
+      ]
+    },
+    "encode.backslash_unescape": {
+      "name": "Backslash unescape",
+      "description": "Turns \\n, \\t, \\\", \\uXXXX, \\xXX and similar escapes back into characters; unknown escapes stay as written with a warning.",
+      "keywords": [
+        "unescape",
+        "backslash",
+        "string",
+        "json",
+        "c"
+      ]
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode escape",
+      "description": "Writes every non-ASCII character as a \\uXXXX escape.",
+      "keywords": [
+        "unicode",
+        "escape",
+        "\\u",
+        "code point",
+        "java",
+        "javascript"
+      ],
+      "params": {
+        "astral": {
+          "label": "Characters beyond U+FFFF",
+          "options": {
+            "surrogate_pair": "Surrogate pair (\\uD83D\\uDE00)",
+            "braces": "Braces (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode unescape",
+      "description": "Turns \\uXXXX and \\u{...} escapes back into characters and leaves other text unchanged.",
+      "keywords": [
+        "unicode",
+        "unescape",
+        "\\u",
+        "code point"
+      ]
+    }
+  },
   "case": {
     "case.upper": {
       "name": "UPPERCASE",
@@ -157,7 +371,112 @@
       ]
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 hash",
+      "description": "MD5 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "md5",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 hash",
+      "description": "SHA-1 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha1",
+        "sha-1",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 hash",
+      "description": "SHA-256 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha256",
+        "sha-256",
+        "sha2",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 hash",
+      "description": "SHA-512 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha512",
+        "sha-512",
+        "sha2",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 checksum",
+      "description": "CRC-32 with the IEEE polynomial used by zip and PNG. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "crc",
+        "crc32",
+        "checksum",
+        "zip"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex": "Hex (8 digits)",
+            "decimal": "Decimal"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Trim",

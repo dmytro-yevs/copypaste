@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Encoder en Base64",
+      "description": "Encode les octets UTF-8 du texte en Base64.",
+      "params": {
+        "variant": {
+          "label": "Alphabet",
+          "options": {
+            "standard": "Standard",
+            "url_safe": "Compatible URL"
+          }
+        },
+        "padding": {
+          "label": "Ajouter le remplissage (=)"
+        },
+        "wrap": {
+          "label": "Couper les lignes à 76 caractères"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Décoder le Base64",
+      "description": "Décode le Base64 standard ou compatible URL en ignorant les retours à la ligne, le remplissage manquant et un préfixe data: URI.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "text": "Texte",
+            "hex": "Octets en hex"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "Encoder un composant d’URL",
+      "description": "Encode en pourcentage tout sauf les lettres, chiffres et - . _ ~, pour une valeur de requête ou un segment de chemin.",
+      "params": {
+        "space": {
+          "label": "Encoder les espaces en",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (style formulaire)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Encoder une URL complète",
+      "description": "Encode seulement les caractères interdits dans une URL et conserve sa structure et les séquences %XX existantes."
+    },
+    "encode.url_decode": {
+      "name": "Décoder une URL",
+      "description": "Décode les séquences %XX et signale une séquence mal formée à sa position.",
+      "params": {
+        "plus_as_space": {
+          "label": "Traiter + comme une espace"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Encoder en hex",
+      "description": "Écrit les octets UTF-8 du texte en chiffres hexadécimaux.",
+      "params": {
+        "separator": {
+          "label": "Séparateur",
+          "options": {
+            "none": "Aucun",
+            "space": "Espace"
+          }
+        },
+        "case": {
+          "label": "Casse",
+          "options": {
+            "lower": "Minuscules",
+            "upper": "Majuscules"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Décoder l’hex",
+      "description": "Reconvertit des chiffres hexadécimaux en texte en ignorant les espaces et les préfixes 0x."
+    },
+    "encode.html_encode": {
+      "name": "Encoder les entités HTML",
+      "description": "Remplace & < > \" et ' par des entités HTML et, en option, chaque caractère non ASCII par une référence numérique.",
+      "params": {
+        "scope": {
+          "label": "Caractères à encoder",
+          "options": {
+            "minimal": "Seulement & < > \" '",
+            "non_ascii": "Aussi tous les non-ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "Décoder les entités HTML",
+      "description": "Décode toutes les entités nommées HTML5 et les références numériques ; les entités inconnues restent telles quelles."
+    },
+    "encode.backslash_escape": {
+      "name": "Échapper avec des barres obliques inverses",
+      "description": "Échappe les barres obliques inverses, guillemets doubles, retours à la ligne, tabulations et caractères de contrôle, style C et JSON."
+    },
+    "encode.backslash_unescape": {
+      "name": "Retirer les échappements",
+      "description": "Reconvertit \\n, \\t, \\\", \\uXXXX, \\xXX et échappements similaires en caractères ; les inconnus restent tels quels avec un avertissement."
+    },
+    "encode.unicode_escape": {
+      "name": "Échapper l’Unicode",
+      "description": "Écrit chaque caractère non ASCII sous forme d’échappement \\uXXXX.",
+      "params": {
+        "astral": {
+          "label": "Caractères au-delà de U+FFFF",
+          "options": {
+            "surrogate_pair": "Paire de substitution (\\uD83D\\uDE00)",
+            "braces": "Accolades (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Retirer les échappements Unicode",
+      "description": "Reconvertit les échappements \\uXXXX et \\u{...} en caractères et laisse le reste du texte inchangé."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "MAJUSCULES",
@@ -109,7 +234,77 @@
       "description": "Passe les majuscules en minuscules et les minuscules en majuscules."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "Hachage MD5",
+      "description": "Empreinte MD5, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "Hachage SHA-1",
+      "description": "Empreinte SHA-1, pas pour la sécurité. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "Hachage SHA-256",
+      "description": "Empreinte SHA-256. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "Hachage SHA-512",
+      "description": "Empreinte SHA-512. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex_lower": "Hex, minuscules",
+            "hex_upper": "Hex, majuscules",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "Somme de contrôle CRC-32",
+      "description": "CRC-32 avec le polynôme IEEE utilisé par ZIP et PNG. Hache le texte en UTF-8 exactement tel qu’affiché, sans ajouter de retour à la ligne.",
+      "params": {
+        "output": {
+          "label": "Sortie",
+          "options": {
+            "hex": "Hex (8 chiffres)",
+            "decimal": "Décimal"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Rogner",

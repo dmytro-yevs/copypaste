@@ -1160,6 +1160,7 @@ dependencies = [
  "html2text",
  "icu_casemap",
  "jiff",
+ "markup5ever",
  "md-5",
  "percent-encoding",
  "quick-xml",

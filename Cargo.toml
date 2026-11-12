@@ -161,6 +161,9 @@ md-5 = "0.10.6"
 sha1 = "0.10.7"
 crc32fast = "1.5.0"
 percent-encoding = "2.3.2"
+# HTML5 named character references for the HTML-entity decode transform.
+# Already linked through html2text at this version, so its table adds no code.
+markup5ever = "0.40.0"
 # Official MCP SDK for the `copypaste mcp` stdio server. Pinned exactly
 # because its API still moves between minor releases; 3.9.0 is the first
 # release outside RUSTSEC-2026-0462. The default `base64` feature is off: it
