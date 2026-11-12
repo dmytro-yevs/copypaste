@@ -95,11 +95,13 @@ fn expected(method: &Method) -> Expected {
         Method::Watch | Method::WatchRuntime | Method::WatchEvents { .. } | Method::Shutdown => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
+        Method::Transforms { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::TransformCatalogue(_)))
+        }
         // Each feature group answers `unsupported` until its feature lands.
         Method::Snippets { .. }
         | Method::Clips { .. }
         | Method::PasteQueue { .. }
-        | Method::Transforms { .. }
         | Method::Rules { .. }
         | Method::Ai { .. } => Expected::Error(ErrorCode::Unsupported),
         Method::Copy { .. }
