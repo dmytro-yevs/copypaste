@@ -1,21 +1,14 @@
 //! Whether the peer on an IPC connection is the CopyPaste app.
 //!
-//! Approvals, grant administration, policy changes and un-hiding are served
-//! only to the app (`OpGates::privileged`). A connection's peer handle is taken
-//! when it is accepted; the check itself runs off the reactor on the first
-//! privileged request and its answer holds for the rest of the connection, so
-//! connections that never ask (every CLI request) pay one cheap syscall.
-//!
-//! * macOS: the socket's audit token names the running code, which must meet
-//!   the daemon's own designated requirement with the app's identifier.
-//! * Windows: the pipe client's image must be the app next to the daemon and
-//!   carry a valid Authenticode signature from the daemon's own signer.
-//! * Linux: the peer's `/proc/<pid>/exe` must be the app next to the daemon.
-//!   Weaker: no signature, and a pid can be reused.
-//!
-//! Unsigned or ad-hoc daemons fall back to the path check; debug builds may
-//! name the app with `COPYPASTE_DEV_APP_PATH`. This is not a boundary against
-//! a process of the same user, which can already read history directly.
+//! Privileged ops (`OpGates::privileged`) are served only to the app. The peer
+//! handle is taken at accept; the check runs off the reactor on the first
+//! privileged request and holds for the connection, so CLI connections pay
+//! one cheap syscall. macOS: the audit token's code must meet the daemon's own
+//! designated requirement with the app identifier. Windows: the client image
+//! must be the app next to the daemon, signed by the daemon's signer. Linux:
+//! `/proc/<pid>/exe` must be the app next to the daemon (weaker: no signature,
+//! pids are reused). Unsigned daemons fall back to that path check, plus
+//! `COPYPASTE_DEV_APP_PATH` in debug. Not a boundary against same-user code.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
