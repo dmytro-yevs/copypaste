@@ -20,6 +20,26 @@ internal data class CaptureFeedbackPreview(
     val imageHeight: Int? = null,
 )
 
+/** What a CopyPaste clipboard write announces to the user. */
+internal enum class ClipboardWriteFeedback {
+    /** Content received from another device: the capture notification. */
+    Captured,
+
+    /** A copy the user asked for: the copy sound. */
+    Copied,
+
+    /** A transient delivery for one paste: the delivering surface reports it. */
+    Silent;
+
+    companion object {
+        fun of(received: Boolean, transient: Boolean): ClipboardWriteFeedback = when {
+            received -> Captured
+            transient -> Silent
+            else -> Copied
+        }
+    }
+}
+
 internal object AndroidCaptureFeedback {
     private const val channelId = "clipboard-capture-events-silent"
     private const val notificationId = 2300

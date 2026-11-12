@@ -33,7 +33,7 @@ pub mod settings;
 
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
 pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
-pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost};
+pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost, WriteOptions};
 pub use meta::{Meta, Origin};
 pub use p2p::P2p;
 pub use settings::{Settings, SettingsError, SettingsReadGuard, SettingsTransition};
@@ -850,7 +850,7 @@ impl Runtime {
                 &item_id,
                 &ClipboardPayload::Text(code.to_owned().into()),
                 copypaste_ipc::content_type::TEXT,
-                completion.privacy.secret,
+                WriteOptions::copy(completion.privacy.secret),
             )
             .map_err(|_| RuntimeError::Capture)
     }
@@ -1221,15 +1221,15 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<bool>>);
+    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<WriteOptions>>);
     impl ClipboardWriter for RecordingClipboard {
         fn write(
             &self,
             payload: &ClipboardPayload,
             _content_type: &str,
-            secret: bool,
+            options: WriteOptions,
         ) -> Result<(), ClipboardWriteError> {
-            self.1.lock().unwrap().push(secret);
+            self.1.lock().unwrap().push(options);
             self.0.lock().unwrap().push(match payload {
                 ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
                 ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
@@ -1276,7 +1276,11 @@ mod tests {
             .set_secret(&runtime.keyring, "secret-source", false)
             .unwrap();
         assert!(runtime.copy(4, "secret-source", false).ok);
-        assert_eq!(*clipboard.1.lock().unwrap(), [true, true, true, false]);
+        assert_eq!(
+            *clipboard.1.lock().unwrap(),
+            [true, true, true, false].map(WriteOptions::copy),
+            "history copies keep their sensitivity and are never transient"
+        );
     }
 
     #[derive(Default)]
@@ -1291,9 +1295,9 @@ mod tests {
             &self,
             payload: &ClipboardPayload,
             kind: &str,
-            secret: bool,
+            options: WriteOptions,
         ) -> Result<(), ClipboardWriteError> {
-            self.writes.write(payload, kind, secret)
+            self.writes.write(payload, kind, options)
         }
 
         fn write_received(
@@ -1302,7 +1306,7 @@ mod tests {
             kind: &str,
             secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.write(payload, kind, secret)?;
+            self.write(payload, kind, WriteOptions::copy(secret))?;
             *self.acknowledgements.lock().unwrap() += 1;
             self.concealed.lock().unwrap().push(secret);
             Ok(())
@@ -2037,7 +2041,7 @@ mod tests {
                 &self,
                 _: &ClipboardPayload,
                 _: &str,
-                _: bool,
+                _: WriteOptions,
             ) -> Result<(), ClipboardWriteError> {
                 Err(ClipboardWriteError::Failed)
             }

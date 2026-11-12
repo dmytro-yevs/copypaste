@@ -44,7 +44,7 @@ mod attribution;
 mod file;
 
 use super::change::{clear_sentinel_on_delta_mismatch, Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+use super::{Capture, CapturePolicy, ClipboardSource, WriteOptions, MAX_CAPTURE_BYTES};
 #[cfg(test)]
 use crate::macos_workspace::SourceIdentity as FrontmostApp;
 use attribution::Attribution;
@@ -60,6 +60,8 @@ const UTI_PNG: &str = "public.png";
 const UTI_TIFF: &str = "public.tiff";
 const UTI_FILE_URL: &str = "public.file-url";
 const UTI_SOURCE: &str = "org.nspasteboard.source";
+const UTI_CONCEALED: &str = "org.nspasteboard.ConcealedType";
+const UTI_TRANSIENT: &str = "org.nspasteboard.TransientType";
 /// §3.12 (CopyPaste-pbre): the invariant UTI strings are process-lifetime
 /// constants, built once and reused. allocating ~12 fresh Cocoa strings on
 /// every changed tick.
@@ -100,12 +102,8 @@ impl Utis {
         // `NSString` is `ImmutableWithMutableSubclass<NSMutableString>`, which
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
-            concealed_probe: NSArray::from_vec(vec![NSString::from_str(
-                "org.nspasteboard.ConcealedType",
-            )]),
-            transient_probe: NSArray::from_vec(vec![NSString::from_str(
-                "org.nspasteboard.TransientType",
-            )]),
+            concealed_probe: NSArray::from_vec(vec![NSString::from_str(UTI_CONCEALED)]),
+            transient_probe: NSArray::from_vec(vec![NSString::from_str(UTI_TRANSIENT)]),
             text_probe: NSArray::from_vec(vec![text.clone()]),
             rtf_probe: NSArray::from_vec(vec![rtf.clone()]),
             html_probe: NSArray::from_vec(vec![html.clone()]),
@@ -440,7 +438,7 @@ impl ClipboardSource for MacOsClipboard {
         })
     }
 
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         // I-17 again: the paste-back path needs the pool as much as the poll.
         autoreleasepool(|_pool| {
             let pb = unsafe { NSPasteboard::generalPasteboard() };
@@ -453,7 +451,7 @@ impl ClipboardSource for MacOsClipboard {
                 // content visible. A poll landing between the two sees an empty
                 // pasteboard, which yields nothing and keeps polling.
                 self.tracker.sentinel.arm(pb.clearContents() as i64);
-                pb.setString_forType(&value, &utis.text) && (!concealed || mark_concealed(&pb))
+                pb.setString_forType(&value, &utis.text) && mark(&pb, options)
             });
             if !ok {
                 // §3.3 step 5.
@@ -486,7 +484,7 @@ impl ClipboardSource for MacOsClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
@@ -527,9 +525,7 @@ impl ClipboardSource for MacOsClipboard {
             self.tracker
                 .sentinel
                 .arm(unsafe { pb.clearContents() } as i64);
-            if !unsafe { pb.setData_forType(Some(&data), &uti) }
-                || (concealed && !mark_concealed(&pb))
-            {
+            if !unsafe { pb.setData_forType(Some(&data), &uti) } || !mark(&pb, options) {
                 self.tracker.sentinel.clear();
                 return Err(ClipboardWriteError::Failed);
             }
@@ -560,12 +556,24 @@ impl ClipboardSource for MacOsClipboard {
     }
 }
 
-/// Adds the nspasteboard.org concealed marker, the one capture reads as
-/// `privacy.secret`, to the contents just written after `clearContents`.
-fn mark_concealed(pb: &NSPasteboard) -> bool {
-    let empty = unsafe { NSData::dataWithBytes_length(std::ptr::null_mut(), 0) };
-    let concealed = NSString::from_str("org.nspasteboard.ConcealedType");
-    unsafe { pb.setData_forType(Some(&empty), &concealed) }
+/// The nspasteboard.org markers a write carries: concealed for a secret (the
+/// one capture reads as `privacy.secret`), transient for a paste delivery.
+fn marker_types(options: WriteOptions) -> impl Iterator<Item = &'static str> {
+    [
+        (options.secret, UTI_CONCEALED),
+        (options.transient, UTI_TRANSIENT),
+    ]
+    .into_iter()
+    .filter_map(|(present, uti)| present.then_some(uti))
+}
+
+/// Adds the markers `options` asks for to the contents just written after
+/// `clearContents`.
+fn mark(pb: &NSPasteboard, options: WriteOptions) -> bool {
+    marker_types(options).all(|uti| {
+        let empty = unsafe { NSData::dataWithBytes_length(std::ptr::null_mut(), 0) };
+        unsafe { pb.setData_forType(Some(&empty), &NSString::from_str(uti)) }
+    })
 }
 
 // Tests — the half of manifest 01 that only a Mac can answer
@@ -706,6 +714,36 @@ mod tests {
     }
 
     #[test]
+    fn a_transient_write_carries_the_transient_marker_beside_any_concealed_one() {
+        let markers = |secret, transient| {
+            marker_types(WriteOptions { secret, transient }).collect::<Vec<_>>()
+        };
+        assert!(markers(false, false).is_empty());
+        assert_eq!(markers(true, false), [UTI_CONCEALED]);
+        assert_eq!(markers(false, true), [UTI_TRANSIENT]);
+        assert_eq!(markers(true, true), [UTI_CONCEALED, UTI_TRANSIENT]);
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn a_transient_self_write_is_marked_and_not_captured_back() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+        write_text("something copied earlier");
+        let _ = clipboard.poll();
+        let options = WriteOptions {
+            secret: true,
+            transient: true,
+        };
+        clipboard
+            .set_contents("delivered by us", options)
+            .expect("the write failed");
+        assert!(offers(UTI_TRANSIENT) && offers(UTI_CONCEALED));
+        assert!(clipboard.poll().is_none(), "our own delivery was captured");
+        clear();
+    }
+
+    #[test]
     fn source_attribution_preserves_a_name_when_a_helper_has_no_bundle_id() {
         assert_eq!(
             Attribution::from_app(Some(&FrontmostApp {
@@ -731,7 +769,7 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
                 b"decrypted file bytes",
                 Some(&metadata),
-                false,
+                WriteOptions::default(),
             )
             .unwrap();
 
@@ -794,7 +832,7 @@ mod tests {
 
         let pre = change_count();
         clipboard
-            .set_contents("pasted by us", false)
+            .set_contents("pasted by us", WriteOptions::default())
             .expect("the write failed");
         let actual = change_count();
         assert_eq!(
@@ -1030,7 +1068,7 @@ mod tests {
         let _ = clipboard.poll();
 
         clipboard
-            .set_contents("pasted by us", false)
+            .set_contents("pasted by us", WriteOptions::default())
             .expect("the write failed");
         if let Some(capture) = clipboard.poll() {
             panic!(

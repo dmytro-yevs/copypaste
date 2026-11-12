@@ -7,7 +7,7 @@ use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 use copypaste_ipc::{
     CapabilityGuarantee, CapabilityState, CapabilityStatus, DiagnosticCounters, PlatformCapability,
 };
-use copypaste_runtime::{PlatformStatus, RuntimeHost, Settings, SettingsTransition};
+use copypaste_runtime::{PlatformStatus, RuntimeHost, Settings, SettingsTransition, WriteOptions};
 
 use crate::clipboard::{CapturePolicy, ClipboardSource};
 
@@ -50,9 +50,9 @@ impl RuntimeHost for DaemonHost {
         item_id: &str,
         payload: &ClipboardPayload,
         content_type: &str,
-        secret: bool,
+        options: WriteOptions,
     ) -> Result<(), ClipboardWriteError> {
-        lock(&self.clipboard).write_payload(item_id, payload, content_type, secret)
+        lock(&self.clipboard).write_payload(item_id, payload, content_type, options)
     }
 
     fn copy_feedback(&self) {

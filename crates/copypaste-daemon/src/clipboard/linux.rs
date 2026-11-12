@@ -21,7 +21,9 @@ use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
-use super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
+use super::{
+    Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence, WriteOptions,
+};
 use copypaste_ipc::{CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability};
 
 mod formats;
@@ -576,11 +578,11 @@ impl ClipboardSource for X11Clipboard {
     fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         self.write(OwnedSelection {
             target: 0,
             bytes: text.as_bytes().to_vec(),
-            concealed,
+            concealed: options.secret,
         })
     }
     fn set_binary_contents(
@@ -589,7 +591,7 @@ impl ClipboardSource for X11Clipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (_, target) =
@@ -609,7 +611,7 @@ impl ClipboardSource for X11Clipboard {
         self.write(OwnedSelection {
             target,
             bytes,
-            concealed,
+            concealed: options.secret,
         })
         .map_err(|_| ClipboardWriteError::Failed)
     }
@@ -705,13 +707,13 @@ impl ClipboardSource for LinuxClipboard {
             Self::Adaptive(source) => source.active.is_available(),
         }
     }
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         match self {
-            Self::X11(source) => source.set_contents(text, concealed),
-            Self::Gnome(source) => source.set_contents(text, concealed),
-            Self::Kwin(source) => source.set_contents(text, concealed),
-            Self::Wayland(source) => source.set_contents(text, concealed),
-            Self::Adaptive(source) => source.active.set_contents(text, concealed),
+            Self::X11(source) => source.set_contents(text, options),
+            Self::Gnome(source) => source.set_contents(text, options),
+            Self::Kwin(source) => source.set_contents(text, options),
+            Self::Wayland(source) => source.set_contents(text, options),
+            Self::Adaptive(source) => source.active.set_contents(text, options),
         }
     }
     fn set_binary_contents(
@@ -720,25 +722,25 @@ impl ClipboardSource for LinuxClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         match self {
             Self::X11(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, options)
             }
             Self::Gnome(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, options)
             }
             Self::Kwin(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, options)
             }
             Self::Wayland(source) => {
-                source.set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+                source.set_binary_contents(item_id, content_type, bytes, metadata, options)
             }
             Self::Adaptive(source) => {
                 source
                     .active
-                    .set_binary_contents(item_id, content_type, bytes, metadata, concealed)
+                    .set_binary_contents(item_id, content_type, bytes, metadata, options)
             }
         }
     }
@@ -2428,7 +2430,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"written tiff",
                 None,
-                false,
+                WriteOptions::default(),
             )
             .expect("write TIFF to X11");
         let (connection, _) = x11rb::connect(None).expect("fixture verification X server");

@@ -109,7 +109,11 @@ mod tests {
             })
         }
 
-        fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
+        fn set_contents(
+            &mut self,
+            _: &str,
+            _: crate::clipboard::WriteOptions,
+        ) -> anyhow::Result<()> {
             panic!("private mode must preserve the native clipboard")
         }
 

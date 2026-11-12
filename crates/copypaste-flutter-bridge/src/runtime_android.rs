@@ -766,9 +766,9 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         &self,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
-        secret: bool,
+        options: copypaste_runtime::WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, false, secret)
+        self.write_native(payload, content_type, false, options)
     }
 
     fn write_received(
@@ -777,7 +777,8 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         content_type: &str,
         secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, true, secret)
+        let options = copypaste_runtime::WriteOptions::copy(secret);
+        self.write_native(payload, content_type, true, options)
     }
 }
 
@@ -787,7 +788,7 @@ impl AndroidClipboard {
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
         received: bool,
-        secret: bool,
+        options: copypaste_runtime::WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let vm = JAVA_VM
             .get()
@@ -797,7 +798,7 @@ impl AndroidClipboard {
             .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
         let ok = match payload {
             copypaste_core::ClipboardPayload::Text(text) => {
-                call_text(&mut env, text, content_type, received, secret)
+                call_text(&mut env, text, content_type, received, options)
             }
             copypaste_core::ClipboardPayload::Image {
                 content_type,
@@ -812,7 +813,7 @@ impl AndroidClipboard {
                 },
                 content_type,
                 received,
-                secret,
+                options,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
                 if let Some(file) = metadata
@@ -839,12 +840,13 @@ impl AndroidClipboard {
                         .call_static_method(
                             class,
                             "writeClipboardFile",
-                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZ)Z",
                             &[
                                 (&path).into(),
                                 (&name).into(),
                                 (&mime).into(),
-                                JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+                                jni_bool(options.secret),
+                                jni_bool(options.transient),
                             ],
                         )
                         .ok()
@@ -863,7 +865,7 @@ impl AndroidClipboard {
                         .as_ref()
                         .map_or("application/octet-stream", |file| file.mime_type.as_str()),
                     received,
-                    secret,
+                    options,
                 )
             }
             copypaste_core::ClipboardPayload::Unsupported { .. } => {
@@ -875,12 +877,16 @@ impl AndroidClipboard {
     }
 }
 
+fn jni_bool(value: bool) -> JValue<'static, 'static> {
+    JValue::Bool(if value { JNI_TRUE } else { JNI_FALSE })
+}
+
 fn call_text(
     env: &mut JNIEnv,
     text: &str,
     content_type: &str,
     received: bool,
-    secret: bool,
+    options: copypaste_runtime::WriteOptions,
 ) -> bool {
     let (Ok(text), Ok(content_type)) = (env.new_string(text), env.new_string(content_type)) else {
         return false;
@@ -891,12 +897,13 @@ fn call_text(
     env.call_static_method(
         class,
         "writeClipboardText",
-        "(Ljava/lang/String;Ljava/lang/String;ZZ)Z",
+        "(Ljava/lang/String;Ljava/lang/String;ZZZ)Z",
         &[
             JValue::Object(&text.into()),
             JValue::Object(&content_type.into()),
-            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
-            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+            jni_bool(received),
+            jni_bool(options.secret),
+            jni_bool(options.transient),
         ],
     )
     .ok()
@@ -910,7 +917,7 @@ fn call_binary(
     filename: &str,
     mime_type: &str,
     received: bool,
-    secret: bool,
+    options: copypaste_runtime::WriteOptions,
 ) -> bool {
     let (Ok(bytes), Ok(filename), Ok(mime_type)) = (
         env.byte_array_from_slice(bytes),
@@ -925,13 +932,14 @@ fn call_binary(
     env.call_static_method(
         class,
         "writeClipboardBinary",
-        "([BLjava/lang/String;Ljava/lang/String;ZZ)Z",
+        "([BLjava/lang/String;Ljava/lang/String;ZZZ)Z",
         &[
             JValue::Object(&JObject::from(bytes)),
             JValue::Object(&filename.into()),
             JValue::Object(&mime_type.into()),
-            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
-            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+            jni_bool(received),
+            jni_bool(options.secret),
+            jni_bool(options.transient),
         ],
     )
     .ok()

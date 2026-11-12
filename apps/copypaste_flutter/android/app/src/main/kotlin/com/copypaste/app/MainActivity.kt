@@ -67,28 +67,39 @@ class MainActivity : FlutterActivity() {
             contentType: String,
             received: Boolean,
             secret: Boolean,
+            transient: Boolean,
         ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeText(context, text, contentType, secret = secret).also { written ->
                 if (written) runCatching {
-                    if (received) {
-                        AndroidCaptureFeedback.onCaptured(
+                    when (ClipboardWriteFeedback.of(received, transient)) {
+                        ClipboardWriteFeedback.Captured -> AndroidCaptureFeedback.onCaptured(
                             context,
                             if (secret) null else CaptureFeedbackPreview(
                                 AndroidCaptureFeedback.textPreview(text),
                             ),
                         )
-                    } else AndroidCaptureFeedback.onCopied()
+                        ClipboardWriteFeedback.Copied -> AndroidCaptureFeedback.onCopied()
+                        ClipboardWriteFeedback.Silent -> Unit
+                    }
                 }
             }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardFile(path: String, filename: String, mimeType: String, secret: Boolean): Boolean {
+        fun writeClipboardFile(
+            path: String,
+            filename: String,
+            mimeType: String,
+            secret: Boolean,
+            transient: Boolean,
+        ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeFile(context, path, filename, mimeType, secret).also { written ->
-                if (written) runCatching { AndroidCaptureFeedback.onCopied() }
+                if (written && ClipboardWriteFeedback.of(received = false, transient) == ClipboardWriteFeedback.Copied) {
+                    runCatching { AndroidCaptureFeedback.onCopied() }
+                }
             }
         }
 
@@ -100,16 +111,19 @@ class MainActivity : FlutterActivity() {
             mimeType: String,
             received: Boolean,
             secret: Boolean,
+            transient: Boolean,
         ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType, secret).also { written ->
-                if (written) {
-                    if (received) {
+                if (written) when (ClipboardWriteFeedback.of(received, transient)) {
+                    ClipboardWriteFeedback.Captured -> {
                         val preview = if (secret) null else runCatching {
                             AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
                         }.getOrNull()
                         runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
-                    } else runCatching { AndroidCaptureFeedback.onCopied() }
+                    }
+                    ClipboardWriteFeedback.Copied -> runCatching { AndroidCaptureFeedback.onCopied() }
+                    ClipboardWriteFeedback.Silent -> Unit
                 }
             }
         }

@@ -35,7 +35,9 @@ use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_source_v1::ZwlrDataControlSourceV1,
 };
 
-use super::super::{Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence};
+use super::super::{
+    Capture, CapturePolicy, ChangeSignal, ClipboardSource, SourcePolicyEvidence, WriteOptions,
+};
 
 const MAX_MIMES: usize = 64;
 const MAX_MIME_BYTES: usize = 255;
@@ -310,10 +312,10 @@ impl ClipboardSource for WaylandClipboard {
         self.active()
     }
 
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
         self.write(concealed_values(
             HashMap::from([("text/plain;charset=utf-8".into(), text.as_bytes().to_vec())]),
-            concealed,
+            options.secret,
         ))
     }
 
@@ -323,7 +325,7 @@ impl ClipboardSource for WaylandClipboard {
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
         let (mime, _) = super::formats::write_format(content_type)
@@ -342,7 +344,7 @@ impl ClipboardSource for WaylandClipboard {
         };
         self.write(concealed_values(
             HashMap::from([(mime.into(), bytes)]),
-            concealed,
+            options.secret,
         ))
         .map_err(|_| ClipboardWriteError::Failed)
     }
@@ -1271,7 +1273,7 @@ mod tests {
         }
 
         clipboard
-            .set_contents("owned text", false)
+            .set_contents("owned text", WriteOptions::default())
             .expect("text write");
         assert_eq!(wl_paste("text/plain;charset=utf-8"), b"owned text");
         assert!(!clipboard.changed(), "our marker suppresses the self-write");
@@ -1282,7 +1284,7 @@ mod tests {
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 b"outbound tiff",
                 None,
-                false,
+                WriteOptions::default(),
             )
             .expect("TIFF write");
         assert_eq!(wl_paste("image/tiff"), b"outbound tiff");
