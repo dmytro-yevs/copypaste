@@ -13,6 +13,7 @@
 //! maintaining a second implementation.
 
 use crate::retention::RetentionBatch;
+use crate::rules::apply::CaptureEffects;
 use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
 use crate::{now_ms, CryptoError, Keyring};
 
@@ -161,6 +162,7 @@ pub(crate) fn ingest_into_batched(
         metadata.as_ref(),
         batch.settings(),
         Sweep::Deferred,
+        None,
     )
 }
 
@@ -270,6 +272,40 @@ pub fn ingest_into_with_capture_source_metadata_with_current_retention(
         payload_metadata,
         settings,
         Sweep::Now(&current_settings),
+        None,
+    )
+    .map(|(ingested, _)| ingested)
+}
+
+/// [`ingest_into_with_capture_source_metadata_with_current_retention`] for a
+/// capture content rules ran on: their effects are written in the
+/// transaction that stores the item.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_text_with_rules(
+    store: &Store,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    current_settings: impl Fn() -> copypaste_ipc::ConfigData,
+    effects: &CaptureEffects,
+) -> Result<Ingested, IngestError> {
+    ingest_text(
+        store,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        Sweep::Now(&current_settings),
+        Some(effects),
     )
     .map(|(ingested, _)| ingested)
 }
@@ -320,6 +356,7 @@ fn ingest_text(
     payload_metadata: Option<&crate::PayloadMetadata>,
     settings: &copypaste_ipc::ConfigData,
     sweep: Sweep<'_>,
+    effects: Option<&CaptureEffects>,
 ) -> Result<(Ingested, bool), IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
@@ -345,6 +382,8 @@ fn ingest_text(
     let item_id = uuid::Uuid::new_v4().to_string();
     let seal_id = item_id.clone();
     let indexable = copypaste_ipc::content_type::is_text(content_type);
+    let key = keyring.item_key();
+    let write = crate::rules::apply::capture_writer(&key, effects, created_at);
 
     let (ingested, changed) = store.insert_or_bump_late_sealed(
         NewItem {
@@ -361,10 +400,10 @@ fn ingest_text(
         },
         indexable.then_some(content),
         || -> Result<_, IngestError> {
-            let (nonce, ciphertext) =
-                crate::encrypt(content.as_bytes(), &keyring.item_key(), &seal_id)?;
+            let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, &seal_id)?;
             Ok((nonce, ciphertext))
         },
+        write.as_ref().map(|write| write as _),
     )?;
 
     if let Sweep::Now(current_settings) = sweep {
@@ -451,6 +490,35 @@ pub fn ingest_binary_into_with_capture_source_metadata(
     payload_metadata: Option<&crate::PayloadMetadata>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_binary_with_rules(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        app_bundle_id,
+        app_name,
+        payload_metadata,
+        settings,
+        None,
+    )
+}
+
+/// [`ingest_binary_into_with_capture_source_metadata`], writing the effects
+/// of the content rules that ran on the capture in the storing transaction.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_with_rules(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::PayloadMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+    effects: Option<&CaptureEffects>,
+) -> Result<Ingested, IngestError> {
     if bytes.is_empty() {
         return Err(IngestError::Empty);
     }
@@ -467,9 +535,10 @@ pub fn ingest_binary_into_with_capture_source_metadata(
     let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
     let digest = crate::binary::content_digest(bytes);
     let item_id = crate::binary::capture_item_id_from_digest(&digest, content_type);
-    let ciphertext =
-        crate::binary::seal_with_digest(bytes, &digest, &keyring.item_key(), &item_id)?;
-    let ingested = store.insert_or_bump(NewItem {
+    let key = keyring.item_key();
+    let ciphertext = crate::binary::seal_with_digest(bytes, &digest, &key, &item_id)?;
+    let write = crate::rules::apply::capture_writer(&key, effects, created_at);
+    let item = NewItem {
         id: item_id,
         content_ciphertext: ciphertext,
         // A binary envelope contains a nonce per chunk.  An empty row nonce
@@ -482,7 +551,8 @@ pub fn ingest_binary_into_with_capture_source_metadata(
         app_bundle_id: app_bundle_id.map(str::to_owned),
         app_name: app_name.map(str::to_owned),
         payload_metadata,
-    })?;
+    };
+    let ingested = store.insert_or_bump_with(item, write.as_ref().map(|write| write as _))?;
 
     enforce_retention(store, settings);
 

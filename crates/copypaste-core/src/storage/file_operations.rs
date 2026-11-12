@@ -125,6 +125,7 @@ impl Store {
         size: u64,
         modified: Option<&str>,
         deduplicate: bool,
+        after: Option<super::items::AfterWrite<'_>>,
     ) -> Result<crate::Ingested, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
@@ -157,6 +158,9 @@ impl Store {
                 "UPDATE clipboard_items SET created_at=MAX(created_at+1,?2),app_bundle_id=?3,app_name=?4,payload_metadata=?5,content_bytes=LENGTH(content_ciphertext)+LENGTH(CAST(COALESCE(?5,'') AS BLOB)) WHERE id=?1",
                 params![id,item.created_at,item.app_bundle_id,item.app_name,item.payload_metadata],
             )?;
+            if let Some(after) = after {
+                after(&tx, &id)?;
+            }
             tx.commit()?;
             drop(conn);
             return self
@@ -170,6 +174,9 @@ impl Store {
             "INSERT INTO file_references VALUES (?1,?2,?3,?4)",
             params![item.id, reference, size, modified],
         )?;
+        if let Some(after) = after {
+            after(&tx, &id)?;
+        }
         tx.commit()?;
         drop(conn);
         self.get(&id)?

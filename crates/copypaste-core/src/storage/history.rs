@@ -233,21 +233,29 @@ pub(super) fn validate_filters(query: &HistoryQuery) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Tag filters select pinned clips only. Shared by the list and its counts so
+/// Manual tag assignments select pinned clips only; tags from content rules,
+/// a local projection, select any clip. Shared by the list and its counts so
 /// both read the same assignments.
 pub(super) fn push_tag_filter(filters: &mut String, values: &mut Vec<Value>, query: &HistoryQuery) {
+    const MANUAL: &str = "SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0";
+    const RULE: &str = "SELECT 1 FROM clip_rule_tags rt JOIN history_tags rtt ON rtt.id = rt.tag_id WHERE rt.clip_id = ci.id AND rtt.deleted = 0";
     if query.untagged_only {
-        filters.push_str(" AND ci.pinned = 1 AND NOT EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0)");
+        filters.push_str(&format!(
+            " AND ci.pinned = 1 AND NOT EXISTS ({MANUAL}) AND NOT EXISTS ({RULE})"
+        ));
     } else if !query.tag_ids.is_empty() {
-        filters.push_str(" AND ci.pinned = 1 AND EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0 AND ct.tag_id IN (");
+        let mut list = String::new();
         for (index, id) in query.tag_ids.iter().enumerate() {
             if index > 0 {
-                filters.push(',');
+                list.push(',');
             }
             values.push(Value::Text(id.clone()));
-            filters.push_str(&format!("?{}", values.len()));
+            list.push_str(&format!("?{}", values.len()));
         }
-        filters.push_str("))");
+        filters.push_str(&format!(
+            " AND ((ci.pinned = 1 AND EXISTS ({MANUAL} AND ct.tag_id IN ({list}))) \
+             OR EXISTS ({RULE} AND rt.tag_id IN ({list})))"
+        ));
     }
 }
 

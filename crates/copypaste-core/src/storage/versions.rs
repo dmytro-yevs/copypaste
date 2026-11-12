@@ -603,6 +603,7 @@ pub(super) fn upsert_in_tx(
         Ok(_) => {
             super::organization::apply_pin_projection(tx, incoming.id)?;
             super::expiry::after_received(tx, incoming)?;
+            super::receipt::after_stored(tx, incoming)?;
             if let Some(bytes) = incoming.content_ciphertext {
                 super::file_payloads::link(tx, incoming.id, incoming.content_hash, bytes)?;
             }

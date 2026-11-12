@@ -311,6 +311,35 @@ impl Runtime {
         }
     }
 
+    /// Runs the transforms content rules chose for a capture, in rule order,
+    /// with the user's tracking lists and the short per-step budget. Answers
+    /// the text and whether a step made it sensitive.
+    pub(crate) fn run_capture_transforms(
+        &self,
+        steps: Vec<Step>,
+        input: &str,
+    ) -> Result<(String, bool), TransformError> {
+        let steps: Vec<_> = steps.into_iter().map(Ok).collect();
+        let tracking = defaults::tracking_rules(self, &steps);
+        let chain = Chain {
+            cancel: None,
+            tracking: tracking.as_ref(),
+            preview: true,
+        };
+        let mut sensitive = false;
+        let output = chain
+            .run(&steps, input, |_, run, _| {
+                if let StepRun::Ran {
+                    sensitive: marked, ..
+                } = run
+                {
+                    sensitive |= marked;
+                }
+            })
+            .map_err(|(_, error)| error)?;
+        Ok((output, sensitive))
+    }
+
     /// A transient paste. The restore token comes back only while the user
     /// keeps "restore the clipboard after a transformed paste" on; the caller
     /// restores with it once its native paste is done.

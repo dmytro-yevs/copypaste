@@ -25,6 +25,7 @@ use copypaste_p2p::Node;
 use tokio::sync::{broadcast, watch};
 
 pub mod capture_admission;
+mod capture_rules;
 mod deadlines;
 mod dispatch;
 mod features;
@@ -36,6 +37,7 @@ mod peer_sync;
 pub mod settings;
 
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
+pub use capture_rules::{CaptureDecision, CapturePlan, CaptureSubject, MAX_SKIPPED_CAPTURES};
 pub use deadlines::ResumeWaker;
 pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
 pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost, WriteOptions};
@@ -84,8 +86,8 @@ pub struct Runtime {
     host: Arc<dyn RuntimeHost>,
     changes: Arc<Changes>,
     deadlines: Arc<deadlines::Deadlines>,
-    /// The content rules compiled for one rules revision.
-    compiled_rules: Mutex<Option<(i64, Arc<CompiledRuleSet>)>>,
+    /// Captures content rules skipped, for "Recently skipped".
+    skipped_captures: capture_rules::SkippedCaptures,
     paste_queue: features::PasteQueue,
     ai: features::AiState,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
@@ -360,7 +362,7 @@ impl Runtime {
             host,
             changes,
             deadlines,
-            compiled_rules: Mutex::default(),
+            skipped_captures: Mutex::default(),
             paste_queue: features::PasteQueue::default(),
             ai: features::AiState::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
@@ -824,9 +826,6 @@ impl Runtime {
         if kinds == LibraryKinds::default() {
             return;
         }
-        if kinds.intersects(LibraryKinds::RULES) {
-            *locked(&self.compiled_rules) = None;
-        }
         if kinds.intersects(LibraryKinds::SNIPPETS) {
             self.host.surfaces_changed();
         }
@@ -903,22 +902,10 @@ impl Runtime {
         }
     }
 
-    /// The content rules compiled for the current rules revision; `build`
-    /// runs only when the revision moved since the last call.
-    pub fn compiled_rules(
-        &self,
-        build: impl FnOnce(&Store) -> Result<CompiledRuleSet, copypaste_core::StoreError>,
-    ) -> Result<Arc<CompiledRuleSet>, copypaste_core::StoreError> {
-        let revision = self.store.resource_revisions()?.rules;
-        let mut cached = locked(&self.compiled_rules);
-        if let Some((cached_revision, rules)) = cached.as_ref() {
-            if *cached_revision == revision {
-                return Ok(Arc::clone(rules));
-            }
-        }
-        let rules = Arc::new(build(&self.store)?);
-        *cached = Some((revision, Arc::clone(&rules)));
-        Ok(rules)
+    /// The content rules this device runs, compiled once per rules revision
+    /// in the store and shared with capture and receipt.
+    pub fn compiled_rules(&self) -> Result<Arc<CompiledRuleSet>, copypaste_core::StoreError> {
+        Ok(self.store.content_rules()?.set)
     }
 
     pub fn note_peers_changed(&self) {
@@ -1004,7 +991,9 @@ impl Runtime {
             .begin(host, Arc::new(|| {}))
             .ok_or(RuntimeError::CaptureRefused)
             .and_then(|token| {
-                let result = self.capture_text_item(token, content).map(|(id, _)| id);
+                let result = self
+                    .capture_text_item(token, content, true)
+                    .map(|(id, _)| id);
                 self.capture_admission().abandon(token);
                 result
             });
@@ -1019,48 +1008,74 @@ impl Runtime {
         token: u64,
         content: &str,
     ) -> Result<copypaste_ipc::ClipboardPrivacy, RuntimeError> {
-        self.capture_text_item(token, content)
+        self.capture_text_item(token, content, true)
             .map(|(_, privacy)| privacy)
     }
 
+    /// Content rules run on clipboard captures; a module's capture skips them.
     fn capture_text_item(
         &self,
         token: u64,
         content: &str,
+        rules: bool,
     ) -> Result<(String, copypaste_ipc::ClipboardPrivacy), RuntimeError> {
-        // Detection only marks the item; producer markers alone gate capture.
-        let detected =
-            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
-                .unwrap_or_default();
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
+        let created_at = now_ms();
+        let plan = if rules {
+            match self.evaluate_capture(&CaptureSubject {
+                text: Some(content),
+                content_type: copypaste_ipc::content_type::TEXT,
+                byte_len: content.len() as u64,
+                source_app: None,
+                source_app_name: None,
+                privacy: permit.privacy,
+                created_at,
+            }) {
+                CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+                CaptureDecision::Store(plan) => plan,
+            }
+        } else {
+            CapturePlan::default()
+        };
+        let content = plan.text(content);
+        // Detection only marks the item; producer markers alone gate capture.
+        let detected =
+            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
+                .unwrap_or_default();
         let settings = &permit.config;
-        let privacy_metadata =
-            (!permit.privacy.is_empty()).then_some(copypaste_core::PayloadMetadata {
+        let privacy_metadata = plan.metadata((!permit.privacy.is_empty()).then_some(
+            copypaste_core::PayloadMetadata {
                 secret_override: None,
                 privacy: permit.privacy,
                 ..Default::default()
-            });
-        let ingested =
-            copypaste_core::ingest_into_with_capture_source_metadata_with_current_retention(
-                &self.store,
-                &self.keyring,
-                content,
-                copypaste_ipc::content_type::TEXT,
-                now_ms(),
-                None,
-                None,
-                privacy_metadata.as_ref(),
-                settings,
-                || self.settings.config(),
-            )
-            .map_err(|_| RuntimeError::Capture)?;
+            },
+        ));
+        let ingested = copypaste_core::ingest::ingest_text_with_rules(
+            &self.store,
+            &self.keyring,
+            content,
+            copypaste_ipc::content_type::TEXT,
+            created_at,
+            None,
+            None,
+            privacy_metadata.as_ref(),
+            settings,
+            || self.settings.config(),
+            plan.effects(),
+        )
+        .map_err(|_| RuntimeError::Capture)?;
         let privacy = permit.privacy.union(detected);
+        let privacy = copypaste_ipc::ClipboardPrivacy {
+            secret: privacy.secret || plan.secret(),
+            ..privacy
+        };
         let item = ingested.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok((item.id, privacy))
     }
 
@@ -1103,7 +1118,7 @@ impl Runtime {
     }
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
-        let (item_id, _) = self.capture_text_item(token, code)?;
+        let (item_id, _) = self.capture_text_item(token, code, false)?;
         let completion = self
             .capture_admission()
             .acquire(token, CaptureScope::Completion)
@@ -1201,6 +1216,19 @@ impl Runtime {
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
+        let created_at = now_ms();
+        let plan = match self.evaluate_capture(&CaptureSubject {
+            text: None,
+            content_type,
+            byte_len: bytes.len() as u64,
+            source_app: source_app.map(|source| source.bundle_id.as_str()),
+            source_app_name: source_app.and_then(|source| source.name.as_deref()),
+            privacy: permit.privacy,
+            created_at,
+        }) {
+            CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+            CaptureDecision::Store(plan) => plan,
+        };
         let settings = &permit.config;
         let metadata = copypaste_core::PayloadMetadata {
             credentials: false,
@@ -1209,25 +1237,29 @@ impl Runtime {
             file: None,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
         };
-        let metadata = (!metadata.privacy.is_empty()
-            || metadata.file.is_some()
-            || metadata.source_app_icon.is_some())
-        .then_some(metadata);
-        let ingested = copypaste_core::ingest_binary_into_with_capture_source_metadata(
+        let metadata = plan.metadata(
+            (!metadata.privacy.is_empty()
+                || metadata.file.is_some()
+                || metadata.source_app_icon.is_some())
+            .then_some(metadata),
+        );
+        let ingested = copypaste_core::ingest::ingest_binary_with_rules(
             &self.store,
             &self.keyring,
             bytes,
             content_type,
-            now_ms(),
+            created_at,
             source_app.map(|source| source.bundle_id.as_str()),
             source_app.and_then(|source| source.name.as_deref()),
             metadata.as_ref(),
             settings,
+            Some(plan.effects()),
         )
         .map_err(|_| RuntimeError::Capture)?;
         let item = ingested.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok(())
     }
 
@@ -1258,22 +1290,39 @@ impl Runtime {
             Some(size_bytes),
         )
         .map_err(|_| RuntimeError::Capture)?;
+        let created_at = now_ms();
+        let subject = copypaste_core::rules::apply::file_subject(&metadata);
+        let plan = match self.evaluate_capture(&CaptureSubject {
+            text: Some(&subject),
+            content_type: copypaste_ipc::content_type::FILE,
+            byte_len: reference.size(),
+            source_app: source_app.map(|source| source.bundle_id.as_str()),
+            source_app_name: source_app.and_then(|source| source.name.as_deref()),
+            privacy: permit.privacy,
+            created_at,
+        }) {
+            CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+            CaptureDecision::Store(plan) => plan,
+        };
+        let context = plan.metadata(Some(context));
         let row = reference
-            .publish(
+            .publish_with_rules(
                 &self.store,
                 &self.keyring.item_key(),
                 metadata,
-                now_ms(),
+                created_at,
                 source_app.map(|source| source.bundle_id.as_str()),
                 source_app.and_then(|source| source.name.as_deref()),
-                Some(&context),
+                context.as_ref(),
                 &permit.config,
                 false,
+                Some(plan.effects()),
             )
             .map_err(|_| RuntimeError::Capture)?;
         let item = row.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok(())
     }
 

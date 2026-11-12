@@ -93,8 +93,42 @@ impl FileReference {
         })
     }
 
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn publish(
+        &self,
+        store: &Store,
+        key: &crate::ItemKey,
+        metadata: crate::FileMetadata,
+        created_at: i64,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+        context: Option<&crate::PayloadMetadata>,
+        settings: &copypaste_ipc::ConfigData,
+        explicit: bool,
+    ) -> Result<crate::Ingested, FileTransferError> {
+        self.publish_with_rules(
+            store,
+            key,
+            metadata,
+            created_at,
+            app_bundle_id,
+            app_name,
+            context,
+            settings,
+            explicit,
+            None,
+        )
+    }
+
+    /// [`FileReference::publish`] for a capture content rules ran on: their
+    /// effects are written in the transaction that stores the item.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_with_rules(
         &self,
         store: &Store,
         key: &crate::ItemKey,
@@ -105,6 +139,7 @@ impl FileReference {
         context: Option<&crate::PayloadMetadata>,
         settings: &copypaste_ipc::ConfigData,
         explicit: bool,
+        effects: Option<&crate::rules::apply::CaptureEffects>,
     ) -> Result<crate::Ingested, FileTransferError> {
         metadata.source_reference = Some(self.reference.clone());
         let offer = file_transfer::FileTransfer {
@@ -123,12 +158,14 @@ impl FileReference {
             context,
             explicit,
         )?;
+        let write = crate::rules::apply::capture_writer(key, effects, created_at);
         let result = store.insert_file_reference(
             item,
             &self.reference,
             self.size,
             self.modified.as_deref(),
             !explicit,
+            write.as_ref().map(|write| write as _),
         )?;
         crate::ingest::enforce_retention(store, settings);
         Ok(result)
