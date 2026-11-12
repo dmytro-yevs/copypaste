@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">기록</string>
+    <string name="widget_filter_pinned">고정됨</string>
+    <string name="widget_filter_snippets">스니펫</string>
+    <string name="widget_filter_description">%1$s 표시 중. 탭하여 변경.</string>
+    <string name="widget_privacy_full">전체 미리보기</string>
+    <string name="widget_privacy_titles">제목만</string>
+    <string name="widget_privacy_hidden">숨김</string>
+    <string name="widget_privacy_description">미리보기: %1$s. 탭하여 변경.</string>
+    <string name="widget_search">CopyPaste에서 검색</string>
+    <string name="widget_paused">수집 일시중지됨 · 다시 시작</string>
+    <string name="widget_empty">아직 클립이 없습니다 · 클립보드 저장</string>
+    <string name="widget_empty_pinned">고정된 클립이 없습니다</string>
+    <string name="widget_empty_snippets">아직 스니펫이 없습니다</string>
+    <string name="widget_setup">수집 설정</string>
+    <string name="widget_unavailable">클립을 보려면 잠금을 해제하세요</string>
+    <string name="widget_error">클립을 불러오지 못했습니다 · 탭하여 다시 시도</string>
+    <string name="widget_hidden">미리보기 숨김</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="other">클립 %d개</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="other">스니펫 %d개</item>
+    </plurals>
+    <string name="widget_kind_text">텍스트</string>
+    <string name="widget_kind_link">링크</string>
+    <string name="widget_kind_image">이미지</string>
+    <string name="widget_kind_file">파일</string>
+    <string name="widget_kind_color">색상</string>
+    <string name="widget_kind_code">코드</string>
+    <string name="widget_kind_snippet">스니펫</string>
+    <string name="widget_secret_item">비밀 항목</string>
+    <string name="widget_secret_description">%1$s, 비밀. 두 번 탭하고 인증하면 복사합니다.</string>
+    <string name="widget_concealed_snippet">숨겨진 스니펫</string>
+    <string name="widget_copied">복사됨</string>
+    <string name="widget_copy_failed">복사하지 못했습니다</string>
+    <string name="widget_auth_reason">비밀 항목 복사</string>
+</resources>

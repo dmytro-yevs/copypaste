@@ -168,6 +168,7 @@ impl Changes {
             if let Some(modules) = self.modules.upgrade() {
                 modules.history_changed();
             }
+            self.host.surfaces_changed();
         }
         // No subscriber is the ordinary case, and `item_count` costs a
         // `SELECT COUNT(*)`, so nothing is built for nobody.
@@ -824,6 +825,9 @@ impl Runtime {
         if kinds.intersects(LibraryKinds::RULES) {
             *locked(&self.compiled_rules) = None;
         }
+        if kinds.intersects(LibraryKinds::SNIPPETS) {
+            self.host.surfaces_changed();
+        }
         self.changes
             .send(EventKind::Library, |data| data.library = Some(kinds));
     }
@@ -949,10 +953,11 @@ impl Runtime {
         self.capture_running.load(Ordering::Acquire)
     }
 
-    /// Advance the capture revision and publish status, only when subscribed.
-    /// Status includes no clipboard payload.
+    /// Advance the capture revision, tell host surfaces, and publish status
+    /// only when subscribed. Status includes no clipboard payload.
     pub fn note_capture_state_changed(&self) {
         self.capture_revision.fetch_add(1, Ordering::AcqRel);
+        self.host.surfaces_changed();
         if self.runtime_events.receiver_count() == 0 {
             return;
         }
@@ -3666,6 +3671,46 @@ mod tests {
                 .ok
         );
         assert_eq!(*clipboard.0.lock().unwrap(), 1);
+        runtime.shutdown();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_surfaces_hear_history_snippet_and_capture_changes_but_not_rules() {
+        #[derive(Default)]
+        struct SurfaceClipboard(Mutex<usize>);
+        impl ClipboardWriter for SurfaceClipboard {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: WriteOptions,
+            ) -> Result<(), ClipboardWriteError> {
+                Ok(())
+            }
+            fn surfaces_changed(&self) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let clipboard = Arc::new(SurfaceClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let task = runtime.start_deadlines().unwrap();
+        let count = || *clipboard.0.lock().unwrap();
+
+        runtime.capture_text("shown on a widget").unwrap();
+        assert_eq!(count(), 1, "a capture changes history");
+        runtime.on_org_changed(LibraryKinds::RULES);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(count(), 1, "rules are not shown on surfaces");
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(count(), 2, "snippets are");
+        assert!(
+            runtime
+                .request_blocking(1, Method::SetPrivateMode { enabled: true })
+                .ok
+        );
+        assert_eq!(count(), 3, "pausing capture changes the surface state");
         runtime.shutdown();
         task.await.unwrap();
     }

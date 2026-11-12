@@ -31,6 +31,8 @@ pub(crate) static JAVA_VM: OnceLock<Arc<JavaVM>> = OnceLock::new();
 // cannot resolve application classes through FindClass on attached threads.
 static CLIPBOARD_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 pub(crate) static INFERENCE_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
+/// The home-screen widget provider, told when what it shows changed.
+static WIDGET_PROVIDER_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
 static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -58,6 +60,19 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
             Err(_) => {
                 let _ = env.exception_clear();
                 return;
+            }
+        }
+    }
+    if WIDGET_PROVIDER_CLASS.get().is_none() {
+        match env
+            .find_class("com/copypaste/app/RecentClipsWidgetProvider")
+            .and_then(|class| env.new_global_ref(class))
+        {
+            Ok(class) => {
+                let _ = WIDGET_PROVIDER_CLASS.set(class);
+            }
+            Err(_) => {
+                let _ = env.exception_clear();
             }
         }
     }
@@ -779,6 +794,45 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let options = copypaste_runtime::WriteOptions::copy(secret);
         self.write_native(payload, content_type, true, options)
+    }
+
+    fn history_cleared(&self) {
+        notify_widgets(true);
+    }
+
+    fn device_removed(&self, _device_id: &str) {
+        notify_widgets(true);
+    }
+
+    fn surfaces_changed(&self) {
+        notify_widgets(false);
+    }
+}
+
+/// Tells the home-screen widget that its content changed. Kotlin coalesces
+/// ordinary changes; `cleared` (history cleared, device removed) empties every
+/// instance at once. Carries no content.
+fn notify_widgets(cleared: bool) {
+    let (Some(vm), Some(class), Some(context)) = (
+        JAVA_VM.get(),
+        WIDGET_PROVIDER_CLASS.get(),
+        APPLICATION_CONTEXT.get(),
+    ) else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    if env
+        .call_static_method(
+            class,
+            "notifyChanged",
+            "(Landroid/content/Context;Z)V",
+            &[JValue::Object(context.as_obj()), jni_bool(cleared)],
+        )
+        .is_err()
+    {
+        let _ = env.exception_clear();
     }
 }
 
