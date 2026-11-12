@@ -31,7 +31,8 @@ pub(crate) enum Style {
     Long,
     Full,
     Iso,
-    Pattern(DateTimePattern),
+    /// A CLDR pattern, checked by [`cldr_pattern`] when parsed.
+    Pattern(String),
 }
 
 #[derive(Debug)]
@@ -55,9 +56,10 @@ pub(crate) fn parse_spec(name: &str, params: &mut Params, key: String) -> Result
     let style = match (params.take("style"), params.take("format")) {
         (Some(_), Some(_)) => return Err(Issue::ConflictingParameters),
         (None, None) => Style::Medium,
-        (None, Some(pattern)) => Style::Pattern(
-            DateTimePattern::try_from_pattern_str(&pattern).map_err(|_| Issue::InvalidPattern)?,
-        ),
+        (None, Some(pattern)) => {
+            cldr_pattern(&pattern, 1)?;
+            Style::Pattern(pattern)
+        }
         (Some(style), None) => match style.as_str() {
             "short" => Style::Short,
             "medium" => Style::Medium,
@@ -146,6 +148,37 @@ fn parse_offset(text: &str) -> Option<Vec<Span>> {
     (!terms.is_empty()).then_some(terms)
 }
 
+/// Letters ICU4X 2.x formats; it prints any other unquoted letter as is.
+const ICU_LETTERS: &str = "GyUruMLdDFgKhHmsSAEecabzOvVxXZ";
+
+/// Parses a CLDR pattern for ICU. ICU4X has no week fields, so an unquoted
+/// `w` or `ww` is replaced by `week`, the ISO 8601 week number, in every
+/// locale. Unquoted letters ICU would print literally are refused.
+fn cldr_pattern(pattern: &str, week: i8) -> Result<DateTimePattern, Issue> {
+    let mut expanded = String::with_capacity(pattern.len() + 2);
+    let mut chars = pattern.chars().peekable();
+    let mut quoted = false;
+    while let Some(c) = chars.next() {
+        if c == '\'' {
+            quoted = !quoted;
+        } else if !quoted && c == 'w' {
+            match chars.next_if_eq(&'w') {
+                // Digits are never pattern letters, so they need no quotes.
+                None => expanded.push_str(&week.to_string()),
+                Some(_) => expanded.push_str(&format!("{week:02}")),
+            }
+            if chars.peek() == Some(&'w') {
+                return Err(Issue::InvalidPattern);
+            }
+            continue;
+        } else if !quoted && c.is_ascii_alphabetic() && !ICU_LETTERS.contains(c) {
+            return Err(Issue::InvalidPattern);
+        }
+        expanded.push(c);
+    }
+    DateTimePattern::try_from_pattern_str(&expanded).map_err(|_| Issue::InvalidPattern)
+}
+
 /// Formats one date placeholder. `local_zone` is the device zone the caller
 /// passed; `app_locale` applies when the placeholder names no locale.
 pub(crate) fn format(
@@ -209,9 +242,10 @@ fn format_cldr(
     let zone = id.with_offset(offset).at_date_time(DateTime { date, time });
     let input = ZonedDateTime { date, time, zone };
     if let Style::Pattern(pattern) = style {
+        let pattern = cldr_pattern(pattern, zoned.date().iso_week_date().week())?;
         let mut names = pattern_names(locale)?;
         let formatter = names
-            .include_for_pattern(pattern)
+            .include_for_pattern(&pattern)
             .map_err(|_| Issue::InvalidPattern)?;
         return formatter
             .format(&input)
@@ -275,7 +309,7 @@ pub(crate) fn check_pattern(spec: &DateSpec, app_locale: &Locale) -> Result<(), 
     };
     let locale = spec.locale.as_ref().unwrap_or(app_locale);
     pattern_names(locale)?
-        .include_for_pattern(pattern)
+        .include_for_pattern(&cldr_pattern(pattern, 1)?)
         .map(|_| ())
         .map_err(|_| Issue::InvalidPattern)
 }
@@ -292,6 +326,13 @@ mod tests {
         assert!(parse_offset("+1m").is_none());
         assert!(parse_offset("+d").is_none());
         assert!(parse_offset("").is_none());
+    }
+
+    #[test]
+    fn patterns_refuse_letters_icu_would_print_as_is() {
+        assert!(cldr_pattern("'Quarter' w, ww", 7).is_ok());
+        assert_eq!(cldr_pattern("www", 7).err(), Some(Issue::InvalidPattern));
+        assert_eq!(cldr_pattern("yyyy Q", 7).err(), Some(Issue::InvalidPattern));
     }
 
     #[test]

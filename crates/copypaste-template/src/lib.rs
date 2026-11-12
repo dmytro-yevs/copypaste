@@ -32,6 +32,10 @@ pub const MAX_FIELDS: usize = 10;
 /// Deepest nested snippet that is still expanded; the top level is depth 0.
 pub const MAX_DEPTH: usize = 3;
 
+/// Most nested snippet insertions in one expansion, at every depth together.
+/// Bounds the work of bodies that reference each other many times over.
+pub const MAX_NESTED_EXPANSIONS: usize = 256;
+
 /// Highest `clipboard index`: the Nth previous text history item.
 pub const MAX_CLIPBOARD_INDEX: u8 = 50;
 

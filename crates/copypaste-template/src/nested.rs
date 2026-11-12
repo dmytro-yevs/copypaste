@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lint::Issue;
 use crate::syntax::{Params, Template};
-use crate::MAX_DEPTH;
+use crate::{MAX_DEPTH, MAX_NESTED_EXPANSIONS};
 
 /// How a `snippet` placeholder names its target.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,8 @@ impl SnippetResolver for NoSnippets {
 pub(crate) struct Chain {
     stack: Vec<Origin>,
     has_root: bool,
+    /// Nested bodies entered so far in this walk, at any depth.
+    entered: usize,
 }
 
 impl Chain {
@@ -82,6 +84,7 @@ impl Chain {
         Self {
             stack: root.into_iter().cloned().collect(),
             has_root: root.is_some(),
+            entered: 0,
         }
     }
 
@@ -100,12 +103,16 @@ impl Chain {
         if self.depth() >= MAX_DEPTH {
             return Err(Issue::DepthExceeded);
         }
+        if self.entered >= MAX_NESTED_EXPANSIONS {
+            return Err(Issue::NestingLimit);
+        }
         let nested = resolver.resolve(reference).ok_or(Issue::UnknownSnippet)?;
         if let Some(start) = self.stack.iter().position(|o| o.id == nested.origin.id) {
             let mut chain: Vec<String> = self.stack[start..].iter().map(Origin::label).collect();
             chain.push(nested.origin.label());
             return Err(Issue::Cycle { chain });
         }
+        self.entered += 1;
         self.stack.push(nested.origin);
         Ok(nested.body)
     }

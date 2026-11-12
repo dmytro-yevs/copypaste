@@ -40,7 +40,7 @@ pub(crate) struct Parsed {
 
 #[derive(Debug)]
 pub(crate) enum Directive {
-    Date(DateSpec),
+    Date(Box<DateSpec>),
     Clipboard { index: u8, required: bool },
     Cursor,
     Field(FieldSpec),
@@ -304,7 +304,9 @@ fn parse_inner(inner: &str) -> Result<Parsed, Issue> {
 
 fn directive(name: &str, params: &mut Params, key: String) -> Result<Directive, Issue> {
     Ok(match name {
-        "date" | "time" | "datetime" => Directive::Date(dates::parse_spec(name, params, key)?),
+        "date" | "time" | "datetime" => {
+            Directive::Date(Box::new(dates::parse_spec(name, params, key)?))
+        }
         "clipboard" => {
             let index = match params.take("index") {
                 None => 0,

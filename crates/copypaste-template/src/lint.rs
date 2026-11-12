@@ -67,6 +67,8 @@ pub enum Issue {
         chain: Vec<String>,
     },
     DepthExceeded,
+    /// More nested snippets than one expansion inserts.
+    NestingLimit,
     UnknownSnippet,
     /// Template is off but the body holds placeholders.
     ContainsPlaceholders,
