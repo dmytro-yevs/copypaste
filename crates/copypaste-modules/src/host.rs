@@ -203,6 +203,15 @@ impl ModuleHost {
         }
         self.wake_sync();
     }
+    /// See [`crate::SyncServices::reoffer`].
+    pub fn reoffer(&self, item_ids: &[String]) {
+        if let Ok(services) = self.sync_services.lock() {
+            if let Some(services) = services.as_ref() {
+                let _ = services.reoffer(item_ids);
+            }
+        }
+        self.wake_sync();
+    }
     pub fn sync_enabled_changed(&self, enabled: bool) {
         if !enabled {
             if let Ok(manager) = self.manager() {

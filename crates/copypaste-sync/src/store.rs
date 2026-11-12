@@ -93,7 +93,8 @@ impl StoreView {
     }
 
     /// Bound plaintext crossing a native provider boundary while retaining a
-    /// resumable keyset for every deferred row.
+    /// resumable keyset for every deferred row. Rows the store withholds from
+    /// cloud are passed over without being offered.
     pub fn scan_bounded(
         &self,
         store: &Store,
@@ -123,7 +124,11 @@ impl StoreView {
         let retried: Vec<String> = previously_unreadable.ids.iter().cloned().collect();
         if !retried.is_empty() {
             for chunk in retried.chunks(UPLOAD_SCAN_LIMIT as usize) {
+                let withheld = store.cloud_withheld_among(chunk).map_err(source_error)?;
                 for row in store.versions(chunk).map_err(source_error)? {
+                    if withheld.contains(&row.id) {
+                        continue;
+                    }
                     match self.to_local(&row) {
                         Some(item)
                             if items
@@ -180,8 +185,9 @@ impl StoreView {
         // to resume from to read that row again.
         let mut behind = offer.started.clone();
         let mut bytes = items.iter().map(|item| item.content.len()).sum::<usize>();
+        let withheld = withheld(store, &rows)?;
         for row in &rows {
-            if !previously_unreadable.ids.contains(&row.id) {
+            if !previously_unreadable.ids.contains(&row.id) && !withheld.contains(&row.id) {
                 match self.to_local(row) {
                     Some(item) => {
                         if bytes.saturating_add(item.content.len()) > max_bytes {
@@ -246,13 +252,14 @@ impl StoreView {
             )
             .map_err(source_error)?;
         let mut cycled = page.len() < UPLOAD_SCAN_LIMIT as usize;
+        let withheld = withheld(store, &page)?;
         for row in &page {
             let at = keyset_of(row);
             if at > *floor {
                 cycled = true;
                 break;
             }
-            if previously_unreadable.ids.contains(&row.id) {
+            if previously_unreadable.ids.contains(&row.id) || withheld.contains(&row.id) {
                 sweep.next = at;
                 continue;
             }
@@ -429,6 +436,16 @@ fn remote_version<'a>(
         app_bundle_id: item.source_app_bundle_id.as_deref(),
         app_name: item.source_app_name.as_deref(),
     }
+}
+
+/// The rows a cloud upload must never carry: clips that expire within an hour
+/// of creation, their notes and their tombstones.
+fn withheld(
+    store: &Store,
+    rows: &[copypaste_core::StoredItem],
+) -> Result<std::collections::HashSet<String>, SyncError> {
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    store.cloud_withheld_among(&ids).map_err(source_error)
 }
 
 fn source_error(e: impl std::fmt::Debug) -> SyncError {

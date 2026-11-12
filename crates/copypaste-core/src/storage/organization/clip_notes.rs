@@ -5,11 +5,13 @@
 //! before its clip, so a note without a live clip is stored (the sender's
 //! cursor advances) and marked orphan; inserting the clip clears the mark, and
 //! orphans older than [`ORPHAN_TTL_MS`] are pruned. Hiding from AI wins over a
-//! concurrent unhide that was based on an older version.
+//! concurrent unhide that was based on an older version, and the earlier of
+//! two synced deadlines wins unless the newer version keeps the clip.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use super::super::expiry;
 use super::{identifier, line, IncomingItem, StoreError, CONTENT_TYPE, LIBRARY_KIND_CLASS};
 
 pub(super) const NOTE_BYTES: usize = 4 * 1024;
@@ -95,6 +97,27 @@ impl ClipNoteRecord {
             .map(serde_json::to_string)
             .transpose()
             .map_err(|_| StoreError::InvalidHistoryQuery)?;
+        let local: Option<(bool, Option<i64>, Option<i64>)> = tx
+            .query_row(
+                "SELECT keep,expires_at,expiry_duration_ms FROM clip_notes WHERE clip_id=?1",
+                [&self.clip_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let expiry = expiry::merge_synced(
+            local
+                .filter(|(keep, _, _)| !keep)
+                .map(|(_, expires_at, duration_ms)| expiry::SyncedExpiry {
+                    expires_at,
+                    duration_ms,
+                })
+                .unwrap_or_default(),
+            expiry::SyncedExpiry {
+                expires_at: self.expires_at,
+                duration_ms: self.expiry_duration_ms,
+            },
+            self.keep,
+        );
         tx.execute(
             "INSERT INTO clip_notes(clip_id,record_id,hidden_from_ai,hidden_changed_at,base_stamp,\
              keep,expires_at,expiry_duration_ms,provenance_json,orphan_since) \
@@ -114,13 +137,13 @@ impl ClipNoteRecord {
                 self.hidden_changed_at,
                 self.base_stamp,
                 self.keep,
-                self.expires_at,
-                self.expiry_duration_ms,
+                expiry.expires_at,
+                expiry.duration_ms,
                 provenance,
                 crate::now_ms(),
             ],
         )?;
-        Ok(())
+        expiry::note_applied(tx, self)
     }
 }
 
