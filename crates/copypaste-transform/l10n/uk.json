@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "Форматувати JSON",
+      "description": "Додає відступи до JSON, зберігаючи числа, екранування й порядок ключів точно як написано.",
+      "params": {
+        "indent": {
+          "label": "Відступ",
+          "options": {
+            "2": "2 пробіли",
+            "4": "4 пробіли",
+            "tab": "Табуляція"
+          }
+        },
+        "sort_keys": {
+          "label": "Сортувати ключі"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Мінімізувати JSON",
+      "description": "Видаляє з JSON усі незначущі пробіли."
+    },
+    "structure.json_validate": {
+      "name": "Перевірити JSON",
+      "description": "Перевіряє, чи текст є коректним JSON, і показує місце помилки, не змінюючи текст.",
+      "params": {
+        "lenient": {
+          "label": "Дозволити коментарі та кінцеві коми"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Сортувати ключі JSON",
+      "description": "Упорядковує ключі об’єктів за кодовими точками; масиви зберігають свій порядок.",
+      "params": {
+        "recursive": {
+          "label": "Включно з вкладеними об’єктами"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Взяти в лапки як рядок JSON",
+      "description": "Обгортає текст у рядковий літерал JSON, екрануючи лапки й розриви рядків."
+    },
+    "structure.json_unquote": {
+      "name": "Розпакувати рядок JSON",
+      "description": "Декодує рядковий літерал JSON у звичайний текст, зокрема двічі закодований JSON."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML у JSON",
+      "description": "Перетворює один документ YAML на JSON.",
+      "params": {
+        "indent": {
+          "label": "Відступ",
+          "options": {
+            "2": "2 пробіли",
+            "4": "4 пробіли",
+            "tab": "Табуляція"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON у YAML",
+      "description": "Перетворює JSON на YAML у блоковому стилі."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV у JSON",
+      "description": "Перетворює рядки CSV або TSV на JSON; значення лишаються текстом.",
+      "params": {
+        "header": {
+          "label": "Перший рядок — заголовок"
+        },
+        "delimiter": {
+          "label": "Роздільник",
+          "options": {
+            "auto": "Визначити",
+            "comma": "Кома",
+            "semicolon": "Крапка з комою",
+            "tab": "Табуляція"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Форматувати XML",
+      "description": "Додає відступи до елементів XML, не змінюючи текст; зовнішні сутності ніколи не завантажуються.",
+      "params": {
+        "indent": {
+          "label": "Відступ",
+          "options": {
+            "2": "2 пробіли",
+            "4": "4 пробіли",
+            "tab": "Табуляція"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Мінімізувати XML",
+      "description": "Видаляє пробіли між елементами XML."
+    }
+  },
   "encode": {
     "encode.base64_encode": {
       "name": "Кодувати в Base64",

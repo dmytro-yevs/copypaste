@@ -1,0 +1,783 @@
+[
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":12345678901234567890,\"b\":1.10}",
+    "output": "{\n  \"a\": 12345678901234567890,\n  \"b\": 1.10\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":1,}",
+    "error": "json.trailing_comma"
+  },
+  {
+    "transform": "structure.json_format",
+    "params": {
+      "indent": "4"
+    },
+    "input": "[1,{\"a\":[]}]",
+    "output": "[\n    1,\n    {\n        \"a\": []\n    }\n]"
+  },
+  {
+    "transform": "structure.json_format",
+    "params": {
+      "indent": "tab"
+    },
+    "input": "{\"a\":{}}",
+    "output": "{\n\t\"a\": {}\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "params": {
+      "sort_keys": true
+    },
+    "input": "{\"b\":1,\"a\":{\"d\":[3],\"c\":2}}",
+    "output": "{\n  \"a\": {\n    \"c\": 2,\n    \"d\": [\n      3\n    ]\n  },\n  \"b\": 1\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":1,\"a\":2}",
+    "output": "{\n  \"a\": 1,\n  \"a\": 2\n}",
+    "warnings": [
+      "json.duplicate_key"
+    ]
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[\"\\u00e9\\/x\"]",
+    "output": "[\n  \"\\u00e9\\/x\"\n]",
+    "warnings": []
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "\ufeff{\"a\":true}",
+    "output": "{\n  \"a\": true\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":1}\n{\"b\":[2]}\n",
+    "output": "{\n  \"a\": 1\n}\n{\n  \"b\": [\n    2\n  ]\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":1} {\"b\":2}",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+    "error": "json.too_deep"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[01]",
+    "error": "json.invalid_number"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":1 // c\n}",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "  \n ",
+    "error": "json.empty"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "  42  ",
+    "output": "42"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"ключ\":\"значення 😀\"}",
+    "output": "{\n  \"ключ\": \"значення 😀\"\n}"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[-0.0e-0,1E+2,0]",
+    "output": "[\n  -0.0e-0,\n  1E+2,\n  0\n]"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[\"a\tb\"]",
+    "error": "json.control_character"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "{\"a\":[1,2",
+    "error": "json.unexpected_end"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[1,]",
+    "error": "json.trailing_comma"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[NaN]",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[truex]",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_format",
+    "input": "[true,false,null]",
+    "output": "[\n  true,\n  false,\n  null\n]"
+  },
+  {
+    "transform": "structure.json_minify",
+    "input": "{\n  \"a\": [1, 2],\n  \"b\": {\"c\": \"x y\"}\n}",
+    "output": "{\"a\":[1,2],\"b\":{\"c\":\"x y\"}}"
+  },
+  {
+    "transform": "structure.json_minify",
+    "input": "{\n  \"a\": 1\n}\n[ 1 ]",
+    "output": "{\"a\":1}\n[1]"
+  },
+  {
+    "transform": "structure.json_minify",
+    "input": "[ 1E+2 , 0.10 ]",
+    "output": "[1E+2,0.10]"
+  },
+  {
+    "transform": "structure.json_minify",
+    "input": "[1 2]",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_minify",
+    "input": "\r\n[\r\n]\r\n",
+    "output": "[]"
+  },
+  {
+    "transform": "structure.json_validate",
+    "params": {
+      "lenient": true
+    },
+    "input": "{\"a\":1,}",
+    "output": "{\"a\":1,}",
+    "warnings": [
+      "json.trailing_comma"
+    ]
+  },
+  {
+    "transform": "structure.json_validate",
+    "input": "{\"a\":1,}",
+    "error": "json.trailing_comma"
+  },
+  {
+    "transform": "structure.json_validate",
+    "params": {
+      "lenient": true
+    },
+    "input": "{\n  // note\n  \"a\": /* x */ 1\n}",
+    "output": "{\n  // note\n  \"a\": /* x */ 1\n}",
+    "warnings": [
+      "json.comment",
+      "json.comment"
+    ]
+  },
+  {
+    "transform": "structure.json_validate",
+    "input": "[1, 2]",
+    "output": "[1, 2]",
+    "warnings": []
+  },
+  {
+    "transform": "structure.json_validate",
+    "params": {
+      "lenient": true
+    },
+    "input": "{\"a\" 1}",
+    "error": "json.unexpected_character"
+  },
+  {
+    "transform": "structure.json_validate",
+    "input": "\ufeff[]",
+    "output": "\ufeff[]"
+  },
+  {
+    "transform": "structure.json_validate",
+    "params": {
+      "lenient": true
+    },
+    "input": "[1 /* open",
+    "error": "json.unexpected_end"
+  },
+  {
+    "transform": "structure.json_validate",
+    "input": "{\"a\":1,\"a\":2}",
+    "output": "{\"a\":1,\"a\":2}",
+    "warnings": [
+      "json.duplicate_key"
+    ]
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"b\":{\"z\":1,\"y\":2},\"a\":[{\"d\":1,\"c\":2}]}",
+    "output": "{\"a\":[{\"c\":2,\"d\":1}],\"b\":{\"y\":2,\"z\":1}}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "params": {
+      "recursive": false
+    },
+    "input": "{\"b\":{\"z\":1,\"y\":2},\"a\":[{\"d\":1,\"c\":2}]}",
+    "output": "{\"a\":[{\"d\":1,\"c\":2}],\"b\":{\"z\":1,\"y\":2}}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\n    \"b\": 1,\n    \"a\": 2\n}",
+    "output": "{\n    \"a\": 2,\n    \"b\": 1\n}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"b\":1,\"B\":2,\"é\":3,\"a\":4}",
+    "output": "{\"B\":2,\"a\":4,\"b\":1,\"é\":3}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"\\u0062\":1,\"a\":2}",
+    "output": "{\"a\":2,\"\\u0062\":1}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "[3,1,2]",
+    "output": "[3,1,2]"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"b\":1,\"a\":1,\"b\":2}",
+    "output": "{\"a\":1,\"b\":1,\"b\":2}",
+    "warnings": [
+      "json.duplicate_key"
+    ]
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"b\":1,\"a\":2}\n{\"d\":1,\"c\":2}",
+    "output": "{\"a\":2,\"b\":1}\n{\"c\":2,\"d\":1}"
+  },
+  {
+    "transform": "structure.json_sort_keys",
+    "input": "{\"b\":1,",
+    "error": "json.unexpected_end"
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "Say \"hi\"\nbye",
+    "output": "\"Say \\\"hi\\\"\\nbye\""
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "C:\\temp\n",
+    "output": "\"C:\\\\temp\\n\""
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "a\u0001b\u001f",
+    "output": "\"a\\u0001b\\u001f\""
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "привіт 😀 </script>",
+    "output": "\"привіт 😀 </script>\""
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "",
+    "output": "\"\""
+  },
+  {
+    "transform": "structure.json_quote",
+    "input": "tab\tcr\r",
+    "output": "\"tab\\tcr\\r\""
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"line\\nnext\"",
+    "output": "line\nnext"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "a\\tb",
+    "output": "a\tb"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"\\\"{\\\\\\\"a\\\\\\\":1}\\\"\"",
+    "output": "{\"a\":1}",
+    "warnings": [
+      "json.double_encoded"
+    ]
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"{\\\"a\\\":1}\"",
+    "output": "{\"a\":1}",
+    "warnings": []
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"bad \\x\"",
+    "error": "json.invalid_escape"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"\\ud83d\\ude00\"",
+    "output": "😀"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"\\ud83d\"",
+    "error": "json.invalid_escape"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"a\"b\"",
+    "error": "json.unescaped_quote"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "  \"x\"  \n",
+    "output": "x"
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"\\\"hi\\\"\"",
+    "output": "\"hi\""
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "say \"hi\"",
+    "output": "say \"hi\""
+  },
+  {
+    "transform": "structure.json_unquote",
+    "input": "\"é \\u00e9 \\/\"",
+    "output": "é é /"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "name: demo\nport: 8080\ntags:\n  - a\n  - b",
+    "output": "{\n  \"name\": \"demo\",\n  \"port\": 8080,\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ]\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: 1.10\nb: 12345678901234567890\nc: +7\nd: 0x1F\ne: .5\nf: -3",
+    "output": "{\n  \"a\": 1.10,\n  \"b\": 12345678901234567890,\n  \"c\": 7,\n  \"d\": 31,\n  \"e\": 0.5,\n  \"f\": -3\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: true\nb: ~\nc:\nd: 'true'\ne: yes",
+    "output": "{\n  \"a\": true,\n  \"b\": null,\n  \"c\": null,\n  \"d\": \"true\",\n  \"e\": \"yes\"\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: 1\n---\nb: 2",
+    "error": "yaml.multiple_documents"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: [1, 2",
+    "error": "yaml.syntax"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: 1\na: 2",
+    "error": "yaml.duplicate_key"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "base: &b\n  x: 1\ncopy: *b",
+    "output": "{\n  \"base\": {\n    \"x\": 1\n  },\n  \"copy\": {\n    \"x\": 1\n  }\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: !Ref thing",
+    "output": "{\n  \"a\": \"thing\"\n}",
+    "warnings": [
+      "yaml.tag_ignored"
+    ]
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: .inf",
+    "error": "yaml.non_finite_number"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "? [a, b]\n: c",
+    "error": "yaml.complex_key"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "1: one\ntrue: yes",
+    "output": "{\n  \"1\": \"one\",\n  \"true\": \"yes\"\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "",
+    "error": "yaml.empty"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "# only a comment\n",
+    "error": "yaml.empty"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "text: |\n  line1\n  line2\n",
+    "output": "{\n  \"text\": \"line1\\nline2\\n\"\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "назва: Київ\nчисло: 1.50",
+    "output": "{\n  \"назва\": \"Київ\",\n  \"число\": 1.50\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "params": {
+      "indent": "4"
+    },
+    "input": "{a: [1, 2], b: {c: d}}",
+    "output": "{\n    \"a\": [\n        1,\n        2\n    ],\n    \"b\": {\n        \"c\": \"d\"\n    }\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "hello",
+    "output": "\"hello\""
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "- \"quoted\\ttab\"\n- 'single'",
+    "output": "[\n  \"quoted\\ttab\",\n  \"single\"\n]"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "a: !!str 123\nb: !!float 1",
+    "output": "{\n  \"a\": \"123\",\n  \"b\": 1.0\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "\ufeffa: 1",
+    "output": "{\n  \"a\": 1\n}"
+  },
+  {
+    "transform": "structure.yaml_to_json",
+    "input": "---\na: 1\n...\n",
+    "output": "{\n  \"a\": 1\n}"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"name\":\"demo\",\"on\":\"yes\",\"tags\":[\"a\",\"b\"]}",
+    "output": "name: demo\n\"on\": \"yes\"\ntags:\n  - a\n  - b"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"a\":{\"b\":[1,{\"c\":null,\"d\":true}],\"e\":{}},\"f\":[]}",
+    "output": "a:\n  b:\n    - 1\n    - c: null\n      d: true\n  e: {}\nf: []"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "[[1,2],[]]",
+    "output": "- - 1\n  - 2\n- []"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "[\"true\",\"007\",\"a: b\",\"multi\\nline\",\"\",\"#tag\",\"plain text\",\"2024-01-01\",\"~\"]",
+    "output": "- \"true\"\n- \"007\"\n- \"a: b\"\n- \"multi\\nline\"\n- \"\"\n- \"#tag\"\n- plain text\n- \"2024-01-01\"\n- \"~\""
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"num\":1.10,\"n\":-0,\"big\":12345678901234567890}",
+    "output": "num: 1.10\n\"n\": -0\nbig: 12345678901234567890"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"a\":1}\n{\"b\":2}",
+    "output": "a: 1\n---\nb: 2"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "\"hi\"",
+    "output": "hi"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "null",
+    "output": "null"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{}",
+    "output": "{}"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"a\":",
+    "error": "json.unexpected_end"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "{\"yes\":1,\"key with: colon\":2,\"Київ\":\"місто\"}",
+    "output": "\"yes\": 1\n\"key with: colon\": 2\nКиїв: місто"
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "[\"tab\\there\",\"quote \\\" inside\",\"\\u0007\"]",
+    "output": "- \"tab\\there\"\n- quote \" inside\n- \"\\u0007\""
+  },
+  {
+    "transform": "structure.json_to_yaml",
+    "input": "[{\"a\":[{\"b\":1}]}]",
+    "output": "- a:\n    - b: 1"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "name,age\nAda,36",
+    "output": "[\n  {\n    \"name\": \"Ada\",\n    \"age\": \"36\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a;b\n1;2\n",
+    "output": "[\n  {\n    \"a\": \"1\",\n    \"b\": \"2\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a\tb\nx y\tz\n",
+    "output": "[\n  {\n    \"a\": \"x y\",\n    \"b\": \"z\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "name,note\nAda,\"line1\nline2\"\n",
+    "output": "[\n  {\n    \"name\": \"Ada\",\n    \"note\": \"line1\\nline2\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "params": {
+      "header": false
+    },
+    "input": "1,2\n3,4",
+    "output": "[\n  [\n    \"1\",\n    \"2\"\n  ],\n  [\n    \"3\",\n    \"4\"\n  ]\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,b\n1,2,3",
+    "error": "csv.field_count"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "",
+    "output": "[]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,b\n",
+    "output": "[]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,b\r\n1,2\r\n",
+    "output": "[\n  {\n    \"a\": \"1\",\n    \"b\": \"2\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,a\n1,2",
+    "output": "[\n  {\n    \"a\": \"1\",\n    \"a\": \"2\"\n  }\n]",
+    "warnings": [
+      "csv.duplicate_header"
+    ]
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "params": {
+      "delimiter": "semicolon"
+    },
+    "input": "a;b\n1,5;2",
+    "output": "[\n  {\n    \"a\": \"1,5\",\n    \"b\": \"2\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "q\n\"say \"\"hi\"\"\"",
+    "output": "[\n  {\n    \"q\": \"say \\\"hi\\\"\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "n\n007\ntrue",
+    "output": "[\n  {\n    \"n\": \"007\"\n  },\n  {\n    \"n\": \"true\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "\ufeffid,v\n1,x",
+    "output": "[\n  {\n    \"id\": \"1\",\n    \"v\": \"x\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "params": {
+      "header": false,
+      "delimiter": "tab"
+    },
+    "input": "a,b\n1,2",
+    "output": "[\n  [\n    \"a,b\"\n  ],\n  [\n    \"1,2\"\n  ]\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,b\n,",
+    "output": "[\n  {\n    \"a\": \"\",\n    \"b\": \"\"\n  }\n]"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "a,\"b\n1,2",
+    "error": "csv.unclosed_quote"
+  },
+  {
+    "transform": "structure.csv_to_json",
+    "input": "size,pipe\n5\" pipe,\"x,y\"",
+    "output": "[\n  {\n    \"size\": \"5\\\" pipe\",\n    \"pipe\": \"x,y\"\n  }\n]"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<list><item id='1'>One</item><item/></list>",
+    "output": "<list>\n  <item id=\"1\">One</item>\n  <item/>\n</list>"
+  },
+  {
+    "transform": "structure.xml_minify",
+    "input": "<list>\n  <item>One</item>\n</list>",
+    "output": "<list><item>One</item></list>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<!DOCTYPE x [<!ENTITY e SYSTEM \"file:///etc/passwd\">]><x>&e;</x>",
+    "error": "xml.external_entity"
+  },
+  {
+    "transform": "structure.xml_minify",
+    "input": "<!DOCTYPE x [<!ENTITY % p SYSTEM \"http://example.test/x.dtd\"> %p;]><x/>",
+    "error": "xml.external_entity"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<!DOCTYPE x [<!ENTITY e \"hi\">]><x>&e;</x>",
+    "output": "<!DOCTYPE x [<!ENTITY e \"hi\">]>\n<x>&e;</x>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a><b></a>",
+    "error": "xml.mismatched_end_tag"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a><b>",
+    "error": "xml.unclosed_element"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a/><b/>",
+    "error": "xml.multiple_roots"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "hi<a/>",
+    "error": "xml.text_outside_root"
+  },
+  {
+    "transform": "structure.xml_format",
+    "params": {
+      "indent": "4"
+    },
+    "input": "<?xml version=\"1.0\"?><!-- c --><r><a><b>t</b></a></r>",
+    "output": "<?xml version=\"1.0\"?>\n<!-- c -->\n<r>\n    <a>\n        <b>t</b>\n    </a>\n</r>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<p>Hello <b>world</b>!</p>",
+    "output": "<p>Hello <b>world</b>!</p>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<r><pre xml:space=\"preserve\">\n  <x/>\n</pre></r>",
+    "output": "<r>\n  <pre xml:space=\"preserve\">\n  <x/>\n</pre>\n</r>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<r><![CDATA[a < b]]></r>",
+    "output": "<r><![CDATA[a < b]]></r>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a  x = '1'   y=\"2\" />",
+    "output": "<a x=\"1\" y=\"2\"/>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a t='say \"hi\"'/>",
+    "output": "<a t='say \"hi\"'/>"
+  },
+  {
+    "transform": "structure.xml_minify",
+    "input": "<a>\n  <b> x </b>\n  <!-- keep -->\n</a>",
+    "output": "<a><b> x </b><!-- keep --></a>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "  ",
+    "error": "xml.empty"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<!-- only -->",
+    "error": "xml.no_root"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a x=\"1\" x=\"2\"/>",
+    "error": "xml.invalid_attribute"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a>   </a>",
+    "output": "<a></a>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "params": {
+      "indent": "tab"
+    },
+    "input": "<a><b><c/></b></a>",
+    "output": "<a>\n\t<b>\n\t\t<c/>\n\t</b>\n</a>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a><!-- x -- y --></a>",
+    "error": "xml.syntax"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a>x &amp; y &#169;</a>",
+    "output": "<a>x &amp; y &#169;</a>"
+  },
+  {
+    "transform": "structure.xml_minify",
+    "input": "<?xml version=\"1.0\"?>\n<r>\n  <a/>\n</r>\n",
+    "output": "<?xml version=\"1.0\"?><r><a/></r>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<r><?pi data?><a>1</a></r>",
+    "output": "<r>\n  <?pi data?>\n  <a>1</a>\n</r>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<ns:a xmlns:ns=\"urn:x\"><ns:b/></ns:a>",
+    "output": "<ns:a xmlns:ns=\"urn:x\">\n  <ns:b/>\n</ns:a>"
+  },
+  {
+    "transform": "structure.xml_format",
+    "input": "<a>\n  <b>1</b>\n  <c>\n    <d>2</d>\n  </c>\n</a>\n",
+    "output": "<a>\n  <b>1</b>\n  <c>\n    <d>2</d>\n  </c>\n</a>"
+  }
+]

@@ -1,5 +1,162 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "Format JSON",
+      "description": "Indents JSON and keeps numbers, escapes and key order exactly as written.",
+      "keywords": [
+        "pretty print",
+        "beautify",
+        "indent",
+        "json lines"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        },
+        "sort_keys": {
+          "label": "Sort keys"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minify JSON",
+      "description": "Removes all insignificant whitespace from JSON.",
+      "keywords": [
+        "compact",
+        "compress",
+        "one line"
+      ]
+    },
+    "structure.json_validate": {
+      "name": "Validate JSON",
+      "description": "Checks that the text is valid JSON and shows where it is not, without changing it.",
+      "keywords": [
+        "check",
+        "lint",
+        "syntax",
+        "jsonc"
+      ],
+      "params": {
+        "lenient": {
+          "label": "Allow comments and trailing commas"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Sort JSON keys",
+      "description": "Orders object keys by code point; arrays keep their order.",
+      "keywords": [
+        "order",
+        "alphabetical",
+        "canonical"
+      ],
+      "params": {
+        "recursive": {
+          "label": "Include nested objects"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Quote as JSON string",
+      "description": "Wraps the text in a JSON string literal, escaping quotes and line breaks.",
+      "keywords": [
+        "escape",
+        "stringify",
+        "string literal"
+      ]
+    },
+    "structure.json_unquote": {
+      "name": "Unquote JSON string",
+      "description": "Decodes a JSON string literal back to plain text, including double-encoded JSON.",
+      "keywords": [
+        "unescape",
+        "parse string",
+        "double encoded"
+      ]
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML to JSON",
+      "description": "Converts a single YAML document to JSON.",
+      "keywords": [
+        "convert",
+        "yml"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON to YAML",
+      "description": "Converts JSON to block-style YAML.",
+      "keywords": [
+        "convert",
+        "yml"
+      ]
+    },
+    "structure.csv_to_json": {
+      "name": "CSV to JSON",
+      "description": "Converts CSV or TSV rows to JSON; values stay text.",
+      "keywords": [
+        "tsv",
+        "spreadsheet",
+        "table",
+        "convert"
+      ],
+      "params": {
+        "header": {
+          "label": "First row is a header"
+        },
+        "delimiter": {
+          "label": "Delimiter",
+          "options": {
+            "auto": "Detect",
+            "comma": "Comma",
+            "semicolon": "Semicolon",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Format XML",
+      "description": "Indents XML elements without changing text; external entities are never loaded.",
+      "keywords": [
+        "pretty print",
+        "beautify",
+        "indent"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minify XML",
+      "description": "Removes whitespace between XML elements.",
+      "keywords": [
+        "compact",
+        "compress"
+      ]
+    }
+  },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 encode",

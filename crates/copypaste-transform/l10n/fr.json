@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "Formater le JSON",
+      "description": "Indente le JSON en conservant nombres, échappements et ordre des clés tels qu’écrits.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        },
+        "sort_keys": {
+          "label": "Trier les clés"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minifier le JSON",
+      "description": "Supprime tous les espaces non significatifs du JSON."
+    },
+    "structure.json_validate": {
+      "name": "Valider le JSON",
+      "description": "Vérifie que le texte est un JSON valide et indique où il ne l’est pas, sans le modifier.",
+      "params": {
+        "lenient": {
+          "label": "Autoriser les commentaires et les virgules finales"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Trier les clés JSON",
+      "description": "Trie les clés des objets par point de code ; les tableaux gardent leur ordre.",
+      "params": {
+        "recursive": {
+          "label": "Inclure les objets imbriqués"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Citer en chaîne JSON",
+      "description": "Place le texte dans un littéral de chaîne JSON en échappant guillemets et sauts de ligne."
+    },
+    "structure.json_unquote": {
+      "name": "Décoder une chaîne JSON",
+      "description": "Décode un littéral de chaîne JSON en texte brut, y compris le JSON doublement encodé."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML vers JSON",
+      "description": "Convertit un document YAML unique en JSON.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON vers YAML",
+      "description": "Convertit le JSON en YAML de style bloc."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV vers JSON",
+      "description": "Convertit des lignes CSV ou TSV en JSON ; les valeurs restent du texte.",
+      "params": {
+        "header": {
+          "label": "La première ligne est un en-tête"
+        },
+        "delimiter": {
+          "label": "Séparateur",
+          "options": {
+            "auto": "Détecter",
+            "comma": "Virgule",
+            "semicolon": "Point-virgule",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Formater le XML",
+      "description": "Indente les éléments XML sans modifier le texte ; les entités externes ne sont jamais chargées.",
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 espaces",
+            "4": "4 espaces",
+            "tab": "Tabulation"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minifier le XML",
+      "description": "Supprime les espaces entre les éléments XML."
+    }
+  },
   "encode": {
     "encode.base64_encode": {
       "name": "Encoder en Base64",

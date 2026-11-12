@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON biçimlendir",
+      "description": "Sayıları, kaçış dizilerini ve anahtar sırasını yazıldığı gibi koruyarak JSON’u girintiler.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        },
+        "sort_keys": {
+          "label": "Anahtarları sırala"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON küçült",
+      "description": "JSON’daki gereksiz tüm boşlukları kaldırır."
+    },
+    "structure.json_validate": {
+      "name": "JSON doğrula",
+      "description": "Metnin geçerli JSON olup olmadığını denetler ve hatanın yerini gösterir; metni değiştirmez.",
+      "params": {
+        "lenient": {
+          "label": "Yorumlara ve sondaki virgüllere izin ver"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON anahtarlarını sırala",
+      "description": "Nesne anahtarlarını kod noktasına göre sıralar; diziler sırasını korur.",
+      "params": {
+        "recursive": {
+          "label": "İç içe nesneleri dahil et"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON dizesi olarak tırnakla",
+      "description": "Metni bir JSON dize sabitine sarar; tırnakları ve satır sonlarını kaçışlar."
+    },
+    "structure.json_unquote": {
+      "name": "JSON dizesini çöz",
+      "description": "Bir JSON dize sabitini düz metne geri çevirir; iki kez kodlanmış JSON’u da işler."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML’dan JSON’a",
+      "description": "Tek bir YAML belgesini JSON’a dönüştürür.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON’dan YAML’a",
+      "description": "JSON’u blok stilinde YAML’a dönüştürür."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV’den JSON’a",
+      "description": "CSV veya TSV satırlarını JSON’a dönüştürür; değerler metin olarak kalır.",
+      "params": {
+        "header": {
+          "label": "İlk satır başlıktır"
+        },
+        "delimiter": {
+          "label": "Ayırıcı",
+          "options": {
+            "auto": "Algıla",
+            "comma": "Virgül",
+            "semicolon": "Noktalı virgül",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML biçimlendir",
+      "description": "Metni değiştirmeden XML öğelerini girintiler; dış varlıklar asla yüklenmez.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML küçült",
+      "description": "XML öğeleri arasındaki boşlukları kaldırır."
+    }
+  },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 kodla",

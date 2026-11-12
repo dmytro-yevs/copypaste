@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "格式化 JSON",
+      "description": "为 JSON 添加缩进，数字、转义和键顺序完全保持原样。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        },
+        "sort_keys": {
+          "label": "排序键"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "压缩 JSON",
+      "description": "删除 JSON 中所有无意义的空白。"
+    },
+    "structure.json_validate": {
+      "name": "验证 JSON",
+      "description": "检查文本是否为有效 JSON 并指出错误位置，不修改文本。",
+      "params": {
+        "lenient": {
+          "label": "允许注释和尾随逗号"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "排序 JSON 键",
+      "description": "按码位对对象键排序；数组保持原有顺序。",
+      "params": {
+        "recursive": {
+          "label": "包括嵌套对象"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "转为 JSON 字符串",
+      "description": "将文本包装为 JSON 字符串字面量，并转义引号和换行。"
+    },
+    "structure.json_unquote": {
+      "name": "解析 JSON 字符串",
+      "description": "将 JSON 字符串字面量还原为纯文本，包括双重编码的 JSON。"
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML 转 JSON",
+      "description": "将单个 YAML 文档转换为 JSON。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON 转 YAML",
+      "description": "将 JSON 转换为块样式的 YAML。"
+    },
+    "structure.csv_to_json": {
+      "name": "CSV 转 JSON",
+      "description": "将 CSV 或 TSV 行转换为 JSON；值保持为文本。",
+      "params": {
+        "header": {
+          "label": "首行为标题行"
+        },
+        "delimiter": {
+          "label": "分隔符",
+          "options": {
+            "auto": "自动检测",
+            "comma": "逗号",
+            "semicolon": "分号",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "格式化 XML",
+      "description": "为 XML 元素添加缩进而不改动文本；从不加载外部实体。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "压缩 XML",
+      "description": "删除 XML 元素之间的空白。"
+    }
+  },
   "encode": {
     "encode.base64_encode": {
       "name": "Base64 编码",
