@@ -85,6 +85,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!-- Long-pressing a CopyPaste Quick Settings tile opens the app. -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".PairingPresentationActivity"
@@ -100,6 +104,110 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@style/InvisibleTheme" />
+        <!-- Quick access surfaces: framework Views and RemoteViews in the main
+             process, without a Flutter engine. -->
+        <activity
+            android:name=".QuickAccessActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/InvisibleTheme" />
+        <activity
+            android:name=".QueueIntakeActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/quick_access_queue_intake_label"
+            android:theme="@style/InvisibleTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <!-- Share-sheet target; an alias so it can be disabled apart from text selection. -->
+        <activity-alias
+            android:name=".QueueShareTarget"
+            android:targetActivity=".QueueIntakeActivity"
+            android:exported="true"
+            android:label="@string/quick_access_queue_intake_label">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity-alias>
+        <activity
+            android:name=".TransformActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:label="@string/quick_access_transform_label"
+            android:theme="@style/InvisibleTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".ClipboardInputMethodService"
+            android:exported="true"
+            android:label="@string/quick_access_ime_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/clipboard_input_method" />
+        </service>
+        <service
+            android:name=".SaveClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_lucide_clipboard"
+            android:label="@string/quick_access_tile_save_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".CaptureToggleTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_lucide_eye"
+            android:label="@string/quick_access_tile_capture_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <receiver
+            android:name=".RecentClipsWidgetProvider"
+            android:exported="false"
+            android:label="@string/quick_access_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/recent_clips_widget_info" />
+        </receiver>
+        <service
+            android:name=".widget.RecentClipsWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <service
             android:name=".ClipboardCaptureService"
             android:exported="false"

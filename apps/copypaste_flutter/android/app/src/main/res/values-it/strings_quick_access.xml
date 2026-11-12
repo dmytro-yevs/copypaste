@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Elementi CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Cambia tastiera</string>
+    <string name="quick_access_tile_save_label">Salva appunti</string>
+    <string name="quick_access_tile_capture_label">Acquisizione degli appunti</string>
+    <string name="quick_access_widget_label">Elementi recenti</string>
+    <string name="quick_access_widget_description">I tuoi elementi più recenti. Tocca un elemento per copiarlo.</string>
+    <string name="quick_access_queue_intake_label">Aggiungi alla coda di incolla</string>
+    <string name="quick_access_transform_label">Trasforma</string>
+</resources>

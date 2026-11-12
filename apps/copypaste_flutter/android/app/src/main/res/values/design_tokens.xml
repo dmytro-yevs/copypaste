@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mirror of lib/app/theme/app_tokens.dart and the AppTheme light colors for
+     native Android surfaces (keyboard panel, tiles, widget). Kept in sync by
+     test/app/theme/android_design_tokens_test.dart. -->
+<resources>
+    <dimen name="app_spacing_xxs">2dp</dimen>
+    <dimen name="app_spacing_xs">4dp</dimen>
+    <dimen name="app_spacing_sm">8dp</dimen>
+    <dimen name="app_spacing_md">12dp</dimen>
+    <dimen name="app_spacing_lg">16dp</dimen>
+    <dimen name="app_spacing_xl">20dp</dimen>
+    <dimen name="app_spacing_xxl">24dp</dimen>
+    <dimen name="app_spacing_xxxl">32dp</dimen>
+    <dimen name="app_spacing_huge">40dp</dimen>
+    <dimen name="app_spacing_massive">48dp</dimen>
+
+    <dimen name="app_icon_size_status_indicator">8dp</dimen>
+    <dimen name="app_icon_size_xs">12dp</dimen>
+    <dimen name="app_icon_size_sm">16dp</dimen>
+    <dimen name="app_icon_size_md">20dp</dimen>
+    <dimen name="app_icon_size_lg">24dp</dimen>
+    <dimen name="app_icon_size_xl">32dp</dimen>
+    <dimen name="app_icon_size_state">48dp</dimen>
+    <dimen name="app_icon_size_hero">64dp</dimen>
+
+    <dimen name="app_radius_xs">4dp</dimen>
+    <dimen name="app_radius_sm">6dp</dimen>
+    <dimen name="app_radius_md">8dp</dimen>
+    <dimen name="app_radius_lg">12dp</dimen>
+    <dimen name="app_radius_xl">16dp</dimen>
+    <dimen name="app_radius_full">999dp</dimen>
+
+    <dimen name="app_control_size_compact">32dp</dimen>
+    <dimen name="app_control_size_regular">36dp</dimen>
+    <dimen name="app_control_size_large">40dp</dimen>
+    <dimen name="app_control_size_touch">48dp</dimen>
+    <dimen name="app_control_size_navigation">56dp</dimen>
+
+    <dimen name="app_text_size_x_small">12sp</dimen>
+    <dimen name="app_text_size_small">14sp</dimen>
+    <dimen name="app_text_size_base">14sp</dimen>
+    <dimen name="app_text_size_large">16sp</dimen>
+    <dimen name="app_text_size_x_large">18sp</dimen>
+    <dimen name="app_text_size_history_metadata">12sp</dimen>
+    <dimen name="app_text_size_menu">13sp</dimen>
+    <dimen name="app_text_size_menu_metadata">11sp</dimen>
+
+    <color name="app_color_background">#FFFFFFFF</color>
+    <color name="app_color_foreground">#FF1A1C1F</color>
+    <color name="app_color_card">#FFFFFFFF</color>
+    <color name="app_color_card_foreground">#FF1A1C1F</color>
+    <color name="app_color_popover">#FFFFFFFF</color>
+    <color name="app_color_popover_foreground">#FF1A1C1F</color>
+    <color name="app_color_primary">#FF1A1C1F</color>
+    <color name="app_color_primary_foreground">#FFFFFFFF</color>
+    <color name="app_color_secondary">#FFF9F9F9</color>
+    <color name="app_color_secondary_foreground">#FF1A1C1F</color>
+    <color name="app_color_muted">#FFEDEDED</color>
+    <color name="app_color_muted_foreground">#FF5D5D5D</color>
+    <color name="app_color_accent">#FFEDEDED</color>
+    <color name="app_color_accent_foreground">#FF1A1C1F</color>
+    <color name="app_color_destructive">#FFE02E2A</color>
+    <color name="app_color_border">#141A1C1F</color>
+    <color name="app_color_input">#FFEDEDED</color>
+    <color name="app_color_status_warning">#FFB45309</color>
+    <color name="app_color_status_info">#FF2563EB</color>
+    <color name="app_color_status_success">#FF15803D</color>
+</resources>

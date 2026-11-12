@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">Кліпи CopyPaste</string>
+    <string name="quick_access_ime_switch_back">Змінити клавіатуру</string>
+    <string name="quick_access_tile_save_label">Зберегти буфер обміну</string>
+    <string name="quick_access_tile_capture_label">Запис буфера обміну</string>
+    <string name="quick_access_widget_label">Останні кліпи</string>
+    <string name="quick_access_widget_description">Ваші останні кліпи. Торкніться кліпу, щоб скопіювати його.</string>
+    <string name="quick_access_queue_intake_label">Додати до черги вставлення</string>
+    <string name="quick_access_transform_label">Перетворити</string>
+</resources>

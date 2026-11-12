@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mirror of the AppTheme dark colors; sizes come from values/design_tokens.xml. -->
+<resources>
+    <color name="app_color_background">#FF181818</color>
+    <color name="app_color_foreground">#FFDFDFDF</color>
+    <color name="app_color_card">#FF181818</color>
+    <color name="app_color_card_foreground">#FFDFDFDF</color>
+    <color name="app_color_popover">#FF212121</color>
+    <color name="app_color_popover_foreground">#FFDFDFDF</color>
+    <color name="app_color_primary">#FFDFDFDF</color>
+    <color name="app_color_primary_foreground">#FF181818</color>
+    <color name="app_color_secondary">#FF1B1B1B</color>
+    <color name="app_color_secondary_foreground">#FFFFFFFF</color>
+    <color name="app_color_muted">#FF212121</color>
+    <color name="app_color_muted_foreground">#FFAFAFAF</color>
+    <color name="app_color_accent">#FF282828</color>
+    <color name="app_color_accent_foreground">#FFFFFFFF</color>
+    <color name="app_color_destructive">#FFE02E2A</color>
+    <color name="app_color_border">#14DFDFDF</color>
+    <color name="app_color_input">#FF212121</color>
+    <color name="app_color_status_warning">#FFFBBF24</color>
+    <color name="app_color_status_info">#FF60A5FA</color>
+    <color name="app_color_status_success">#FF4ADE80</color>
+</resources>
