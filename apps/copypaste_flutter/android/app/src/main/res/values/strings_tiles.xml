@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quick Settings tiles, Save clipboard, Add to Paste Queue and the transform
+     sheet. None of these strings ever embeds clip content. -->
+<resources>
+    <string name="quick_access_tile_saved_at">Saved at %1$s</string>
+    <string name="quick_access_tile_set_up">Set up</string>
+    <string name="quick_access_tile_paused">Paused</string>
+    <string name="quick_access_tile_tier_full">Full</string>
+    <string name="quick_access_tile_tier_panel">Panel</string>
+    <string name="quick_access_tile_tier_app">In app</string>
+    <string name="quick_access_save_saved">Clipboard saved</string>
+    <string name="quick_access_save_saved_secret">Clipboard saved as secret</string>
+    <string name="quick_access_save_already">Already saved</string>
+    <string name="quick_access_save_empty">Clipboard is empty</string>
+    <string name="quick_access_save_sensitive">Sensitive clip not saved</string>
+    <string name="quick_access_save_paused">Capture is paused</string>
+    <string name="quick_access_save_failed">Couldn\'t save the clipboard</string>
+    <string name="quick_access_queue_added">Added to Paste Queue</string>
+    <string name="quick_access_queue_nothing">Nothing to add</string>
+    <string name="quick_access_queue_failed">Couldn\'t add to Paste Queue</string>
+    <string name="quick_access_transform_title">Transform</string>
+    <string name="quick_access_transform_back">Back to transforms</string>
+    <string name="quick_access_transform_close">Close</string>
+    <string name="quick_access_transform_favorites">Favorites</string>
+    <string name="quick_access_transform_pipelines">Pipelines</string>
+    <string name="quick_access_transform_category_structure">Structure</string>
+    <string name="quick_access_transform_category_encode">Encode</string>
+    <string name="quick_access_transform_category_case">Case</string>
+    <string name="quick_access_transform_category_hash">Hash</string>
+    <string name="quick_access_transform_category_lines">Lines</string>
+    <string name="quick_access_transform_category_clean">Clean up</string>
+    <string name="quick_access_transform_category_url">URL</string>
+    <string name="quick_access_transform_category_markup">Markup</string>
+    <string name="quick_access_transform_category_dev">Developer</string>
+    <string name="quick_access_transform_loading">Loading transforms…</string>
+    <string name="quick_access_transform_error">Couldn\'t load transforms</string>
+    <string name="quick_access_transform_retry">Retry</string>
+    <string name="quick_access_transform_none">No transforms available</string>
+    <string name="quick_access_transform_empty_source">Nothing to transform. Copy some text or pick a history item.</string>
+    <string name="quick_access_transform_not_text">Transforms work on text.</string>
+    <string name="quick_access_transform_too_large">Too large to transform</string>
+    <string name="quick_access_transform_no_changes">No changes</string>
+    <string name="quick_access_transform_warning">Check the result: the transform reported a warning</string>
+    <string name="quick_access_transform_truncated">Showing the first 64 KiB</string>
+    <string name="quick_access_transform_failed">This transform can\'t process this text</string>
+    <string name="quick_access_transform_failed_at">This transform can\'t process this text (line %1$d, column %2$d)</string>
+    <string name="quick_access_transform_sensitive">Sensitive content is hidden. Tap to reveal.</string>
+    <string name="quick_access_transform_replace">Replace</string>
+    <string name="quick_access_transform_copy">Copy</string>
+    <string name="quick_access_transform_save">Save</string>
+    <string name="quick_access_transform_copied">Copied</string>
+    <string name="quick_access_transform_saved">Saved to history</string>
+    <string name="quick_access_transform_action_failed">Couldn\'t finish this action</string>
+    <string name="quick_access_transform_replace_too_large">Too large to replace here. Copy it instead.</string>
+</resources>
