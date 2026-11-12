@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Kodowanie Base64",
+      "description": "Koduje bajty UTF-8 tekstu w Base64.",
+      "params": {
+        "variant": {
+          "label": "Alfabet",
+          "options": {
+            "standard": "Standardowy",
+            "url_safe": "Bezpieczny dla URL"
+          }
+        },
+        "padding": {
+          "label": "Dodaj dopełnienie (=)"
+        },
+        "wrap": {
+          "label": "Zawijaj wiersze co 76 znaków"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Dekodowanie Base64",
+      "description": "Dekoduje standardowe lub bezpieczne dla URL Base64, pomijając podziały wierszy, brak dopełnienia i prefiks data: URI.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "text": "Tekst",
+            "hex": "Bajty szesnastkowo"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "Koduj składnik URL",
+      "description": "Koduje procentowo wszystko poza literami, cyframi i - . _ ~, do wartości zapytania lub segmentu ścieżki.",
+      "params": {
+        "space": {
+          "label": "Koduj spacje jako",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (styl formularza)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Koduj cały URL",
+      "description": "Koduje tylko znaki niedozwolone w URL i zachowuje jego strukturę oraz istniejące sekwencje %XX."
+    },
+    "encode.url_decode": {
+      "name": "Dekodowanie URL",
+      "description": "Dekoduje sekwencje %XX i wskazuje pozycję błędnej sekwencji.",
+      "params": {
+        "plus_as_space": {
+          "label": "Traktuj + jako spację"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Kodowanie szesnastkowe",
+      "description": "Zapisuje bajty UTF-8 tekstu jako cyfry szesnastkowe.",
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "none": "Brak",
+            "space": "Spacja"
+          }
+        },
+        "case": {
+          "label": "Wielkość liter",
+          "options": {
+            "lower": "Małe litery",
+            "upper": "Wielkie litery"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Dekodowanie szesnastkowe",
+      "description": "Zamienia cyfry szesnastkowe z powrotem na tekst, pomijając spacje i prefiksy 0x."
+    },
+    "encode.html_encode": {
+      "name": "Koduj encje HTML",
+      "description": "Zastępuje & < > \" i ' encjami HTML, a opcjonalnie każdy znak spoza ASCII odwołaniem numerycznym.",
+      "params": {
+        "scope": {
+          "label": "Znaki do zakodowania",
+          "options": {
+            "minimal": "Tylko & < > \" '",
+            "non_ascii": "Także wszystkie spoza ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "Dekoduj encje HTML",
+      "description": "Dekoduje wszystkie nazwane encje HTML5 i odwołania numeryczne; nieznane encje pozostają bez zmian."
+    },
+    "encode.backslash_escape": {
+      "name": "Escapowanie ukośnikiem",
+      "description": "Poprzedza ukośnikiem odwrotnym ukośniki, cudzysłowy, podziały wierszy, tabulatory i znaki sterujące w stylu C i JSON."
+    },
+    "encode.backslash_unescape": {
+      "name": "Usuń escapowanie ukośnikiem",
+      "description": "Zamienia \\n, \\t, \\\", \\uXXXX, \\xXX i podobne sekwencje z powrotem na znaki; nieznane pozostają z ostrzeżeniem."
+    },
+    "encode.unicode_escape": {
+      "name": "Escapowanie Unicode",
+      "description": "Zapisuje każdy znak spoza ASCII jako sekwencję \\uXXXX.",
+      "params": {
+        "astral": {
+          "label": "Znaki powyżej U+FFFF",
+          "options": {
+            "surrogate_pair": "Para surogatów (\\uD83D\\uDE00)",
+            "braces": "Nawiasy klamrowe (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Usuń escapowanie Unicode",
+      "description": "Zamienia sekwencje \\uXXXX i \\u{...} z powrotem na znaki, a resztę tekstu zostawia bez zmian."
+    }
+  },
   "case": {
     "case.upper": {
       "name": "WIELKIE LITERY",
@@ -109,7 +234,77 @@
       "description": "Zmienia wielkie litery na małe, a małe na wielkie."
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "Skrót MD5",
+      "description": "Skrót MD5, nie do zastosowań bezpieczeństwa. Haszuje tekst jako UTF-8 dokładnie tak, jak jest pokazany, bez dodawania nowego wiersza.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "hex_lower": "Szesnastkowo, małe litery",
+            "hex_upper": "Szesnastkowo, wielkie litery",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "Skrót SHA-1",
+      "description": "Skrót SHA-1, nie do zastosowań bezpieczeństwa. Haszuje tekst jako UTF-8 dokładnie tak, jak jest pokazany, bez dodawania nowego wiersza.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "hex_lower": "Szesnastkowo, małe litery",
+            "hex_upper": "Szesnastkowo, wielkie litery",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "Skrót SHA-256",
+      "description": "Skrót SHA-256. Haszuje tekst jako UTF-8 dokładnie tak, jak jest pokazany, bez dodawania nowego wiersza.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "hex_lower": "Szesnastkowo, małe litery",
+            "hex_upper": "Szesnastkowo, wielkie litery",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "Skrót SHA-512",
+      "description": "Skrót SHA-512. Haszuje tekst jako UTF-8 dokładnie tak, jak jest pokazany, bez dodawania nowego wiersza.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "hex_lower": "Szesnastkowo, małe litery",
+            "hex_upper": "Szesnastkowo, wielkie litery",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "Suma kontrolna CRC-32",
+      "description": "CRC-32 z wielomianem IEEE używanym przez ZIP i PNG. Haszuje tekst jako UTF-8 dokładnie tak, jak jest pokazany, bez dodawania nowego wiersza.",
+      "params": {
+        "output": {
+          "label": "Wynik",
+          "options": {
+            "hex": "Szesnastkowo (8 cyfr)",
+            "decimal": "Dziesiętnie"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "Przytnij",

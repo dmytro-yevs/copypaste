@@ -92,6 +92,9 @@ pub enum TransformError {
         code: &'static str,
         location: Option<Location>,
     },
+    /// Decoded bytes are not UTF-8 text; the UI offers hex output instead.
+    #[error("decoded data is binary ({bytes} bytes)")]
+    BinaryData { bytes: usize },
     #[error("transform was cancelled")]
     Cancelled,
     #[error("transform exceeded its time budget")]
@@ -109,6 +112,7 @@ impl TransformError {
             Self::InputTooLarge { .. } => "input_too_large",
             Self::OutputTooLarge { .. } => "output_too_large",
             Self::InvalidInput { code, .. } => code,
+            Self::BinaryData { .. } => "binary_data",
             Self::Cancelled => "cancelled",
             Self::BudgetExceeded => "budget_exceeded",
         }

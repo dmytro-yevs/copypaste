@@ -15,6 +15,7 @@ hex.workspace = true
 html2text.workspace = true
 icu_casemap.workspace = true
 jiff.workspace = true
+markup5ever.workspace = true
 md-5.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true

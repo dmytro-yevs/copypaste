@@ -1,6 +1,131 @@
 {
   "structure": {},
-  "encode": {},
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 编码",
+      "description": "将文本的 UTF-8 字节编码为 Base64。",
+      "params": {
+        "variant": {
+          "label": "字母表",
+          "options": {
+            "standard": "标准",
+            "url_safe": "URL 安全"
+          }
+        },
+        "padding": {
+          "label": "添加填充 (=)"
+        },
+        "wrap": {
+          "label": "每 76 个字符换行"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 解码",
+      "description": "解码标准或 URL 安全的 Base64，忽略换行、缺失的填充和 data: URI 前缀。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "text": "文本",
+            "hex": "十六进制字节"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL 组件编码",
+      "description": "对字母、数字和 - . _ ~ 以外的所有字符进行百分号编码，用于查询值或路径片段。",
+      "params": {
+        "space": {
+          "label": "空格编码为",
+          "options": {
+            "percent": "%20",
+            "plus": "+（表单格式）"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "完整 URL 编码",
+      "description": "只编码 URL 中不允许的字符，保留其结构和已有的 %XX 序列。"
+    },
+    "encode.url_decode": {
+      "name": "URL 解码",
+      "description": "解码 %XX 序列，并指出格式错误序列的位置。",
+      "params": {
+        "plus_as_space": {
+          "label": "将 + 视为空格"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "十六进制编码",
+      "description": "将文本的 UTF-8 字节写成十六进制数字。",
+      "params": {
+        "separator": {
+          "label": "分隔符",
+          "options": {
+            "none": "无",
+            "space": "空格"
+          }
+        },
+        "case": {
+          "label": "大小写",
+          "options": {
+            "lower": "小写",
+            "upper": "大写"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "十六进制解码",
+      "description": "将十六进制数字还原为文本，忽略空格和 0x 前缀。"
+    },
+    "encode.html_encode": {
+      "name": "HTML 实体编码",
+      "description": "将 & < > \" ' 替换为 HTML 实体，并可选择把所有非 ASCII 字符替换为数字引用。",
+      "params": {
+        "scope": {
+          "label": "要编码的字符",
+          "options": {
+            "minimal": "仅 & < > \" '",
+            "non_ascii": "也包括所有非 ASCII 字符"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML 实体解码",
+      "description": "解码所有 HTML5 命名实体和数字引用；未知实体保持原样。"
+    },
+    "encode.backslash_escape": {
+      "name": "反斜杠转义",
+      "description": "按 C 和 JSON 风格转义反斜杠、双引号、换行、制表符和控制字符。"
+    },
+    "encode.backslash_unescape": {
+      "name": "反斜杠反转义",
+      "description": "将 \\n、\\t、\\\"、\\uXXXX、\\xXX 等转义还原为字符；未知转义保持原样并给出警告。"
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode 转义",
+      "description": "将每个非 ASCII 字符写成 \\uXXXX 转义。",
+      "params": {
+        "astral": {
+          "label": "U+FFFF 以上的字符",
+          "options": {
+            "surrogate_pair": "代理对 (\\uD83D\\uDE00)",
+            "braces": "花括号 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode 反转义",
+      "description": "将 \\uXXXX 和 \\u{...} 转义还原为字符，其他文本保持不变。"
+    }
+  },
   "case": {
     "case.upper": {
       "name": "大写",
@@ -109,7 +234,77 @@
       "description": "将大写字母变为小写，小写字母变为大写。"
     }
   },
-  "hash": {},
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 哈希",
+      "description": "MD5 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 哈希",
+      "description": "SHA-1 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 哈希",
+      "description": "SHA-256 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 哈希",
+      "description": "SHA-512 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 校验和",
+      "description": "使用 ZIP 和 PNG 所用 IEEE 多项式的 CRC-32。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex": "十六进制（8 位）",
+            "decimal": "十进制"
+          }
+        }
+      }
+    }
+  },
   "lines": {
     "lines.trim": {
       "name": "去除首尾空白",

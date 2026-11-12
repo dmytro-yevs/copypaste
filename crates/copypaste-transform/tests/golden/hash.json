@@ -1,0 +1,172 @@
+[
+  {
+    "transform": "hash.md5",
+    "input": "abc",
+    "output": "900150983cd24fb0d6963f7d28e17f72"
+  },
+  {
+    "transform": "hash.md5",
+    "input": "",
+    "output": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  {
+    "transform": "hash.md5",
+    "input": "Привіт 😀",
+    "output": "77b2f6e4827ebf1ebce2e3e7d7cfbb92"
+  },
+  {
+    "transform": "hash.md5",
+    "params": {
+      "output": "hex_upper"
+    },
+    "input": "abc",
+    "output": "900150983CD24FB0D6963F7D28E17F72"
+  },
+  {
+    "transform": "hash.md5",
+    "params": {
+      "output": "base64"
+    },
+    "input": "abc",
+    "output": "kAFQmDzST7DWlj99KOF/cg=="
+  },
+  {
+    "transform": "hash.sha1",
+    "input": "abc",
+    "output": "a9993e364706816aba3e25717850c26c9cd0d89d"
+  },
+  {
+    "transform": "hash.sha1",
+    "input": "",
+    "output": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+  },
+  {
+    "transform": "hash.sha1",
+    "input": "Привіт 😀",
+    "output": "f47cf9494000f8cc759e8286aade07245ec0769e"
+  },
+  {
+    "transform": "hash.sha1",
+    "params": {
+      "output": "hex_upper"
+    },
+    "input": "abc",
+    "output": "A9993E364706816ABA3E25717850C26C9CD0D89D"
+  },
+  {
+    "transform": "hash.sha1",
+    "params": {
+      "output": "base64"
+    },
+    "input": "abc",
+    "output": "qZk+NkcGgWq6PiVxeFDCbJzQ2J0="
+  },
+  {
+    "transform": "hash.sha256",
+    "input": "abc",
+    "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  },
+  {
+    "transform": "hash.sha256",
+    "input": "",
+    "output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "transform": "hash.sha256",
+    "input": "Привіт 😀",
+    "output": "ddba3cd4d7a37cecfcc51219e742144da7e91102a8d6959e1f29611d127d110e"
+  },
+  {
+    "transform": "hash.sha256",
+    "params": {
+      "output": "hex_upper"
+    },
+    "input": "abc",
+    "output": "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
+  },
+  {
+    "transform": "hash.sha256",
+    "params": {
+      "output": "base64"
+    },
+    "input": "abc",
+    "output": "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+  },
+  {
+    "transform": "hash.sha512",
+    "input": "abc",
+    "output": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+  },
+  {
+    "transform": "hash.sha512",
+    "input": "",
+    "output": "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
+  },
+  {
+    "transform": "hash.sha512",
+    "input": "Привіт 😀",
+    "output": "f875e3d69f764b77884e63369cca4cafb25d875c93d7fe85b464dfb3d15e8a23d13c5c73b19e44e8f876cabb08369248f2c3d7374db6358d8b91877aa680e7d3"
+  },
+  {
+    "transform": "hash.sha512",
+    "params": {
+      "output": "hex_upper"
+    },
+    "input": "abc",
+    "output": "DDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A2192992A274FC1A836BA3C23A3FEEBBD454D4423643CE80E2A9AC94FA54CA49F"
+  },
+  {
+    "transform": "hash.sha512",
+    "params": {
+      "output": "base64"
+    },
+    "input": "abc",
+    "output": "3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw=="
+  },
+  {
+    "transform": "hash.sha256",
+    "input": "abc\n",
+    "output": "edeaaff3f1774ad2888673770c6d64097e391bc362d7d6fb34982ddf0efd18cb"
+  },
+  {
+    "transform": "hash.sha256",
+    "input": "line1\r\nline2",
+    "output": "d14a91a6d1c6ee83bf0c774ebecbee6d8b393b395dae29eea839c354d6fba9c0"
+  },
+  {
+    "transform": "hash.crc32",
+    "input": "abc",
+    "output": "352441c2"
+  },
+  {
+    "transform": "hash.crc32",
+    "input": "",
+    "output": "00000000"
+  },
+  {
+    "transform": "hash.crc32",
+    "input": "The quick brown fox jumps over the lazy dog",
+    "output": "414fa339"
+  },
+  {
+    "transform": "hash.crc32",
+    "input": "Привіт",
+    "output": "2a5d2e45"
+  },
+  {
+    "transform": "hash.crc32",
+    "params": {
+      "output": "decimal"
+    },
+    "input": "123456789",
+    "output": "3421780262"
+  },
+  {
+    "transform": "hash.crc32",
+    "params": {
+      "output": "decimal"
+    },
+    "input": "",
+    "output": "0"
+  }
+]
