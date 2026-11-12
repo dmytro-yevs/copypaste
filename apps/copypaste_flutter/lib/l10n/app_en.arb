@@ -949,6 +949,54 @@
   "@settingsSectionModulesSummary": {
     "description": "Short summary of the Modules settings section, used when searching settings."
   },
+  "settingsSectionRules": "Content rules",
+  "@settingsSectionRules": {
+    "description": "Settings section name in navigation and as the section heading. Rules that act on copied content automatically."
+  },
+  "settingsSectionRulesSummary": "Tag, skip, protect, or expire clips automatically.",
+  "@settingsSectionRulesSummary": {
+    "description": "Short summary of the Content rules settings section, used when searching settings."
+  },
+  "settingsSectionQuickAccess": "Quick access",
+  "@settingsSectionQuickAccess": {
+    "description": "Android settings section name for the clipboard keyboard, Quick Settings tiles and home-screen widget."
+  },
+  "settingsSectionQuickAccessSummary": "Keyboard, tiles, and home-screen widget.",
+  "@settingsSectionQuickAccessSummary": {
+    "description": "Short summary of the Quick access settings section, used when searching settings."
+  },
+  "settingsSectionSnippets": "Snippets",
+  "@settingsSectionSnippets": {
+    "description": "Settings section name in navigation and as the section heading. Noun: saved reusable texts."
+  },
+  "settingsSectionSnippetsSummary": "Reusable text and templates.",
+  "@settingsSectionSnippetsSummary": {
+    "description": "Short summary of the Snippets settings section, used when searching settings."
+  },
+  "settingsSectionTransforms": "Text transforms",
+  "@settingsSectionTransforms": {
+    "description": "Settings section name in navigation and as the section heading. Text conversions such as case changes or JSON formatting."
+  },
+  "settingsSectionTransformsSummary": "Favorites, pipelines, and default paste transforms.",
+  "@settingsSectionTransformsSummary": {
+    "description": "Short summary of the Text transforms settings section, used when searching settings."
+  },
+  "settingsSectionAiTools": "AI tools",
+  "@settingsSectionAiTools": {
+    "description": "Settings section name in navigation and as the section heading. External AI assistants that can read clipboard history."
+  },
+  "settingsSectionAiToolsSummary": "Connect AI assistants and control what they can see.",
+  "@settingsSectionAiToolsSummary": {
+    "description": "Short summary of the AI tools settings section, used when searching settings."
+  },
+  "pasteQueueSettingsTitle": "Paste Queue",
+  "@pasteQueueSettingsTitle": {
+    "description": "Heading of the Paste Queue settings group. Paste Queue is the product feature name."
+  },
+  "pasteQueueSettingsSummary": "Collect several copies and paste them in order.",
+  "@pasteQueueSettingsSummary": {
+    "description": "Description of the Paste Queue settings group."
+  },
   "settingsSectionAbout": "About",
   "@settingsSectionAbout": {
     "description": "Settings section name in navigation and as the section heading, about the application."
@@ -1744,6 +1792,10 @@
   "settingsShortcutRecording": "Press shortcut…",
   "@settingsShortcutRecording": {
     "description": "Button label while waiting for the user to press a new keyboard shortcut."
+  },
+  "settingsShortcutNotSet": "Not set",
+  "@settingsShortcutNotSet": {
+    "description": "Label of a global shortcut recorder button when no shortcut is assigned."
   },
   "settingsShortcutReset": "Reset shortcut",
   "@settingsShortcutReset": {

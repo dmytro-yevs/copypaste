@@ -338,16 +338,18 @@ class _Registrar implements DesktopShortcutRegistrar {
 
   @override
   Future<void> register(
+    String id,
     DesktopShortcut shortcut,
-    Future<void> Function() callback,
-  ) async {
+    Future<void> Function() callback, {
+    required String description,
+  }) async {
     if (failRegister) throw PlatformException(code: 'registration_failed');
     registerCalls += 1;
     registered = shortcut;
   }
 
   @override
-  Future<void> unregister() async {
+  Future<void> unregister(String id) async {
     unregisterCalls += 1;
     registered = null;
   }

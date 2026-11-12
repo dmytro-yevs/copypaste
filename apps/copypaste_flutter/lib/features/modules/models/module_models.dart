@@ -1,8 +1,9 @@
 import '../../../l10n/l10n.dart';
+import '../../../shared/forms/dynamic_form_draft.dart';
 
 enum ModulesLoadState { loading, ready, error }
 
-enum ModuleFieldKind { text, boolean, file, choices }
+typedef ModuleFieldKind = DynamicFormFieldKind;
 
 enum ModuleEventKind { smsReceived }
 
@@ -26,34 +27,9 @@ String formatModulePlatforms(List<ModulePlatform> platforms) =>
             .join(' · '),
       );
 
-class ModuleField {
-  const ModuleField({
-    required this.id,
-    required this.title,
-    required this.kind,
-    required this.defaultValue,
-    this.required = false,
-    this.secret = false,
-    this.options = const [],
-    this.acceptedExtensions = const [],
-    this.maxBytes = 64 * 1024 * 1024,
-  });
-  final String id;
-  final String title;
-  final ModuleFieldKind kind;
-  final Object defaultValue;
-  final bool required;
-  final bool secret;
-  final List<ModuleChoice> options;
-  final List<String> acceptedExtensions;
-  final int maxBytes;
-}
+typedef ModuleField = DynamicFormField;
 
-class ModuleChoice {
-  const ModuleChoice({required this.id, required this.title});
-  final String id;
-  final String title;
-}
+typedef ModuleChoice = DynamicFormChoice;
 
 class ModuleSearchModel {
   const ModuleSearchModel({
@@ -131,6 +107,18 @@ class InstalledModule {
   final String? error;
   final bool restartRequired;
   final List<ModuleEventKind> events;
+
+  /// The search model that serves the languages chosen in [values].
+  ModuleSearchModel? searchModelFor(Map<String, Object> values) {
+    final languages = values[searchLanguageField];
+    return languages is List
+        ? ModuleSearchModel.forLanguages(searchModels, languages.cast<String>())
+        : null;
+  }
+
+  /// Preferences are complete only when a search model serves them.
+  bool acceptsPreferences(Map<String, Object> values) =>
+      searchModels.isEmpty || searchModelFor(values) != null;
 }
 
 class ModuleResult {
@@ -138,8 +126,9 @@ class ModuleResult {
   final String text;
 }
 
-class ModulesException implements Exception {
+class ModulesException implements UserFacingException {
   const ModulesException(this.message);
+  @override
   final String message;
   @override
   String toString() => message;

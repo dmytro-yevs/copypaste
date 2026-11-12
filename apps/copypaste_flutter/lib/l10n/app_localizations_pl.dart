@@ -809,6 +809,48 @@ class AppLocalizationsPl extends AppLocalizations {
       'Instalowanie opcjonalnych modułów i zarządzanie nimi.';
 
   @override
+  String get settingsSectionRules => 'Reguły treści';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Automatyczne tagowanie, pomijanie, ochrona i wygasanie elementów.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Szybki dostęp';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Klawiatura, kafelki i widżet ekranu głównego.';
+
+  @override
+  String get settingsSectionSnippets => 'Fragmenty';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Teksty i szablony wielokrotnego użytku.';
+
+  @override
+  String get settingsSectionTransforms => 'Przekształcenia tekstu';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Ulubione, potoki i domyślne przekształcenia przy wklejaniu.';
+
+  @override
+  String get settingsSectionAiTools => 'Narzędzia AI';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Połącz asystentów AI i decyduj, co mogą zobaczyć.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Zbieraj kilka kopii i wklejaj je po kolei.';
+
+  @override
   String get settingsSectionAbout => 'Informacje';
 
   @override
@@ -1458,6 +1500,9 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Naciśnij skrót…';
+
+  @override
+  String get settingsShortcutNotSet => 'Nie ustawiono';
 
   @override
   String get settingsShortcutReset => 'Przywróć domyślny skrót';

@@ -1,28 +1,34 @@
-import 'package:flutter_test/flutter_test.dart';
-import 'package:copypaste_flutter/features/modules/controller/module_form_draft.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
-import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
+import 'package:copypaste_flutter/shared/forms/dynamic_form_draft.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
     'selects one compatible model and validates multiple language choices',
     () async {
-      const languages = ModuleField(
+      const languages = DynamicFormField(
         id: 'languages',
         title: 'Search languages',
-        kind: ModuleFieldKind.choices,
+        kind: DynamicFormFieldKind.choices,
         defaultValue: <String>[],
         required: true,
         options: [
-          ModuleChoice(id: 'en', title: 'English'),
-          ModuleChoice(id: 'uk', title: 'Ukrainian'),
+          DynamicFormChoice(id: 'en', title: 'English'),
+          DynamicFormChoice(id: 'uk', title: 'Ukrainian'),
         ],
       );
-      final draft = ModuleFormDraft(
-        fields: [languages],
-        initial: {},
-        languageField: 'languages',
-        models: const [
+      const module = InstalledModule(
+        id: 'search',
+        title: 'Search',
+        description: '',
+        version: '1.0.0',
+        enabled: true,
+        sizeBytes: 0,
+        commands: [],
+        preferenceFields: [languages],
+        preferences: {},
+        searchLanguageField: 'languages',
+        searchModels: [
           ModuleSearchModel(
             id: 'english',
             title: 'English',
@@ -39,13 +45,18 @@ void main() {
           ),
         ],
       );
+      final draft = DynamicFormDraft(
+        fields: [languages],
+        initial: {},
+        accepts: module.acceptsPreferences,
+      );
       expect(draft.valid, isFalse);
       draft.setValue('languages', ['en']);
       expect(draft.valid, isTrue);
-      expect(draft.selectedModel?.id, 'english');
+      expect(module.searchModelFor(draft.values)?.id, 'english');
       draft.setValue('languages', ['en', 'uk']);
       expect(draft.valid, isTrue);
-      expect(draft.selectedModel?.id, 'multi');
+      expect(module.searchModelFor(draft.values)?.id, 'multi');
       draft.setValue('languages', ['en', 'en']);
       expect(draft.valid, isFalse);
       draft.setValue('languages', ['unknown']);
@@ -57,16 +68,16 @@ void main() {
   test(
     'selected files remain available until the invocation draft closes',
     () async {
-      const image = ModuleField(
+      const image = DynamicFormField(
         id: 'image_path',
         title: 'Image',
-        kind: ModuleFieldKind.file,
+        kind: DynamicFormFieldKind.file,
         defaultValue: '',
         required: true,
         acceptedExtensions: ['png'],
       );
       final picker = _Picker();
-      final draft = ModuleFormDraft(
+      final draft = DynamicFormDraft(
         fields: [image],
         initial: {},
         picker: picker,
@@ -85,11 +96,11 @@ void main() {
   );
 }
 
-class _Picker implements ModuleInputPicker {
+class _Picker implements DynamicFormInputPicker {
   int disposed = 0;
   @override
-  Future<SelectedModuleInput?> chooseInput(ModuleField field) async =>
-      SelectedModuleInput(
+  Future<SelectedDynamicFormInput?> chooseInput(DynamicFormField field) async =>
+      SelectedDynamicFormInput(
         path: '/private/image.png',
         name: 'image.png',
         dispose: () async {

@@ -792,6 +792,47 @@ class AppLocalizationsEn extends AppLocalizations {
       'Install and manage optional modules.';
 
   @override
+  String get settingsSectionRules => 'Content rules';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Tag, skip, protect, or expire clips automatically.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Quick access';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Keyboard, tiles, and home-screen widget.';
+
+  @override
+  String get settingsSectionSnippets => 'Snippets';
+
+  @override
+  String get settingsSectionSnippetsSummary => 'Reusable text and templates.';
+
+  @override
+  String get settingsSectionTransforms => 'Text transforms';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favorites, pipelines, and default paste transforms.';
+
+  @override
+  String get settingsSectionAiTools => 'AI tools';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Connect AI assistants and control what they can see.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Collect several copies and paste them in order.';
+
+  @override
   String get settingsSectionAbout => 'About';
 
   @override
@@ -1423,6 +1464,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Press shortcut…';
+
+  @override
+  String get settingsShortcutNotSet => 'Not set';
 
   @override
   String get settingsShortcutReset => 'Reset shortcut';

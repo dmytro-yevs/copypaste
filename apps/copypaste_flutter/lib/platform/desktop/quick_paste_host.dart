@@ -25,6 +25,103 @@ Future<void> openTrayQuickPaste(
   }
 }
 
+/// Result of pasting the clipboard into the foreground application.
+///
+/// Every outcome except [pasted] leaves the content on the clipboard, so the
+/// caller can tell the user to paste manually.
+enum PasteOutcome {
+  pasted,
+
+  /// Synthesized input is blocked: no Accessibility permission, or secure
+  /// input is active.
+  copiedOnly,
+
+  /// The foreground window runs at a higher integrity level (Windows).
+  elevatedTarget,
+
+  /// No application can receive the paste.
+  noTarget,
+
+  /// The session cannot synthesize input, for example Wayland without an
+  /// input-injection path.
+  unsupported,
+}
+
+/// Native access to the application that receives a paste.
+///
+/// Channel contract: `pasteForeground {plainText: bool}` answers a
+/// [PasteOutcome] name, `moveCaretLeft {count: int}` a bool, and
+/// `secureFieldFocused` a bool or null.
+abstract interface class ForegroundPasteHost {
+  /// The largest caret move a paste may request.
+  static const maxCaretMove = 2000;
+
+  /// [plainText] asks for the plain-text paste where the platform has one.
+  Future<PasteOutcome> pasteForeground({bool plainText = false});
+
+  /// Moves the caret left by [count] graphemes after a paste.
+  Future<bool> moveCaretLeft(int count);
+
+  Future<bool> accessibilityGranted();
+
+  /// Whether a password field has focus, or `null` when the platform cannot
+  /// tell. Callers query it once per presentation, never by polling.
+  Future<bool?> secureFieldFocused();
+}
+
+mixin _ForegroundPasteChannel implements ForegroundPasteHost {
+  MethodChannel get _channel;
+
+  @override
+  Future<PasteOutcome> pasteForeground({bool plainText = false}) async {
+    try {
+      final name = await _channel.invokeMethod<Object?>('pasteForeground', {
+        'plainText': plainText,
+      });
+      return PasteOutcome.values.firstWhere(
+        (outcome) => outcome.name == name,
+        orElse: () => PasteOutcome.unsupported,
+      );
+    } on MissingPluginException {
+      return PasteOutcome.unsupported;
+    } on PlatformException {
+      return PasteOutcome.unsupported;
+    }
+  }
+
+  @override
+  Future<bool> moveCaretLeft(int count) async {
+    if (count < 0 || count > ForegroundPasteHost.maxCaretMove) {
+      throw RangeError.range(count, 0, ForegroundPasteHost.maxCaretMove);
+    }
+    if (count == 0) return true;
+    try {
+      return await _channel.invokeMethod<Object?>('moveCaretLeft', {
+            'count': count,
+          }) ==
+          true;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool?> secureFieldFocused() async {
+    try {
+      final focused = await _channel.invokeMethod<Object?>(
+        'secureFieldFocused',
+      );
+      return focused is bool ? focused : null;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+}
+
 abstract interface class QuickPasteWindowHost {
   Future<bool> isSupported();
 
@@ -41,13 +138,16 @@ abstract interface class QuickPasteWindowHost {
   Future<void> dispose();
 }
 
-class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
+class MethodChannelQuickPasteWindowHost
+    with _ForegroundPasteChannel
+    implements QuickPasteWindowHost {
   MethodChannelQuickPasteWindowHost({MethodChannel? channel})
     : _channel =
           channel ?? const MethodChannel('com.copypaste.app/quick_paste_host') {
     _channel.setMethodCallHandler(_handleMethodCall);
   }
 
+  @override
   final MethodChannel _channel;
   VoidCallback? _openSettings;
   VoidCallback? _openMain;
@@ -169,6 +269,7 @@ abstract interface class QuickPasteFrameHost {
 }
 
 class MethodChannelQuickPasteContextHost
+    with _ForegroundPasteChannel
     implements QuickPasteContextHost, QuickPasteFrameHost {
   MethodChannelQuickPasteContextHost({MethodChannel? channel})
     : _channel =
@@ -177,6 +278,7 @@ class MethodChannelQuickPasteContextHost
     _channel.setMethodCallHandler(_handleMethodCall);
   }
 
+  @override
   final MethodChannel _channel;
   QuickPasteOpenedHandler? _opened;
   Future<void> Function()? _shutdown;

@@ -816,6 +816,48 @@ class AppLocalizationsFr extends AppLocalizations {
       'Installer et gérer les modules facultatifs.';
 
   @override
+  String get settingsSectionRules => 'Règles de contenu';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Étiqueter, ignorer, protéger ou faire expirer les éléments automatiquement.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Accès rapide';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Clavier, tuiles et widget d’écran d’accueil.';
+
+  @override
+  String get settingsSectionSnippets => 'Extraits';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Textes et modèles réutilisables.';
+
+  @override
+  String get settingsSectionTransforms => 'Transformations de texte';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoris, enchaînements et transformations par défaut au collage.';
+
+  @override
+  String get settingsSectionAiTools => 'Outils d’IA';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Connecter des assistants d’IA et contrôler ce qu’ils peuvent voir.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Rassembler plusieurs copies et les coller dans l’ordre.';
+
+  @override
   String get settingsSectionAbout => 'À propos';
 
   @override
@@ -1476,6 +1518,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Appuyez sur le raccourci…';
+
+  @override
+  String get settingsShortcutNotSet => 'Non défini';
 
   @override
   String get settingsShortcutReset => 'Réinitialiser le raccourci';

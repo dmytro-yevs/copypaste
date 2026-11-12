@@ -735,6 +735,42 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsSectionModulesSummary => 'オプションモジュールのインストールと管理。';
 
   @override
+  String get settingsSectionRules => 'コンテンツルール';
+
+  @override
+  String get settingsSectionRulesSummary => 'クリップを自動でタグ付け、スキップ、保護、期限切れにします。';
+
+  @override
+  String get settingsSectionQuickAccess => 'クイックアクセス';
+
+  @override
+  String get settingsSectionQuickAccessSummary => 'キーボード、タイル、ホーム画面ウィジェット。';
+
+  @override
+  String get settingsSectionSnippets => 'スニペット';
+
+  @override
+  String get settingsSectionSnippetsSummary => '再利用できるテキストとテンプレート。';
+
+  @override
+  String get settingsSectionTransforms => 'テキスト変換';
+
+  @override
+  String get settingsSectionTransformsSummary => 'お気に入り、パイプライン、貼り付け時の既定の変換。';
+
+  @override
+  String get settingsSectionAiTools => 'AI ツール';
+
+  @override
+  String get settingsSectionAiToolsSummary => 'AI アシスタントを接続し、参照できる内容を管理します。';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary => '複数のコピーを集めて順番に貼り付けます。';
+
+  @override
   String get settingsSectionAbout => '情報';
 
   @override
@@ -1346,6 +1382,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'ショートカットを押してください…';
+
+  @override
+  String get settingsShortcutNotSet => '未設定';
 
   @override
   String get settingsShortcutReset => 'ショートカットをリセット';

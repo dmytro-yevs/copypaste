@@ -3,6 +3,10 @@ import 'package:copypaste_flutter/features/settings/controller/settings_controll
 import 'package:copypaste_flutter/features/settings/controller/settings_navigation_state.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
+import 'package:copypaste_flutter/features/quick_access/view/quick_access_settings_view.dart';
+import 'package:copypaste_flutter/features/settings/view/settings_search_target.dart';
+import 'package:copypaste_flutter/features/snippets/view/snippets_settings_view.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -64,5 +68,87 @@ void main() {
       reason: 'Unloading did not dispose background capture state.',
     );
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('feature sections need a contribution and a supported platform', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = SettingsController(
+      repository: FakeSettingsRepository(),
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      screenshotProtection: FakeScreenshotProtection(),
+      captureRefreshInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final snippetsKey = GlobalKey();
+    final sections = [
+      SettingsFeatureSection(
+        section: SettingsSectionId.snippets,
+        builder: (context, scope) => const SnippetsSettingsView(),
+        searchTargets: (context) => [
+          SettingsSearchTarget(
+            id: 'result-snippet-library',
+            section: SettingsSectionId.snippets,
+            label: 'Snippet library',
+            description: 'Saved texts',
+            targetKey: snippetsKey,
+          ),
+        ],
+      ),
+      SettingsFeatureSection(
+        section: SettingsSectionId.quickAccess,
+        builder: (context, scope) => const QuickAccessSettingsView(),
+      ),
+    ];
+    Future<void> pumpFor(TargetPlatform platform) async {
+      debugDefaultTargetPlatformOverride = platform;
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: SettingsScreen(
+              controller: controller,
+              featureSections: sections,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Finder section(String slug) =>
+        find.byKey(ValueKey('settings-section-$slug'));
+
+    await pumpFor(TargetPlatform.macOS);
+    expect(section('snippets'), findsOneWidget);
+    expect(section('transforms'), findsNothing);
+    expect(section('quick-access'), findsNothing);
+    await tester.tap(
+      find.descendant(of: section('snippets'), matching: find.text('Snippets')),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(controller.navigation.section, SettingsSectionId.snippets);
+    expect(find.byType(SnippetsSettingsView), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-search')),
+      'library',
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(
+      find.byKey(const ValueKey('settings-result-snippet-library')),
+      findsOneWidget,
+    );
+    await tester.enterText(find.byKey(const ValueKey('settings-search')), '');
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await pumpFor(TargetPlatform.android);
+    expect(section('quick-access'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
   });
 }

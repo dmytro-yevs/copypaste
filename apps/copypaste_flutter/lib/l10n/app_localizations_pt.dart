@@ -813,6 +813,48 @@ class AppLocalizationsPt extends AppLocalizations {
       'Instale e gerencie módulos opcionais.';
 
   @override
+  String get settingsSectionRules => 'Regras de conteúdo';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Marque, ignore, proteja ou expire itens automaticamente.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Acesso rápido';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Teclado, blocos e widget da tela inicial.';
+
+  @override
+  String get settingsSectionSnippets => 'Trechos';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Textos e modelos reutilizáveis.';
+
+  @override
+  String get settingsSectionTransforms => 'Transformações de texto';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoritos, sequências e transformações padrão ao colar.';
+
+  @override
+  String get settingsSectionAiTools => 'Ferramentas de IA';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Conecte assistentes de IA e controle o que eles podem ver.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Reúna várias cópias e cole-as em ordem.';
+
+  @override
   String get settingsSectionAbout => 'Sobre';
 
   @override
@@ -1470,6 +1512,9 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Pressione o atalho…';
+
+  @override
+  String get settingsShortcutNotSet => 'Não definido';
 
   @override
   String get settingsShortcutReset => 'Redefinir atalho';

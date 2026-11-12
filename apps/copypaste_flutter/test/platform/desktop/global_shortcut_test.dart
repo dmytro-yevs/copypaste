@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
+const _id = DesktopShortcutId.quickPaste;
+const _description = 'Open Quick Paste';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('dev.leanflutter.plugins/hotkey_manager');
@@ -40,7 +43,7 @@ void main() {
 
   tearDown(() async {
     failRelease = false;
-    await registrar.unregister();
+    await registrar.unregister(_id);
     messenger.setMockMethodCallHandler(channel, null);
   });
 
@@ -55,7 +58,7 @@ void main() {
       throwsFormatException,
     );
     await expectLater(
-      registrar.register(copy, () async {}),
+      registrar.register(_id, copy, () async {}, description: _description),
       throwsArgumentError,
     );
     expect(calls, isEmpty);
@@ -67,29 +70,44 @@ void main() {
       ],
     );
     expect(quickPaste.isValid, isTrue);
-    await registrar.register(quickPaste, () async {});
+    await registrar.register(
+      _id,
+      quickPaste,
+      () async {},
+      description: _description,
+    );
     expect(calls, ['register']);
   });
 
   test(
     'failed release retains callback ownership and blocks replacement',
     () async {
-      await registrar.register(shortcut, () async {});
+      await registrar.register(
+        _id,
+        shortcut,
+        () async {},
+        description: _description,
+      );
       final original = hotKeyManager.registeredHotKeyList.single;
       failRelease = true;
       await expectLater(
-        registrar.unregister(),
+        registrar.unregister(_id),
         throwsA(isA<PlatformException>()),
       );
       await expectLater(
-        registrar.register(shortcut, () async {}),
+        registrar.register(
+          _id,
+          shortcut,
+          () async {},
+          description: _description,
+        ),
         throwsA(isA<PlatformException>()),
       );
       expect(calls, ['register', 'unregister', 'unregister']);
       expect(hotKeyManager.registeredHotKeyList.single, same(original));
       failRelease = false;
-      await registrar.unregister();
-      await registrar.unregister();
+      await registrar.unregister(_id);
+      await registrar.unregister(_id);
       expect(calls, ['register', 'unregister', 'unregister', 'unregister']);
       expect(hotKeyManager.registeredHotKeyList, isEmpty);
     },
@@ -100,14 +118,60 @@ void main() {
     () async {
       failRegistration = true;
       await expectLater(
-        registrar.register(shortcut, () async {}),
+        registrar.register(
+          _id,
+          shortcut,
+          () async {},
+          description: _description,
+        ),
         throwsA(isA<PlatformException>()),
       );
-      await registrar.unregister();
+      await registrar.unregister(_id);
       expect(calls, ['register']);
       expect(hotKeyManager.registeredHotKeyList, isEmpty);
     },
   );
+
+  test('ids hold separate bindings and never share one combination', () async {
+    const other = DesktopShortcut(
+      key: PhysicalKeyboardKey.f7,
+      modifiers: [DesktopShortcutModifier.meta],
+    );
+    await registrar.register(
+      _id,
+      shortcut,
+      () async {},
+      description: _description,
+    );
+    await registrar.register(
+      'copypaste.paste-next',
+      other,
+      () async {},
+      description: 'Paste next',
+    );
+    expect(hotKeyManager.registeredHotKeyList.map((key) => key.identifier), [
+      _id,
+      'copypaste.paste-next',
+    ]);
+    await expectLater(
+      registrar.register(
+        'copypaste.paste-next',
+        shortcut,
+        () async {},
+        description: 'Paste next',
+      ),
+      throwsA(
+        isA<DesktopShortcutConflict>().having(
+          (conflict) => conflict.heldBy,
+          'heldBy',
+          _id,
+        ),
+      ),
+    );
+    expect(hotKeyManager.registeredHotKeyList, hasLength(2));
+    await registrar.unregister('copypaste.paste-next');
+    expect(hotKeyManager.registeredHotKeyList.single.identifier, _id);
+  });
 
   group('Linux portal registrar', () {
     const linuxChannel = MethodChannel('test/linux_shortcuts');
@@ -134,7 +198,7 @@ void main() {
     });
 
     tearDown(() async {
-      await linuxRegistrar.unregister();
+      await linuxRegistrar.unregister(_id);
       messenger.setMockMethodCallHandler(linuxChannel, null);
     });
 
@@ -143,6 +207,7 @@ void main() {
       () async {
         var activations = 0;
         await linuxRegistrar.register(
+          _id,
           const DesktopShortcut(
             key: PhysicalKeyboardKey.keyC,
             modifiers: [
@@ -151,6 +216,7 @@ void main() {
             ],
           ),
           () async => activations += 1,
+          description: _description,
         );
 
         expect(linuxCalls.map((call) => call.method), [
@@ -164,7 +230,10 @@ void main() {
           'usage': PhysicalKeyboardKey.keyC.usbHidUsage,
           'modifiers': ['control', 'shift'],
         });
-        expect(linuxRegistrar.registeredTriggerDescription, 'Ctrl+Shift+C');
+        expect(
+          linuxRegistrar.registeredTriggerDescription(_id),
+          'Ctrl+Shift+C',
+        );
 
         Future<Object?> activate(Object? arguments) async {
           final completion = Completer<Object?>();
@@ -195,7 +264,12 @@ void main() {
         return true;
       });
       await expectLater(
-        linuxRegistrar.register(shortcut, () async {}),
+        linuxRegistrar.register(
+          _id,
+          shortcut,
+          () async {},
+          description: _description,
+        ),
         throwsA(isA<PlatformException>()),
       );
       expect(linuxCalls, isEmpty);
@@ -206,7 +280,12 @@ void main() {
         return true;
       });
       await expectLater(
-        linuxRegistrar.register(shortcut, () async {}),
+        linuxRegistrar.register(
+          _id,
+          shortcut,
+          () async {},
+          description: _description,
+        ),
         throwsA(isA<PlatformException>()),
       );
     });

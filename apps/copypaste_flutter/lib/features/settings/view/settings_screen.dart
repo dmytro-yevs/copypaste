@@ -7,7 +7,6 @@ import '../../modules/controller/modules_controller.dart';
 import '../../modules/view/modules_settings_view.dart';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/localization/app_language.dart';
@@ -17,7 +16,6 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
-import '../../../platform/desktop/global_shortcut.dart';
 import '../../../platform/desktop/desktop_visibility_controller.dart';
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/adaptive_breakpoints.dart';
@@ -29,6 +27,9 @@ import '../controller/launch_at_login_controller.dart';
 import '../../../platform/startup/launch_at_login.dart';
 import '../controller/settings_navigation_state.dart';
 import '../models/settings_models.dart';
+import 'settings_search_target.dart';
+import 'settings_section.dart';
+import 'shortcut_recorder.dart';
 import '../../update/controller/app_update_controller.dart';
 import '../../update/models/app_update_models.dart';
 
@@ -43,6 +44,7 @@ class SettingsScreen extends StatefulWidget {
     this.modules,
     this.onOpenAndroidCaptureSetup,
     this.language,
+    this.featureSections = const [],
   });
 
   final SettingsController controller;
@@ -53,6 +55,9 @@ class SettingsScreen extends StatefulWidget {
   final ModulesController? modules;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
   final AppLanguageController? language;
+
+  /// Feature-owned section content, in the order it renders.
+  final List<SettingsFeatureSection> featureSections;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -105,6 +110,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _quickPasteShortcutKey = GlobalKey();
   final _quickPasteAutoPasteKey = GlobalKey();
   final _aboutSectionKey = GlobalKey();
+  final _featureSectionKeys = <SettingsSectionId, GlobalKey>{};
   final _detailRevision = ValueNotifier<int>(0);
   final _searchFocus = FocusNode();
   late final TextEditingController _searchController;
@@ -301,11 +307,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Gap(AppSpacing.xxxl),
               ],
-              switch (selectedSection) {
+              _withContributions(selectedSection, switch (selectedSection) {
                 SettingsSectionId.general => _generalSection(
                   showHeading: showHeading,
                 ),
-                SettingsSectionId.modules => _SettingsSection(
+                SettingsSectionId.modules => SettingsSection(
                   key: _modulesSectionKey,
                   title: context.l10n.settingsSectionModules,
                   showHeading: showHeading,
@@ -350,7 +356,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _SettingsTargetId.quickPasteAutoPaste,
                   ),
                 ),
-              },
+                SettingsSectionId.rules ||
+                SettingsSectionId.quickAccess ||
+                SettingsSectionId.snippets ||
+                SettingsSectionId.transforms ||
+                SettingsSectionId.aiTools => _featureSection(
+                  selectedSection,
+                  showHeading: showHeading,
+                ),
+              }),
             ],
           ),
         ),
@@ -374,7 +388,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _compactNavigationList(
     BuildContext context,
-    List<_SettingsNavigationTarget> targets,
+    List<SettingsSearchTarget> targets,
   ) {
     return ListView.separated(
       key: const ValueKey<String>('settings-category-list'),
@@ -415,10 +429,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _openCompactSection(
-    BuildContext context,
-    _SettingsNavigationTarget target,
-  ) {
+  void _openCompactSection(BuildContext context, SettingsSearchTarget target) {
     _compactRouteOpen = true;
     _activateTarget(target);
     final route = AppPageRoute<void>(
@@ -470,7 +481,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _navigationTargetLabel(_SettingsNavigationTarget target) {
+  Widget _navigationTargetLabel(SettingsSearchTarget target) {
     if (!target.isSearchResult) return Text(target.label);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -486,33 +497,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  SettingsSectionId get _effectiveSelectedSection {
-    if ((_selectedSection == SettingsSectionId.general &&
-            !_hasGeneralSection) ||
-        (_selectedSection == SettingsSectionId.quickPaste &&
-            widget.quickPaste == null) ||
-        (_selectedSection == SettingsSectionId.modules &&
-            widget.modules == null)) {
-      return SettingsSectionId.clipboard;
-    }
-    return _selectedSection;
+  SettingsSectionId get _effectiveSelectedSection =>
+      _sectionAvailable(_selectedSection)
+      ? _selectedSection
+      : SettingsSectionId.clipboard;
+
+  bool _sectionAvailable(SettingsSectionId section) {
+    if (!section.availableOn(defaultTargetPlatform)) return false;
+    return switch (section) {
+      SettingsSectionId.general => _hasGeneralSection,
+      SettingsSectionId.quickPaste => widget.quickPaste != null,
+      SettingsSectionId.modules => widget.modules != null,
+      SettingsSectionId.rules ||
+      SettingsSectionId.quickAccess ||
+      SettingsSectionId.snippets ||
+      SettingsSectionId.transforms ||
+      SettingsSectionId.aiTools => _contributions(section).isNotEmpty,
+      SettingsSectionId.clipboard ||
+      SettingsSectionId.privacy ||
+      SettingsSectionId.sync ||
+      SettingsSectionId.notifications ||
+      SettingsSectionId.data ||
+      SettingsSectionId.about => true,
+    };
   }
 
-  List<_SettingsNavigationTarget> _navigationTargets() {
+  Iterable<SettingsFeatureSection> _contributions(SettingsSectionId section) =>
+      widget.featureSections.where(
+        (contribution) => contribution.section == section,
+      );
+
+  SettingsSectionScope get _sectionScope =>
+      SettingsSectionScope(highlightedTargetId: _highlightedTargetId);
+
+  /// Appends feature contributions after a built-in section's content.
+  Widget _withContributions(SettingsSectionId section, Widget content) {
+    if (_featureSectionIds.contains(section)) return content;
+    final contributions = _contributions(section).toList(growable: false);
+    if (contributions.isEmpty) return content;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        content,
+        for (final contribution in contributions) ...[
+          const Gap(AppSpacing.xxxl),
+          contribution.builder(context, _sectionScope),
+        ],
+      ],
+    );
+  }
+
+  Widget _featureSection(
+    SettingsSectionId section, {
+    required bool showHeading,
+  }) {
+    final contributions = _contributions(section).toList(growable: false);
+    return SettingsSection(
+      key: _sectionKey(section),
+      title: section.label,
+      description: section.description,
+      showHeading: showHeading,
+      groupContent: false,
+      children: [
+        for (var i = 0; i < contributions.length; i++) ...[
+          if (i > 0) const Gap(AppSpacing.xxxl),
+          contributions[i].builder(context, _sectionScope),
+        ],
+      ],
+    );
+  }
+
+  static const _featureSectionIds = {
+    SettingsSectionId.rules,
+    SettingsSectionId.quickAccess,
+    SettingsSectionId.snippets,
+    SettingsSectionId.transforms,
+    SettingsSectionId.aiTools,
+  };
+
+  List<SettingsSearchTarget> _navigationTargets() {
     if (_searchQuery.isEmpty) return _sectionTargets();
     return _searchTargets()
         .where((target) => target.matches(_searchQuery))
         .toList(growable: false);
   }
 
-  List<_SettingsNavigationTarget> _sectionTargets() {
+  List<SettingsSearchTarget> _sectionTargets() {
     return [
       for (final section in SettingsSectionId.values)
-        if ((section != SettingsSectionId.general || _hasGeneralSection) &&
-            (section != SettingsSectionId.quickPaste ||
-                widget.quickPaste != null) &&
-            (section != SettingsSectionId.modules || widget.modules != null))
-          _SettingsNavigationTarget(
+        if (_sectionAvailable(section))
+          SettingsSearchTarget(
             id: 'section-${section.slug}',
             section: section,
             label: section.label,
@@ -527,10 +601,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       widget.desktopVisibility != null ||
       widget.launchAtLogin != null;
 
-  List<_SettingsNavigationTarget> _searchTargets() {
+  List<SettingsSearchTarget> _searchTargets() {
     return [
       if (widget.language != null)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.language,
           section: SettingsSectionId.general,
           label: context.l10n.settingsLanguageTitle,
@@ -539,7 +613,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _languageKey,
         ),
       if (widget.launchAtLogin != null)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: 'result-start-at-login',
           section: SettingsSectionId.general,
           label: _startupLabel,
@@ -548,7 +622,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _launchAtLoginKey,
         ),
       if (widget.desktopVisibility != null) ...[
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: 'result-taskbar-visibility',
           section: SettingsSectionId.general,
           label: _taskbarVisibilityLabel,
@@ -556,7 +630,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keywords: context.l10n.settingsTaskbarVisibilityKeywords,
           targetKey: _taskbarVisibilityKey,
         ),
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: 'result-tray-visibility',
           section: SettingsSectionId.general,
           label: _trayVisibilityLabel,
@@ -566,7 +640,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
       if (widget.modules != null)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: 'result-modules',
           section: SettingsSectionId.modules,
           label: context.l10n.settingsSectionModules,
@@ -575,7 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _modulesSectionKey,
         ),
       if (widget.onOpenAndroidCaptureSetup != null)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.androidBackgroundCapture,
           section: SettingsSectionId.clipboard,
           label: context.l10n.settingsAndroidCaptureTitle,
@@ -584,7 +658,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _androidCaptureKey,
         ),
       if (widget.controller.screenshotCaptureSupported)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.screenshotCapture,
           section: SettingsSectionId.clipboard,
           label: context.l10n.settingsSaveScreenshotsTitle,
@@ -592,14 +666,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keywords: context.l10n.settingsSaveScreenshotsKeywords,
           targetKey: _screenshotCaptureKey,
         ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.clipboardCapture,
         section: SettingsSectionId.clipboard,
         label: context.l10n.settingsClipboardCaptureTitle,
         description: context.l10n.settingsClipboardCaptureSearchDescription,
         targetKey: _clipboardCaptureKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.excludedApplications,
         section: SettingsSectionId.privacy,
         label: context.l10n.settingsExcludedAppsTitle,
@@ -607,14 +681,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsExcludedAppsKeywords,
         targetKey: _excludedApplicationsKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.retention,
         section: SettingsSectionId.clipboard,
         label: context.l10n.settingsRetentionTitle,
         description: context.l10n.settingsRetentionDescription,
         targetKey: _retentionKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.storageQuota,
         section: SettingsSectionId.clipboard,
         label: context.l10n.settingsStorageQuotaTitle,
@@ -622,7 +696,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsStorageQuotaKeywords,
         targetKey: _storageQuotaKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.historyFiles,
         section: SettingsSectionId.data,
         label: context.l10n.settingsHistoryFilesTitle,
@@ -630,7 +704,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsHistoryFilesKeywords,
         targetKey: _historyFilesKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.maxFileSize,
         section: SettingsSectionId.clipboard,
         label: context.l10n.settingsMaxFileSizeTitle,
@@ -638,14 +712,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsMaxFileSizeKeywords,
         targetKey: _maxFileSizeKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.sync,
         section: SettingsSectionId.sync,
         label: context.l10n.settingsSyncSwitchTitle,
         description: context.l10n.settingsSyncSearchDescription,
         targetKey: _syncEnabledKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.instantClipboard,
         section: SettingsSectionId.sync,
         label: context.l10n.settingsInstantClipboardTitle,
@@ -653,7 +727,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsInstantClipboardKeywords,
         targetKey: _instantClipboardKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.lanVisibility,
         section: SettingsSectionId.sync,
         label: context.l10n.settingsLanVisibilityTitle,
@@ -661,14 +735,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsLanVisibilityKeywords,
         targetKey: _lanVisibilityKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.notificationOnCopy,
         section: SettingsSectionId.notifications,
         label: context.l10n.settingsNotifyOnCopyTitle,
         description: context.l10n.settingsNotifyOnCopyDescription,
         targetKey: _notificationOnCopyKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.notificationPreview,
         section: SettingsSectionId.notifications,
         label: context.l10n.settingsNotificationPreviewTitle,
@@ -676,7 +750,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsNotificationPreviewKeywords,
         targetKey: _notificationPreviewKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.skipSecret,
         section: SettingsSectionId.privacy,
         label: context.l10n.settingsSkipSecretTitle,
@@ -684,7 +758,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsSkipSecretKeywords,
         targetKey: _skipSecretKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.skipTransient,
         section: SettingsSectionId.privacy,
         label: context.l10n.settingsSkipTransientTitle,
@@ -692,7 +766,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsSkipTransientKeywords,
         targetKey: _skipTransientKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.blockScreenshots,
         section: SettingsSectionId.privacy,
         label: context.l10n.settingsBlockScreenshotsTitle,
@@ -700,7 +774,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         keywords: context.l10n.settingsBlockScreenshotsKeywords,
         targetKey: _blockScreenshotsKey,
       ),
-      _SettingsNavigationTarget(
+      SettingsSearchTarget(
         id: _SettingsTargetId.soundOnCopy,
         section: SettingsSectionId.notifications,
         label: context.l10n.settingsSoundOnCopyTitle,
@@ -708,7 +782,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         targetKey: _soundOnCopyKey,
       ),
       if (widget.appUpdate != null)
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.applicationUpdates,
           section: SettingsSectionId.about,
           label: context.l10n.settingsUpdatesTitle,
@@ -717,7 +791,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _applicationUpdatesKey,
         ),
       if (widget.quickPaste != null) ...[
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.quickPasteShortcut,
           section: SettingsSectionId.quickPaste,
           label: context.l10n.settingsQuickPasteShortcutTitle,
@@ -725,7 +799,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keywords: context.l10n.settingsQuickPasteShortcutKeywords,
           targetKey: _quickPasteShortcutKey,
         ),
-        _SettingsNavigationTarget(
+        SettingsSearchTarget(
           id: _SettingsTargetId.quickPasteAutoPaste,
           section: SettingsSectionId.quickPaste,
           label: context.l10n.settingsAutoPasteTitle,
@@ -734,6 +808,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           targetKey: _quickPasteAutoPasteKey,
         ),
       ],
+      for (final contribution in widget.featureSections)
+        if (_sectionAvailable(contribution.section))
+          ...contribution.searchTargets(context),
     ];
   }
 
@@ -747,18 +824,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SettingsSectionId.notifications => _notificationsSectionKey,
     SettingsSectionId.quickPaste => _quickPasteSectionKey,
     SettingsSectionId.about => _aboutSectionKey,
+    SettingsSectionId.rules ||
+    SettingsSectionId.quickAccess ||
+    SettingsSectionId.snippets ||
+    SettingsSectionId.transforms ||
+    SettingsSectionId.aiTools => _featureSectionKeys.putIfAbsent(
+      section,
+      GlobalKey.new,
+    ),
   };
 
   Key? _selectedNavigationKey(
-    List<_SettingsNavigationTarget> targets,
+    List<SettingsSearchTarget> targets,
     SettingsSectionId selectedSection,
   ) {
     final selected = _selectedTarget(targets, selectedSection);
     return selected == null ? null : ValueKey<String>(selected.widgetKey);
   }
 
-  _SettingsNavigationTarget? _selectedTarget(
-    List<_SettingsNavigationTarget> targets,
+  SettingsSearchTarget? _selectedTarget(
+    List<SettingsSearchTarget> targets,
     SettingsSectionId selectedSection,
   ) {
     for (final target in targets) {
@@ -772,10 +857,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return null;
   }
 
-  void _selectNavigationTarget(
-    Key? key,
-    List<_SettingsNavigationTarget> targets,
-  ) {
+  void _selectNavigationTarget(Key? key, List<SettingsSearchTarget> targets) {
     for (final target in targets) {
       if (key == ValueKey<String>(target.widgetKey)) {
         _activateTarget(target);
@@ -784,7 +866,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _activateTarget(_SettingsNavigationTarget target) {
+  void _activateTarget(SettingsSearchTarget target) {
     _searchFocus.unfocus();
     final highlight = target.isSearchResult;
     _highlightTimer?.cancel();
@@ -806,7 +888,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  Future<void> _revealSearchTarget(_SettingsNavigationTarget target) async {
+  Future<void> _revealSearchTarget(SettingsSearchTarget target) async {
     await _scrollTo(target.targetKey);
   }
 
@@ -837,7 +919,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _generalSection({required bool showHeading}) {
     final controller = widget.desktopVisibility;
     final preferences = controller?.preferences;
-    return _SettingsSection(
+    return SettingsSection(
       key: _generalSectionKey,
       title: context.l10n.settingsSectionGeneral,
       showHeading: showHeading,
@@ -846,7 +928,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (widget.language case final language?)
           ListenableBuilder(
             listenable: language,
-            builder: (context, _) => _SettingRow(
+            builder: (context, _) => SettingRow(
               key: _languageKey,
               highlighted: _isHighlighted(_SettingsTargetId.language),
               title: context.l10n.settingsLanguageTitle,
@@ -874,7 +956,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         if (widget.launchAtLogin case final startup?)
-          _SettingRow(
+          SettingRow(
             key: _launchAtLoginKey,
             highlighted: _isHighlighted('result-start-at-login'),
             title: _startupLabel,
@@ -920,7 +1002,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             content: Text(message),
           ),
         if (controller != null && preferences != null) ...[
-          _SettingRow(
+          SettingRow(
             key: _taskbarVisibilityKey,
             highlighted: _isHighlighted('result-taskbar-visibility'),
             title: _taskbarVisibilityLabel,
@@ -933,7 +1015,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : (value) => unawaited(controller.setTaskbarVisible(value)),
             ),
           ),
-          _SettingRow(
+          SettingRow(
             key: _trayVisibilityKey,
             highlighted: _isHighlighted('result-tray-visibility'),
             title: _trayVisibilityLabel,
@@ -956,14 +1038,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool showHeading,
   }) {
     final capture = widget.controller.capture;
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _clipboardSectionKey,
       title: context.l10n.settingsSectionClipboard,
       description: context.l10n.settingsClipboardDescription,
       children: [
         if (widget.onOpenAndroidCaptureSetup != null) ...[
-          _SettingRow(
+          SettingRow(
             key: _androidCaptureKey,
             highlighted: _isHighlighted(
               _SettingsTargetId.androidBackgroundCapture,
@@ -981,7 +1063,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
         if (widget.controller.screenshotCaptureSupported) ...[
-          _SettingRow(
+          SettingRow(
             key: _screenshotCaptureKey,
             highlighted: _isHighlighted(_SettingsTargetId.screenshotCapture),
             title: context.l10n.settingsSaveScreenshotsTitle,
@@ -996,7 +1078,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (widget.controller.screenshotCapture.enabled &&
               widget.controller.screenshotCapture.needsPermission)
-            _SettingRow(
+            SettingRow(
               title: context.l10n.settingsScreenshotAccessTitle,
               description: context.l10n.settingsScreenshotAccessDescription,
               trailing: Button.secondary(
@@ -1024,7 +1106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : () => widget.controller.setScreenshotCaptureEnabled(true),
             ),
         ],
-        _SettingRow(
+        SettingRow(
           key: _clipboardCaptureKey,
           highlighted: _isHighlighted(_SettingsTargetId.clipboardCapture),
           title: context.l10n.settingsClipboardCaptureTitle,
@@ -1044,7 +1126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             content: Text(context.l10n.settingsCaptureStoppedMessage),
           ),
         ],
-        _SettingRow(
+        SettingRow(
           key: _retentionKey,
           highlighted: _isHighlighted(_SettingsTargetId.retention),
           title: context.l10n.settingsRetentionTitle,
@@ -1058,7 +1140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: widget.controller.setRetentionDays,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _storageQuotaKey,
           highlighted: _isHighlighted(_SettingsTargetId.storageQuota),
           title: context.l10n.settingsStorageQuotaTitle,
@@ -1070,7 +1152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: widget.controller.setStorageQuotaBytes,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _maxFileSizeKey,
           highlighted: _isHighlighted(_SettingsTargetId.maxFileSize),
           title: context.l10n.settingsMaxFileSizeTitle,
@@ -1098,7 +1180,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _dataSection({required bool showHeading}) {
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _dataSectionKey,
       title: context.l10n.settingsSectionData,
@@ -1108,7 +1190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           key: _historyFilesKey,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _SettingRow(
+            SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
               title: context.l10n.settingsExportTextTitle,
               description: context.l10n.settingsExportTextDescription,
@@ -1124,7 +1206,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const Divider(),
-            _SettingRow(
+            SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
               title: context.l10n.settingsBackupTitle,
               description: context.l10n.settingsBackupDescription,
@@ -1140,7 +1222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const Divider(),
-            _SettingRow(
+            SettingRow(
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
               title: context.l10n.settingsRestoreTitle,
               description: context.l10n.settingsRestoreDescription,
@@ -1162,13 +1244,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _syncSection(RuntimeSettings settings, {required bool showHeading}) {
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _syncSectionKey,
       title: context.l10n.settingsSectionSync,
       description: context.l10n.settingsSyncDescription,
       children: [
-        _SettingRow(
+        SettingRow(
           key: _syncEnabledKey,
           highlighted: _isHighlighted(_SettingsTargetId.sync),
           title: context.l10n.settingsSyncSwitchTitle,
@@ -1180,7 +1262,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setSyncEnabled,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _instantClipboardKey,
           highlighted: _isHighlighted(_SettingsTargetId.instantClipboard),
           title: context.l10n.settingsInstantClipboardTitle,
@@ -1193,7 +1275,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setInstantClipboard,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _lanVisibilityKey,
           highlighted: _isHighlighted(_SettingsTargetId.lanVisibility),
           title: context.l10n.settingsLanVisibilityTitle,
@@ -1213,7 +1295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     RuntimeSettings settings, {
     required bool showHeading,
   }) {
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _privacySectionKey,
       title: context.l10n.settingsSectionPrivacy,
@@ -1320,7 +1402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _skipSecretKey,
           highlighted: _isHighlighted(_SettingsTargetId.skipSecret),
           title: context.l10n.settingsSkipSecretTitle,
@@ -1334,7 +1416,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setSkipSecret,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _skipTransientKey,
           highlighted: _isHighlighted(_SettingsTargetId.skipTransient),
           title: context.l10n.settingsSkipTransientTitle,
@@ -1348,7 +1430,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setSkipTransient,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _blockScreenshotsKey,
           highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
           title: context.l10n.settingsBlockScreenshotsTitle,
@@ -1374,13 +1456,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     RuntimeSettings settings, {
     required bool showHeading,
   }) {
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _notificationsSectionKey,
       title: context.l10n.settingsSectionNotifications,
       description: context.l10n.settingsNotificationsDescription,
       children: [
-        _SettingRow(
+        SettingRow(
           key: _notificationOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationOnCopy),
           title: context.l10n.settingsNotifyOnCopyTitle,
@@ -1392,7 +1474,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setNotifyOnCopy,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _notificationPreviewKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationPreview),
           title: context.l10n.settingsNotificationPreviewTitle,
@@ -1405,7 +1487,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setNotificationPreview,
           ),
         ),
-        _SettingRow(
+        SettingRow(
           key: _soundOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.soundOnCopy),
           title: context.l10n.settingsSoundOnCopyTitle,
@@ -1422,13 +1504,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _aboutSection({required bool showHeading}) {
-    return _SettingsSection(
+    return SettingsSection(
       showHeading: showHeading,
       key: _aboutSectionKey,
       title: context.l10n.settingsSectionAbout,
       description: context.l10n.settingsAboutDescription,
       children: [
-        _SettingRow(
+        SettingRow(
           title: context.l10n.settingsVersionTitle,
           description: context.l10n.settingsVersionDescription,
           trailing: Text(
@@ -1440,7 +1522,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Gap(AppSpacing.md),
           AnimatedBuilder(
             animation: controller,
-            builder: (context, _) => _SettingRow(
+            builder: (context, _) => SettingRow(
               key: _applicationUpdatesKey,
               highlighted: _isHighlighted(_SettingsTargetId.applicationUpdates),
               title: context.l10n.settingsUpdatesTitle,
@@ -1704,113 +1786,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
-    super.key,
-    required this.title,
-    required this.description,
-    required this.children,
-    this.groupContent = true,
-    this.showHeading = true,
-  });
-
-  final String title;
-  final String description;
-  final List<Widget> children;
-  final bool groupContent;
-  final bool showHeading;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (showHeading) ...[
-          Text(title, style: Theme.of(context).typography.h3),
-          const Gap(AppSpacing.xs),
-        ],
-        Text(description).muted(),
-        const Gap(AppSpacing.lg),
-        if (groupContent)
-          Card(
-            theme: AppTheme.settingsGroupCardTheme,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < children.length; i++) ...[
-                  if (i > 0) const Divider(),
-                  children[i],
-                ],
-              ],
-            ),
-          )
-        else
-          ...children,
-      ],
-    );
-  }
-}
-
-class _SettingRow extends StatelessWidget {
-  const _SettingRow({
-    super.key,
-    required this.title,
-    required this.description,
-    required this.trailing,
-    this.highlighted = false,
-  });
-
-  final String title;
-  final String description;
-  final Widget trailing;
-  final bool highlighted;
-
-  @override
-  Widget build(BuildContext context) {
-    final copy = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title).medium(),
-        const Gap(AppSpacing.xs),
-        Text(description).muted().textSmall(),
-      ],
-    );
-    return OutlinedContainer(
-      key: ValueKey<String>('settings-row-$title'),
-      duration: AppMotion.resolve(context, AppMotion.quick),
-      theme: AppTheme.settingsRowTheme(context, highlighted: highlighted),
-      clipBehavior: Clip.none,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final stack =
-              trailing is! Switch &&
-              (constraints.maxWidth <
-                      AppLayoutSize.settingsStackedControlWidth ||
-                  MediaQuery.textScalerOf(context).scale(1) > 1.3);
-          if (stack) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                copy,
-                const Gap(AppSpacing.md),
-                Align(alignment: Alignment.centerRight, child: trailing),
-              ],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: copy),
-              const Gap(AppSpacing.lg),
-              trailing,
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
 class _QuickPasteSection extends StatelessWidget {
   const _QuickPasteSection({
     super.key,
@@ -1834,7 +1809,7 @@ class _QuickPasteSection extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        return _SettingsSection(
+        return SettingsSection(
           showHeading: showHeading,
           title: 'Quick Paste',
           description: context.l10n.settingsQuickPasteDescription,
@@ -1907,7 +1882,7 @@ class _QuickPasteSection extends StatelessWidget {
                 ),
               )
             else ...[
-              _SettingRow(
+              SettingRow(
                 key: shortcutKey,
                 highlighted: shortcutHighlighted,
                 title: context.l10n.settingsQuickPasteShortcutTitle,
@@ -1916,9 +1891,16 @@ class _QuickPasteSection extends StatelessWidget {
                     context.l10n.settingsQuickPasteRegisteredShortcut(shortcut),
                   null => context.l10n.settingsQuickPasteShortcutDescription,
                 },
-                trailing: _ShortcutRecorder(controller: controller),
+                trailing: ShortcutRecorder(
+                  shortcut: controller.shortcut,
+                  enabled: !controller.busy,
+                  onBeginRecording: controller.beginShortcutRecording,
+                  onCancelRecording: controller.cancelShortcutRecording,
+                  onRecorded: controller.setShortcut,
+                  onReset: controller.resetShortcut,
+                ),
               ),
-              _SettingRow(
+              SettingRow(
                 key: autoPasteKey,
                 highlighted: autoPasteHighlighted,
                 title: context.l10n.settingsAutoPasteTitle,
@@ -1968,133 +1950,6 @@ class _QuickPasteSection extends StatelessWidget {
         );
       },
     );
-  }
-}
-
-class _ShortcutRecorder extends StatefulWidget {
-  const _ShortcutRecorder({required this.controller});
-
-  final QuickPasteSettingsController controller;
-
-  @override
-  State<_ShortcutRecorder> createState() => _ShortcutRecorderState();
-}
-
-class _ShortcutRecorderState extends State<_ShortcutRecorder> {
-  final FocusNode _focusNode = FocusNode(debugLabel: 'quick-paste-recorder');
-  bool _recording = false;
-
-  @override
-  void dispose() {
-    if (_recording) widget.controller.cancelShortcutRecording();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  Future<void> _startRecording() async {
-    if (!await widget.controller.beginShortcutRecording() || !mounted) return;
-    setState(() => _recording = true);
-    _focusNode.requestFocus();
-  }
-
-  Future<void> _cancelRecording() async {
-    if (!_recording) return;
-    setState(() => _recording = false);
-    await widget.controller.cancelShortcutRecording();
-  }
-
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (!_recording || event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.escape) {
-      _cancelRecording();
-      return KeyEventResult.handled;
-    }
-    final modifiers = <DesktopShortcutModifier>[
-      for (final modifier in DesktopShortcutModifier.values)
-        if (modifier.physicalKeys.any(
-          HardwareKeyboard.instance.physicalKeysPressed.contains,
-        ))
-          modifier,
-    ];
-    final shortcut = DesktopShortcut(
-      key: event.physicalKey,
-      modifiers: modifiers,
-    );
-    if (!shortcut.isValid) return KeyEventResult.handled;
-    setState(() => _recording = false);
-    widget.controller.setShortcut(shortcut);
-    return KeyEventResult.handled;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _focusNode,
-      onKeyEvent: _handleKey,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Button.secondary(
-            onPressed: widget.controller.busy
-                ? null
-                : _recording
-                ? _cancelRecording
-                : _startRecording,
-            child: _recording
-                ? Text(context.l10n.settingsShortcutRecording)
-                : KeyboardDisplay(keys: widget.controller.shortcut.displayKeys),
-          ),
-          const Gap(AppSpacing.sm),
-          Tooltip(
-            showDuration: AppMotion.resolve(context, AppMotion.standard),
-            tooltip: (context) => TooltipContainer(
-              child: Text(context.l10n.settingsShortcutReset),
-            ),
-            child: Button.ghost(
-              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
-              onPressed: widget.controller.busy || _recording
-                  ? null
-                  : widget.controller.resetShortcut,
-              child: const AppIconFrame(child: Icon(LucideIcons.rotateCcw)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsNavigationTarget {
-  const _SettingsNavigationTarget({
-    required this.id,
-    required this.section,
-    required this.label,
-    required this.description,
-    required this.targetKey,
-    this.keywords = '',
-  });
-
-  final String id;
-  final SettingsSectionId section;
-  final String label;
-  final String description;
-  final String keywords;
-  final GlobalKey targetKey;
-
-  String get widgetKey => 'settings-$id';
-  bool get isSearchResult => id.startsWith('result-');
-
-  bool matches(String query) {
-    final searchable = [
-      section.label,
-      label,
-      description,
-      keywords,
-    ].join(' ').toLowerCase();
-    return query
-        .split(RegExp(r'\s+'))
-        .where((token) => token.isNotEmpty)
-        .every(searchable.contains);
   }
 }
 

@@ -814,6 +814,48 @@ class AppLocalizationsIt extends AppLocalizations {
       'Installa e gestisci i moduli opzionali.';
 
   @override
+  String get settingsSectionRules => 'Regole sui contenuti';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Etichetta, ignora, proteggi o fai scadere gli elementi automaticamente.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Accesso rapido';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Tastiera, riquadri e widget della schermata Home.';
+
+  @override
+  String get settingsSectionSnippets => 'Frammenti';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Testi e modelli riutilizzabili.';
+
+  @override
+  String get settingsSectionTransforms => 'Trasformazioni del testo';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Preferiti, sequenze e trasformazioni predefinite per l\'incolla.';
+
+  @override
+  String get settingsSectionAiTools => 'Strumenti IA';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Collega assistenti IA e controlla cosa possono vedere.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Raccogli più copie e incollale in ordine.';
+
+  @override
   String get settingsSectionAbout => 'Informazioni';
 
   @override
@@ -1469,6 +1511,9 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Premi la scorciatoia…';
+
+  @override
+  String get settingsShortcutNotSet => 'Non impostata';
 
   @override
   String get settingsShortcutReset => 'Reimposta scorciatoia';
