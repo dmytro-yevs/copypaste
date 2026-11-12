@@ -4,16 +4,21 @@
 //! made on two devices both survive. A purge is terminal: once any applied
 //! metadata version carried `purged`, the projection stays purged and the body
 //! projects as empty whatever arrives later.
+//!
+//! The projected `deleted_at` is the effective one: a delete loses to a body
+//! version stamped after it, so an edit made after a remote delete restores
+//! the snippet. A body replaced by a concurrent version is kept as a conflict
+//! copy, projected here and published by the next keyed write.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::{identifier, line, required_line, StoreError};
+use super::{identifier, line, record_id, required_line, StoreError};
+use crate::snippets::{abbreviation, conflict};
 
 pub(super) const SNIPPET_BYTES: usize = 4 * 1024;
 pub(super) const BODY_BYTES: usize = 320 * 1024;
 pub(super) const COLLECTION_BYTES: usize = 2 * 1024;
-const MAX_ANCESTORS: usize = 16;
 const REVISION_HEX: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,11 +85,6 @@ fn revision(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// The lookup form of an abbreviation, shared by the index and its queries.
-fn abbreviation_key(abbreviation: &str) -> String {
-    abbreviation.to_lowercase()
-}
-
 impl SnippetRecord {
     pub(super) fn valid(&self) -> bool {
         identifier(&self.id)
@@ -93,7 +93,7 @@ impl SnippetRecord {
             && self
                 .abbreviation
                 .as_deref()
-                .is_none_or(|abbreviation| required_line(abbreviation, 64))
+                .is_none_or(|abbreviation| abbreviation::validate(abbreviation).is_ok())
             && (if self.pinned {
                 self.pin_order.is_some_and(f64::is_finite)
             } else {
@@ -110,6 +110,16 @@ impl SnippetRecord {
         record_id: &str,
         stamp: i64,
     ) -> Result<(), StoreError> {
+        let body_stamp: Option<i64> = tx
+            .query_row(
+                "SELECT body_stamp FROM snippet_bodies WHERE id=?1",
+                [&self.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let deleted_at = self
+            .deleted_at
+            .filter(|_| body_stamp.is_none_or(|body| body <= stamp));
         tx.execute(
             "INSERT INTO snippets(id,record_id,collection_id,title,abbreviation,abbreviation_key,\
              template,pinned,pin_order,order_key,concealed,deleted_at,purged,meta_stamp,created_at,\
@@ -127,13 +137,13 @@ impl SnippetRecord {
                 self.collection_id,
                 self.title,
                 self.abbreviation,
-                self.abbreviation.as_deref().map(abbreviation_key),
+                self.abbreviation.as_deref().map(abbreviation::normalize),
                 self.template,
                 self.pinned,
                 self.pin_order,
                 self.order_key,
                 self.concealed,
-                self.deleted_at,
+                deleted_at,
                 self.purged,
                 stamp,
                 self.created_at,
@@ -155,7 +165,7 @@ impl SnippetBodyRecord {
     pub(super) fn valid(&self) -> bool {
         identifier(&self.id)
             && revision(&self.revision)
-            && self.ancestors.len() <= MAX_ANCESTORS
+            && self.ancestors.len() <= conflict::MAX_ANCESTORS
             && self.ancestors.iter().all(|ancestor| revision(ancestor))
     }
 
@@ -190,8 +200,15 @@ impl SnippetBodyRecord {
                 stamp
             ],
         )?;
+        tx.execute(
+            "UPDATE snippets SET deleted_at=NULL WHERE id=?1 AND deleted_at IS NOT NULL \
+             AND purged=0 AND meta_stamp<?2",
+            params![self.id, stamp],
+        )?;
         if let Some(previous) = previous.filter(|previous| previous.revision != self.revision) {
-            on_replaced(tx, &previous, self)?;
+            if !purged {
+                on_replaced(tx, record_id, &previous, self)?;
+            }
         }
         refresh_search(tx, &self.id)
     }
@@ -226,14 +243,81 @@ impl SnippetCollectionRecord {
     }
 }
 
+fn version(body: &SnippetBodyRecord) -> conflict::BodyVersion<'_> {
+    conflict::BodyVersion {
+        revision: &body.revision,
+        ancestors: &body.ancestors,
+        text: &body.text,
+        rich_html: body.rich_html.as_deref(),
+    }
+}
+
 /// Called when an applied body replaces a different revision of the same
-/// snippet, with the projection as it was before the write.
+/// snippet, before its record is replaced. The applied version won the merge,
+/// so a concurrent `previous` is the loser and is projected as a copy. The
+/// copy has no record yet: sealing one needs the item key, which the apply
+/// transaction does not hold.
 fn on_replaced(
-    _tx: &Connection,
-    _previous: &SnippetBodyRecord,
-    _incoming: &SnippetBodyRecord,
+    tx: &Connection,
+    body_record_id: &str,
+    previous: &SnippetBodyRecord,
+    incoming: &SnippetBodyRecord,
 ) -> Result<(), StoreError> {
-    Ok(())
+    if !conflict::concurrent(&version(previous), &version(incoming)) {
+        return Ok(());
+    }
+    let copy_id = conflict::copy_id(&previous.revision);
+    if snippet(tx, &copy_id)?.is_some() {
+        return Ok(());
+    }
+    let (stamp, origin): (i64, String) = tx
+        .query_row(
+            "SELECT created_at,origin_device_id FROM organization_records WHERE id=?1",
+            [body_record_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .unwrap_or_else(|| (crate::now_ms(), String::new()));
+    let (device_id, device_name): (String, Option<String>) = tx.query_row(
+        "SELECT d.id,(SELECT name FROM sync_device_name WHERE device_id=d.id) FROM \
+         (SELECT CASE WHEN ?1<>'' THEN ?1 ELSE COALESCE((SELECT value FROM sync_device_state \
+         WHERE key='device_id'),'') END AS id) d",
+        [&origin],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    // A body seen before its metadata: unknown flags are taken as concealed.
+    let original = snippet(tx, &incoming.id)?;
+    let copy = SnippetRecord {
+        id: copy_id.clone(),
+        collection_id: original.as_ref().and_then(|s| s.collection_id.clone()),
+        title: conflict::copy_title(
+            original.as_ref().map_or("", |s| s.title.as_str()),
+            device_name.as_deref().unwrap_or("unknown device"),
+            stamp,
+            crate::storage::snippets::MAX_TITLE_CHARS,
+        ),
+        abbreviation: None,
+        template: original.as_ref().is_some_and(|s| s.template),
+        pinned: false,
+        pin_order: None,
+        order_key: original
+            .as_ref()
+            .map_or_else(|| "V".to_owned(), |s| s.order_key.clone()),
+        concealed: original.as_ref().is_none_or(|s| s.concealed),
+        deleted_at: None,
+        purged: false,
+        created_at: stamp,
+        created_device: device_id.chars().take(128).collect(),
+    };
+    let body = SnippetBodyRecord {
+        id: copy_id.clone(),
+        revision: previous.revision.clone(),
+        ancestors: Vec::new(),
+        text: previous.text.clone(),
+        rich_html: previous.rich_html.clone(),
+    };
+    copy.project(tx, &record_id(&snippet_key(&copy_id)), stamp)?;
+    body.project(tx, &record_id(&body_key(&copy_id)), stamp)
 }
 
 fn is_purged(tx: &Connection, id: &str) -> Result<bool, StoreError> {
@@ -247,6 +331,26 @@ fn is_purged(tx: &Connection, id: &str) -> Result<bool, StoreError> {
 
 pub(super) fn keeps_purge(tx: &Connection, incoming: &SnippetRecord) -> Result<bool, StoreError> {
     Ok(!incoming.purged && is_purged(tx, &incoming.id)?)
+}
+
+/// A body edited after a purge is answered with the local stub, so its text
+/// is not stored. Without a local stub it is stored, projected empty, and
+/// replaced once the purging device writes its stub back above it.
+pub(super) fn keeps_purged_body(
+    tx: &Connection,
+    incoming: &SnippetBodyRecord,
+) -> Result<bool, StoreError> {
+    if incoming.revision == conflict::PURGED_REVISION || !is_purged(tx, &incoming.id)? {
+        return Ok(false);
+    }
+    Ok(tx
+        .query_row(
+            "SELECT revision=?2 FROM snippet_bodies WHERE id=?1",
+            params![incoming.id, conflict::PURGED_REVISION],
+            |r| r.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false))
 }
 
 /// Keeps the snippet's full-text row equal to its projection: title and

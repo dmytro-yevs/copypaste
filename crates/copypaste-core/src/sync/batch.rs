@@ -155,6 +155,11 @@ fn apply_page(
                     &written,
                     &mut applied,
                 )?;
+                if incoming.iter().zip(&applied).any(|(item, flags)| {
+                    flags.content && item.content_type == crate::storage::organization::CONTENT_TYPE
+                }) {
+                    super::merge::publish_library_copies(store, keyring);
+                }
                 return Ok(applied);
             }
             Err(MergePageError::SnapshotChanged(authoritative)) => {
