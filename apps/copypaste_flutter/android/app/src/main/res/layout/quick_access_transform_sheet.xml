@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transform sheet for a text selection or the current clipboard: header,
+     a scrollable body (palette list, state view or preview) and a fixed
+     footer of output actions. Sizes and colors come from design_tokens.xml. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/qa_sheet_scrim"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/qa_sheet"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:clickable="true"
+        android:focusable="false"
+        android:orientation="vertical"
+        android:paddingBottom="@dimen/app_spacing_sm">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_spacing_sm"
+            android:paddingTop="@dimen/app_spacing_sm"
+            android:paddingEnd="@dimen/app_spacing_sm">
+
+            <ImageButton
+                android:id="@+id/qa_sheet_back"
+                android:layout_width="@dimen/app_control_size_touch"
+                android:layout_height="@dimen/app_control_size_touch"
+                android:contentDescription="@string/quick_access_transform_back"
+                android:src="@drawable/ic_lucide_chevron_left"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="@dimen/app_spacing_sm"
+                android:paddingEnd="@dimen/app_spacing_sm">
+
+                <TextView
+                    android:id="@+id/qa_sheet_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityHeading="true"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:text="@string/quick_access_transform_title"
+                    android:textColor="@color/app_color_foreground"
+                    android:textSize="@dimen/app_text_size_large" />
+
+                <TextView
+                    android:id="@+id/qa_sheet_subtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:singleLine="true"
+                    android:textColor="@color/app_color_muted_foreground"
+                    android:textSize="@dimen/app_text_size_x_small" />
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/qa_sheet_close"
+                android:layout_width="@dimen/app_control_size_touch"
+                android:layout_height="@dimen/app_control_size_touch"
+                android:contentDescription="@string/quick_access_transform_close"
+                android:src="@drawable/ic_lucide_x" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/qa_sheet_body"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/app_spacing_xs">
+
+            <ListView
+                android:id="@+id/qa_sheet_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:divider="@null"
+                android:scrollbarStyle="outsideOverlay" />
+
+            <LinearLayout
+                android:id="@+id/qa_sheet_preview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:paddingStart="@dimen/app_spacing_lg"
+                android:paddingEnd="@dimen/app_spacing_lg"
+                android:visibility="gone">
+
+                <HorizontalScrollView
+                    android:id="@+id/qa_sheet_params_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/qa_sheet_params"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal" />
+                </HorizontalScrollView>
+
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="@dimen/app_spacing_sm"
+                    android:layout_weight="1">
+
+                    <TextView
+                        android:id="@+id/qa_sheet_output"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:accessibilityLiveRegion="polite"
+                        android:fontFamily="monospace"
+                        android:padding="@dimen/app_spacing_md"
+                        android:textColor="@color/app_color_foreground"
+                        android:textIsSelectable="false"
+                        android:textSize="@dimen/app_text_size_small" />
+                </ScrollView>
+
+                <TextView
+                    android:id="@+id/qa_sheet_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:paddingTop="@dimen/app_spacing_xs"
+                    android:paddingBottom="@dimen/app_spacing_xs"
+                    android:textColor="@color/app_color_muted_foreground"
+                    android:textSize="@dimen/app_text_size_x_small"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/qa_sheet_state"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="@dimen/app_spacing_lg"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/qa_sheet_state_icon"
+                    android:layout_width="@dimen/app_icon_size_lg"
+                    android:layout_height="@dimen/app_icon_size_lg"
+                    android:importantForAccessibility="no" />
+
+                <TextView
+                    android:id="@+id/qa_sheet_state_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/app_spacing_sm"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="center"
+                    android:textColor="@color/app_color_muted_foreground"
+                    android:textSize="@dimen/app_text_size_small" />
+
+                <TextView
+                    android:id="@+id/qa_sheet_state_action"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/app_spacing_sm"
+                    android:gravity="center"
+                    android:minHeight="@dimen/app_control_size_touch"
+                    android:paddingStart="@dimen/app_spacing_lg"
+                    android:paddingEnd="@dimen/app_spacing_lg"
+                    android:textColor="@color/app_color_foreground"
+                    android:textSize="@dimen/app_text_size_small"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <LinearLayout
+            android:id="@+id/qa_sheet_footer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/app_spacing_sm"
+            android:gravity="end|center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_spacing_lg"
+            android:paddingEnd="@dimen/app_spacing_lg" />
+    </LinearLayout>
+</FrameLayout>

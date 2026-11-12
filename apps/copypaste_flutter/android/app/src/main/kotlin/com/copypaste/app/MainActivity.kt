@@ -21,6 +21,7 @@ import androidx.annotation.Keep
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import com.jakewharton.processphoenix.ProcessPhoenix
+import com.copypaste.app.quickaccess.QuickAccessTiles
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -544,6 +545,8 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         AndroidCaptureSignals.changed()
+        // Pause and capture setup change in the app; the tile redraws only when they differ.
+        if (!hasFocus) QuickAccessTiles.refresh(this)
         if (hasFocus && clipboardListenerRegistered) {
             if (!clipboardFocusGuard.hasPendingPicker ||
                 clipboardFocusGuard.shouldCaptureAfterFocus(clipboardGeneration())) {

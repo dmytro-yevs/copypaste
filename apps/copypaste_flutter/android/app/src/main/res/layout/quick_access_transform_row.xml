@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One transform or pipeline in the transform sheet. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="@dimen/app_control_size_touch"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/app_spacing_lg"
+    android:paddingTop="@dimen/app_spacing_sm"
+    android:paddingEnd="@dimen/app_spacing_lg"
+    android:paddingBottom="@dimen/app_spacing_sm">
+
+    <TextView
+        android:id="@+id/qa_row_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textColor="@color/app_color_foreground"
+        android:textSize="@dimen/app_text_size_base" />
+
+    <TextView
+        android:id="@+id/qa_row_description"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/app_spacing_xxs"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@color/app_color_muted_foreground"
+        android:textSize="@dimen/app_text_size_history_metadata" />
+</LinearLayout>
