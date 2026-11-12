@@ -3,7 +3,6 @@ import 'package:copypaste_flutter/features/settings/controller/settings_controll
 import 'package:copypaste_flutter/features/settings/controller/settings_navigation_state.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
-import 'package:copypaste_flutter/features/quick_access/view/quick_access_settings_view.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_search_target.dart';
 import 'package:copypaste_flutter/features/snippets/view/snippets_settings_view.dart';
 import 'package:flutter/foundation.dart';
@@ -101,7 +100,7 @@ void main() {
       ),
       SettingsFeatureSection(
         section: SettingsSectionId.quickAccess,
-        builder: (context, scope) => const QuickAccessSettingsView(),
+        builder: (context, scope) => const SizedBox.shrink(),
       ),
     ];
     Future<void> pumpFor(TargetPlatform platform) async {

@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4481,4 +4482,175 @@ class AppLocalizationsPl extends AppLocalizations {
   @override
   String get transformsTrackingPlaceholder =>
       'nazwa lub nazwa@domena, potem Enter';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Stan szybkiego dostępu jest niedostępny';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste nie może odczytać stanu klawiatury, kafelków i widżetu. Spróbuj ponownie.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Nie udało się wykonać działania';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android nie otworzył żądanego ekranu lub nie zapisał zmiany. Spróbuj ponownie.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Klawiatura wpisów';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Włącz „Wpisy CopyPaste” w systemowych ustawieniach klawiatury. Android ostrzega, że klawiatura może widzieć wpisywany tekst: panel wpisów nigdy nie rejestruje naciśnięć klawiszy, nie ma klawiszy do pisania w innych aplikacjach i wstawia tylko wpisy, które dotkniesz.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Włączona';
+
+  @override
+  String get quickAccessKeyboardOff => 'Wyłączona';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Otwórz ustawienia klawiatury';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Włącz panel klawiatury „Wpisy CopyPaste”.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'klawiatura metoda wprowadzania ime panel włącz';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Przełącz na klawiaturę wpisów';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Wybierz „Wpisy CopyPaste” jako bieżącą klawiaturę. Dopóki jest wybrana, każda kopia jest zapisywana.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Wybierz klawiaturę';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Bieżąca klawiatura';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Tryb przechwytywania';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Bez dostępu przez Shizuku lub ADB kopie są zapisywane tylko po otwarciu panelu wpisów, dopóki pozostaje wybrany, albo z aplikacji CopyPaste, kafelka, widżetu lub menu Udostępnij.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Zobacz, jak zapisywane są kopie z innych aplikacji.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'przechwytywanie poziom pełny panel ręczny shizuku zbieranie';
+
+  @override
+  String get quickAccessTierFull => 'Pełny: każda kopia jest zapisywana w tle';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panel wybrany: zbieranie';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Tryb panelu: nadrabianie przy otwarciu';
+
+  @override
+  String get quickAccessTierManual =>
+      'Ręczny: zapisuj z aplikacji, kafelka, widżetu lub menu Udostępnij';
+
+  @override
+  String get quickAccessTierPaused => 'Przechwytywanie wstrzymane';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Wracaj do poprzedniej klawiatury po wstawieniu';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Przełącza z powrotem po pojedynczym wstawieniu. Panel pozostaje otwarty, gdy używasz karty Kolejka lub działań wpisu. Wyłącz, aby dalej zbierać kopie.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'powrót poprzednia klawiatura automatycznie wstawianie';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Aktywuj wyszukiwanie po otwarciu panelu';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Otwiera panel na polu wyszukiwania. Gdy wyłączone, wpisy są o jedno dotknięcie.';
+
+  @override
+  String get quickAccessTilesTitle => 'Kafelki szybkich ustawień';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Dodaj kafelki „Zapisz schowek” i „Przechwytywanie schowka”.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'szybkie ustawienia kafelek panel zapisz wstrzymaj';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Przesuń dwukrotnie w dół od górnej krawędzi ekranu, kliknij Edytuj i przeciągnij kafelek CopyPaste do szybkich ustawień.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Kafelek „Zapisz schowek”';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Zapisuje zawartość schowka z szybkich ustawień.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Kafelek „Przechwytywanie schowka”';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Wstrzymuje i wznawia przechwytywanie z szybkich ustawień.';
+
+  @override
+  String get quickAccessAddTile => 'Dodaj kafelek';
+
+  @override
+  String get quickAccessTileAdded => 'Dodano do szybkich ustawień';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widżet „Ostatnie wpisy”';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Pokazuje najnowsze wpisy na ekranie głównym. Dotknij wpisu, aby go skopiować.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Naciśnij i przytrzymaj ekran główny, kliknij Widżety i przeciągnij „Ostatnie wpisy” z CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Dodano $count widżetu',
+      many: 'Dodano $count widżetów',
+      few: 'Dodano $count widżety',
+      one: 'Dodano 1 widżet',
+      zero: 'Nie dodano',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Dodaj widżet';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'ekran główny widżet launcher ostatnie';
 }

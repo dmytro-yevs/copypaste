@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4494,4 +4495,175 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get transformsTrackingPlaceholder => 'nome ou nome@domínio e Enter';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Status do acesso rápido indisponível';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'O CopyPaste não conseguiu ler o status do teclado, dos blocos e do widget. Tente novamente.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Não foi possível concluir';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'O Android não abriu a tela solicitada ou não salvou a alteração. Tente novamente.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Teclado de clipes';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Ative Clipes do CopyPaste nas configurações de teclado do sistema. O Android avisa que um teclado pode ver o que você digita: o painel de clipes nunca registra teclas, não tem teclas de digitação para outros apps e insere apenas os itens que você toca.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Ativado';
+
+  @override
+  String get quickAccessKeyboardOff => 'Desativado';
+
+  @override
+  String get quickAccessOpenKeyboardSettings =>
+      'Abrir configurações do teclado';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Ative o painel de teclado Clipes do CopyPaste.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'teclado método de entrada ime painel ativar';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Mudar para o teclado de clipes';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Escolha Clipes do CopyPaste como teclado atual. Enquanto ele estiver selecionado, cada cópia é salva.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Escolher teclado';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Teclado atual';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Modo de captura';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Sem acesso pelo Shizuku ou ADB, as cópias são salvas somente quando o painel de clipes abre, enquanto ele estiver selecionado ou pelo app CopyPaste, um bloco, o widget ou Compartilhar.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Veja como as cópias de outros apps são salvas.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'captura nível completo painel manual shizuku coletar';
+
+  @override
+  String get quickAccessTierFull =>
+      'Completo: cada cópia é salva em segundo plano';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Painel selecionado: coletando';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Modo painel: recuperação ao abrir';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manual: salve pelo app, um bloco, o widget ou Compartilhar';
+
+  @override
+  String get quickAccessTierPaused => 'Captura pausada';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Voltar ao teclado anterior após inserir';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Volta após uma única inserção. O painel fica aberto enquanto você usa a guia Fila ou as ações de um item. Desative para continuar coletando cópias.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'voltar teclado anterior automático inserir';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Focar na pesquisa ao abrir o painel';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Abre o painel no campo de pesquisa. Quando desativado, seus clipes ficam a um toque.';
+
+  @override
+  String get quickAccessTilesTitle => 'Blocos de configurações rápidas';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Adicione os blocos Salvar área de transferência e Captura da área de transferência.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'configurações rápidas bloco painel salvar pausar';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Deslize para baixo duas vezes a partir do topo da tela, toque em Editar e arraste um bloco do CopyPaste para as configurações rápidas.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Bloco Salvar área de transferência';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Salva o conteúdo da área de transferência pelas configurações rápidas.';
+
+  @override
+  String get quickAccessCaptureTileTitle =>
+      'Bloco Captura da área de transferência';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Pausa e retoma a captura pelas configurações rápidas.';
+
+  @override
+  String get quickAccessAddTile => 'Adicionar bloco';
+
+  @override
+  String get quickAccessTileAdded => 'Adicionado às configurações rápidas';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget Clipes recentes';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Mostra seus clipes mais recentes na tela inicial. Toque em um para copiá-lo.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Toque e mantenha pressionada a tela inicial, toque em Widgets e arraste Clipes recentes do CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widgets adicionados',
+      one: '1 widget adicionado',
+      zero: 'Não adicionado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Adicionar widget';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'tela inicial widget launcher recentes';
 }

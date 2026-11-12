@@ -7382,6 +7382,276 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'name or name@domain, then Enter'**
   String get transformsTrackingPlaceholder;
+
+  /// Error title in Android Settings > Quick access when the keyboard, tile and widget status cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick access status unavailable'**
+  String get quickAccessUnavailableTitle;
+
+  /// Error message under quickAccessUnavailableTitle; a Retry button follows.
+  ///
+  /// In en, this message translates to:
+  /// **'CopyPaste couldn\'t read the keyboard, tile, and widget status. Try again.'**
+  String get quickAccessUnavailableMessage;
+
+  /// Notice title in Android Settings > Quick access when a system screen could not be opened or an option could not be saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t complete that'**
+  String get quickAccessActionFailedTitle;
+
+  /// Notice message under quickAccessActionFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Android didn\'t open the requested screen or save the change. Try again.'**
+  String get quickAccessActionFailedMessage;
+
+  /// Setting row title: the CopyPaste clips keyboard panel (an Android input method that inserts saved clips).
+  ///
+  /// In en, this message translates to:
+  /// **'Clips keyboard'**
+  String get quickAccessKeyboardTitle;
+
+  /// Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on CopyPaste clips in the system keyboard settings. Android warns that a keyboard can see what you type: the clips panel never records keystrokes, has no typing keys for other apps, and inserts only the items you tap.'**
+  String get quickAccessKeyboardDescription;
+
+  /// Status under the clips keyboard row: the keyboard is turned on in system settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Turned on'**
+  String get quickAccessKeyboardOn;
+
+  /// Status under the clips keyboard row: the keyboard is turned off in system settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Turned off'**
+  String get quickAccessKeyboardOff;
+
+  /// Button that opens the Android system screen where keyboards are turned on.
+  ///
+  /// In en, this message translates to:
+  /// **'Open keyboard settings'**
+  String get quickAccessOpenKeyboardSettings;
+
+  /// Settings search result description for the clips keyboard row.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on the CopyPaste clips keyboard panel.'**
+  String get quickAccessKeyboardSearchDescription;
+
+  /// Space-separated search keywords for the clips keyboard row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'keyboard input method ime panel enable'**
+  String get quickAccessKeyboardKeywords;
+
+  /// Setting row title: make the clips keyboard the current keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch to the clips keyboard'**
+  String get quickAccessSwitchKeyboardTitle;
+
+  /// Setting row description for switching to the clips keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose CopyPaste clips as the current keyboard. While it stays selected, each copy is saved.'**
+  String get quickAccessSwitchKeyboardDescription;
+
+  /// Button that shows the Android keyboard picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose keyboard'**
+  String get quickAccessSwitchKeyboardAction;
+
+  /// Status: the clips keyboard is the current keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Current keyboard'**
+  String get quickAccessKeyboardCurrent;
+
+  /// Setting row title: how copies made in other apps are saved on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture mode'**
+  String get quickAccessCaptureTierTitle;
+
+  /// Setting row description explaining capture without Shizuku or ADB access.
+  ///
+  /// In en, this message translates to:
+  /// **'Without Shizuku or ADB access, copies are saved only when the clips panel opens, while it stays selected, or from the CopyPaste app, a tile, the widget, or Share.'**
+  String get quickAccessCaptureTierDescription;
+
+  /// Settings search result description for the capture mode row.
+  ///
+  /// In en, this message translates to:
+  /// **'See how copies from other apps are saved.'**
+  String get quickAccessCaptureTierSearchDescription;
+
+  /// Space-separated search keywords for the capture mode row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'capture tier full panel manual shizuku collect'**
+  String get quickAccessCaptureTierKeywords;
+
+  /// Capture mode status: background capture granted through Shizuku or ADB saves every copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Full: every copy is saved in the background'**
+  String get quickAccessTierFull;
+
+  /// Capture mode status: the clips keyboard is the current keyboard and saves each copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Panel selected: collecting'**
+  String get quickAccessTierPanelCollecting;
+
+  /// Capture mode status: the clips keyboard is turned on and saves the clipboard when it opens.
+  ///
+  /// In en, this message translates to:
+  /// **'Panel mode: catch-up on open'**
+  String get quickAccessTierPanelCatchUp;
+
+  /// Capture mode status: copies are saved only by an explicit action.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual: save from the app, a tile, the widget, or Share'**
+  String get quickAccessTierManual;
+
+  /// Capture mode status: the user paused clipboard capture.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture paused'**
+  String get quickAccessTierPaused;
+
+  /// Switch title: after inserting a clip, the panel switches back to the keyboard used before.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to previous keyboard after inserting'**
+  String get quickAccessAutoReturnTitle;
+
+  /// Switch description for returning to the previous keyboard after inserting.
+  ///
+  /// In en, this message translates to:
+  /// **'Switches back after a single insert. The panel stays open while you use the Queue tab or item actions. Turn off to keep collecting copies.'**
+  String get quickAccessAutoReturnDescription;
+
+  /// Space-separated search keywords for the return-to-previous-keyboard switch; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'switch back previous keyboard auto return insert'**
+  String get quickAccessAutoReturnKeywords;
+
+  /// Switch title: the clips panel opens with its search field focused.
+  ///
+  /// In en, this message translates to:
+  /// **'Focus search when the panel opens'**
+  String get quickAccessFocusSearchTitle;
+
+  /// Switch description for focusing search when the clips panel opens.
+  ///
+  /// In en, this message translates to:
+  /// **'Opens the panel on its search field. When off, your clips are one tap away.'**
+  String get quickAccessFocusSearchDescription;
+
+  /// Setting row title for the Android Quick Settings tiles; also the search result label.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Settings tiles'**
+  String get quickAccessTilesTitle;
+
+  /// Settings search result description for the Quick Settings tile rows.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the Save clipboard and Clipboard capture tiles.'**
+  String get quickAccessTilesSearchDescription;
+
+  /// Space-separated search keywords for the Quick Settings tile rows; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'quick settings tile shade save pause'**
+  String get quickAccessTilesKeywords;
+
+  /// How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Swipe down twice from the top of the screen, tap Edit, and drag a CopyPaste tile into Quick Settings.'**
+  String get quickAccessTileInstructions;
+
+  /// Setting row title for the Save clipboard Quick Settings tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Save clipboard tile'**
+  String get quickAccessSaveTileTitle;
+
+  /// Setting row description for the Save clipboard tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Saves what\'s on the clipboard from Quick Settings.'**
+  String get quickAccessSaveTileDescription;
+
+  /// Setting row title for the Clipboard capture Quick Settings tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Clipboard capture tile'**
+  String get quickAccessCaptureTileTitle;
+
+  /// Setting row description for the Clipboard capture tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Pauses and resumes capture from Quick Settings.'**
+  String get quickAccessCaptureTileDescription;
+
+  /// Button that asks Android to add the tile to Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Add tile'**
+  String get quickAccessAddTile;
+
+  /// Status: the tile is in Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Added to Quick Settings'**
+  String get quickAccessTileAdded;
+
+  /// Setting row title for the Recent clips home-screen widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clips widget'**
+  String get quickAccessWidgetTitle;
+
+  /// Setting row description for the Recent clips widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Shows your latest clips on the home screen. Tap one to copy it.'**
+  String get quickAccessWidgetDescription;
+
+  /// How to add the widget by hand, shown when the launcher cannot pin widgets.
+  ///
+  /// In en, this message translates to:
+  /// **'Touch and hold the home screen, tap Widgets, and drag Recent clips from CopyPaste.'**
+  String get quickAccessWidgetInstructions;
+
+  /// Status: how many Recent clips widgets are on the home screen.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Not added} =1{1 widget added} other{{count} widgets added}}'**
+  String quickAccessWidgetCount(int count);
+
+  /// Button that asks the launcher to add the Recent clips widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Add widget'**
+  String get quickAccessAddWidget;
+
+  /// Space-separated search keywords for the widget row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'home screen widget launcher recent'**
+  String get quickAccessWidgetKeywords;
 }
 
 class _AppLocalizationsDelegate

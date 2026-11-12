@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4384,4 +4385,169 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get transformsTrackingPlaceholder =>
       'ad veya ad@alanadı, ardından Enter';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Hızlı erişim durumu kullanılamıyor';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste klavye, kutucuk ve widget durumunu okuyamadı. Tekrar deneyin.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'İşlem tamamlanamadı';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android istenen ekranı açmadı veya değişikliği kaydetmedi. Tekrar deneyin.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Öğe klavyesi';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Sistem klavye ayarlarında CopyPaste öğeleri\'ni açın. Android, bir klavyenin yazdıklarınızı görebileceği konusunda uyarır: öğe paneli tuş vuruşlarını asla kaydetmez, diğer uygulamalara yazma tuşu yoktur ve yalnızca dokunduğunuz öğeleri ekler.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Açık';
+
+  @override
+  String get quickAccessKeyboardOff => 'Kapalı';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Klavye ayarlarını aç';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'CopyPaste öğeleri klavye panelini açın.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'klavye giriş yöntemi ime panel etkinleştir';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Öğe klavyesine geç';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'CopyPaste öğeleri\'ni geçerli klavye olarak seçin. Seçili kaldığı sürece her kopya kaydedilir.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Klavye seç';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Geçerli klavye';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Yakalama modu';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Shizuku veya ADB erişimi olmadan kopyalar yalnızca öğe paneli açıldığında, panel seçili kaldığı sürece veya CopyPaste uygulaması, bir kutucuk, widget ya da Paylaş üzerinden kaydedilir.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Diğer uygulamalardaki kopyaların nasıl kaydedildiğini görün.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'yakalama düzey tam panel manuel shizuku toplama';
+
+  @override
+  String get quickAccessTierFull => 'Tam: her kopya arka planda kaydedilir';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panel seçili: toplanıyor';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Panel modu: açılışta yakalama';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuel: uygulama, kutucuk, widget veya Paylaş üzerinden kaydedin';
+
+  @override
+  String get quickAccessTierPaused => 'Yakalama duraklatıldı';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Ekledikten sonra önceki klavyeye dön';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Tek bir eklemeden sonra geri döner. Kuyruk sekmesini veya öğe işlemlerini kullanırken panel açık kalır. Kopya toplamaya devam etmek için kapatın.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'geri dön önceki klavye otomatik ekle';
+
+  @override
+  String get quickAccessFocusSearchTitle => 'Panel açılınca aramaya odaklan';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Paneli arama alanında açar. Kapalıyken öğeleriniz tek dokunuş uzaklıktadır.';
+
+  @override
+  String get quickAccessTilesTitle => 'Hızlı Ayarlar kutucukları';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Panoyu kaydet ve Pano yakalama kutucuklarını ekleyin.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'hızlı ayarlar kutucuk bildirim paneli kaydet duraklat';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Ekranın üstünden iki kez aşağı kaydırın, Düzenle\'ye dokunun ve bir CopyPaste kutucuğunu Hızlı Ayarlar\'a sürükleyin.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Panoyu kaydet kutucuğu';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Hızlı Ayarlar\'dan panodakini kaydeder.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Pano yakalama kutucuğu';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Hızlı Ayarlar\'dan yakalamayı duraklatır ve sürdürür.';
+
+  @override
+  String get quickAccessAddTile => 'Kutucuk ekle';
+
+  @override
+  String get quickAccessTileAdded => 'Hızlı Ayarlar\'a eklendi';
+
+  @override
+  String get quickAccessWidgetTitle => 'Son öğeler widget\'ı';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'En son öğelerinizi ana ekranda gösterir. Kopyalamak için birine dokunun.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Ana ekrana dokunup basılı tutun, Widget\'lar\'a dokunun ve CopyPaste\'teki Son öğeler\'i sürükleyin.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widget eklendi',
+      zero: 'Eklenmedi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Widget ekle';
+
+  @override
+  String get quickAccessWidgetKeywords => 'ana ekran widget başlatıcı son';
 }

@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4502,4 +4503,177 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsTrackingPlaceholder => 'nome o nome@dominio, poi Invio';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Stato dell\'accesso rapido non disponibile';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste non è riuscito a leggere lo stato di tastiera, riquadri e widget. Riprova.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Impossibile completare l\'azione';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android non ha aperto la schermata richiesta o non ha salvato la modifica. Riprova.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Tastiera degli elementi';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Attiva Elementi CopyPaste nelle impostazioni della tastiera di sistema. Android avvisa che una tastiera può vedere ciò che digiti: il pannello degli elementi non registra mai i tasti premuti, non ha tasti di digitazione per altre app e inserisce solo gli elementi che tocchi.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Attivata';
+
+  @override
+  String get quickAccessKeyboardOff => 'Disattivata';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Apri impostazioni tastiera';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Attiva il pannello tastiera Elementi CopyPaste.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'tastiera metodo di inserimento ime pannello attivare';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle =>
+      'Passa alla tastiera degli elementi';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Scegli Elementi CopyPaste come tastiera attuale. Finché resta selezionata, ogni copia viene salvata.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Scegli tastiera';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Tastiera attuale';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Modalità di acquisizione';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Senza accesso tramite Shizuku o ADB, le copie vengono salvate solo quando si apre il pannello degli elementi, finché resta selezionato, oppure dall\'app CopyPaste, da un riquadro, dal widget o da Condividi.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Scopri come vengono salvate le copie dalle altre app.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'acquisizione livello completa pannello manuale shizuku raccogliere';
+
+  @override
+  String get quickAccessTierFull =>
+      'Completa: ogni copia viene salvata in background';
+
+  @override
+  String get quickAccessTierPanelCollecting =>
+      'Pannello selezionato: raccolta in corso';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Modalità pannello: recupero all\'apertura';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuale: salva dall\'app, da un riquadro, dal widget o da Condividi';
+
+  @override
+  String get quickAccessTierPaused => 'Acquisizione in pausa';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Torna alla tastiera precedente dopo l\'inserimento';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Torna indietro dopo un singolo inserimento. Il pannello resta aperto mentre usi la scheda Coda o le azioni di un elemento. Disattiva per continuare a raccogliere copie.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'tornare tastiera precedente automatico inserire';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Attiva la ricerca all\'apertura del pannello';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Apre il pannello sul campo di ricerca. Se disattivata, i tuoi elementi sono a un tocco di distanza.';
+
+  @override
+  String get quickAccessTilesTitle => 'Riquadri delle Impostazioni rapide';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Aggiungi i riquadri Salva appunti e Acquisizione degli appunti.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'impostazioni rapide riquadro tendina salvare pausa';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Scorri due volte verso il basso dalla parte superiore dello schermo, tocca Modifica e trascina un riquadro di CopyPaste nelle Impostazioni rapide.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Riquadro Salva appunti';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Salva il contenuto degli appunti dalle Impostazioni rapide.';
+
+  @override
+  String get quickAccessCaptureTileTitle =>
+      'Riquadro Acquisizione degli appunti';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Mette in pausa e riprende l\'acquisizione dalle Impostazioni rapide.';
+
+  @override
+  String get quickAccessAddTile => 'Aggiungi riquadro';
+
+  @override
+  String get quickAccessTileAdded => 'Aggiunto alle Impostazioni rapide';
+
+  @override
+  String get quickAccessWidgetTitle => 'Widget Elementi recenti';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Mostra gli elementi più recenti nella schermata Home. Toccane uno per copiarlo.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Tocca e tieni premuta la schermata Home, tocca Widget e trascina Elementi recenti di CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widget aggiunti',
+      one: '1 widget aggiunto',
+      zero: 'Non aggiunto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Aggiungi widget';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'schermata home widget launcher recenti';
 }

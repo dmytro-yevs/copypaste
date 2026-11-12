@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4057,4 +4058,154 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get transformsTrackingPlaceholder => '名称或 名称@域名，然后按 Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => '快速访问状态不可用';
+
+  @override
+  String get quickAccessUnavailableMessage => 'CopyPaste 无法读取键盘、图块和小组件的状态。请重试。';
+
+  @override
+  String get quickAccessActionFailedTitle => '无法完成操作';
+
+  @override
+  String get quickAccessActionFailedMessage => 'Android 未打开所请求的界面或未保存更改。请重试。';
+
+  @override
+  String get quickAccessKeyboardTitle => '剪贴项键盘';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      '在系统键盘设置中开启“CopyPaste 剪贴项”。Android 会提示键盘可以看到你输入的内容：剪贴项面板从不记录按键，没有用于在其他应用中输入的按键，只插入你点按的项目。';
+
+  @override
+  String get quickAccessKeyboardOn => '已开启';
+
+  @override
+  String get quickAccessKeyboardOff => '已关闭';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => '打开键盘设置';
+
+  @override
+  String get quickAccessKeyboardSearchDescription => '开启“CopyPaste 剪贴项”键盘面板。';
+
+  @override
+  String get quickAccessKeyboardKeywords => '键盘 输入法 ime 面板 开启';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => '切换到剪贴项键盘';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      '将“CopyPaste 剪贴项”选为当前键盘。保持选中期间，每次复制都会被保存。';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => '选择键盘';
+
+  @override
+  String get quickAccessKeyboardCurrent => '当前键盘';
+
+  @override
+  String get quickAccessCaptureTierTitle => '捕获模式';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      '没有通过 Shizuku 或 ADB 授予的权限时，只有在剪贴项面板打开时、保持选中期间，或通过 CopyPaste 应用、图块、小组件或分享操作时才会保存复制内容。';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription => '查看如何保存来自其他应用的复制内容。';
+
+  @override
+  String get quickAccessCaptureTierKeywords => '捕获 级别 完整 面板 手动 shizuku 收集';
+
+  @override
+  String get quickAccessTierFull => '完整：在后台保存每次复制';
+
+  @override
+  String get quickAccessTierPanelCollecting => '已选中面板：正在收集';
+
+  @override
+  String get quickAccessTierPanelCatchUp => '面板模式：打开时补存';
+
+  @override
+  String get quickAccessTierManual => '手动：通过应用、图块、小组件或分享保存';
+
+  @override
+  String get quickAccessTierPaused => '捕获已暂停';
+
+  @override
+  String get quickAccessAutoReturnTitle => '插入后返回上一个键盘';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      '单次插入后切换回去。使用“队列”标签页或项目操作时面板保持打开。关闭此项可继续收集复制内容。';
+
+  @override
+  String get quickAccessAutoReturnKeywords => '返回 上一个键盘 自动 插入';
+
+  @override
+  String get quickAccessFocusSearchTitle => '打开面板时聚焦搜索';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      '打开面板时定位到搜索框。关闭时，点按一次即可使用剪贴项。';
+
+  @override
+  String get quickAccessTilesTitle => '快捷设置图块';
+
+  @override
+  String get quickAccessTilesSearchDescription => '添加“保存剪贴板”和“剪贴板捕获”图块。';
+
+  @override
+  String get quickAccessTilesKeywords => '快捷设置 图块 通知栏 保存 暂停';
+
+  @override
+  String get quickAccessTileInstructions =>
+      '从屏幕顶部向下滑动两次，点按“编辑”，然后将 CopyPaste 图块拖到快捷设置中。';
+
+  @override
+  String get quickAccessSaveTileTitle => '“保存剪贴板”图块';
+
+  @override
+  String get quickAccessSaveTileDescription => '从快捷设置保存剪贴板中的内容。';
+
+  @override
+  String get quickAccessCaptureTileTitle => '“剪贴板捕获”图块';
+
+  @override
+  String get quickAccessCaptureTileDescription => '从快捷设置暂停和恢复捕获。';
+
+  @override
+  String get quickAccessAddTile => '添加图块';
+
+  @override
+  String get quickAccessTileAdded => '已添加到快捷设置';
+
+  @override
+  String get quickAccessWidgetTitle => '“最近的剪贴项”小组件';
+
+  @override
+  String get quickAccessWidgetDescription => '在主屏幕上显示最新的剪贴项。点按即可复制。';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      '长按主屏幕，点按“小组件”，然后拖动 CopyPaste 的“最近的剪贴项”。';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已添加 $count 个小组件',
+      zero: '未添加',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => '添加小组件';
+
+  @override
+  String get quickAccessWidgetKeywords => '主屏幕 小组件 启动器 最近';
 }

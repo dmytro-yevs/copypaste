@@ -1,0 +1,27 @@
+package com.copypaste.app
+
+import android.content.Context
+
+/** Device-local keyboard panel options: the app's settings write them and the panel reads them. */
+internal object QuickAccessPreferences {
+    private const val STORE = "copypaste_quick_access"
+
+    enum class PanelOption(val wire: String, val key: String, val default: Boolean) {
+        AUTO_RETURN("autoReturn", "auto-return", true),
+        FOCUS_SEARCH_ON_OPEN("focusSearchOnOpen", "focus-search-on-open", false);
+
+        companion object {
+            fun fromWire(wire: String?): PanelOption? = entries.firstOrNull { it.wire == wire }
+        }
+    }
+
+    fun enabled(context: Context, option: PanelOption): Boolean =
+        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).getBoolean(option.key, option.default)
+
+    fun setEnabled(context: Context, option: PanelOption, enabled: Boolean): Boolean =
+        context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+            .edit().putBoolean(option.key, enabled).commit()
+
+    fun asMap(context: Context): Map<String, Boolean> =
+        PanelOption.entries.associate { it.wire to enabled(context, it) }
+}

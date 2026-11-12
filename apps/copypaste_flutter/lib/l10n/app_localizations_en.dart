@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4372,4 +4373,169 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get transformsTrackingPlaceholder => 'name or name@domain, then Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => 'Quick access status unavailable';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste couldn\'t read the keyboard, tile, and widget status. Try again.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Couldn\'t complete that';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android didn\'t open the requested screen or save the change. Try again.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Clips keyboard';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Turn on CopyPaste clips in the system keyboard settings. Android warns that a keyboard can see what you type: the clips panel never records keystrokes, has no typing keys for other apps, and inserts only the items you tap.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Turned on';
+
+  @override
+  String get quickAccessKeyboardOff => 'Turned off';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Open keyboard settings';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Turn on the CopyPaste clips keyboard panel.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'keyboard input method ime panel enable';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Switch to the clips keyboard';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Choose CopyPaste clips as the current keyboard. While it stays selected, each copy is saved.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Choose keyboard';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Current keyboard';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Capture mode';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Without Shizuku or ADB access, copies are saved only when the clips panel opens, while it stays selected, or from the CopyPaste app, a tile, the widget, or Share.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'See how copies from other apps are saved.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'capture tier full panel manual shizuku collect';
+
+  @override
+  String get quickAccessTierFull =>
+      'Full: every copy is saved in the background';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panel selected: collecting';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Panel mode: catch-up on open';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manual: save from the app, a tile, the widget, or Share';
+
+  @override
+  String get quickAccessTierPaused => 'Capture paused';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Return to previous keyboard after inserting';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Switches back after a single insert. The panel stays open while you use the Queue tab or item actions. Turn off to keep collecting copies.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'switch back previous keyboard auto return insert';
+
+  @override
+  String get quickAccessFocusSearchTitle => 'Focus search when the panel opens';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Opens the panel on its search field. When off, your clips are one tap away.';
+
+  @override
+  String get quickAccessTilesTitle => 'Quick Settings tiles';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Add the Save clipboard and Clipboard capture tiles.';
+
+  @override
+  String get quickAccessTilesKeywords => 'quick settings tile shade save pause';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Swipe down twice from the top of the screen, tap Edit, and drag a CopyPaste tile into Quick Settings.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Save clipboard tile';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Saves what\'s on the clipboard from Quick Settings.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Clipboard capture tile';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Pauses and resumes capture from Quick Settings.';
+
+  @override
+  String get quickAccessAddTile => 'Add tile';
+
+  @override
+  String get quickAccessTileAdded => 'Added to Quick Settings';
+
+  @override
+  String get quickAccessWidgetTitle => 'Recent clips widget';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Shows your latest clips on the home screen. Tap one to copy it.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Touch and hold the home screen, tap Widgets, and drag Recent clips from CopyPaste.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widgets added',
+      one: '1 widget added',
+      zero: 'Not added',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Add widget';
+
+  @override
+  String get quickAccessWidgetKeywords => 'home screen widget launcher recent';
 }
