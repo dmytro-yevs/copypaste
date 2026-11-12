@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON formatieren",
+      "description": "Rückt JSON ein und behält Zahlen, Escapes und Schlüsselreihenfolge exakt bei.",
+      "params": {
+        "indent": {
+          "label": "Einrückung",
+          "options": {
+            "2": "2 Leerzeichen",
+            "4": "4 Leerzeichen",
+            "tab": "Tabulator"
+          }
+        },
+        "sort_keys": {
+          "label": "Schlüssel sortieren"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON minimieren",
+      "description": "Entfernt alle unnötigen Leerzeichen aus JSON."
+    },
+    "structure.json_validate": {
+      "name": "JSON prüfen",
+      "description": "Prüft, ob der Text gültiges JSON ist, und zeigt Fehlerstellen, ohne ihn zu ändern.",
+      "params": {
+        "lenient": {
+          "label": "Kommentare und nachgestellte Kommas erlauben"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON-Schlüssel sortieren",
+      "description": "Sortiert Objektschlüssel nach Codepunkt; Arrays behalten ihre Reihenfolge.",
+      "params": {
+        "recursive": {
+          "label": "Verschachtelte Objekte einbeziehen"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Als JSON-String maskieren",
+      "description": "Setzt den Text in ein JSON-Stringliteral und maskiert Anführungszeichen und Zeilenumbrüche."
+    },
+    "structure.json_unquote": {
+      "name": "JSON-String demaskieren",
+      "description": "Wandelt ein JSON-Stringliteral in Klartext zurück, auch doppelt kodiertes JSON."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML zu JSON",
+      "description": "Wandelt ein einzelnes YAML-Dokument in JSON um.",
+      "params": {
+        "indent": {
+          "label": "Einrückung",
+          "options": {
+            "2": "2 Leerzeichen",
+            "4": "4 Leerzeichen",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON zu YAML",
+      "description": "Wandelt JSON in YAML im Blockstil um."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV zu JSON",
+      "description": "Wandelt CSV- oder TSV-Zeilen in JSON um; Werte bleiben Text.",
+      "params": {
+        "header": {
+          "label": "Erste Zeile ist Kopfzeile"
+        },
+        "delimiter": {
+          "label": "Trennzeichen",
+          "options": {
+            "auto": "Erkennen",
+            "comma": "Komma",
+            "semicolon": "Semikolon",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML formatieren",
+      "description": "Rückt XML-Elemente ein, ohne Text zu ändern; externe Entitäten werden nie geladen.",
+      "params": {
+        "indent": {
+          "label": "Einrückung",
+          "options": {
+            "2": "2 Leerzeichen",
+            "4": "4 Leerzeichen",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML minimieren",
+      "description": "Entfernt Leerraum zwischen XML-Elementen."
+    }
+  },
   "encode": {},
   "case": {
     "case.upper": {

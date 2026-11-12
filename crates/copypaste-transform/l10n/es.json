@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "Formatear JSON",
+      "description": "Aplica sangría al JSON y conserva números, escapes y orden de claves tal como están escritos.",
+      "params": {
+        "indent": {
+          "label": "Sangría",
+          "options": {
+            "2": "2 espacios",
+            "4": "4 espacios",
+            "tab": "Tabulador"
+          }
+        },
+        "sort_keys": {
+          "label": "Ordenar claves"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minificar JSON",
+      "description": "Elimina todos los espacios en blanco innecesarios del JSON."
+    },
+    "structure.json_validate": {
+      "name": "Validar JSON",
+      "description": "Comprueba si el texto es JSON válido y muestra dónde falla, sin modificarlo.",
+      "params": {
+        "lenient": {
+          "label": "Permitir comentarios y comas finales"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Ordenar claves JSON",
+      "description": "Ordena las claves de los objetos por punto de código; los arrays conservan su orden.",
+      "params": {
+        "recursive": {
+          "label": "Incluir objetos anidados"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Entrecomillar como cadena JSON",
+      "description": "Envuelve el texto en un literal de cadena JSON y escapa comillas y saltos de línea."
+    },
+    "structure.json_unquote": {
+      "name": "Quitar comillas de cadena JSON",
+      "description": "Decodifica un literal de cadena JSON a texto plano, incluido JSON doblemente codificado."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML a JSON",
+      "description": "Convierte un único documento YAML a JSON.",
+      "params": {
+        "indent": {
+          "label": "Sangría",
+          "options": {
+            "2": "2 espacios",
+            "4": "4 espacios",
+            "tab": "Tabulador"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON a YAML",
+      "description": "Convierte JSON a YAML en estilo de bloque."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV a JSON",
+      "description": "Convierte filas CSV o TSV a JSON; los valores siguen siendo texto.",
+      "params": {
+        "header": {
+          "label": "La primera fila es el encabezado"
+        },
+        "delimiter": {
+          "label": "Delimitador",
+          "options": {
+            "auto": "Detectar",
+            "comma": "Coma",
+            "semicolon": "Punto y coma",
+            "tab": "Tabulador"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Formatear XML",
+      "description": "Aplica sangría a los elementos XML sin cambiar el texto; nunca se cargan entidades externas.",
+      "params": {
+        "indent": {
+          "label": "Sangría",
+          "options": {
+            "2": "2 espacios",
+            "4": "4 espacios",
+            "tab": "Tabulador"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minificar XML",
+      "description": "Elimina los espacios en blanco entre elementos XML."
+    }
+  },
   "encode": {},
   "case": {
     "case.upper": {

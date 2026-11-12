@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON を整形",
+      "description": "数値、エスケープ、キーの順序を書かれたとおりに保ったまま JSON をインデントします。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        },
+        "sort_keys": {
+          "label": "キーを並べ替え"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON を圧縮",
+      "description": "JSON から不要な空白をすべて削除します。"
+    },
+    "structure.json_validate": {
+      "name": "JSON を検証",
+      "description": "テキストが有効な JSON かを確認し、問題の位置を示します。テキストは変更しません。",
+      "params": {
+        "lenient": {
+          "label": "コメントと末尾のカンマを許可"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON のキーを並べ替え",
+      "description": "オブジェクトのキーをコードポイント順に並べ替えます。配列の順序は保たれます。",
+      "params": {
+        "recursive": {
+          "label": "入れ子のオブジェクトも含める"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON 文字列として引用",
+      "description": "テキストを JSON 文字列リテラルで囲み、引用符と改行をエスケープします。"
+    },
+    "structure.json_unquote": {
+      "name": "JSON 文字列を復元",
+      "description": "JSON 文字列リテラルをプレーンテキストに戻します。二重にエンコードされた JSON にも対応します。"
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML から JSON",
+      "description": "1 つの YAML ドキュメントを JSON に変換します。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON から YAML",
+      "description": "JSON をブロックスタイルの YAML に変換します。"
+    },
+    "structure.csv_to_json": {
+      "name": "CSV から JSON",
+      "description": "CSV または TSV の行を JSON に変換します。値はテキストのままです。",
+      "params": {
+        "header": {
+          "label": "1 行目をヘッダーにする"
+        },
+        "delimiter": {
+          "label": "区切り文字",
+          "options": {
+            "auto": "自動検出",
+            "comma": "カンマ",
+            "semicolon": "セミコロン",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML を整形",
+      "description": "テキストを変えずに XML 要素をインデントします。外部エンティティは読み込みません。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML を圧縮",
+      "description": "XML 要素間の空白を削除します。"
+    }
+  },
   "encode": {},
   "case": {
     "case.upper": {

@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "Formatuj JSON",
+      "description": "Dodaje wcięcia do JSON, zachowując liczby, sekwencje ucieczki i kolejność kluczy bez zmian.",
+      "params": {
+        "indent": {
+          "label": "Wcięcie",
+          "options": {
+            "2": "2 spacje",
+            "4": "4 spacje",
+            "tab": "Tabulator"
+          }
+        },
+        "sort_keys": {
+          "label": "Sortuj klucze"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minifikuj JSON",
+      "description": "Usuwa z JSON wszystkie zbędne białe znaki."
+    },
+    "structure.json_validate": {
+      "name": "Sprawdź JSON",
+      "description": "Sprawdza, czy tekst jest poprawnym JSON, i wskazuje błędy, nie zmieniając go.",
+      "params": {
+        "lenient": {
+          "label": "Zezwalaj na komentarze i końcowe przecinki"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Sortuj klucze JSON",
+      "description": "Porządkuje klucze obiektów według punktów kodowych; tablice zachowują kolejność.",
+      "params": {
+        "recursive": {
+          "label": "Uwzględnij zagnieżdżone obiekty"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Ujmij jako ciąg JSON",
+      "description": "Umieszcza tekst w literale ciągu JSON, poprzedzając cudzysłowy i podziały wierszy znakiem ucieczki."
+    },
+    "structure.json_unquote": {
+      "name": "Rozpakuj ciąg JSON",
+      "description": "Dekoduje literał ciągu JSON do zwykłego tekstu, także podwójnie zakodowany JSON."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML na JSON",
+      "description": "Konwertuje pojedynczy dokument YAML na JSON.",
+      "params": {
+        "indent": {
+          "label": "Wcięcie",
+          "options": {
+            "2": "2 spacje",
+            "4": "4 spacje",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON na YAML",
+      "description": "Konwertuje JSON na YAML w stylu blokowym."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV na JSON",
+      "description": "Konwertuje wiersze CSV lub TSV na JSON; wartości pozostają tekstem.",
+      "params": {
+        "header": {
+          "label": "Pierwszy wiersz to nagłówek"
+        },
+        "delimiter": {
+          "label": "Separator",
+          "options": {
+            "auto": "Wykryj",
+            "comma": "Przecinek",
+            "semicolon": "Średnik",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Formatuj XML",
+      "description": "Dodaje wcięcia do elementów XML bez zmiany tekstu; zewnętrzne encje nigdy nie są wczytywane.",
+      "params": {
+        "indent": {
+          "label": "Wcięcie",
+          "options": {
+            "2": "2 spacje",
+            "4": "4 spacje",
+            "tab": "Tabulator"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minifikuj XML",
+      "description": "Usuwa białe znaki między elementami XML."
+    }
+  },
   "encode": {},
   "case": {
     "case.upper": {

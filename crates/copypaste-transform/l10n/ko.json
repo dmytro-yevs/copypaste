@@ -1,5 +1,107 @@
 {
-  "structure": {},
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON 서식 지정",
+      "description": "숫자, 이스케이프, 키 순서를 작성된 그대로 유지하며 JSON을 들여씁니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        },
+        "sort_keys": {
+          "label": "키 정렬"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON 축소",
+      "description": "JSON에서 불필요한 공백을 모두 제거합니다."
+    },
+    "structure.json_validate": {
+      "name": "JSON 검증",
+      "description": "텍스트가 올바른 JSON인지 확인하고 문제 위치를 보여 줍니다. 텍스트는 바꾸지 않습니다.",
+      "params": {
+        "lenient": {
+          "label": "주석과 후행 쉼표 허용"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON 키 정렬",
+      "description": "객체 키를 코드 포인트 순으로 정렬합니다. 배열 순서는 유지됩니다.",
+      "params": {
+        "recursive": {
+          "label": "중첩된 객체 포함"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON 문자열로 감싸기",
+      "description": "텍스트를 JSON 문자열 리터럴로 감싸고 따옴표와 줄바꿈을 이스케이프합니다."
+    },
+    "structure.json_unquote": {
+      "name": "JSON 문자열 풀기",
+      "description": "JSON 문자열 리터럴을 일반 텍스트로 되돌립니다. 이중 인코딩된 JSON도 처리합니다."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML을 JSON으로",
+      "description": "YAML 문서 하나를 JSON으로 변환합니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON을 YAML로",
+      "description": "JSON을 블록 스타일 YAML로 변환합니다."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV를 JSON으로",
+      "description": "CSV 또는 TSV 행을 JSON으로 변환합니다. 값은 텍스트로 유지됩니다.",
+      "params": {
+        "header": {
+          "label": "첫 행을 헤더로 사용"
+        },
+        "delimiter": {
+          "label": "구분 기호",
+          "options": {
+            "auto": "자동 감지",
+            "comma": "쉼표",
+            "semicolon": "세미콜론",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML 서식 지정",
+      "description": "텍스트를 바꾸지 않고 XML 요소를 들여씁니다. 외부 엔터티는 불러오지 않습니다.",
+      "params": {
+        "indent": {
+          "label": "들여쓰기",
+          "options": {
+            "2": "공백 2칸",
+            "4": "공백 4칸",
+            "tab": "탭"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML 축소",
+      "description": "XML 요소 사이의 공백을 제거합니다."
+    }
+  },
   "encode": {},
   "case": {
     "case.upper": {
