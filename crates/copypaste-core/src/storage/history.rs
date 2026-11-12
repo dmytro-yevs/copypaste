@@ -11,6 +11,7 @@ use rusqlite::{params_from_iter, types::Value};
 use sha2::{Digest, Sha256};
 
 use super::fuzzy_search;
+use super::local_state::{self, unexpired};
 use super::model::{
     item_columns_ci, item_columns_preview_ci, row_to_item, ItemColumns, StoreError, StoredItem,
 };
@@ -79,6 +80,8 @@ pub struct HistoryPreviewRow {
     pub row: StoredItem,
     /// None indicates that the original payload failed authentication.
     pub preview: Option<crate::history_item::StaticHistoryPreview>,
+    /// Per-clip state outside the payload, already bounded for the wire.
+    pub annotations: Option<copypaste_ipc::ItemAnnotations>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +93,7 @@ pub struct HistoryPreviewPage {
 struct QueryPage {
     items: Vec<StoredItem>,
     previews: Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    annotations: Vec<Option<copypaste_ipc::ItemAnnotations>>,
     next: Option<HistoryCursor>,
 }
 
@@ -504,7 +508,12 @@ impl Store {
                 .items
                 .into_iter()
                 .zip(page.previews)
-                .map(|(row, preview)| HistoryPreviewRow { row, preview })
+                .zip(page.annotations)
+                .map(|((row, preview), annotations)| HistoryPreviewRow {
+                    row,
+                    preview,
+                    annotations,
+                })
                 .collect(),
             next: page.next,
         })
@@ -533,6 +542,7 @@ impl Store {
             return Ok(QueryPage {
                 items: Vec::new(),
                 previews: Vec::new(),
+                annotations: Vec::new(),
                 next: None,
             });
         }
@@ -561,6 +571,7 @@ impl Store {
             return Ok(QueryPage {
                 items: Vec::new(),
                 previews: Vec::new(),
+                annotations: Vec::new(),
                 next: None,
             });
         }
@@ -579,7 +590,7 @@ impl Store {
                 }
             }
         }
-        let mut filters = String::from("ci.deleted = 0");
+        let mut filters = String::from(concat!("ci.deleted = 0 AND ", unexpired!("ci.")));
         let match_parameter = if let Some(search) = &search {
             filters.push_str(" AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')");
             values.push(Value::Text(search.expanded.clone()));
@@ -781,6 +792,7 @@ impl Store {
         let mut items = Vec::with_capacity(limit as usize);
         let mut bytes = 0usize;
         let mut previews = Vec::new();
+        let mut annotations = Vec::new();
         let mut pending = Vec::new();
         let mut more = false;
         let mut last_relevance = None;
@@ -790,13 +802,20 @@ impl Store {
                 break;
             }
             let item = row_to_item(row, &columns)?;
-            let item_bytes = if preview_keys.is_some() {
-                let logical: i64 = row.get("logical_cipher_bytes")?;
-                usize::try_from(logical).unwrap_or(usize::MAX)
-            } else {
-                item.content_ciphertext.len()
-            }
-            .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
+            let annotated = match preview_keys {
+                Some(_) => local_state::annotations(&tx, &item.id)?,
+                None => None,
+            };
+            let item_bytes = copypaste_ipc::limits::page_item_bytes(
+                if preview_keys.is_some() {
+                    let logical: i64 = row.get("logical_cipher_bytes")?;
+                    usize::try_from(logical).unwrap_or(usize::MAX)
+                } else {
+                    item.content_ciphertext.len()
+                }
+                .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len)),
+                annotated.as_ref(),
+            );
             if !items.is_empty() && bytes.saturating_add(item_bytes) > budget {
                 more = true;
                 break;
@@ -809,6 +828,7 @@ impl Store {
                 let resolved =
                     super::history_preview::resolve(&tx, row, &item, item_key, preview_key)?;
                 previews.push(resolved.preview);
+                annotations.push(annotated);
                 if let Some(write) = resolved.pending {
                     pending.push(write);
                 }
@@ -837,6 +857,7 @@ impl Store {
         Ok(QueryPage {
             items,
             previews,
+            annotations,
             next,
         })
     }

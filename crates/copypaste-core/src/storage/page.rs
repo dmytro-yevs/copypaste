@@ -53,6 +53,7 @@
 
 use rusqlite::{params, OptionalExtension};
 
+use super::local_state::{self, unexpired};
 use super::model::{item_columns, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
@@ -177,9 +178,14 @@ fn fetch_bounded(
         } else {
             item.content_ciphertext.len()
         };
-        let next_bytes = bytes
-            .saturating_add(logical_bytes)
-            .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
+        let annotations = match preview.keys {
+            Some(_) => local_state::annotations(conn, &item.id)?,
+            None => None,
+        };
+        let next_bytes = bytes.saturating_add(copypaste_ipc::limits::page_item_bytes(
+            logical_bytes.saturating_add(item.payload_metadata.as_ref().map_or(0, String::len)),
+            annotations.as_ref(),
+        ));
         if !out.is_empty() && next_bytes > budget {
             return Ok(BoundedFetch::BudgetReached);
         }
@@ -188,6 +194,7 @@ fn fetch_bounded(
             let resolved =
                 super::history_preview::resolve(conn, row, &item, item_key, preview_key)?;
             preview.items.push(resolved.preview);
+            preview.annotations.push(annotations);
             if let Some(write) = resolved.pending {
                 preview.pending.push(write);
             }
@@ -196,9 +203,16 @@ fn fetch_bounded(
     }
 }
 
+/// Previews and annotations of a bounded page, index-aligned with its rows.
+type PagePreviews = (
+    Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    Vec<Option<copypaste_ipc::ItemAnnotations>>,
+);
+
 struct PreviewContext<'a> {
     keys: Option<(&'a crate::ItemKey, &'a crate::PreviewKey)>,
     items: Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    annotations: Vec<Option<copypaste_ipc::ItemAnnotations>>,
     pending: Vec<super::history_preview::Pending>,
 }
 
@@ -247,8 +261,9 @@ const UNPINNED_SEEK_SQL: &str = concat!(
     "SELECT ",
     item_columns!(),
     ", pin_order FROM clipboard_items INDEXED BY idx_items_evictable \
-      WHERE deleted = 0 AND pinned = 0 \
-        AND created_at <= ?1 AND (created_at < ?1 OR id < ?2) \
+      WHERE deleted = 0 AND pinned = 0 AND ",
+    unexpired!(""),
+    " AND created_at <= ?1 AND (created_at < ?1 OR id < ?2) \
       ORDER BY created_at DESC, id DESC \
       LIMIT ?3"
 );
@@ -257,8 +272,9 @@ const UNPINNED_HEAD_SQL: &str = concat!(
     "SELECT ",
     item_columns!(),
     ", pin_order FROM clipboard_items INDEXED BY idx_items_evictable \
-      WHERE deleted = 0 AND pinned = 0 \
-      ORDER BY created_at DESC, id DESC \
+      WHERE deleted = 0 AND pinned = 0 AND ",
+    unexpired!(""),
+    " ORDER BY created_at DESC, id DESC \
       LIMIT ?1"
 );
 
@@ -350,14 +366,20 @@ impl Store {
         item_key: &crate::ItemKey,
         preview_key: &crate::PreviewKey,
     ) -> Result<PreviewPage, StoreError> {
-        let (page, previews) =
+        let (page, (previews, annotations)) =
             self.list_from_bounded_inner(after, limit, budget, Some((item_key, preview_key)))?;
         Ok(PreviewPage {
             items: page
                 .items
                 .into_iter()
-                .zip(previews)
-                .map(|(row, preview)| super::history::HistoryPreviewRow { row, preview })
+                .zip(previews.into_iter().zip(annotations))
+                .map(
+                    |(row, (preview, annotations))| super::history::HistoryPreviewRow {
+                        row,
+                        preview,
+                        annotations,
+                    },
+                )
                 .collect(),
             next: page.next,
         })
@@ -369,14 +391,14 @@ impl Store {
         limit: u32,
         budget: usize,
         keys: Option<(&crate::ItemKey, &crate::PreviewKey)>,
-    ) -> Result<(Page, Vec<Option<crate::history_item::StaticHistoryPreview>>), StoreError> {
+    ) -> Result<(Page, PagePreviews), StoreError> {
         if limit == 0 {
             return Ok((
                 Page {
                     items: Vec::new(),
                     next: None,
                 },
-                Vec::new(),
+                Default::default(),
             ));
         }
 
@@ -390,6 +412,7 @@ impl Store {
         let mut preview = PreviewContext {
             keys,
             items: Vec::new(),
+            annotations: Vec::new(),
             pending: Vec::new(),
         };
         let limit = limit as usize;
@@ -471,7 +494,7 @@ impl Store {
                 items: rows.into_iter().map(|(item, _)| item).collect(),
                 next,
             },
-            preview.items,
+            (preview.items, preview.annotations),
         ))
     }
 

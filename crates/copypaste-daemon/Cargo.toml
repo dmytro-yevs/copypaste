@@ -70,6 +70,7 @@ clipboard-win = { version = "5.4", features = ["std"] }
 # this (`active-win-pos-rs` and friends) also return the window title, which is
 # user content we deliberately never read. See ADR-0018. WinTrust and
 # Cryptography verify the IPC client's Authenticode signer (peer identity).
+# Power subscribes to system resume for the deadline scheduler.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
@@ -78,6 +79,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security_Cryptography_Sip",
     "Win32_Security_WinTrust",
     "Win32_System_DataExchange",
+    "Win32_System_Power",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }

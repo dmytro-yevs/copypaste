@@ -262,6 +262,8 @@ enum NotificationKind {
     Activated,
     Deactivated,
     Gap,
+    /// A coverage gap that also resumes the deadline task.
+    Wake,
 }
 
 fn notification_bundle(notification: NonNull<NSNotification>) -> Option<String> {
@@ -298,7 +300,7 @@ fn install_observers(
                 NotificationKind::Deactivated,
             ),
             (NSWorkspaceWillSleepNotification, NotificationKind::Gap),
-            (NSWorkspaceDidWakeNotification, NotificationKind::Gap),
+            (NSWorkspaceDidWakeNotification, NotificationKind::Wake),
             (
                 NSWorkspaceSessionDidResignActiveNotification,
                 NotificationKind::Gap,
@@ -315,6 +317,9 @@ fn install_observers(
             let shared = Arc::clone(shared);
             let block = RcBlock::new(move |notification: NonNull<NSNotification>| {
                 let result = catch_unwind(AssertUnwindSafe(|| {
+                    if matches!(kind, NotificationKind::Wake) {
+                        crate::power::resumed();
+                    }
                     // Delivery with no operation queue is synchronous on the posting
                     // thread. Off-main delivery records unknown coverage directly
                     // under the decision's history mutex without accessing Cocoa.
@@ -329,7 +334,7 @@ fn install_observers(
                         NotificationKind::Deactivated => {
                             shared.deactivate(notification_bundle(notification))
                         }
-                        NotificationKind::Gap => shared.record(None),
+                        NotificationKind::Gap | NotificationKind::Wake => shared.record(None),
                     });
                 }));
                 if let Err(payload) = result {
@@ -462,6 +467,11 @@ impl Drop for MainService {
             unsafe { CFRunLoopSourceInvalidate(signal.source.as_concrete_TypeRef()) };
         }
     }
+}
+
+/// Whether the workspace observers, including the wake notification, run.
+pub(crate) fn observes_wake() -> bool {
+    lock(&SERVICE).as_ref().and_then(Weak::upgrade).is_some()
 }
 
 /// Sample a primitive cursor before reading changeCount; this performs no Cocoa

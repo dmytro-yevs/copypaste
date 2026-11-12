@@ -6,15 +6,18 @@
 //! protocol; those remain in `copypaste-core` and `copypaste-p2p`.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
+use copypaste_core::rules::compile::CompiledRuleSet;
+use copypaste_core::storage::local_state::LibraryRevision;
 use copypaste_core::{now_ms, p2p_contract, ClipboardPayload, Keyring, Store, StoreSource};
 use copypaste_ipc::{
-    CapabilityGuarantee, CapabilityState, CapabilityStatus, EventData, EventKind,
-    PlatformCapability,
+    CapabilityGuarantee, CapabilityState, CapabilityStatus, EventData, EventKind, LibraryKinds,
+    OperationProgress, PlatformCapability,
 };
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
@@ -22,6 +25,7 @@ use copypaste_p2p::Node;
 use tokio::sync::{broadcast, watch};
 
 pub mod capture_admission;
+mod deadlines;
 mod dispatch;
 mod features;
 pub mod host;
@@ -32,6 +36,7 @@ mod peer_sync;
 pub mod settings;
 
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
+pub use deadlines::ResumeWaker;
 pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
 pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost, WriteOptions};
 pub use meta::{Meta, Origin};
@@ -41,6 +46,13 @@ pub use settings::{Settings, SettingsError, SettingsReadGuard, SettingsTransitio
 /// Change events buffered per subscriber before it is told it lagged. Small on
 /// purpose: the recovery for a lag is one extra re-read.
 pub const EVENT_BUFFER: usize = 256;
+
+/// `Library` events are coalesced to at most one per this window.
+const LIBRARY_COALESCE_MS: i64 = 500;
+/// `Progress` events are coalesced to at most one per this window.
+const PROGRESS_COALESCE_MS: i64 = 250;
+/// Concurrent operations whose progress is coalesced.
+const MAX_PROGRESS_OPERATIONS: usize = 32;
 
 /// What a host opens before the runtime is composed over it. The host owns
 /// the keyring and the store so it can report their failures its own way.
@@ -71,6 +83,9 @@ pub struct Runtime {
     pub source: Arc<StoreSource>,
     host: Arc<dyn RuntimeHost>,
     changes: Arc<Changes>,
+    deadlines: Arc<deadlines::Deadlines>,
+    /// The content rules compiled for one rules revision.
+    compiled_rules: Mutex<Option<(i64, Arc<CompiledRuleSet>)>>,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
@@ -86,9 +101,67 @@ struct Changes {
     store: Store,
     modules: Weak<copypaste_modules::ModuleHost>,
     host: Arc<dyn RuntimeHost>,
+    deadlines: Arc<deadlines::Deadlines>,
+    clipboard: features::ClipboardOwner,
+    library: Mutex<LibraryChanges>,
+    progress: Mutex<HashMap<String, ProgressSlot>>,
+}
+
+/// Library changes waiting for the coalesced `Library` event.
+#[derive(Default)]
+struct LibraryChanges {
+    kinds: LibraryKinds,
+    /// A peer or the cloud applied versions; diff the revision to learn what.
+    received: bool,
+    scheduled: bool,
+    baseline: Option<LibraryRevision>,
+}
+
+/// The last emission of one operation's progress and the update held back.
+struct ProgressSlot {
+    emitted_at: i64,
+    held: Option<OperationProgress>,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Changes {
+    /// Send one event when anyone listens; the count is read only then.
+    fn send(&self, event: EventKind, fill: impl FnOnce(&mut EventData)) {
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let mut data = EventData::change(event, self.store.count().unwrap_or(0));
+        fill(&mut data);
+        let _ = self.events.send(data);
+    }
+
+    /// Versions arrived from a peer or the cloud. The coalesced flush
+    /// re-checks library kinds and sweeps deadlines, since a synced expiry
+    /// may have arrived; a long pull costs one sweep per window, not per row.
+    fn received(&self) {
+        self.library_changed(LibraryKinds::default(), true);
+    }
+
+    fn library_changed(&self, kinds: LibraryKinds, received: bool) {
+        let mut library = locked(&self.library);
+        library.kinds = library.kinds.union(kinds);
+        library.received |= received;
+        if std::mem::replace(&mut library.scheduled, true) {
+            return;
+        }
+        drop(library);
+        self.deadlines.schedule(
+            deadlines::DeadlineKey::new("library_event", ""),
+            self.deadlines.now().saturating_add(LIBRARY_COALESCE_MS),
+            Box::new(|runtime: &Runtime| runtime.flush_library()),
+        );
+    }
+
     fn publish(&self, event: EventKind, captured_item_id: Option<&str>) {
         if event == EventKind::Items {
             if let Some(modules) = self.modules.upgrade() {
@@ -110,6 +183,7 @@ impl Changes {
     /// A received item reached the system clipboard: copy feedback without
     /// treating the receive as local activity.
     fn received_copy(&self, item_id: &str) {
+        self.clipboard.changed(Some(item_id));
         self.publish(EventKind::Items, Some(item_id));
         self.host.copy_feedback();
     }
@@ -229,11 +303,16 @@ impl Runtime {
         ));
         let modules = Arc::new(copypaste_modules::ModuleHost::new(&data_dir));
         let events = broadcast::channel(EVENT_BUFFER).0;
+        let deadlines = Arc::new(deadlines::Deadlines::default());
         let changes = Arc::new(Changes {
             events: events.clone(),
             store: store.clone(),
             modules: Arc::downgrade(&modules),
             host: Arc::clone(&host),
+            deadlines: Arc::clone(&deadlines),
+            clipboard: features::ClipboardOwner::default(),
+            library: Mutex::default(),
+            progress: Mutex::default(),
         });
         let instant_clipboard = Arc::new(copypaste_core::sync::InstantClipboard::default());
         let source = Arc::new(Self::source(
@@ -277,6 +356,8 @@ impl Runtime {
             source,
             host,
             changes,
+            deadlines,
+            compiled_rules: Mutex::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
@@ -391,6 +472,7 @@ impl Runtime {
                         local_node.cursors().note_local(stamp);
                         local_driver.wake();
                         local_changes.publish(EventKind::Items, None);
+                        local_changes.received();
                     },
                 )
                 .with_group(
@@ -502,6 +584,7 @@ impl Runtime {
     /// sync until [`Runtime::shutdown`]. Idempotent while the listener runs.
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
         self.start_module_sync();
+        self.start_deadlines();
         if self.listener_started.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -547,7 +630,7 @@ impl Runtime {
             move |_, outcome| {
                 session.remember_device(outcome);
                 if outcome.stats.received > 0 {
-                    session.note_remote_change();
+                    session.note_received_change();
                 }
             },
             move |sync_status_changed: bool| {
@@ -656,12 +739,178 @@ impl Runtime {
         self.changes.publish(EventKind::Items, Some(item_id));
         self.p2p.wake();
         self.modules.note_version(floor_ms);
+        self.on_captured(item_id);
     }
 
     /// History changed because a peer or the cloud delivered something, or
     /// only its presentation changed.
     pub fn note_remote_change(&self) {
         self.changes.publish(EventKind::Items, None);
+    }
+
+    /// A peer or the cloud applied versions here: history changed, library
+    /// records may have, and a synced deadline may have arrived.
+    pub fn note_received_change(&self) {
+        self.note_remote_change();
+        self.changes.received();
+    }
+
+    /// A host saw the clipboard change without capturing it (paused or
+    /// excluded), so a pending restore must not overwrite it.
+    pub fn note_clipboard_changed(&self) {
+        self.changes.clipboard.changed(None);
+    }
+
+    /// A store deadline (a clip expiry, a purge time) was written; the
+    /// deadline task re-arms when it is the earliest.
+    pub fn note_store_deadline(&self, at_ms: i64) {
+        self.deadlines.note_store_deadline(at_ms);
+    }
+
+    /// A committed local capture, for the features that follow captures.
+    fn on_captured(&self, item_id: &str) {
+        self.changes.clipboard.changed(Some(item_id));
+        self.paste_queue_captured(item_id);
+    }
+
+    /// History was cleared: the paste queue and the host surfaces that show
+    /// history (Android widgets) are emptied with it.
+    pub(crate) fn on_history_cleared(&self) {
+        self.paste_queue_history_cleared();
+        self.host.history_cleared();
+    }
+
+    /// A paired device was removed: host surfaces drop what they show from it.
+    pub(crate) fn on_device_removed(&self, device_id: &str) {
+        self.host.device_removed(device_id);
+    }
+
+    /// Library records of `kinds` changed locally. Emits one coalesced
+    /// `Library` event and drops compiled rules when rules changed.
+    pub fn on_org_changed(&self, kinds: LibraryKinds) {
+        self.changes.library_changed(kinds, false);
+    }
+
+    fn flush_library(&self) {
+        let (mut kinds, received, baseline) = {
+            let mut library = locked(&self.changes.library);
+            library.scheduled = false;
+            (
+                std::mem::take(&mut library.kinds),
+                std::mem::take(&mut library.received),
+                library.baseline,
+            )
+        };
+        if received {
+            self.deadlines.request_sweep();
+        }
+        match self.store.library_revision() {
+            Ok(current) => {
+                if received {
+                    kinds = kinds.union(
+                        baseline.map_or(LibraryKinds::all(), |base| library_diff(&base, &current)),
+                    );
+                }
+                locked(&self.changes.library).baseline = Some(current);
+            }
+            Err(_) if received => kinds = LibraryKinds::all(),
+            Err(_) => {}
+        }
+        if kinds == LibraryKinds::default() {
+            return;
+        }
+        if kinds.intersects(LibraryKinds::RULES) {
+            *locked(&self.compiled_rules) = None;
+        }
+        self.changes
+            .send(EventKind::Library, |data| data.library = Some(kinds));
+    }
+
+    /// The paste queue moved to `revision`.
+    pub fn note_paste_queue_changed(&self, revision: u64) {
+        self.changes.send(EventKind::PasteQueue, |data| {
+            data.paste_queue_revision = Some(revision);
+        });
+    }
+
+    /// An AI tool approval is pending or a session's authorization changed.
+    pub fn note_ai_approval(&self) {
+        self.changes.send(EventKind::AiApproval, |_| {});
+    }
+
+    /// A long operation advanced. Coalesced per request to one event per
+    /// 250 ms; the final update is never held back.
+    pub fn note_progress(&self, progress: OperationProgress) {
+        let now = self.deadlines.now();
+        let mut slots = locked(&self.changes.progress);
+        if slots.len() >= MAX_PROGRESS_OPERATIONS && !slots.contains_key(&progress.request_id) {
+            slots.clear();
+        }
+        let request_id = progress.request_id.clone();
+        let finished = progress.done >= progress.total;
+        let slot = slots.entry(request_id.clone()).or_insert(ProgressSlot {
+            emitted_at: i64::MIN,
+            held: None,
+        });
+        let due = slot.emitted_at.saturating_add(PROGRESS_COALESCE_MS);
+        if !finished && now < due {
+            let first_held = slot.held.replace(progress).is_none();
+            drop(slots);
+            if first_held {
+                let request = request_id.clone();
+                self.deadlines.schedule(
+                    deadlines::DeadlineKey::new("progress_event", request_id),
+                    due,
+                    Box::new(move |runtime: &Runtime| runtime.flush_progress(&request)),
+                );
+            }
+            return;
+        }
+        if finished {
+            slots.remove(&request_id);
+        } else {
+            slot.emitted_at = now;
+            slot.held = None;
+        }
+        drop(slots);
+        if finished {
+            self.deadlines
+                .cancel(&deadlines::DeadlineKey::new("progress_event", request_id));
+        }
+        self.changes
+            .send(EventKind::Progress, |data| data.operation = Some(progress));
+    }
+
+    fn flush_progress(&self, request_id: &str) {
+        let now = self.deadlines.now();
+        let held = locked(&self.changes.progress)
+            .get_mut(request_id)
+            .and_then(|slot| {
+                slot.emitted_at = now;
+                slot.held.take()
+            });
+        if let Some(held) = held {
+            self.changes
+                .send(EventKind::Progress, |data| data.operation = Some(held));
+        }
+    }
+
+    /// The content rules compiled for the current rules revision; `build`
+    /// runs only when the revision moved since the last call.
+    pub fn compiled_rules(
+        &self,
+        build: impl FnOnce(&Store) -> Result<CompiledRuleSet, copypaste_core::StoreError>,
+    ) -> Result<Arc<CompiledRuleSet>, copypaste_core::StoreError> {
+        let revision = self.store.resource_revisions()?.rules;
+        let mut cached = locked(&self.compiled_rules);
+        if let Some((cached_revision, rules)) = cached.as_ref() {
+            if *cached_revision == revision {
+                return Ok(Arc::clone(rules));
+            }
+        }
+        let rules = Arc::new(build(&self.store)?);
+        *cached = Some((revision, Arc::clone(&rules)));
+        Ok(rules)
     }
 
     pub fn note_peers_changed(&self) {
@@ -852,7 +1101,9 @@ impl Runtime {
                 copypaste_ipc::content_type::TEXT,
                 WriteOptions::copy(completion.privacy.secret),
             )
-            .map_err(|_| RuntimeError::Capture)
+            .map_err(|_| RuntimeError::Capture)?;
+        self.changes.clipboard.changed(Some(&item_id));
+        Ok(())
     }
 
     /// Records an image or file captured by an in-process platform host.
@@ -1051,6 +1302,32 @@ impl Runtime {
         let _ = self.capture_admission().shutdown();
         let _ = self.shutdown.send(true);
     }
+}
+
+/// The library kinds whose change markers differ between two revisions.
+fn library_diff(before: &LibraryRevision, after: &LibraryRevision) -> LibraryKinds {
+    [
+        (
+            before.snippets != after.snippets,
+            LibraryKinds::SNIPPETS.union(LibraryKinds::COLLECTIONS),
+        ),
+        (before.rules != after.rules, LibraryKinds::RULES),
+        (before.pipelines != after.pipelines, LibraryKinds::PIPELINES),
+        (
+            before.preferences != after.preferences,
+            LibraryKinds::PREFERENCES,
+        ),
+        (
+            before.set_members != after.set_members,
+            LibraryKinds::SET_MEMBERS,
+        ),
+        (before.grants != after.grants, LibraryKinds::GRANTS),
+    ]
+    .into_iter()
+    .filter(|(changed, _)| *changed)
+    .fold(LibraryKinds::default(), |kinds, (_, kind)| {
+        kinds.union(kind)
+    })
 }
 
 /// Source exclusions need authenticated attribution: without an active source
@@ -3189,5 +3466,48 @@ mod tests {
             capture.backend.as_deref(),
             Some("linux-wayland-data-control")
         );
+    }
+
+    #[tokio::test]
+    async fn library_changes_coalesce_into_one_event_and_clearing_history_reaches_the_host() {
+        #[derive(Default)]
+        struct ClearingClipboard(Mutex<usize>);
+        impl ClipboardWriter for ClearingClipboard {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: WriteOptions,
+            ) -> Result<(), ClipboardWriteError> {
+                Ok(())
+            }
+            fn history_cleared(&self) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let clipboard = Arc::new(ClearingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let task = runtime.start_deadlines().unwrap();
+        let mut events = runtime.subscribe_events();
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        runtime.on_org_changed(LibraryKinds::RULES);
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        let event = events.try_recv().unwrap();
+        assert_eq!(event.event, EventKind::Library);
+        assert_eq!(
+            event.library,
+            Some(LibraryKinds::SNIPPETS.union(LibraryKinds::RULES))
+        );
+        assert!(events.try_recv().is_err(), "one event for the burst");
+
+        assert!(
+            runtime
+                .request_blocking(1, Method::DeleteAll { through: None })
+                .ok
+        );
+        assert_eq!(*clipboard.0.lock().unwrap(), 1);
+        runtime.shutdown();
+        task.await.unwrap();
     }
 }

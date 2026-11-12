@@ -23,7 +23,7 @@ impl PeerSyncHost for RuntimePeerHost {
     async fn sync_peer(&self, peer: Peer, cycle: SyncCycle) -> u64 {
         let result = self.0.sync_one(&peer, &cycle).await;
         if result.received > 0 {
-            self.0.note_remote_change();
+            self.0.note_received_change();
         }
         u64::from(result.sent) + u64::from(result.received)
     }
