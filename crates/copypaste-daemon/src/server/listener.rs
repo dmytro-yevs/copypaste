@@ -1457,7 +1457,7 @@ mod tests {
             .await
             .expect("the history change was filtered and the attach is answered");
         assert_eq!(reply.id, 2);
-        assert_eq!(reply.error_code, Some(ErrorCode::Unsupported));
+        assert_eq!(reply.error_code, Some(ErrorCode::NotFound));
 
         shutdown_tx.send(true).unwrap();
         state.release_drain_listener();

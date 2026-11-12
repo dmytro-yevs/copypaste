@@ -89,6 +89,8 @@ pub(super) enum ClipboardText {
     Provided(String),
     /// The history item the user's clipboard holds, when known.
     Item(Option<String>),
+    /// Only this text, for `clipboard index=0`; history is never read.
+    Only(Option<String>),
 }
 
 impl ClipboardText {
@@ -168,6 +170,8 @@ impl Expansion<'_> {
             let (text, from_secret) = match (self.clipboard, index) {
                 (ClipboardText::None, _) => return None,
                 (ClipboardText::Provided(text), 0) => return Some(text.clone()),
+                (ClipboardText::Only(text), 0) => return text.clone(),
+                (ClipboardText::Only(_), _) => return None,
                 (ClipboardText::Item(item), 0) => clip_text(runtime, item.as_deref()?)?,
                 (ClipboardText::Provided(_), index) => history_text(runtime, index, None)?,
                 (ClipboardText::Item(item), index) => {
@@ -209,6 +213,24 @@ impl Expansion<'_> {
             missing_required: rendered.missing_required,
             unfilled: rendered.unfilled,
         })
+    }
+}
+
+impl Runtime {
+    /// Expands a stored snippet that reads no history: `clipboard` is the
+    /// only text a clipboard placeholder can receive. Answers the text, the
+    /// missing required inputs, and whether concealed content went in.
+    pub(crate) fn render_snippet_isolated(
+        &self,
+        detail: &SnippetDetail,
+        values: &BTreeMap<String, String>,
+        clipboard: Option<String>,
+    ) -> Result<(String, Vec<String>, bool), RenderError> {
+        let clipboard = ClipboardText::Only(clipboard);
+        let rendering = Expansion::of(detail, values, &clipboard, None).render(self)?;
+        let secret = rendering.secret;
+        let rendered = wire_rendered(rendering);
+        Ok((rendered.text, rendered.missing_required, secret))
     }
 }
 

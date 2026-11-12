@@ -13,6 +13,7 @@ mod rules;
 mod snippets;
 mod transforms;
 
+pub(crate) use ai::AiState;
 pub(crate) use delivery::ClipboardOwner;
 pub(crate) use paste_queue::PasteQueue;
 
