@@ -8,45 +8,6 @@ import android.os.SystemClock
 import android.os.UserManager
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
-import org.json.JSONObject
-
-internal enum class ClipPresentation { FULL, MASKED, HIDDEN }
-
-/**
- * Kotlin twin of the Dart `ClipVisibility` (lib/shared/clip_visibility.dart):
- * the one answer native surfaces use for secret, rule-masked and expired clips.
- */
-internal data class ClipVisibility(
-    val secret: Boolean,
-    val ruleSecret: Boolean = false,
-    val hiddenFromAi: Boolean = false,
-    val expiresAt: Long? = null,
-) {
-    val masked: Boolean get() = secret || ruleSecret
-
-    fun isExpired(nowMs: Long): Boolean = expiresAt != null && expiresAt <= nowMs
-
-    /** [maskedMode] masks every clip, for example while a password field is focused. */
-    fun presentationAt(nowMs: Long, maskedMode: Boolean = false): ClipPresentation = when {
-        isExpired(nowMs) -> ClipPresentation.HIDDEN
-        masked || maskedMode -> ClipPresentation.MASKED
-        else -> ClipPresentation.FULL
-    }
-
-    companion object {
-        /** Reads an IPC `Item`'s `privacy` and `annotations`. */
-        fun of(item: JSONObject): ClipVisibility {
-            val annotations = item.optJSONObject("annotations")
-            return ClipVisibility(
-                secret = item.optJSONObject("privacy")?.optBoolean("secret", false) == true,
-                ruleSecret = annotations?.optBoolean("rule_secret", false) == true,
-                hiddenFromAi = annotations?.optBoolean("hidden_from_ai", false) == true,
-                expiresAt = annotations?.takeIf { it.has("expires_at") && !it.isNull("expires_at") }
-                    ?.optLong("expires_at"),
-            )
-        }
-    }
-}
 
 /** What the focused editor lets the panel do (password and no-learning fields). */
 internal data class FieldPolicy(

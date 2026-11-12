@@ -5,6 +5,8 @@ import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
+import com.copypaste.app.ClipPresentation
+import com.copypaste.app.ClipVisibility
 import com.copypaste.app.DeviceAuthenticator
 import com.copypaste.app.QuickAccessActivity
 import org.junit.Assert.assertEquals
@@ -112,8 +114,8 @@ class PanelPrivacyTest {
         )
         val visibility = ClipVisibility.of(item)
 
-        assertEquals(ClipPresentation.MASKED, visibility.presentationAt(1_000L))
-        assertEquals(ClipPresentation.HIDDEN, visibility.presentationAt(5_000L))
-        assertEquals(ClipPresentation.MASKED, ClipVisibility(secret = false).presentationAt(0L, maskedMode = true))
+        assertEquals(ClipPresentation.Masked, visibility.presentationAt(1_000L))
+        assertEquals(ClipPresentation.Hidden, visibility.presentationAt(5_000L))
+        assertEquals(ClipPresentation.Masked, ClipVisibility(secret = false).presentationAt(0L, maskedMode = true))
     }
 }

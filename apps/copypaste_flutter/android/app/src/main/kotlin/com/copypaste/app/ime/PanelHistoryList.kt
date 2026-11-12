@@ -15,6 +15,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import com.copypaste.app.AndroidCaptureFeedback
+import com.copypaste.app.ClipPresentation
 import com.copypaste.app.R
 import com.copypaste.app.RuntimeAccessWorker
 import com.copypaste.app.RuntimeReply
@@ -100,7 +101,7 @@ internal class PanelHistoryList(
                     if (after == null) items.clear()
                     val now = clock()
                     items += page.items.filter {
-                        it.visibility.presentationAt(now) != ClipPresentation.HIDDEN && items.none { known -> known.id == it.id }
+                        it.visibility.presentationAt(now) != ClipPresentation.Hidden && items.none { known -> known.id == it.id }
                     }
                     cursor = page.nextCursor
                     publish()
@@ -125,11 +126,11 @@ internal class PanelHistoryList(
     fun presentation(item: PanelItem): ClipPresentation {
         val presentation = item.visibility.presentationAt(clock(), maskedMode)
         val revealed = secretsRevealed && !maskedMode && item.visibility.masked
-        return if (presentation == ClipPresentation.MASKED && revealed) ClipPresentation.FULL else presentation
+        return if (presentation == ClipPresentation.Masked && revealed) ClipPresentation.Full else presentation
     }
 
     fun summary(item: PanelItem): String = when {
-        presentation(item) != ClipPresentation.FULL -> maskedSummary(context, item)
+        presentation(item) != ClipPresentation.Full -> maskedSummary(context, item)
         item.isImage -> context.getString(R.string.ime_kind_image)
         item.isHtml -> AndroidCaptureFeedback.textPreview(Html.fromHtml(item.content, Html.FROM_HTML_MODE_LEGACY).toString().trim())
         else -> AndroidCaptureFeedback.textPreview(item.content.trim())
@@ -157,10 +158,10 @@ internal class PanelHistoryList(
         val badge = row.findViewById<ImageView>(R.id.ime_row_badge)
         val summary = summary(item)
         text.text = summary
-        val current = presentation == ClipPresentation.FULL && item.isText && !item.truncated &&
+        val current = presentation == ClipPresentation.Full && item.isText && !item.truncated &&
             currentClipText != null && currentClipText == item.content
         meta.text = metadata(item, current)
-        val image = if (presentation == ClipPresentation.FULL && item.isImage) thumbnail(item) else null
+        val image = if (presentation == ClipPresentation.Full && item.isImage) thumbnail(item) else null
         thumbnail.setImageBitmap(image)
         thumbnail.visibility = if (image != null) View.VISIBLE else View.GONE
         when {
@@ -185,7 +186,7 @@ internal class PanelHistoryList(
 
     /** Type, summary, source, age and state; a masked clip announces no content. */
     private fun description(item: PanelItem, presentation: ClipPresentation, summary: String, metadata: String): String {
-        val masked = presentation != ClipPresentation.FULL
+        val masked = presentation != ClipPresentation.Full
         return listOfNotNull(
             if (masked && item.visibility.masked) context.getString(R.string.ime_secret_item) else kindLabel(context, item),
             summary.takeIf { !masked && !item.isImage },

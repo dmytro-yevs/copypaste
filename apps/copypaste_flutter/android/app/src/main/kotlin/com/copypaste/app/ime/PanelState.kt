@@ -3,6 +3,7 @@ package com.copypaste.app.ime
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import com.copypaste.app.ClipVisibility
 import org.json.JSONArray
 import org.json.JSONObject
 
