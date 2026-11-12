@@ -484,6 +484,7 @@ pub enum ResponseData {
     Delivered(crate::clips::Delivered),
     SnippetImportPlan(crate::snippets::ImportPlan),
     SnippetImportReport(crate::snippets::ImportReport),
+    SnippetPreferences(crate::snippets::SnippetPreferences),
     ClipAnnotations(Vec<crate::clips::ClipAnnotations>),
     RuleTrace(crate::rules::RuleTrace),
     MaybeItem(Option<Item>),

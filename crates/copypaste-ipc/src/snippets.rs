@@ -283,6 +283,21 @@ pub struct ImportReport {
     pub unrecognized_placeholders: u32,
 }
 
+/// Synced `snippets.*` preferences; device authentication itself runs per
+/// device.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnippetPreferences {
+    pub record_pasted: bool,
+    pub require_auth: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnippetPreferenceKey {
+    RecordPasted,
+    RequireAuth,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExportScope {
@@ -397,6 +412,11 @@ pub enum SnippetOp {
         scope: ExportScope,
         passphrase: Option<String>,
         include_concealed: bool,
+    },
+    Preferences,
+    SetPreference {
+        key: SnippetPreferenceKey,
+        value: bool,
     },
 }
 

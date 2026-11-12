@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1089628714;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1748138772;
 
 // Section: executor
 
@@ -5616,6 +5616,46 @@ fn wire__crate__api__snippets__set_snippet_pinned_impl(
         },
     )
 }
+fn wire__crate__api__snippets__set_snippet_preference_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_snippet_preference",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_key =
+                <crate::api::snippets::SnippetPreferenceKind>::sse_decode(&mut deserializer);
+            let api_value = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::snippets::set_snippet_preference(api_key, api_value)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__set_spoiler_revealed_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5836,6 +5876,41 @@ fn wire__crate__api__snippets__snippet_collections_impl(
                 transform_result_sse::<_, crate::api::RuntimeError>(
                     (move || async move {
                         let output_ok = crate::api::snippets::snippet_collections().await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__snippets__snippet_preferences_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "snippet_preferences",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok = crate::api::snippets::snippet_preferences().await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -9836,6 +9911,30 @@ impl SseDecode for crate::api::snippets::SnippetPageView {
     }
 }
 
+impl SseDecode for crate::api::snippets::SnippetPreferenceKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::snippets::SnippetPreferenceKind::RecordPasted,
+            1 => crate::api::snippets::SnippetPreferenceKind::RequireAuth,
+            _ => unreachable!("Invalid variant for SnippetPreferenceKind: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::api::snippets::SnippetPreferencesView {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_recordPasted = <bool>::sse_decode(deserializer);
+        let mut var_requireAuth = <bool>::sse_decode(deserializer);
+        return crate::api::snippets::SnippetPreferencesView {
+            record_pasted: var_recordPasted,
+            require_auth: var_requireAuth,
+        };
+    }
+}
+
 impl SseDecode for crate::api::snippets::SnippetSameIdPolicy {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -10855,77 +10954,86 @@ fn pde_ffi_dispatcher_primary_impl(
         147 => {
             wire__crate__api__snippets__set_snippet_pinned_impl(port, ptr, rust_vec_len, data_len)
         }
-        148 => wire__crate__api__set_spoiler_revealed_impl(port, ptr, rust_vec_len, data_len),
-        149 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        150 => wire__crate__api__transforms__set_transform_preference_impl(
+        148 => wire__crate__api__snippets__set_snippet_preference_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        151 => wire__crate__api__transforms__set_transform_set_member_impl(
+        149 => wire__crate__api__set_spoiler_revealed_impl(port, ptr, rust_vec_len, data_len),
+        150 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        151 => wire__crate__api__transforms__set_transform_preference_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        152 => wire__crate__api__paste_queue__skip_paste_queue_entry_impl(
+        152 => wire__crate__api__transforms__set_transform_set_member_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        153 => {
+        153 => wire__crate__api__paste_queue__skip_paste_queue_entry_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        154 => {
             wire__crate__api__snippets__snippet_collections_impl(port, ptr, rust_vec_len, data_len)
         }
-        154 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
-        155 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        156 => wire__crate__api__start_file_download_impl(port, ptr, rust_vec_len, data_len),
-        157 => wire__crate__api__paste_queue__step_back_paste_queue_impl(
+        155 => {
+            wire__crate__api__snippets__snippet_preferences_impl(port, ptr, rust_vec_len, data_len)
+        }
+        156 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
+        157 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        158 => wire__crate__api__start_file_download_impl(port, ptr, rust_vec_len, data_len),
+        159 => wire__crate__api__paste_queue__step_back_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        158 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        159 => {
+        160 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        161 => {
             wire__crate__api__transforms__suggest_transforms_impl(port, ptr, rust_vec_len, data_len)
         }
-        160 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        161 => wire__crate__api__rules__test_content_rule_impl(port, ptr, rust_vec_len, data_len),
-        162 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        163 => wire__crate__api__transforms__transform_catalogue_impl(
+        162 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        163 => wire__crate__api__rules__test_content_rule_impl(port, ptr, rust_vec_len, data_len),
+        164 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        165 => wire__crate__api__transforms__transform_catalogue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        164 => wire__crate__api__transforms__transform_pipelines_impl(
+        166 => wire__crate__api__transforms__transform_pipelines_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        165 => wire__crate__api__transforms__transform_preferences_impl(
+        167 => wire__crate__api__transforms__transform_preferences_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        166 => wire__crate__api__paste_queue__undo_clear_paste_queue_impl(
+        168 => wire__crate__api__paste_queue__undo_clear_paste_queue_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        167 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
-        168 => wire__crate__api__ai__update_ai_grant_impl(port, ptr, rust_vec_len, data_len),
-        169 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        170 => wire__crate__api__snippets__use_snippet_impl(port, ptr, rust_vec_len, data_len),
-        171 => {
+        169 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
+        170 => wire__crate__api__ai__update_ai_grant_impl(port, ptr, rust_vec_len, data_len),
+        171 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
+        172 => wire__crate__api__snippets__use_snippet_impl(port, ptr, rust_vec_len, data_len),
+        173 => {
             wire__crate__api__rules__validate_content_rule_impl(port, ptr, rust_vec_len, data_len)
         }
-        172 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
+        174 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -13584,6 +13692,48 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::snippets::SnippetPageView>
     for crate::api::snippets::SnippetPageView
 {
     fn into_into_dart(self) -> crate::api::snippets::SnippetPageView {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::snippets::SnippetPreferenceKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::RecordPasted => 0.into_dart(),
+            Self::RequireAuth => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::snippets::SnippetPreferenceKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::snippets::SnippetPreferenceKind>
+    for crate::api::snippets::SnippetPreferenceKind
+{
+    fn into_into_dart(self) -> crate::api::snippets::SnippetPreferenceKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::snippets::SnippetPreferencesView {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.record_pasted.into_into_dart().into_dart(),
+            self.require_auth.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::snippets::SnippetPreferencesView
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::snippets::SnippetPreferencesView>
+    for crate::api::snippets::SnippetPreferencesView
+{
+    fn into_into_dart(self) -> crate::api::snippets::SnippetPreferencesView {
         self
     }
 }
@@ -17008,6 +17158,30 @@ impl SseEncode for crate::api::snippets::SnippetPageView {
         <Vec<crate::api::snippets::SnippetSummaryView>>::sse_encode(self.snippets, serializer);
         <Option<String>>::sse_encode(self.next_cursor, serializer);
         <u32>::sse_encode(self.total, serializer);
+    }
+}
+
+impl SseEncode for crate::api::snippets::SnippetPreferenceKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::snippets::SnippetPreferenceKind::RecordPasted => 0,
+                crate::api::snippets::SnippetPreferenceKind::RequireAuth => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::snippets::SnippetPreferencesView {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.record_pasted, serializer);
+        <bool>::sse_encode(self.require_auth, serializer);
     }
 }
 

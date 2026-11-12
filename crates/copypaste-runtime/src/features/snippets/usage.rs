@@ -6,10 +6,10 @@
 //! never for concealed output. Usage counters are local and never sync.
 
 use copypaste_core::now_ms;
-use copypaste_core::storage::organization::{Record, RecordKey};
+use copypaste_core::storage::organization::{PreferenceRecord, Record, RecordKey};
 use copypaste_ipc::clips::{Delivered, Delivery};
-use copypaste_ipc::snippets::SnippetOp;
-use copypaste_ipc::{ErrorCode, Response, ResponseData};
+use copypaste_ipc::snippets::{SnippetOp, SnippetPreferenceKey, SnippetPreferences};
+use copypaste_ipc::{ErrorCode, LibraryKinds, Response, ResponseData};
 
 use super::render::{render_error, ClipboardText, Expansion};
 use crate::features::delivery::DeliveryOptions;
@@ -18,6 +18,7 @@ use crate::Runtime;
 
 const PREFERENCES: &str = "snippets";
 const KEY_RECORD_PASTED: &str = "record_pasted";
+const KEY_REQUIRE_AUTH: &str = "require_auth";
 const MSG_REQUIRED: &str = "Fill in the required fields before using this snippet.";
 
 pub(super) fn handle(runtime: &Runtime, id: u64, op: SnippetOp) -> Response {
@@ -103,9 +104,14 @@ pub(super) fn handle(runtime: &Runtime, id: u64, op: SnippetOp) -> Response {
 
 /// Whether pasted snippet output is kept in history (synced, off by default).
 fn record_pasted(runtime: &Runtime) -> bool {
+    flag(runtime, KEY_RECORD_PASTED)
+}
+
+/// A synced boolean `snippets.*` preference; unset or unreadable is off.
+fn flag(runtime: &Runtime, key: &str) -> bool {
     let record = runtime.store.organization_record(RecordKey::Preference {
         namespace: PREFERENCES,
-        key: KEY_RECORD_PASTED,
+        key,
     });
     match record {
         Ok(Some(Record::Preference(preference))) => {
@@ -116,6 +122,36 @@ fn record_pasted(runtime: &Runtime) -> bool {
         }
         _ => false,
     }
+}
+
+/// `Preferences` and `SetPreference`: the synced snippet preferences.
+pub(super) fn preferences(runtime: &Runtime, id: u64, op: SnippetOp) -> Response {
+    if let SnippetOp::SetPreference { key, value } = op {
+        let key = match key {
+            SnippetPreferenceKey::RecordPasted => KEY_RECORD_PASTED,
+            SnippetPreferenceKey::RequireAuth => KEY_REQUIRE_AUTH,
+        };
+        let started = now_ms();
+        let record = Record::Preference(PreferenceRecord {
+            namespace: PREFERENCES.to_owned(),
+            key: key.to_owned(),
+            value_json: value.to_string(),
+        });
+        if let Err(error) = runtime
+            .store
+            .write_organization_record(&runtime.keyring.item_key(), record)
+        {
+            return storage_error(id, "snippet_preference", &error);
+        }
+        runtime.library_written(started, LibraryKinds::PREFERENCES);
+    }
+    Response::ok(
+        id,
+        ResponseData::SnippetPreferences(SnippetPreferences {
+            record_pasted: flag(runtime, KEY_RECORD_PASTED),
+            require_auth: flag(runtime, KEY_REQUIRE_AUTH),
+        }),
+    )
 }
 
 /// Clipboard text uses the platform's line endings: CRLF on Windows. A CRLF

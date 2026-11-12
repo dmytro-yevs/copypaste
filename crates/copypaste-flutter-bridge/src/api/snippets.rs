@@ -259,6 +259,19 @@ pub enum SnippetExportScopeKind {
     Snippets,
 }
 
+/// Synced snippet preferences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnippetPreferencesView {
+    pub record_pasted: bool,
+    pub require_auth: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetPreferenceKind {
+    RecordPasted,
+    RequireAuth,
+}
+
 fn snippet_op(op: SnippetOp) -> Method {
     Method::Snippets { op }
 }
@@ -745,4 +758,30 @@ pub async fn export_snippets(
         }),
         ResponseData::Count
     ))
+}
+
+pub async fn snippet_preferences() -> Result<SnippetPreferencesView, RuntimeError> {
+    preferences_response(SnippetOp::Preferences).await
+}
+
+pub async fn set_snippet_preference(
+    key: SnippetPreferenceKind,
+    value: bool,
+) -> Result<SnippetPreferencesView, RuntimeError> {
+    preferences_response(SnippetOp::SetPreference {
+        key: match key {
+            SnippetPreferenceKind::RecordPasted => ipc::SnippetPreferenceKey::RecordPasted,
+            SnippetPreferenceKind::RequireAuth => ipc::SnippetPreferenceKey::RequireAuth,
+        },
+        value,
+    })
+    .await
+}
+
+async fn preferences_response(op: SnippetOp) -> Result<SnippetPreferencesView, RuntimeError> {
+    let preferences = expect_data!(snippet_op(op), ResponseData::SnippetPreferences);
+    Ok(SnippetPreferencesView {
+        record_pasted: preferences.record_pasted,
+        require_auth: preferences.require_auth,
+    })
 }

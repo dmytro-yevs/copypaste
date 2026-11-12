@@ -10,10 +10,13 @@ import 'api/paste_queue.dart';
 import 'api/rules.dart';
 import 'api/snippets.dart';
 import 'api/transforms.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -878,6 +881,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SnippetPageView dco_decode_snippet_page_view(dynamic raw);
+
+  @protected
+  SnippetPreferenceKind dco_decode_snippet_preference_kind(dynamic raw);
+
+  @protected
+  SnippetPreferencesView dco_decode_snippet_preferences_view(dynamic raw);
 
   @protected
   SnippetSameIdPolicy dco_decode_snippet_same_id_policy(dynamic raw);
@@ -2121,6 +2130,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SnippetPageView sse_decode_snippet_page_view(SseDeserializer deserializer);
+
+  @protected
+  SnippetPreferenceKind sse_decode_snippet_preference_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SnippetPreferencesView sse_decode_snippet_preferences_view(
+    SseDeserializer deserializer,
+  );
 
   @protected
   SnippetSameIdPolicy sse_decode_snippet_same_id_policy(
@@ -3705,6 +3724,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_snippet_page_view(
     SnippetPageView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_preference_kind(
+    SnippetPreferenceKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_snippet_preferences_view(
+    SnippetPreferencesView self,
     SseSerializer serializer,
   );
 
