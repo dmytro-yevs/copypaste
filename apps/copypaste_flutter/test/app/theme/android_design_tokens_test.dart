@@ -92,6 +92,7 @@ void main() {
       'app_control_size_large': _dp(AppControlSize.large),
       'app_control_size_touch': _dp(AppControlSize.touch),
       'app_control_size_navigation': _dp(AppControlSize.navigation),
+      'app_control_size_keypad_key': _dp(AppControlSize.keypadKey),
       'app_text_size_x_small': _sp(typography.xSmall.fontSize),
       'app_text_size_small': _sp(typography.small.fontSize),
       'app_text_size_base': _sp(typography.base.fontSize),

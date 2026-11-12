@@ -35,6 +35,7 @@
     <dimen name="app_control_size_large">40dp</dimen>
     <dimen name="app_control_size_touch">48dp</dimen>
     <dimen name="app_control_size_navigation">56dp</dimen>
+    <dimen name="app_control_size_keypad_key">48dp</dimen>
 
     <dimen name="app_text_size_x_small">12sp</dimen>
     <dimen name="app_text_size_small">14sp</dimen>
