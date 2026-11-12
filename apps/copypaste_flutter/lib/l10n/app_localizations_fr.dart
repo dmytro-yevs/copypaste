@@ -855,6 +855,455 @@ class AppLocalizationsFr extends AppLocalizations {
       'Rassembler plusieurs copies et les coller dans l’ordre.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '$position sur $total collé';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'L\'élément $position sur $total est dans le presse-papiers';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count éléments collés',
+      one: '1 élément collé',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count éléments sont dans le presse-papiers',
+      one: '1 élément est dans le presse-papiers',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'File terminée';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Ajouté, $total dans la file',
+      one: 'Ajouté, 1 dans la file',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'File vide, rien n\'a été collé';
+
+  @override
+  String get pasteQueueMixed =>
+      'Tout coller fonctionne avec des files contenant uniquement du texte ou uniquement des fichiers';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Coller plusieurs fichiers à la fois n\'est pas encore possible. Collez-les un par un.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count éléments ne sont plus disponibles',
+      one: '1 élément n\'est plus disponible',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Coller le suivant ne fait que copier';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Autorisez l\'accessibilité pour coller automatiquement. En attendant, l\'élément est dans le presse-papiers.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Impossible de coller automatiquement. L\'élément est dans le presse-papiers ; collez-le avec le raccourci habituel.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Impossible de coller dans une app exécutée en tant qu\'administrateur. L\'élément reste dans la file et se trouve dans le presse-papiers.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Aucune app où coller. L\'élément reste dans la file et se trouve dans le presse-papiers.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Collecte des copies';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Collecte arrêtée';
+
+  @override
+  String get pasteQueueFailed =>
+      'Impossible de terminer l\'action de Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count en attente',
+      one: '1 en attente',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count en attente · Collecte',
+      one: '1 en attente · Collecte',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Collecte';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Terminée';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'File pleine ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Les nouvelles copies ne sont plus ajoutées. Rien n\'a été supprimé.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue est vide';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Collectez des copies pour les coller dans l\'ordre, ou ajoutez des éléments depuis l\'historique.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Copiez des éléments pour les ajouter';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Chaque copie rejoint la file jusqu\'à ce que vous arrêtiez la collecte.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Commencer la collecte';
+
+  @override
+  String get pasteQueueStopCollecting => 'Arrêter la collecte';
+
+  @override
+  String get pasteQueueLoading => 'Chargement de la file…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Impossible de charger la file';
+
+  @override
+  String get pasteQueuePasteNext => 'Coller le suivant';
+
+  @override
+  String get pasteQueueCopyNext => 'Copier le suivant';
+
+  @override
+  String get pasteQueuePasteAll => 'Tout coller';
+
+  @override
+  String get pasteQueueCopyAll => 'Tout copier';
+
+  @override
+  String get pasteQueueReverse => 'Inverser l\'ordre';
+
+  @override
+  String get pasteQueueStepBack => 'Revenir en arrière';
+
+  @override
+  String get pasteQueueSkip => 'Ignorer';
+
+  @override
+  String get pasteQueueRemovePasted => 'Retirer les éléments collés';
+
+  @override
+  String get pasteQueueCleared => 'File vidée';
+
+  @override
+  String get pasteQueueUndo => 'Annuler';
+
+  @override
+  String get pasteQueueStartFresh => 'Repartir de zéro';
+
+  @override
+  String get pasteQueueAppend => 'Ajouter à la suite';
+
+  @override
+  String get pasteQueueRestartTitle => 'Commencer une nouvelle collecte ?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Repartir de zéro retire les éléments collés. Ajouter à la suite les conserve.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'File du $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Collé';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Ignoré';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Plus disponible';
+
+  @override
+  String get pasteQueueEdited => 'Modifié';
+
+  @override
+  String get pasteQueueSecret => 'Secret';
+
+  @override
+  String get pasteQueueKindImage => 'Image';
+
+  @override
+  String get pasteQueueKindFiles => 'Fichiers';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Généré à $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Élément $position : $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Déplacé en position $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Monter';
+
+  @override
+  String get pasteQueueMoveDown => 'Descendre';
+
+  @override
+  String get pasteQueueMoveToTop => 'Placer en premier';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Placer en dernier';
+
+  @override
+  String get pasteQueueReorder => 'Faites glisser pour réorganiser';
+
+  @override
+  String get pasteQueueMoreActions => 'Plus d\'actions';
+
+  @override
+  String get pasteQueuePasteNow => 'Coller maintenant';
+
+  @override
+  String get pasteQueueEdit => 'Modifier le texte';
+
+  @override
+  String get pasteQueueUseOriginal => 'Utiliser le texte d\'origine';
+
+  @override
+  String get pasteQueueRemove => 'Retirer de la file';
+
+  @override
+  String get pasteQueueEditTitle => 'Modifier le texte de la file';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Les modifications ne s\'appliquent qu\'à cette file. L\'historique conserve l\'original.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Définir des raccourcis';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Choisissez des raccourcis pour collecter et coller sans ouvrir CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Démarrer ou arrêter la collecte';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Coller le suivant en texte brut';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Un raccourci global qui fonctionne dans toutes les apps.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Un autre raccourci CopyPaste utilise cette combinaison. Le précédent est conservé.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Une autre app utilise cette combinaison. La précédente est conservée ; choisissez-en une autre.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Le système a refusé cette combinaison. La précédente est conservée.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt tape des caractères sur de nombreuses dispositions de clavier (AltGr). Choisissez une autre combinaison.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Les raccourcis globaux ne sont pas disponibles dans cette session. Utilisez la file depuis la fenêtre ou Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Impossible de définir ce raccourci.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Activer Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Désactivée, les raccourcis de la file sont libérés et rien n\'est collecté.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Coller le suivant';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Coller dans l\'app au premier plan nécessite l\'autorisation d\'envoyer des frappes. Presse-papiers seul vous laisse coller.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Coller dans l\'app au premier plan';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Presse-papiers uniquement';
+
+  @override
+  String get pasteQueueInsertTitle => 'Les nouveaux éléments vont';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Où les éléments collectés et ajoutés rejoignent la file.';
+
+  @override
+  String get pasteQueueInsertEnd => 'À la fin (premier entré, premier sorti)';
+
+  @override
+  String get pasteQueueInsertStart => 'Au début (dernier entré, premier sorti)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Après le dernier élément';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Ce que fait Coller le suivant une fois tous les éléments collés.';
+
+  @override
+  String get pasteQueueEndStop => 'Arrêter';
+
+  @override
+  String get pasteQueueEndLoop => 'Recommencer';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Continuer à coller le dernier';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Séparateur de Tout coller';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Placé entre les éléments lorsqu\'ils sont tous collés d\'un coup.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nouvelle ligne';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Ligne vide';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulation';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Espace';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Virgule';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Virgule et espace';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Aucun';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Personnalisé';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Jusqu\'à 32 caractères ; \\n et \\t autorisés';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Toujours coller en texte brut';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Supprime la mise en forme des éléments de la file.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Arrêter la collecte après';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'La collecte s\'arrête si rien n\'est copié pendant cette durée. Les éléments restent.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Jamais';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Taille maximale de la file';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Une fois pleine, plus aucun élément n\'est ajouté. Rien n\'est supprimé.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Restaurer le presse-papiers précédent à la fin';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Remet ce que vous aviez copié avant que la file commence à coller.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue file collecter ordre raccourci séparateur';
+
+  @override
   String get settingsSectionAbout => 'À propos';
 
   @override

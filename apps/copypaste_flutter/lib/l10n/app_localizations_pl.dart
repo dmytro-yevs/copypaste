@@ -848,6 +848,467 @@ class AppLocalizationsPl extends AppLocalizations {
       'Zbieraj kilka kopii i wklejaj je po kolei.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Wklejono $position z $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Element $position z $total jest w schowku';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wklejono $count elementu',
+      many: 'Wklejono $count elementów',
+      few: 'Wklejono $count elementy',
+      one: 'Wklejono $count element',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementu jest w schowku',
+      many: '$count elementów jest w schowku',
+      few: '$count elementy są w schowku',
+      one: '$count element jest w schowku',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Kolejka zakończona';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Dodano, $total w kolejce',
+      many: 'Dodano, $total w kolejce',
+      few: 'Dodano, $total w kolejce',
+      one: 'Dodano, $total w kolejce',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Kolejka pusta, nic nie wklejono';
+
+  @override
+  String get pasteQueueMixed =>
+      'Wklej wszystko działa tylko z kolejką samego tekstu lub samych plików';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Wklejanie kilku plików naraz nie jest jeszcze dostępne. Wklejaj je pojedynczo.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementu nie jest już dostępne',
+      many: '$count elementów nie jest już dostępnych',
+      few: '$count elementy nie są już dostępne',
+      one: '$count element nie jest już dostępny',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Wklej następny tylko kopiuje';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Zezwól na dostęp „Dostępność”, aby wklejać automatycznie. Do tego czasu element jest w schowku.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Nie udało się wkleić automatycznie. Element jest w schowku; wklej go zwykłym skrótem.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Nie można wkleić do aplikacji uruchomionej jako administrator. Element pozostaje w kolejce i jest w schowku.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Brak aplikacji, do której można wkleić. Element pozostaje w kolejce i jest w schowku.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Zbieranie kopii';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Zatrzymano zbieranie';
+
+  @override
+  String get pasteQueueFailed => 'Nie udało się wykonać działania Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count oczekującego',
+      many: '$count oczekujących',
+      few: '$count oczekujące',
+      one: '$count oczekujący',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count oczekującego · Zbieranie',
+      many: '$count oczekujących · Zbieranie',
+      few: '$count oczekujące · Zbieranie',
+      one: '$count oczekujący · Zbieranie',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Zbieranie';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Zakończona';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Kolejka pełna ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Nowe kopie nie są już dodawane. Nic nie zostało usunięte.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue jest pusta';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Zbieraj kopie, aby wklejać je po kolei, albo dodaj elementy z historii.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Kopiuj elementy, aby je dodać';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Każda kopia trafia do kolejki, dopóki nie zatrzymasz zbierania.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Zacznij zbierać';
+
+  @override
+  String get pasteQueueStopCollecting => 'Zatrzymaj zbieranie';
+
+  @override
+  String get pasteQueueLoading => 'Wczytywanie kolejki…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Nie udało się wczytać kolejki';
+
+  @override
+  String get pasteQueuePasteNext => 'Wklej następny';
+
+  @override
+  String get pasteQueueCopyNext => 'Kopiuj następny';
+
+  @override
+  String get pasteQueuePasteAll => 'Wklej wszystko';
+
+  @override
+  String get pasteQueueCopyAll => 'Kopiuj wszystko';
+
+  @override
+  String get pasteQueueReverse => 'Odwróć kolejność';
+
+  @override
+  String get pasteQueueStepBack => 'Cofnij o krok';
+
+  @override
+  String get pasteQueueSkip => 'Pomiń';
+
+  @override
+  String get pasteQueueRemovePasted => 'Usuń wklejone';
+
+  @override
+  String get pasteQueueCleared => 'Wyczyszczono kolejkę';
+
+  @override
+  String get pasteQueueUndo => 'Cofnij';
+
+  @override
+  String get pasteQueueStartFresh => 'Zacznij od nowa';
+
+  @override
+  String get pasteQueueAppend => 'Dołącz';
+
+  @override
+  String get pasteQueueRestartTitle => 'Rozpocząć nowe zbieranie?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '„Zacznij od nowa” usuwa wklejone elementy. „Dołącz” je zachowuje.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Kolejka z $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Wklejony';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Pominięty';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Już niedostępny';
+
+  @override
+  String get pasteQueueEdited => 'Edytowany';
+
+  @override
+  String get pasteQueueSecret => 'Tajne';
+
+  @override
+  String get pasteQueueKindImage => 'Obraz';
+
+  @override
+  String get pasteQueueKindFiles => 'Pliki';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Wygenerowano o $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Element $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Przeniesiono na pozycję $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Przenieś w górę';
+
+  @override
+  String get pasteQueueMoveDown => 'Przenieś w dół';
+
+  @override
+  String get pasteQueueMoveToTop => 'Przenieś na początek';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Przenieś na koniec';
+
+  @override
+  String get pasteQueueReorder => 'Przeciągnij, aby zmienić kolejność';
+
+  @override
+  String get pasteQueueMoreActions => 'Więcej działań';
+
+  @override
+  String get pasteQueuePasteNow => 'Wklej teraz';
+
+  @override
+  String get pasteQueueEdit => 'Edytuj tekst';
+
+  @override
+  String get pasteQueueUseOriginal => 'Użyj oryginalnego tekstu';
+
+  @override
+  String get pasteQueueRemove => 'Usuń z kolejki';
+
+  @override
+  String get pasteQueueEditTitle => 'Edytuj tekst w kolejce';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Zmiany dotyczą tylko tej kolejki. Historia zachowuje oryginał.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Ustaw skróty';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Wybierz skróty, aby zbierać i wklejać bez otwierania CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Zacznij lub zatrzymaj zbieranie';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Wklej następny jako zwykły tekst';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Globalny skrót działający w każdej aplikacji.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Inny skrót CopyPaste używa tej kombinacji. Zachowano poprzedni.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Inna aplikacja używa tej kombinacji. Zachowano poprzednią; wybierz inną.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'System odrzucił tę kombinację. Zachowano poprzednią.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt wpisuje znaki w wielu układach klawiatury (AltGr). Wybierz inną kombinację.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Skróty globalne są niedostępne w tej sesji. Korzystaj z kolejki w oknie lub w Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Nie udało się ustawić tego skrótu.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Włącz Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Po wyłączeniu skróty kolejki są zwalniane i nic nie jest zbierane.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Wklej następny wykonuje';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Wklejanie do aplikacji na pierwszym planie wymaga zgody na wysyłanie naciśnięć klawiszy. „Tylko schowek” zostawia wklejanie tobie.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Wklej do aplikacji na pierwszym planie';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Tylko do schowka';
+
+  @override
+  String get pasteQueueInsertTitle => 'Nowe elementy trafiają';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Gdzie w kolejce trafiają zebrane i dodane elementy.';
+
+  @override
+  String get pasteQueueInsertEnd =>
+      'Na koniec (pierwszy wchodzi, pierwszy wychodzi)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'Na początek (ostatni wchodzi, pierwszy wychodzi)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Po ostatnim elemencie';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Co robi Wklej następny, gdy wszystkie elementy zostały wklejone.';
+
+  @override
+  String get pasteQueueEndStop => 'Zatrzymaj';
+
+  @override
+  String get pasteQueueEndLoop => 'Zacznij od początku';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Wklejaj dalej ostatni';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Separator dla Wklej wszystko';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Wstawiany między elementy podczas wklejania wszystkich naraz.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nowy wiersz';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Pusty wiersz';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulator';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Spacja';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Przecinek';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Przecinek i spacja';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Brak';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Własny';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Do 32 znaków; dozwolone \\n i \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Zawsze wklejaj jako zwykły tekst';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Usuwa formatowanie elementów w kolejce.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Zatrzymaj zbieranie po';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Zbieranie wyłącza się, gdy przez ten czas nic nie skopiowano. Elementy zostają.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Nigdy';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Limit rozmiaru kolejki';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Gdy kolejka jest pełna, elementy nie są dodawane. Nic nie jest usuwane.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Przywróć poprzedni schowek po zakończeniu';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Przywraca to, co było skopiowane, zanim kolejka zaczęła wklejać.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue kolejka zbieranie kolejność skrót separator';
+
+  @override
   String get settingsSectionAbout => 'Informacje';
 
   @override

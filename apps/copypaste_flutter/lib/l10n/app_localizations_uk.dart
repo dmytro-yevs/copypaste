@@ -844,6 +844,468 @@ class AppLocalizationsUk extends AppLocalizations {
       'Збирайте кілька копій і вставляйте їх по черзі.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Вставлено $position з $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Елемент $position з $total у буфері обміну';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Вставлено $count елемента',
+      many: 'Вставлено $count елементів',
+      few: 'Вставлено $count елементи',
+      one: 'Вставлено $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count елемента в буфері обміну',
+      many: '$count елементів у буфері обміну',
+      few: '$count елементи в буфері обміну',
+      one: '$count елемент у буфері обміну',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Чергу завершено';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Додано, у черзі $total',
+      many: 'Додано, у черзі $total',
+      few: 'Додано, у черзі $total',
+      one: 'Додано, у черзі $total',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Черга порожня, нічого не вставлено';
+
+  @override
+  String get pasteQueueMixed =>
+      '«Вставити все» працює лише з чергою тільки з тексту або тільки з файлів';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Вставляти кілька файлів одночасно поки не можна. Вставляйте їх по одному.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count елемента більше недоступні',
+      many: '$count елементів більше недоступні',
+      few: '$count елементи більше недоступні',
+      one: '$count елемент більше недоступний',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '«Вставити наступний» лише копіює';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Дозвольте «Універсальний доступ», щоб вставляти автоматично. Доти елемент у буфері обміну — вставте його самостійно.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Не вдалося вставити автоматично. Елемент у буфері обміну — вставте його звичним поєднанням клавіш.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Не вдалося вставити в застосунок, запущений від імені адміністратора. Елемент лишився в черзі й у буфері обміну.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Немає застосунку, куди вставити. Елемент лишився в черзі й у буфері обміну.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Збирання копій';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Збирання зупинено';
+
+  @override
+  String get pasteQueueFailed => 'Не вдалося виконати дію Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count в очікуванні',
+      many: '$count в очікуванні',
+      few: '$count в очікуванні',
+      one: '$count в очікуванні',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count в очікуванні · Збирання',
+      many: '$count в очікуванні · Збирання',
+      few: '$count в очікуванні · Збирання',
+      one: '$count в очікуванні · Збирання',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Збирання';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Завершено';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Черга заповнена ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Нові копії більше не додаються. Нічого не видалено.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue порожня';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Збирайте копії, щоб вставляти їх по черзі, або додайте елементи з історії.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Копіюйте елементи, щоб додати їх';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Кожна копія потрапляє в чергу, доки ви не зупините збирання.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Почати збирання';
+
+  @override
+  String get pasteQueueStopCollecting => 'Зупинити збирання';
+
+  @override
+  String get pasteQueueLoading => 'Завантаження черги…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Не вдалося завантажити чергу';
+
+  @override
+  String get pasteQueuePasteNext => 'Вставити наступний';
+
+  @override
+  String get pasteQueueCopyNext => 'Копіювати наступний';
+
+  @override
+  String get pasteQueuePasteAll => 'Вставити все';
+
+  @override
+  String get pasteQueueCopyAll => 'Копіювати все';
+
+  @override
+  String get pasteQueueReverse => 'Обернути порядок';
+
+  @override
+  String get pasteQueueStepBack => 'Крок назад';
+
+  @override
+  String get pasteQueueSkip => 'Пропустити';
+
+  @override
+  String get pasteQueueRemovePasted => 'Прибрати вставлені';
+
+  @override
+  String get pasteQueueCleared => 'Чергу очищено';
+
+  @override
+  String get pasteQueueUndo => 'Скасувати';
+
+  @override
+  String get pasteQueueStartFresh => 'Почати заново';
+
+  @override
+  String get pasteQueueAppend => 'Додати в кінець';
+
+  @override
+  String get pasteQueueRestartTitle => 'Почати нове збирання?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '«Почати заново» прибирає вставлені елементи. «Додати в кінець» їх зберігає.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Черга від $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Вставлено';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Пропущено';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Більше недоступний';
+
+  @override
+  String get pasteQueueEdited => 'Змінено';
+
+  @override
+  String get pasteQueueSecret => 'Секрет';
+
+  @override
+  String get pasteQueueKindImage => 'Зображення';
+
+  @override
+  String get pasteQueueKindFiles => 'Файли';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Сформовано о $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Елемент $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Переміщено на позицію $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Перемістити вгору';
+
+  @override
+  String get pasteQueueMoveDown => 'Перемістити вниз';
+
+  @override
+  String get pasteQueueMoveToTop => 'На початок';
+
+  @override
+  String get pasteQueueMoveToBottom => 'У кінець';
+
+  @override
+  String get pasteQueueReorder => 'Перетягніть, щоб змінити порядок';
+
+  @override
+  String get pasteQueueMoreActions => 'Інші дії';
+
+  @override
+  String get pasteQueuePasteNow => 'Вставити зараз';
+
+  @override
+  String get pasteQueueEdit => 'Редагувати текст';
+
+  @override
+  String get pasteQueueUseOriginal => 'Використати оригінальний текст';
+
+  @override
+  String get pasteQueueRemove => 'Прибрати з черги';
+
+  @override
+  String get pasteQueueEditTitle => 'Редагувати текст у черзі';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Зміни стосуються лише цієї черги. Історія зберігає оригінал.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Налаштувати поєднання клавіш';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Виберіть поєднання клавіш, щоб збирати й вставляти, не відкриваючи CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Почати або зупинити збирання';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Вставити наступний як звичайний текст';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Глобальне поєднання клавіш, що працює в будь-якому застосунку.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Це поєднання вже використовує інше поєднання клавіш CopyPaste. Попереднє збережено.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Це поєднання використовує інший застосунок. Попереднє збережено; виберіть інше.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Система відхилила це поєднання. Попереднє збережено.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt вводить символи в багатьох розкладках (AltGr). Виберіть інше поєднання.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'У цьому сеансі глобальні поєднання клавіш недоступні. Користуйтеся чергою у вікні або в Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Не вдалося налаштувати це поєднання клавіш.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Увімкнути Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Якщо вимкнено, поєднання клавіш черги звільняються й нічого не збирається.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '«Вставити наступний» виконує';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Вставлення в активний застосунок потребує дозволу надсилати натискання клавіш. «Лише буфер обміну» залишає вставлення вам.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Вставити в активний застосунок';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Лише в буфер обміну';
+
+  @override
+  String get pasteQueueInsertTitle => 'Нові елементи додаються';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Куди в черзі потрапляють зібрані й додані елементи.';
+
+  @override
+  String get pasteQueueInsertEnd => 'У кінець (першим прийшов — першим вийшов)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'На початок (останнім прийшов — першим вийшов)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Після останнього елемента';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Що робить «Вставити наступний», коли всі елементи вже вставлено.';
+
+  @override
+  String get pasteQueueEndStop => 'Зупинити';
+
+  @override
+  String get pasteQueueEndLoop => 'Почати спочатку';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Вставляти останній далі';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Роздільник для «Вставити все»';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Ставиться між елементами, коли вставляються всі разом.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Новий рядок';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Порожній рядок';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Табуляція';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Пробіл';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Кома';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Кома й пробіл';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Немає';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Власний';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'До 32 символів; можна \\n і \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Завжди вставляти як звичайний текст';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Прибирає форматування з елементів черги.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Зупиняти збирання через';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Збирання вимикається, якщо стільки часу нічого не копіювали. Елементи лишаються.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes хв';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Ніколи';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Ліміт розміру черги';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Коли черга заповнена, елементи не додаються. Нічого не відкидається.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Відновлювати попередній буфер обміну після завершення';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Повертає те, що ви скопіювали до того, як черга почала вставляти.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue черга збирання порядок поєднання клавіш роздільник';
+
+  @override
   String get settingsSectionAbout => 'Про програму';
 
   @override

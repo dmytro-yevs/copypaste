@@ -849,6 +849,458 @@ class AppLocalizationsDe extends AppLocalizations {
       'Mehrere Kopien sammeln und der Reihe nach einfügen.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '$position von $total eingefügt';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Eintrag $position von $total ist in der Zwischenablage';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Einträge eingefügt',
+      one: '1 Eintrag eingefügt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Einträge sind in der Zwischenablage',
+      one: '1 Eintrag ist in der Zwischenablage',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Warteschlange abgeschlossen';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Hinzugefügt, $total in der Warteschlange',
+      one: 'Hinzugefügt, 1 in der Warteschlange',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Warteschlange leer, nichts eingefügt';
+
+  @override
+  String get pasteQueueMixed =>
+      '„Alle einfügen“ funktioniert nur mit reinem Text oder nur mit Dateien';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Mehrere Dateien auf einmal einzufügen ist noch nicht möglich. Füge sie einzeln ein.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Einträge nicht mehr verfügbar',
+      one: '1 Eintrag nicht mehr verfügbar',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '„Nächsten einfügen“ kopiert nur';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Erlaube „Bedienungshilfen“, um automatisch einzufügen. Bis dahin liegt der Eintrag zum Einfügen in der Zwischenablage.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Automatisches Einfügen war nicht möglich. Der Eintrag ist in der Zwischenablage; füge ihn mit dem üblichen Kürzel ein.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'In eine als Administrator ausgeführte App kann nicht eingefügt werden. Der Eintrag bleibt in der Warteschlange und ist in der Zwischenablage.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Keine App zum Einfügen gefunden. Der Eintrag bleibt in der Warteschlange und ist in der Zwischenablage.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Kopien werden gesammelt';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Sammeln beendet';
+
+  @override
+  String get pasteQueueFailed =>
+      'Die Aktion der Paste Queue konnte nicht ausgeführt werden';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ausstehend',
+      one: '1 ausstehend',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ausstehend · Sammelt',
+      one: '1 ausstehend · Sammelt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Sammelt';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Abgeschlossen';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Warteschlange voll ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Neue Kopien werden nicht mehr hinzugefügt. Nichts wurde entfernt.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue ist leer';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Sammle Kopien, um sie der Reihe nach einzufügen, oder füge Einträge aus dem Verlauf hinzu.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Kopiere Inhalte, um sie hinzuzufügen';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Jede Kopie kommt in die Warteschlange, bis du das Sammeln beendest.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Sammeln starten';
+
+  @override
+  String get pasteQueueStopCollecting => 'Sammeln beenden';
+
+  @override
+  String get pasteQueueLoading => 'Warteschlange wird geladen…';
+
+  @override
+  String get pasteQueueLoadFailed =>
+      'Warteschlange konnte nicht geladen werden';
+
+  @override
+  String get pasteQueuePasteNext => 'Nächsten einfügen';
+
+  @override
+  String get pasteQueueCopyNext => 'Nächsten kopieren';
+
+  @override
+  String get pasteQueuePasteAll => 'Alle einfügen';
+
+  @override
+  String get pasteQueueCopyAll => 'Alle kopieren';
+
+  @override
+  String get pasteQueueReverse => 'Reihenfolge umkehren';
+
+  @override
+  String get pasteQueueStepBack => 'Einen Schritt zurück';
+
+  @override
+  String get pasteQueueSkip => 'Überspringen';
+
+  @override
+  String get pasteQueueRemovePasted => 'Eingefügte entfernen';
+
+  @override
+  String get pasteQueueCleared => 'Warteschlange geleert';
+
+  @override
+  String get pasteQueueUndo => 'Rückgängig';
+
+  @override
+  String get pasteQueueStartFresh => 'Neu beginnen';
+
+  @override
+  String get pasteQueueAppend => 'Anhängen';
+
+  @override
+  String get pasteQueueRestartTitle => 'Neue Sammlung beginnen?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '„Neu beginnen“ entfernt die eingefügten Einträge. „Anhängen“ behält sie.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Warteschlange vom $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Eingefügt';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Übersprungen';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Nicht mehr verfügbar';
+
+  @override
+  String get pasteQueueEdited => 'Bearbeitet';
+
+  @override
+  String get pasteQueueSecret => 'Geheim';
+
+  @override
+  String get pasteQueueKindImage => 'Bild';
+
+  @override
+  String get pasteQueueKindFiles => 'Dateien';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Erstellt um $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Eintrag $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'An Position $position verschoben';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Nach oben';
+
+  @override
+  String get pasteQueueMoveDown => 'Nach unten';
+
+  @override
+  String get pasteQueueMoveToTop => 'Ganz nach oben';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Ganz nach unten';
+
+  @override
+  String get pasteQueueReorder => 'Zum Sortieren ziehen';
+
+  @override
+  String get pasteQueueMoreActions => 'Weitere Aktionen';
+
+  @override
+  String get pasteQueuePasteNow => 'Jetzt einfügen';
+
+  @override
+  String get pasteQueueEdit => 'Text bearbeiten';
+
+  @override
+  String get pasteQueueUseOriginal => 'Originaltext verwenden';
+
+  @override
+  String get pasteQueueRemove => 'Aus Warteschlange entfernen';
+
+  @override
+  String get pasteQueueEditTitle => 'Text in der Warteschlange bearbeiten';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Änderungen gelten nur für diese Warteschlange. Der Verlauf behält das Original.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Tastenkürzel festlegen';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Wähle Tastenkürzel, um zu sammeln und einzufügen, ohne CopyPaste zu öffnen.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Sammeln starten oder beenden';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Nächsten als reinen Text einfügen';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Ein globales Tastenkürzel, das in jeder App funktioniert.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Ein anderes CopyPaste-Kürzel nutzt diese Kombination. Das bisherige bleibt erhalten.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Eine andere App nutzt diese Kombination. Das bisherige Kürzel bleibt; wähle ein anderes.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Das System hat diese Kombination abgelehnt. Das bisherige Kürzel bleibt.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Strg+Alt erzeugt auf vielen Tastaturlayouts Zeichen (AltGr). Wähle eine andere Kombination.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Globale Tastenkürzel sind in dieser Sitzung nicht verfügbar. Nutze die Warteschlange im Fenster oder in Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Dieses Tastenkürzel konnte nicht festgelegt werden.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue aktivieren';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Wenn aus, werden die Kürzel der Warteschlange freigegeben und nichts wird gesammelt.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '„Nächsten einfügen“ bewirkt';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Das Einfügen in die vordere App braucht die Erlaubnis, Tastenanschläge zu senden. „Nur Zwischenablage“ überlässt das Einfügen dir.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'In die vordere App einfügen';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Nur in die Zwischenablage';
+
+  @override
+  String get pasteQueueInsertTitle => 'Neue Einträge kommen';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Wo gesammelte und hinzugefügte Einträge in die Warteschlange kommen.';
+
+  @override
+  String get pasteQueueInsertEnd => 'Ans Ende (zuerst rein, zuerst raus)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'An den Anfang (zuletzt rein, zuerst raus)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Nach dem letzten Eintrag';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Was „Nächsten einfügen“ tut, wenn alle Einträge eingefügt sind.';
+
+  @override
+  String get pasteQueueEndStop => 'Anhalten';
+
+  @override
+  String get pasteQueueEndLoop => 'Von vorn beginnen';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Letzten Eintrag weiter einfügen';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Trennzeichen für „Alle einfügen“';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Steht zwischen den Einträgen, wenn alle auf einmal eingefügt werden.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Neue Zeile';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Leerzeile';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulator';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Leerzeichen';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Komma';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Komma und Leerzeichen';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Keines';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Eigenes';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Bis zu 32 Zeichen; \\n und \\t erlaubt';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Immer als reinen Text einfügen';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Entfernt die Formatierung der Einträge.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Sammeln beenden nach';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Das Sammeln endet, wenn so lange nichts kopiert wurde. Die Einträge bleiben.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes Min.';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Nie';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Größe der Warteschlange';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Ist sie voll, kommen keine Einträge mehr hinzu. Nichts wird verworfen.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Vorherige Zwischenablage am Ende wiederherstellen';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Stellt wieder her, was vor dem Einfügen aus der Warteschlange kopiert war.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue warteschlange sammeln reihenfolge tastenkürzel trennzeichen';
+
+  @override
   String get settingsSectionAbout => 'Info';
 
   @override

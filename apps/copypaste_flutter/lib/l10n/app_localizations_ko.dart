@@ -769,6 +769,431 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pasteQueueSettingsSummary => '여러 복사 항목을 모아 순서대로 붙여넣습니다.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '$total개 중 $position번째를 붙여 넣었습니다';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '$total개 중 $position번째 항목이 클립보드에 있습니다';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목을 붙여 넣었습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목이 클립보드에 있습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => '대기열 완료';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '추가됨, 대기열에 $total개',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => '대기열이 비어 있어 붙여 넣지 않았습니다';
+
+  @override
+  String get pasteQueueMixed => '모두 붙여 넣기는 텍스트만 또는 파일만 있는 대기열에서 작동합니다';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      '여러 파일을 한 번에 붙여 넣는 기능은 아직 지원되지 않습니다. 하나씩 붙여 넣으세요.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목을 더 이상 사용할 수 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '다음 붙여 넣기가 복사만 합니다';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      '자동으로 붙여 넣으려면 손쉬운 사용을 허용하세요. 그전까지는 항목이 클립보드에 있으니 직접 붙여 넣으세요.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      '자동으로 붙여 넣지 못했습니다. 항목이 클립보드에 있으니 평소 단축키로 붙여 넣으세요.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      '관리자 권한으로 실행 중인 앱에는 붙여 넣을 수 없습니다. 항목은 대기열에 남아 있고 클립보드에도 있습니다.';
+
+  @override
+  String get pasteQueueNoTarget => '붙여 넣을 앱이 없습니다. 항목은 대기열에 남아 있고 클립보드에도 있습니다.';
+
+  @override
+  String get pasteQueueCollectingStarted => '복사 항목 수집 중';
+
+  @override
+  String get pasteQueueCollectingStopped => '수집을 중지했습니다';
+
+  @override
+  String get pasteQueueFailed => 'Paste Queue 작업을 완료하지 못했습니다';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 대기 중',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 대기 중 · 수집 중',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => '수집 중';
+
+  @override
+  String get pasteQueueFinishedSummary => '완료';
+
+  @override
+  String pasteQueueFull(int max) {
+    return '대기열이 가득 찼습니다($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage => '새 복사 항목은 더 이상 추가되지 않습니다. 삭제된 항목은 없습니다.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue가 비어 있습니다';
+
+  @override
+  String get pasteQueueEmptyMessage => '복사 항목을 수집해 순서대로 붙여 넣거나 기록에서 항목을 추가하세요.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => '복사하면 추가됩니다';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      '수집을 중지할 때까지 복사한 항목이 대기열에 추가됩니다.';
+
+  @override
+  String get pasteQueueStartCollecting => '수집 시작';
+
+  @override
+  String get pasteQueueStopCollecting => '수집 중지';
+
+  @override
+  String get pasteQueueLoading => '대기열을 불러오는 중…';
+
+  @override
+  String get pasteQueueLoadFailed => '대기열을 불러오지 못했습니다';
+
+  @override
+  String get pasteQueuePasteNext => '다음 붙여 넣기';
+
+  @override
+  String get pasteQueueCopyNext => '다음 복사';
+
+  @override
+  String get pasteQueuePasteAll => '모두 붙여 넣기';
+
+  @override
+  String get pasteQueueCopyAll => '모두 복사';
+
+  @override
+  String get pasteQueueReverse => '순서 뒤집기';
+
+  @override
+  String get pasteQueueStepBack => '한 단계 뒤로';
+
+  @override
+  String get pasteQueueSkip => '건너뛰기';
+
+  @override
+  String get pasteQueueRemovePasted => '붙여 넣은 항목 제거';
+
+  @override
+  String get pasteQueueCleared => '대기열을 비웠습니다';
+
+  @override
+  String get pasteQueueUndo => '실행 취소';
+
+  @override
+  String get pasteQueueStartFresh => '새로 시작';
+
+  @override
+  String get pasteQueueAppend => '이어서 추가';
+
+  @override
+  String get pasteQueueRestartTitle => '새로 수집을 시작할까요?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '새로 시작은 붙여 넣은 항목을 제거하고, 이어서 추가는 유지합니다.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time의 대기열';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => '붙여 넣음';
+
+  @override
+  String get pasteQueueStatusSkipped => '건너뜀';
+
+  @override
+  String get pasteQueueStatusUnavailable => '더 이상 사용할 수 없음';
+
+  @override
+  String get pasteQueueEdited => '편집됨';
+
+  @override
+  String get pasteQueueSecret => '비밀';
+
+  @override
+  String get pasteQueueKindImage => '이미지';
+
+  @override
+  String get pasteQueueKindFiles => '파일';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '$time에 생성됨';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return '항목 $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '$position번째 위치로 이동했습니다';
+  }
+
+  @override
+  String get pasteQueueMoveUp => '위로 이동';
+
+  @override
+  String get pasteQueueMoveDown => '아래로 이동';
+
+  @override
+  String get pasteQueueMoveToTop => '맨 위로 이동';
+
+  @override
+  String get pasteQueueMoveToBottom => '맨 아래로 이동';
+
+  @override
+  String get pasteQueueReorder => '끌어서 순서 변경';
+
+  @override
+  String get pasteQueueMoreActions => '추가 작업';
+
+  @override
+  String get pasteQueuePasteNow => '지금 붙여 넣기';
+
+  @override
+  String get pasteQueueEdit => '텍스트 편집';
+
+  @override
+  String get pasteQueueUseOriginal => '원래 텍스트 사용';
+
+  @override
+  String get pasteQueueRemove => '대기열에서 제거';
+
+  @override
+  String get pasteQueueEditTitle => '대기열 텍스트 편집';
+
+  @override
+  String get pasteQueueEditMessage => '변경 사항은 이 대기열에만 적용됩니다. 기록에는 원본이 유지됩니다.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => '단축키 설정';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'CopyPaste를 열지 않고 수집하고 붙여 넣을 단축키를 선택하세요.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => '수집 시작 또는 중지';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => '다음을 일반 텍스트로 붙여 넣기';
+
+  @override
+  String get pasteQueueShortcutDescription => '모든 앱에서 작동하는 전역 단축키입니다.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      '다른 CopyPaste 단축키가 이 조합을 사용합니다. 이전 단축키가 유지됩니다.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      '다른 앱이 이 조합을 사용합니다. 이전 단축키가 유지되니 다른 조합을 선택하세요.';
+
+  @override
+  String get pasteQueueShortcutRejected => '시스템에서 이 조합을 거부했습니다. 이전 단축키가 유지됩니다.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt는 많은 키보드 배열에서 문자를 입력합니다(AltGr). 다른 조합을 선택하세요.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      '이 세션에서는 전역 단축키를 사용할 수 없습니다. 창이나 Quick Paste에서 대기열을 사용하세요.';
+
+  @override
+  String get pasteQueueShortcutFailed => '이 단축키를 설정하지 못했습니다.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue 사용';
+
+  @override
+  String get pasteQueueEnableDescription => '끄면 대기열 단축키가 해제되고 아무것도 수집되지 않습니다.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '다음 붙여 넣기 동작';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      '앞에 있는 앱에 붙여 넣으려면 키 입력 전송 권한이 필요합니다. 클립보드만은 붙여 넣기를 직접 하게 합니다.';
+
+  @override
+  String get pasteQueuePasteIntoApp => '앞에 있는 앱에 붙여 넣기';
+
+  @override
+  String get pasteQueueClipboardOnly => '클립보드에만 넣기';
+
+  @override
+  String get pasteQueueInsertTitle => '새 항목 추가 위치';
+
+  @override
+  String get pasteQueueInsertDescription => '수집하거나 추가한 항목이 대기열의 어디에 들어갈지 정합니다.';
+
+  @override
+  String get pasteQueueInsertEnd => '끝(선입선출)';
+
+  @override
+  String get pasteQueueInsertStart => '처음(후입선출)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => '마지막 항목 다음';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      '모든 항목을 붙여 넣은 뒤 다음 붙여 넣기의 동작입니다.';
+
+  @override
+  String get pasteQueueEndStop => '중지';
+
+  @override
+  String get pasteQueueEndLoop => '처음부터 다시';
+
+  @override
+  String get pasteQueueEndKeepLast => '마지막 항목 계속 붙여 넣기';
+
+  @override
+  String get pasteQueueSeparatorTitle => '모두 붙여 넣기 구분자';
+
+  @override
+  String get pasteQueueSeparatorDescription => '한 번에 모두 붙여 넣을 때 항목 사이에 들어갑니다.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => '줄 바꿈';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => '빈 줄';
+
+  @override
+  String get pasteQueueSeparatorTab => '탭';
+
+  @override
+  String get pasteQueueSeparatorSpace => '공백';
+
+  @override
+  String get pasteQueueSeparatorComma => '쉼표';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => '쉼표와 공백';
+
+  @override
+  String get pasteQueueSeparatorNone => '없음';
+
+  @override
+  String get pasteQueueSeparatorCustom => '사용자 지정';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder => '최대 32자, \\n 및 \\t 사용 가능';
+
+  @override
+  String get pasteQueuePlainTextTitle => '항상 일반 텍스트로 붙여 넣기';
+
+  @override
+  String get pasteQueuePlainTextDescription => '대기열 항목의 서식을 제거합니다.';
+
+  @override
+  String get pasteQueueIdleStopTitle => '수집 자동 중지 시간';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      '이 시간 동안 복사하지 않으면 수집이 꺼집니다. 항목은 유지됩니다.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes분';
+  }
+
+  @override
+  String get pasteQueueIdleNever => '안 함';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => '대기열 크기 제한';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      '가득 차면 더 이상 항목이 추가되지 않습니다. 버려지는 항목은 없습니다.';
+
+  @override
+  String get pasteQueueRestoreTitle => '완료되면 이전 클립보드 복원';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      '대기열이 붙여 넣기를 시작하기 전에 복사했던 내용을 되돌립니다.';
+
+  @override
+  String get pasteQueueSettingsKeywords => 'paste queue 대기열 수집 순서 단축키 구분자';
+
+  @override
   String get settingsSectionAbout => '정보';
 
   @override

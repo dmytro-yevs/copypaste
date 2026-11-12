@@ -853,6 +853,455 @@ class AppLocalizationsIt extends AppLocalizations {
       'Raccogli più copie e incollale in ordine.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Incollato $position di $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'L\'elemento $position di $total è negli appunti';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi incollati',
+      one: '1 elemento incollato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi sono negli appunti',
+      one: '1 elemento è negli appunti',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Coda completata';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Aggiunto, $total in coda',
+      one: 'Aggiunto, 1 in coda',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Coda vuota, nulla incollato';
+
+  @override
+  String get pasteQueueMixed =>
+      'Incolla tutto funziona con code di solo testo o solo file';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Non è ancora possibile incollare più file insieme. Incollali uno alla volta.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi non sono più disponibili',
+      one: '1 elemento non è più disponibile',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Incolla successivo copia soltanto';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Consenti Accessibilità per incollare automaticamente. Nel frattempo l\'elemento è negli appunti.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Impossibile incollare automaticamente. L\'elemento è negli appunti; incollalo con la scorciatoia abituale.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Impossibile incollare in un\'app eseguita come amministratore. L\'elemento resta in coda ed è negli appunti.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Nessuna app in cui incollare. L\'elemento resta in coda ed è negli appunti.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Raccolta delle copie in corso';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Raccolta interrotta';
+
+  @override
+  String get pasteQueueFailed =>
+      'Impossibile completare l\'azione di Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count in attesa',
+      one: '1 in attesa',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count in attesa · Raccolta',
+      one: '1 in attesa · Raccolta',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Raccolta';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Completata';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Coda piena ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Le nuove copie non vengono più aggiunte. Non è stato rimosso nulla.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue è vuota';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Raccogli le copie per incollarle in ordine, oppure aggiungi elementi dalla cronologia.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copia elementi per aggiungerli';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Ogni copia entra in coda finché non interrompi la raccolta.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Avvia raccolta';
+
+  @override
+  String get pasteQueueStopCollecting => 'Interrompi raccolta';
+
+  @override
+  String get pasteQueueLoading => 'Caricamento della coda…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Impossibile caricare la coda';
+
+  @override
+  String get pasteQueuePasteNext => 'Incolla successivo';
+
+  @override
+  String get pasteQueueCopyNext => 'Copia successivo';
+
+  @override
+  String get pasteQueuePasteAll => 'Incolla tutto';
+
+  @override
+  String get pasteQueueCopyAll => 'Copia tutto';
+
+  @override
+  String get pasteQueueReverse => 'Inverti ordine';
+
+  @override
+  String get pasteQueueStepBack => 'Torna indietro';
+
+  @override
+  String get pasteQueueSkip => 'Salta';
+
+  @override
+  String get pasteQueueRemovePasted => 'Rimuovi incollati';
+
+  @override
+  String get pasteQueueCleared => 'Coda svuotata';
+
+  @override
+  String get pasteQueueUndo => 'Annulla';
+
+  @override
+  String get pasteQueueStartFresh => 'Ricomincia da capo';
+
+  @override
+  String get pasteQueueAppend => 'Aggiungi in coda';
+
+  @override
+  String get pasteQueueRestartTitle => 'Avviare una nuova raccolta?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Ricomincia da capo rimuove gli elementi incollati. Aggiungi in coda li mantiene.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Coda del $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Incollato';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Saltato';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Non più disponibile';
+
+  @override
+  String get pasteQueueEdited => 'Modificato';
+
+  @override
+  String get pasteQueueSecret => 'Segreto';
+
+  @override
+  String get pasteQueueKindImage => 'Immagine';
+
+  @override
+  String get pasteQueueKindFiles => 'File';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Generato alle $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Elemento $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Spostato in posizione $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Sposta su';
+
+  @override
+  String get pasteQueueMoveDown => 'Sposta giù';
+
+  @override
+  String get pasteQueueMoveToTop => 'Sposta in cima';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Sposta in fondo';
+
+  @override
+  String get pasteQueueReorder => 'Trascina per riordinare';
+
+  @override
+  String get pasteQueueMoreActions => 'Altre azioni';
+
+  @override
+  String get pasteQueuePasteNow => 'Incolla ora';
+
+  @override
+  String get pasteQueueEdit => 'Modifica testo';
+
+  @override
+  String get pasteQueueUseOriginal => 'Usa il testo originale';
+
+  @override
+  String get pasteQueueRemove => 'Rimuovi dalla coda';
+
+  @override
+  String get pasteQueueEditTitle => 'Modifica il testo in coda';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Le modifiche valgono solo per questa coda. La cronologia mantiene l\'originale.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Imposta scorciatoie';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Scegli le scorciatoie per raccogliere e incollare senza aprire CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Avvia o interrompi la raccolta';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Incolla successivo come testo semplice';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Una scorciatoia globale che funziona in qualsiasi app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Un\'altra scorciatoia di CopyPaste usa questa combinazione. Resta quella precedente.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Un\'altra app usa questa combinazione. Resta quella precedente; scegline un\'altra.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Il sistema ha rifiutato questa combinazione. Resta quella precedente.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt digita caratteri in molti layout di tastiera (AltGr). Scegli un\'altra combinazione.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Le scorciatoie globali non sono disponibili in questa sessione. Usa la coda dalla finestra o da Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Impossibile impostare questa scorciatoia.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Attiva Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Se disattivata, le scorciatoie della coda vengono rilasciate e non si raccoglie nulla.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Incolla successivo esegue';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Incollare nell\'app in primo piano richiede il permesso di inviare tasti. Solo appunti lascia a te l\'incolla.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Incolla nell\'app in primo piano';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Solo negli appunti';
+
+  @override
+  String get pasteQueueInsertTitle => 'I nuovi elementi vanno';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Dove entrano in coda gli elementi raccolti e aggiunti.';
+
+  @override
+  String get pasteQueueInsertEnd => 'In fondo (primo entrato, primo uscito)';
+
+  @override
+  String get pasteQueueInsertStart => 'In cima (ultimo entrato, primo uscito)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Dopo l\'ultimo elemento';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Cosa fa Incolla successivo quando tutti gli elementi sono stati incollati.';
+
+  @override
+  String get pasteQueueEndStop => 'Fermati';
+
+  @override
+  String get pasteQueueEndLoop => 'Ricomincia';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Continua a incollare l\'ultimo';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Separatore di Incolla tutto';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Inserito tra gli elementi quando li incolli tutti insieme.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nuova riga';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Riga vuota';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulazione';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Spazio';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Virgola';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Virgola e spazio';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Nessuno';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Personalizzato';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Fino a 32 caratteri; \\n e \\t consentiti';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Incolla sempre come testo semplice';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Rimuove la formattazione dagli elementi in coda.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Interrompi la raccolta dopo';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'La raccolta si interrompe se non copi nulla per questo tempo. Gli elementi restano.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Mai';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Limite della coda';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Quando è piena, non si aggiungono altri elementi. Nulla viene scartato.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Ripristina gli appunti precedenti alla fine';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Rimette ciò che avevi copiato prima che la coda iniziasse a incollare.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue coda raccogliere ordine scorciatoia separatore';
+
+  @override
   String get settingsSectionAbout => 'Informazioni';
 
   @override

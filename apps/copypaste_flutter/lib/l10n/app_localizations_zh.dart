@@ -737,6 +737,420 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueSettingsSummary => '收集多次复制的内容并按顺序粘贴。';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '已粘贴第 $position 项，共 $total 项';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '第 $position 项（共 $total 项）已在剪贴板中';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已粘贴 $count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项已在剪贴板中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => '队列已完成';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '已添加，队列中有 $total 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => '队列为空，未粘贴任何内容';
+
+  @override
+  String get pasteQueueMixed => '“全部粘贴”仅适用于纯文本或纯文件的队列';
+
+  @override
+  String get pasteQueueSeveralFiles => '暂不支持一次粘贴多个文件，请逐个粘贴。';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项已不可用',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '“粘贴下一项”仅复制';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      '允许“辅助功能”即可自动粘贴。在此之前，该项已在剪贴板中，请手动粘贴。';
+
+  @override
+  String get pasteQueuePasteUnsupported => '无法自动粘贴。该项已在剪贴板中，请用常用快捷键粘贴。';
+
+  @override
+  String get pasteQueueTargetElevated => '无法粘贴到以管理员身份运行的应用。该项仍在队列中，也在剪贴板中。';
+
+  @override
+  String get pasteQueueNoTarget => '没有可粘贴的目标应用。该项仍在队列中，也在剪贴板中。';
+
+  @override
+  String get pasteQueueCollectingStarted => '正在收集复制内容';
+
+  @override
+  String get pasteQueueCollectingStopped => '已停止收集';
+
+  @override
+  String get pasteQueueFailed => '无法完成 Paste Queue 操作';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项待粘贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项待粘贴 · 收集中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => '收集中';
+
+  @override
+  String get pasteQueueFinishedSummary => '已完成';
+
+  @override
+  String pasteQueueFull(int max) {
+    return '队列已满（$max）';
+  }
+
+  @override
+  String get pasteQueueFullMessage => '不再添加新的复制内容。未移除任何内容。';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue 为空';
+
+  @override
+  String get pasteQueueEmptyMessage => '收集复制内容以按顺序粘贴，或从历史记录中添加项目。';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => '复制内容即可添加';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage => '在停止收集之前，每次复制的内容都会加入队列。';
+
+  @override
+  String get pasteQueueStartCollecting => '开始收集';
+
+  @override
+  String get pasteQueueStopCollecting => '停止收集';
+
+  @override
+  String get pasteQueueLoading => '正在加载队列…';
+
+  @override
+  String get pasteQueueLoadFailed => '无法加载队列';
+
+  @override
+  String get pasteQueuePasteNext => '粘贴下一项';
+
+  @override
+  String get pasteQueueCopyNext => '复制下一项';
+
+  @override
+  String get pasteQueuePasteAll => '全部粘贴';
+
+  @override
+  String get pasteQueueCopyAll => '全部复制';
+
+  @override
+  String get pasteQueueReverse => '反转顺序';
+
+  @override
+  String get pasteQueueStepBack => '退回一项';
+
+  @override
+  String get pasteQueueSkip => '跳过';
+
+  @override
+  String get pasteQueueRemovePasted => '移除已粘贴项';
+
+  @override
+  String get pasteQueueCleared => '队列已清空';
+
+  @override
+  String get pasteQueueUndo => '撤销';
+
+  @override
+  String get pasteQueueStartFresh => '重新开始';
+
+  @override
+  String get pasteQueueAppend => '追加';
+
+  @override
+  String get pasteQueueRestartTitle => '开始新的收集？';
+
+  @override
+  String get pasteQueueRestartMessage => '“重新开始”会移除已粘贴项，“追加”会保留它们。';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time 的队列';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => '已粘贴';
+
+  @override
+  String get pasteQueueStatusSkipped => '已跳过';
+
+  @override
+  String get pasteQueueStatusUnavailable => '已不可用';
+
+  @override
+  String get pasteQueueEdited => '已编辑';
+
+  @override
+  String get pasteQueueSecret => '机密';
+
+  @override
+  String get pasteQueueKindImage => '图片';
+
+  @override
+  String get pasteQueueKindFiles => '文件';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '生成于 $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return '第 $position 项：$content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '已移到第 $position 位';
+  }
+
+  @override
+  String get pasteQueueMoveUp => '上移';
+
+  @override
+  String get pasteQueueMoveDown => '下移';
+
+  @override
+  String get pasteQueueMoveToTop => '移到顶部';
+
+  @override
+  String get pasteQueueMoveToBottom => '移到底部';
+
+  @override
+  String get pasteQueueReorder => '拖动以重新排序';
+
+  @override
+  String get pasteQueueMoreActions => '更多操作';
+
+  @override
+  String get pasteQueuePasteNow => '立即粘贴';
+
+  @override
+  String get pasteQueueEdit => '编辑文本';
+
+  @override
+  String get pasteQueueUseOriginal => '使用原始文本';
+
+  @override
+  String get pasteQueueRemove => '从队列中移除';
+
+  @override
+  String get pasteQueueEditTitle => '编辑队列中的文本';
+
+  @override
+  String get pasteQueueEditMessage => '更改仅适用于此队列，历史记录保留原始内容。';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => '设置快捷键';
+
+  @override
+  String get pasteQueueShortcutPromptMessage => '选择快捷键，无需打开 CopyPaste 即可收集和粘贴。';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => '开始或停止收集';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => '以纯文本粘贴下一项';
+
+  @override
+  String get pasteQueueShortcutDescription => '在任何应用中都可用的全局快捷键。';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      '另一个 CopyPaste 快捷键已使用此组合。已保留之前的快捷键。';
+
+  @override
+  String get pasteQueueShortcutInUse => '另一个应用正在使用此组合。已保留之前的快捷键，请选择其他组合。';
+
+  @override
+  String get pasteQueueShortcutRejected => '系统拒绝了此组合。已保留之前的快捷键。';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      '在许多键盘布局中 Ctrl+Alt 用于输入字符（AltGr）。请选择其他组合。';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      '此会话不支持全局快捷键。请在窗口或 Quick Paste 中使用队列。';
+
+  @override
+  String get pasteQueueShortcutFailed => '无法设置此快捷键。';
+
+  @override
+  String get pasteQueueEnableTitle => '启用 Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription => '关闭后，队列快捷键将被释放，也不会收集任何内容。';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '“粘贴下一项”的操作';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      '粘贴到前台应用需要发送按键的权限。“仅剪贴板”则由您自行粘贴。';
+
+  @override
+  String get pasteQueuePasteIntoApp => '粘贴到前台应用';
+
+  @override
+  String get pasteQueueClipboardOnly => '仅放入剪贴板';
+
+  @override
+  String get pasteQueueInsertTitle => '新项目添加到';
+
+  @override
+  String get pasteQueueInsertDescription => '收集和添加的项目加入队列的位置。';
+
+  @override
+  String get pasteQueueInsertEnd => '末尾（先进先出）';
+
+  @override
+  String get pasteQueueInsertStart => '开头（后进先出）';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => '最后一项之后';
+
+  @override
+  String get pasteQueueEndBehaviorDescription => '所有项目粘贴完成后“粘贴下一项”的操作。';
+
+  @override
+  String get pasteQueueEndStop => '停止';
+
+  @override
+  String get pasteQueueEndLoop => '从头开始';
+
+  @override
+  String get pasteQueueEndKeepLast => '继续粘贴最后一项';
+
+  @override
+  String get pasteQueueSeparatorTitle => '“全部粘贴”分隔符';
+
+  @override
+  String get pasteQueueSeparatorDescription => '一次粘贴全部时放在各项之间。';
+
+  @override
+  String get pasteQueueSeparatorNewLine => '换行';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => '空行';
+
+  @override
+  String get pasteQueueSeparatorTab => '制表符';
+
+  @override
+  String get pasteQueueSeparatorSpace => '空格';
+
+  @override
+  String get pasteQueueSeparatorComma => '逗号';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => '逗号和空格';
+
+  @override
+  String get pasteQueueSeparatorNone => '无';
+
+  @override
+  String get pasteQueueSeparatorCustom => '自定义';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder => '最多 32 个字符；可使用 \\n 和 \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => '始终以纯文本粘贴';
+
+  @override
+  String get pasteQueuePlainTextDescription => '去除队列项目的格式。';
+
+  @override
+  String get pasteQueueIdleStopTitle => '停止收集的时间';
+
+  @override
+  String get pasteQueueIdleStopDescription => '若在此时长内没有复制，将停止收集。项目会保留。';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes 分钟';
+  }
+
+  @override
+  String get pasteQueueIdleNever => '从不';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => '队列大小上限';
+
+  @override
+  String get pasteQueueMaxEntriesDescription => '队列满后不再添加项目，也不会丢弃任何内容。';
+
+  @override
+  String get pasteQueueRestoreTitle => '完成后恢复之前的剪贴板';
+
+  @override
+  String get pasteQueueRestoreDescription => '恢复队列开始粘贴之前您复制的内容。';
+
+  @override
+  String get pasteQueueSettingsKeywords => 'paste queue 队列 收集 顺序 快捷键 分隔符';
+
+  @override
   String get settingsSectionAbout => '关于';
 
   @override

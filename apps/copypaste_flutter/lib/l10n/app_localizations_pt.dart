@@ -852,6 +852,455 @@ class AppLocalizationsPt extends AppLocalizations {
       'Reúna várias cópias e cole-as em ordem.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Colado $position de $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'O item $position de $total está na área de transferência';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count itens colados',
+      one: '1 item colado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count itens estão na área de transferência',
+      one: '1 item está na área de transferência',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Fila concluída';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Adicionado, $total na fila',
+      one: 'Adicionado, 1 na fila',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Fila vazia, nada foi colado';
+
+  @override
+  String get pasteQueueMixed =>
+      'Colar tudo funciona com filas só de texto ou só de arquivos';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Ainda não é possível colar vários arquivos de uma vez. Cole-os um por um.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count itens não estão mais disponíveis',
+      one: '1 item não está mais disponível',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Colar próximo apenas copia';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Permita Acessibilidade para colar automaticamente. Até lá, o item fica na área de transferência para você colar.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Não foi possível colar automaticamente. O item está na área de transferência; cole-o com o atalho habitual.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Não foi possível colar em um app executado como administrador. O item continua na fila e está na área de transferência.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Nenhum app para colar. O item continua na fila e está na área de transferência.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Coletando cópias';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Coleta interrompida';
+
+  @override
+  String get pasteQueueFailed =>
+      'Não foi possível concluir a ação da Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendentes',
+      one: '1 pendente',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendentes · Coletando',
+      one: '1 pendente · Coletando',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Coletando';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Concluída';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Fila cheia ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Novas cópias não são mais adicionadas. Nada foi removido.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'A Paste Queue está vazia';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Colete cópias para colá-las em ordem ou adicione itens do histórico.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copie itens para adicioná-los';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Cada cópia entra na fila até você parar a coleta.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Começar a coletar';
+
+  @override
+  String get pasteQueueStopCollecting => 'Parar de coletar';
+
+  @override
+  String get pasteQueueLoading => 'Carregando a fila…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Não foi possível carregar a fila';
+
+  @override
+  String get pasteQueuePasteNext => 'Colar próximo';
+
+  @override
+  String get pasteQueueCopyNext => 'Copiar próximo';
+
+  @override
+  String get pasteQueuePasteAll => 'Colar tudo';
+
+  @override
+  String get pasteQueueCopyAll => 'Copiar tudo';
+
+  @override
+  String get pasteQueueReverse => 'Inverter ordem';
+
+  @override
+  String get pasteQueueStepBack => 'Voltar um passo';
+
+  @override
+  String get pasteQueueSkip => 'Pular';
+
+  @override
+  String get pasteQueueRemovePasted => 'Remover colados';
+
+  @override
+  String get pasteQueueCleared => 'Fila limpa';
+
+  @override
+  String get pasteQueueUndo => 'Desfazer';
+
+  @override
+  String get pasteQueueStartFresh => 'Começar do zero';
+
+  @override
+  String get pasteQueueAppend => 'Acrescentar';
+
+  @override
+  String get pasteQueueRestartTitle => 'Começar uma nova coleta?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Começar do zero remove os itens colados. Acrescentar os mantém.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Fila de $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Colado';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Pulado';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Não disponível';
+
+  @override
+  String get pasteQueueEdited => 'Editado';
+
+  @override
+  String get pasteQueueSecret => 'Secreto';
+
+  @override
+  String get pasteQueueKindImage => 'Imagem';
+
+  @override
+  String get pasteQueueKindFiles => 'Arquivos';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Gerado às $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Item $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Movido para a posição $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Mover para cima';
+
+  @override
+  String get pasteQueueMoveDown => 'Mover para baixo';
+
+  @override
+  String get pasteQueueMoveToTop => 'Mover para o início';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Mover para o fim';
+
+  @override
+  String get pasteQueueReorder => 'Arraste para reordenar';
+
+  @override
+  String get pasteQueueMoreActions => 'Mais ações';
+
+  @override
+  String get pasteQueuePasteNow => 'Colar agora';
+
+  @override
+  String get pasteQueueEdit => 'Editar texto';
+
+  @override
+  String get pasteQueueUseOriginal => 'Usar o texto original';
+
+  @override
+  String get pasteQueueRemove => 'Remover da fila';
+
+  @override
+  String get pasteQueueEditTitle => 'Editar texto da fila';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'As alterações valem só para esta fila. O histórico mantém o original.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Definir atalhos';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Escolha atalhos para coletar e colar sem abrir o CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => 'Iniciar ou parar a coleta';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Colar próximo como texto simples';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Um atalho global que funciona em qualquer app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Outro atalho do CopyPaste usa esta combinação. O anterior foi mantido.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Outro app usa esta combinação. A anterior foi mantida; escolha outra.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'O sistema recusou esta combinação. A anterior foi mantida.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt digita caracteres em muitos layouts de teclado (AltGr). Escolha outra combinação.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Atalhos globais não estão disponíveis nesta sessão. Use a fila pela janela ou pelo Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Não foi possível definir este atalho.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Ativar a Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Desativada, os atalhos da fila são liberados e nada é coletado.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Colar próximo faz';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Colar no app em primeiro plano requer permissão para enviar teclas. Só área de transferência deixa a colagem com você.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Colar no app em primeiro plano';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Só na área de transferência';
+
+  @override
+  String get pasteQueueInsertTitle => 'Novos itens vão para';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Onde os itens coletados e adicionados entram na fila.';
+
+  @override
+  String get pasteQueueInsertEnd => 'Fim (primeiro a entrar, primeiro a sair)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'Início (último a entrar, primeiro a sair)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Depois do último item';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'O que Colar próximo faz depois que todos os itens foram colados.';
+
+  @override
+  String get pasteQueueEndStop => 'Parar';
+
+  @override
+  String get pasteQueueEndLoop => 'Recomeçar';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Continuar colando o último';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Separador de Colar tudo';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Colocado entre os itens ao colar todos de uma vez.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nova linha';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Linha em branco';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulação';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Espaço';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Vírgula';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Vírgula e espaço';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Nenhum';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Personalizado';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Até 32 caracteres; \\n e \\t permitidos';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Sempre colar como texto simples';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Remove a formatação dos itens da fila.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Parar de coletar após';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'A coleta é desligada quando nada é copiado por esse tempo. Os itens continuam.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Nunca';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Limite de tamanho da fila';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Quando cheia, nenhum item é adicionado. Nada é descartado.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Restaurar a área de transferência anterior ao terminar';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Devolve o que você tinha copiado antes de a fila começar a colar.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue fila coletar ordem atalho separador';
+
+  @override
   String get settingsSectionAbout => 'Sobre';
 
   @override

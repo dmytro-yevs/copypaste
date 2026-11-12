@@ -830,6 +830,451 @@ class AppLocalizationsEn extends AppLocalizations {
       'Collect several copies and paste them in order.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Pasted $position of $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Item $position of $total is on the clipboard';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Pasted $count items',
+      one: 'Pasted 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items are on the clipboard',
+      one: '1 item is on the clipboard',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Queue finished';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Added, $total in queue',
+      one: 'Added, 1 in queue',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Queue empty, nothing pasted';
+
+  @override
+  String get pasteQueueMixed =>
+      'Paste all works with text-only or files-only queues';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Pasting several files at once isn\'t available yet. Paste them one at a time.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items no longer available',
+      one: '1 item no longer available',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Paste next copies only';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Allow Accessibility to paste automatically. Until then, the item is on the clipboard for you to paste.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Couldn\'t paste automatically. The item is on the clipboard; paste it with the usual shortcut.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Couldn\'t paste into an app running as administrator. The item is kept in the queue and is on the clipboard.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'No app to paste into. The item is kept in the queue and is on the clipboard.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Collecting copies';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Stopped collecting';
+
+  @override
+  String get pasteQueueFailed => 'Couldn\'t complete the Paste Queue action';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pending',
+      one: '1 pending',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pending · Collecting',
+      one: '1 pending · Collecting',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Collecting';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Finished';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Queue full ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'New copies are no longer added. Nothing was removed.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue is empty';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Collect copies to paste them in order, or add items from history.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copy items to add them';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Each copy joins the queue until you stop collecting.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Start collecting';
+
+  @override
+  String get pasteQueueStopCollecting => 'Stop collecting';
+
+  @override
+  String get pasteQueueLoading => 'Loading the queue…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Couldn\'t load the queue';
+
+  @override
+  String get pasteQueuePasteNext => 'Paste next';
+
+  @override
+  String get pasteQueueCopyNext => 'Copy next';
+
+  @override
+  String get pasteQueuePasteAll => 'Paste all';
+
+  @override
+  String get pasteQueueCopyAll => 'Copy all';
+
+  @override
+  String get pasteQueueReverse => 'Reverse order';
+
+  @override
+  String get pasteQueueStepBack => 'Step back';
+
+  @override
+  String get pasteQueueSkip => 'Skip';
+
+  @override
+  String get pasteQueueRemovePasted => 'Remove pasted';
+
+  @override
+  String get pasteQueueCleared => 'Queue cleared';
+
+  @override
+  String get pasteQueueUndo => 'Undo';
+
+  @override
+  String get pasteQueueStartFresh => 'Start fresh';
+
+  @override
+  String get pasteQueueAppend => 'Append';
+
+  @override
+  String get pasteQueueRestartTitle => 'Start a new collection?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Start fresh removes the pasted items. Append keeps them.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Queue from $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Pasted';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Skipped';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'No longer available';
+
+  @override
+  String get pasteQueueEdited => 'Edited';
+
+  @override
+  String get pasteQueueSecret => 'Secret';
+
+  @override
+  String get pasteQueueKindImage => 'Image';
+
+  @override
+  String get pasteQueueKindFiles => 'Files';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Rendered at $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Item $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Moved to position $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Move up';
+
+  @override
+  String get pasteQueueMoveDown => 'Move down';
+
+  @override
+  String get pasteQueueMoveToTop => 'Move to top';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Move to bottom';
+
+  @override
+  String get pasteQueueReorder => 'Drag to reorder';
+
+  @override
+  String get pasteQueueMoreActions => 'More actions';
+
+  @override
+  String get pasteQueuePasteNow => 'Paste now';
+
+  @override
+  String get pasteQueueEdit => 'Edit text';
+
+  @override
+  String get pasteQueueUseOriginal => 'Use original text';
+
+  @override
+  String get pasteQueueRemove => 'Remove from queue';
+
+  @override
+  String get pasteQueueEditTitle => 'Edit queued text';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Changes apply only to this queue. History keeps the original.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Set shortcuts';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Choose shortcuts to collect and paste without opening CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => 'Start or stop collecting';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => 'Paste next as plain text';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'A global shortcut that works in any app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Another CopyPaste shortcut uses this combination. The previous one is kept.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Another app uses this combination. The previous one is kept; choose another.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'The system refused this combination. The previous one is kept.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt types characters on many keyboard layouts (AltGr). Choose another combination.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Global shortcuts aren\'t available in this session. Use the queue from the window or Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Couldn\'t set this shortcut.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Enable Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'When off, queue shortcuts are released and nothing is collected.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Paste next does';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Pasting into the front app needs permission to send keystrokes. Clipboard only leaves the paste to you.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Paste into the front app';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Put on the clipboard only';
+
+  @override
+  String get pasteQueueInsertTitle => 'New items go to';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Where collected and added items join the queue.';
+
+  @override
+  String get pasteQueueInsertEnd => 'End (first in, first out)';
+
+  @override
+  String get pasteQueueInsertStart => 'Start (last in, first out)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'After the last item';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'What Paste next does once every item was pasted.';
+
+  @override
+  String get pasteQueueEndStop => 'Stop';
+
+  @override
+  String get pasteQueueEndLoop => 'Start over';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Keep pasting the last item';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Paste all separator';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Placed between items when pasting all at once.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'New line';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Blank line';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tab';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Space';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Comma';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Comma and space';
+
+  @override
+  String get pasteQueueSeparatorNone => 'None';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Custom';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Up to 32 characters; \\n and \\t allowed';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Always paste as plain text';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Drops formatting from queued items.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Stop collecting after';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Collecting turns off when nothing was copied for this long. Items stay.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Never';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Queue size limit';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'When full, collecting stops adding items. Nothing is dropped.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Restore the previous clipboard when finished';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Puts back what you had copied before the queue started pasting.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue collect sequence order shortcut hotkey separator stack';
+
+  @override
   String get settingsSectionAbout => 'About';
 
   @override

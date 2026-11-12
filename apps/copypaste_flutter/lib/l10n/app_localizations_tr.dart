@@ -831,6 +831,455 @@ class AppLocalizationsTr extends AppLocalizations {
       'Birden çok kopyayı toplayın ve sırayla yapıştırın.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '$total öğeden $position. yapıştırıldı';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '$total öğeden $position. öğe panoda';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe yapıştırıldı',
+      one: '1 öğe yapıştırıldı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe panoda',
+      one: '1 öğe panoda',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Kuyruk tamamlandı';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Eklendi, kuyrukta $total',
+      one: 'Eklendi, kuyrukta 1',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste =>
+      'Kuyruk boş, hiçbir şey yapıştırılmadı';
+
+  @override
+  String get pasteQueueMixed =>
+      'Tümünü yapıştır yalnızca metin ya da yalnızca dosya içeren kuyruklarda çalışır';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Birden çok dosyayı aynı anda yapıştırmak henüz kullanılamıyor. Tek tek yapıştırın.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe artık kullanılamıyor',
+      one: '1 öğe artık kullanılamıyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle =>
+      'Sonrakini yapıştır yalnızca kopyalıyor';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Otomatik yapıştırmak için Erişilebilirlik izni verin. O zamana kadar öğe yapıştırmanız için panoda.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Otomatik yapıştırılamadı. Öğe panoda; her zamanki kısayolla yapıştırın.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Yönetici olarak çalışan bir uygulamaya yapıştırılamadı. Öğe kuyrukta kalır ve panodadır.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Yapıştırılacak uygulama yok. Öğe kuyrukta kalır ve panodadır.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Kopyalar toplanıyor';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Toplama durduruldu';
+
+  @override
+  String get pasteQueueFailed => 'Paste Queue işlemi tamamlanamadı';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bekliyor',
+      one: '1 bekliyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bekliyor · Toplanıyor',
+      one: '1 bekliyor · Toplanıyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Toplanıyor';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Tamamlandı';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Kuyruk dolu ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Yeni kopyalar artık eklenmiyor. Hiçbir şey kaldırılmadı.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue boş';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Kopyaları sırayla yapıştırmak için toplayın ya da geçmişten öğe ekleyin.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Eklemek için öğeleri kopyalayın';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Toplamayı durdurana kadar her kopya kuyruğa eklenir.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Toplamaya başla';
+
+  @override
+  String get pasteQueueStopCollecting => 'Toplamayı durdur';
+
+  @override
+  String get pasteQueueLoading => 'Kuyruk yükleniyor…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Kuyruk yüklenemedi';
+
+  @override
+  String get pasteQueuePasteNext => 'Sonrakini yapıştır';
+
+  @override
+  String get pasteQueueCopyNext => 'Sonrakini kopyala';
+
+  @override
+  String get pasteQueuePasteAll => 'Tümünü yapıştır';
+
+  @override
+  String get pasteQueueCopyAll => 'Tümünü kopyala';
+
+  @override
+  String get pasteQueueReverse => 'Sırayı ters çevir';
+
+  @override
+  String get pasteQueueStepBack => 'Bir adım geri';
+
+  @override
+  String get pasteQueueSkip => 'Atla';
+
+  @override
+  String get pasteQueueRemovePasted => 'Yapıştırılanları kaldır';
+
+  @override
+  String get pasteQueueCleared => 'Kuyruk temizlendi';
+
+  @override
+  String get pasteQueueUndo => 'Geri al';
+
+  @override
+  String get pasteQueueStartFresh => 'Baştan başla';
+
+  @override
+  String get pasteQueueAppend => 'Sona ekle';
+
+  @override
+  String get pasteQueueRestartTitle => 'Yeni bir toplama başlatılsın mı?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Baştan başla yapıştırılan öğeleri kaldırır. Sona ekle onları korur.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time tarihli kuyruk';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Yapıştırıldı';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Atlandı';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Artık kullanılamıyor';
+
+  @override
+  String get pasteQueueEdited => 'Düzenlendi';
+
+  @override
+  String get pasteQueueSecret => 'Gizli';
+
+  @override
+  String get pasteQueueKindImage => 'Görsel';
+
+  @override
+  String get pasteQueueKindFiles => 'Dosyalar';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '$time itibarıyla oluşturuldu';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Öğe $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '$position. sıraya taşındı';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Yukarı taşı';
+
+  @override
+  String get pasteQueueMoveDown => 'Aşağı taşı';
+
+  @override
+  String get pasteQueueMoveToTop => 'En başa taşı';
+
+  @override
+  String get pasteQueueMoveToBottom => 'En sona taşı';
+
+  @override
+  String get pasteQueueReorder => 'Sıralamak için sürükleyin';
+
+  @override
+  String get pasteQueueMoreActions => 'Diğer işlemler';
+
+  @override
+  String get pasteQueuePasteNow => 'Şimdi yapıştır';
+
+  @override
+  String get pasteQueueEdit => 'Metni düzenle';
+
+  @override
+  String get pasteQueueUseOriginal => 'Özgün metni kullan';
+
+  @override
+  String get pasteQueueRemove => 'Kuyruktan kaldır';
+
+  @override
+  String get pasteQueueEditTitle => 'Kuyruktaki metni düzenle';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Değişiklikler yalnızca bu kuyruğa uygulanır. Geçmiş özgün hâli korur.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Kısayolları ayarla';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'CopyPaste\'i açmadan toplamak ve yapıştırmak için kısayollar seçin.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Toplamayı başlat veya durdur';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Sonrakini düz metin olarak yapıştır';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Her uygulamada çalışan genel bir kısayol.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Başka bir CopyPaste kısayolu bu bileşimi kullanıyor. Önceki korunur.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Başka bir uygulama bu bileşimi kullanıyor. Önceki korunur; başka bir bileşim seçin.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Sistem bu bileşimi reddetti. Önceki korunur.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt birçok klavye düzeninde karakter yazar (AltGr). Başka bir bileşim seçin.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Bu oturumda genel kısayollar kullanılamıyor. Kuyruğu pencereden veya Quick Paste\'ten kullanın.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Bu kısayol ayarlanamadı.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue\'yu etkinleştir';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Kapalıyken kuyruk kısayolları serbest bırakılır ve hiçbir şey toplanmaz.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Sonrakini yapıştır şunu yapar';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Öndeki uygulamaya yapıştırmak tuş vuruşu gönderme izni gerektirir. Yalnızca pano yapıştırmayı size bırakır.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Öndeki uygulamaya yapıştır';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Yalnızca panoya koy';
+
+  @override
+  String get pasteQueueInsertTitle => 'Yeni öğeler şuraya eklenir';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Toplanan ve eklenen öğelerin kuyruğa nereden katılacağı.';
+
+  @override
+  String get pasteQueueInsertEnd => 'Sona (ilk giren ilk çıkar)';
+
+  @override
+  String get pasteQueueInsertStart => 'Başa (son giren ilk çıkar)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Son öğeden sonra';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Tüm öğeler yapıştırıldıktan sonra Sonrakini yapıştır\'ın yaptığı.';
+
+  @override
+  String get pasteQueueEndStop => 'Dur';
+
+  @override
+  String get pasteQueueEndLoop => 'Baştan başla';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Son öğeyi yapıştırmaya devam et';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Tümünü yapıştır ayırıcısı';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Tümü bir kerede yapıştırılırken öğelerin arasına konur.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Yeni satır';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Boş satır';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Sekme';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Boşluk';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Virgül';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Virgül ve boşluk';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Yok';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Özel';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'En fazla 32 karakter; \\n ve \\t kullanılabilir';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Her zaman düz metin olarak yapıştır';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Kuyruktaki öğelerin biçimlendirmesini kaldırır.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Toplamayı şu süreden sonra durdur';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Bu süre boyunca hiçbir şey kopyalanmazsa toplama kapanır. Öğeler kalır.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes dk';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Asla';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Kuyruk boyutu sınırı';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Dolduğunda öğe eklenmez. Hiçbir şey atılmaz.';
+
+  @override
+  String get pasteQueueRestoreTitle => 'Bitince önceki panoyu geri yükle';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Kuyruk yapıştırmaya başlamadan önce kopyaladığınızı geri koyar.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue kuyruk toplama sıra kısayol ayırıcı';
+
+  @override
   String get settingsSectionAbout => 'Hakkında';
 
   @override
