@@ -400,6 +400,9 @@ mod tests {
             generation: "g".into(),
             semantic: 1,
             facets: 1,
+            snippets: 0,
+            rules: 0,
+            queue: 0,
         };
         for n in 0..CACHE_ENTRIES + 1 {
             cache.insert(

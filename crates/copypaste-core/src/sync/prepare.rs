@@ -84,9 +84,15 @@ pub(super) fn prepare_remote_version(
     local: Option<&Version>,
 ) -> Result<Option<Prepared>, MergeError> {
     let organization_text = if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
-        incoming
-            .binary_content
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        // A tombstone has no content; only a clip note may be one, which
+        // the store checks against what it holds.
+        if incoming.deleted {
+            Some("")
+        } else {
+            incoming
+                .binary_content
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        }
     } else {
         Some(incoming.content)
     };

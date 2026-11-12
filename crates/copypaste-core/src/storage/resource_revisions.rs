@@ -7,17 +7,24 @@ pub struct ResourceRevisions {
     pub generation: String,
     pub semantic: i64,
     pub facets: i64,
+    pub snippets: i64,
+    pub rules: i64,
+    pub queue: i64,
 }
 
 pub(super) fn read(conn: &Connection) -> Result<ResourceRevisions, StoreError> {
     Ok(conn.query_row(
-        "SELECT generation, semantic, facets FROM resource_revisions WHERE singleton = 0",
+        "SELECT generation, semantic, facets, snippets, rules, queue FROM resource_revisions \
+         WHERE singleton = 0",
         [],
         |row| {
             Ok(ResourceRevisions {
                 generation: row.get(0)?,
                 semantic: row.get(1)?,
                 facets: row.get(2)?,
+                snippets: row.get(3)?,
+                rules: row.get(4)?,
+                queue: row.get(5)?,
             })
         },
     )?)

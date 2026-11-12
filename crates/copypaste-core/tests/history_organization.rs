@@ -50,8 +50,26 @@ fn assign(store: &Store, key: &Keyring, id: &str, tag: &str, assigned: bool) {
 /// Uses the shared cloud-style encrypted merge; versions are deliberately sent
 /// newest-first, so organization commonly arrives before the clip it describes.
 fn sync(source: &Store, keys: &Keyring, target: &Store, target_keys: &Keyring, origin: &str) {
+    transfer(source, keys, target, target_keys, origin, |_| true);
+}
+
+fn transfer(
+    source: &Store,
+    keys: &Keyring,
+    target: &Store,
+    target_keys: &Keyring,
+    origin: &str,
+    only: impl Fn(&copypaste_core::StoredItem) -> bool,
+) {
     for row in source.versions_since(0, 1000).unwrap().into_iter().rev() {
-        let bytes = open_version_bytes(keys, &row).unwrap();
+        if !only(&row) {
+            continue;
+        }
+        let bytes = if row.deleted {
+            Default::default()
+        } else {
+            open_version_bytes(keys, &row).unwrap()
+        };
         let binary = copypaste_ipc::content_type::is_binary(&row.content_type);
         let content = if binary {
             ""
@@ -65,11 +83,11 @@ fn sync(source: &Store, keys: &Keyring, target: &Store, target_keys: &Keyring, o
             &RemoteVersion {
                 item_id: &row.id,
                 content,
-                binary_content: binary.then_some(bytes.as_slice()),
+                binary_content: (binary && !row.deleted).then_some(bytes.as_slice()),
                 payload_metadata: None,
                 content_type: &row.content_type,
                 created_at: row.created_at,
-                deleted: false,
+                deleted: row.deleted,
                 content_hash: Some(&row.content_hash),
                 origin_device_id: if row.origin_device_id.is_empty() {
                     origin
@@ -482,4 +500,391 @@ fn encrypted_backup_restores_tag_catalogue_assignments_and_pins() {
     );
     assert_eq!(store.history_tags(&[]).unwrap().tags[0].name, "Work");
     assert!(store.get(&id).unwrap().unwrap().pinned);
+}
+
+use copypaste_core::storage::organization::{
+    AiGrantRecord, ClipNoteRecord, ContentRuleRecord, PipelineRecord, PreferenceRecord, Provenance,
+    ProvenanceKind, Record, RecordKey, RuleOrigin, RulePlacementRecord, SetMemberRecord,
+    SnippetBodyRecord, SnippetCollectionRecord, SnippetRecord, TransformRef,
+};
+
+const ORGANIZATION: &str = "application/vnd.copypaste.organization+json";
+
+fn write(store: &Store, key: &Keyring, record: Record) {
+    store
+        .write_organization_record(&key.item_key(), record)
+        .unwrap();
+}
+
+fn record_id(key: &str) -> String {
+    use sha2::Digest;
+    format!(
+        "org:v1:{}",
+        hex::encode(sha2::Sha256::digest(key.as_bytes()))
+    )
+}
+
+fn record(store: &Store, key: RecordKey<'_>) -> Option<Record> {
+    store.organization_record(key).unwrap()
+}
+
+fn source(store: &Store, secret: u8, device: &str) -> copypaste_core::StoreSource {
+    copypaste_core::StoreSource::new(
+        store.clone(),
+        std::sync::Arc::new(Keyring::from_secret(&[secret; 32])),
+        device.into(),
+        device.into(),
+        ConfigData::default(),
+    )
+}
+
+/// One P2P session: everything `from` advertises is fetched and applied.
+fn p2p(from: &copypaste_core::StoreSource, to: &copypaste_core::StoreSource) -> Vec<bool> {
+    use copypaste_p2p::sync::SyncSource;
+    let ids = from
+        .summaries(0)
+        .unwrap()
+        .into_iter()
+        .map(|summary| summary.item_id)
+        .collect::<Vec<_>>();
+    to.apply_batch(from.fetch(&ids).unwrap()).unwrap()
+}
+
+fn snippet(id: &str, title: &str) -> SnippetRecord {
+    SnippetRecord {
+        id: id.into(),
+        collection_id: Some("work".into()),
+        title: title.into(),
+        abbreviation: Some(";Sig".into()),
+        template: true,
+        pinned: true,
+        pin_order: Some(1.5),
+        order_key: "a0".into(),
+        concealed: false,
+        deleted_at: None,
+        purged: false,
+        created_at: 10,
+        created_device: "device-a".into(),
+    }
+}
+
+fn body(id: &str, revision: char, text: &str) -> SnippetBodyRecord {
+    SnippetBodyRecord {
+        id: id.into(),
+        revision: revision.to_string().repeat(32),
+        ancestors: Vec::new(),
+        text: text.into(),
+        rich_html: None,
+    }
+}
+
+fn grant(revoked: bool, name: &str) -> AiGrantRecord {
+    AiGrantRecord {
+        id: "grant-1".into(),
+        owner_device: "device-a".into(),
+        name: name.into(),
+        client_name: "Editor".into(),
+        client_executable: None,
+        scopes: vec!["read_history".into()],
+        lookback: "7d".into(),
+        created_at: 10,
+        last_used_day: None,
+        revoked,
+        revoked_at: revoked.then_some(20),
+        deleted: false,
+    }
+}
+
+fn note(clip_id: &str, hidden: bool, changed_at: i64, base: i64, keep: bool) -> ClipNoteRecord {
+    ClipNoteRecord {
+        clip_id: clip_id.into(),
+        hidden_from_ai: hidden,
+        hidden_changed_at: changed_at,
+        base_stamp: base,
+        keep,
+        expires_at: None,
+        expiry_duration_ms: None,
+        provenance: None,
+    }
+}
+
+#[test]
+fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
+    let (a, ka) = store(60);
+    let (b, _) = store(61);
+    let clip_id = clip(&a, &ka, "described clip", 100);
+    let records = [
+        Record::Snippet(snippet("s1", "Signature")),
+        Record::SnippetBody(body("s1", 'a', "Kind regards")),
+        Record::SnippetCollection(SnippetCollectionRecord {
+            id: "work".into(),
+            name: "Work".into(),
+            icon: "briefcase".into(),
+            accent: "blue".into(),
+            order_key: "a0".into(),
+            deleted_at: None,
+        }),
+        Record::ContentRule(ContentRuleRecord {
+            id: "builtin.credentials".into(),
+            origin: RuleOrigin::Builtin,
+            builtin_version: Some(1),
+            customized_fields: vec!["actions".into()],
+            name: "Credentials".into(),
+            definition_json: r#"{"match":"all","conditions":[]}"#.into(),
+            device_scope: Vec::new(),
+            schema_version: 1,
+            effective_from: 50,
+            deleted_at: None,
+        }),
+        Record::ContentRulePlacement(RulePlacementRecord {
+            id: "builtin.credentials".into(),
+            enabled: true,
+            order_key: "a0".into(),
+        }),
+        Record::Pipeline(PipelineRecord {
+            id: "p1".into(),
+            name: "Clean URL".into(),
+            description: None,
+            steps_json: r#"[{"transform_id":"url.clean","version":1}]"#.into(),
+            deleted_at: None,
+        }),
+        Record::Preference(PreferenceRecord {
+            namespace: "snippets".into(),
+            key: "record_pasted".into(),
+            value_json: "true".into(),
+        }),
+        Record::SetMember(SetMemberRecord {
+            set: "ai_policy.excluded_apps".into(),
+            member: "com.example.vault".into(),
+            present: true,
+        }),
+        Record::AiGrant(grant(false, "Editor grant")),
+        Record::ClipNote(ClipNoteRecord {
+            provenance: Some(Provenance {
+                kind: ProvenanceKind::Transformed,
+                from_clip_id: Some("origin".into()),
+                transform_snapshot: Some(vec![TransformRef {
+                    transform_id: "url.clean".into(),
+                    version: 1,
+                }]),
+                pipeline_name: None,
+                grant_name: None,
+            }),
+            ..note(&clip_id, true, 5, 0, true)
+        }),
+    ];
+    for record in &records {
+        write(&a, &ka, record.clone());
+    }
+    assert!(p2p(&source(&a, 60, "a"), &source(&b, 61, "b"))
+        .into_iter()
+        .all(|stored| stored));
+    let keys = [
+        RecordKey::Snippet("s1"),
+        RecordKey::SnippetBody("s1"),
+        RecordKey::SnippetCollection("work"),
+        RecordKey::ContentRule("builtin.credentials"),
+        RecordKey::ContentRulePlacement("builtin.credentials"),
+        RecordKey::Pipeline("p1"),
+        RecordKey::Preference {
+            namespace: "snippets",
+            key: "record_pasted",
+        },
+        RecordKey::SetMember {
+            set: "ai_policy.excluded_apps",
+            member: "com.example.vault",
+        },
+        RecordKey::AiGrant("grant-1"),
+        RecordKey::ClipNote(&clip_id),
+    ];
+    for (key, expected) in keys.into_iter().zip(&records) {
+        assert_eq!(record(&b, key).as_ref(), Some(expected), "{key:?}");
+    }
+    assert_eq!(
+        b.list(10, 0).unwrap().len(),
+        1,
+        "records never enter history"
+    );
+    assert!(b.search("Kind regards", 10).unwrap().is_empty());
+}
+
+#[test]
+fn a_record_of_an_unknown_kind_is_declined_and_never_becomes_a_clip() {
+    let (store, key) = store(62);
+    let text = r#"{"kind":"future_kind","id":"x"}"#;
+    let id = record_id("future_kind:x");
+    let stored = apply_remote_version(
+        &store,
+        &key,
+        "receiver",
+        &RemoteVersion {
+            item_id: &id,
+            content: "",
+            binary_content: Some(text.as_bytes()),
+            payload_metadata: None,
+            content_type: ORGANIZATION,
+            created_at: 10,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "newer-peer",
+            app_bundle_id: None,
+            app_name: None,
+        },
+    )
+    .unwrap();
+    assert!(!stored);
+    assert!(store.version(&id).unwrap().is_none());
+    assert_eq!(store.count().unwrap(), 0);
+}
+
+#[test]
+fn a_concurrent_unhide_or_unrevoke_loses_and_is_written_back() {
+    let (a, ka) = store(63);
+    let (b, kb) = store(64);
+    let clip_id = clip(&a, &ka, "private", 100);
+    sync(&a, &ka, &b, &kb, "a");
+    write(
+        &a,
+        &ka,
+        Record::ClipNote(note(&clip_id, false, 0, 0, false)),
+    );
+    write(&a, &ka, Record::AiGrant(grant(false, "Original")));
+    sync(&a, &ka, &b, &kb, "a");
+
+    write(
+        &a,
+        &ka,
+        Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)),
+    );
+    write(&a, &ka, Record::AiGrant(grant(true, "Original")));
+    // Later on the other device, before it learned of the hide and revocation.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    write(
+        &b,
+        &kb,
+        Record::ClipNote(note(&clip_id, false, 0, 1_000, true)),
+    );
+    write(&b, &kb, Record::AiGrant(grant(false, "Renamed")));
+
+    sync(&b, &kb, &a, &ka, "b");
+    assert_eq!(
+        record(&a, RecordKey::ClipNote(&clip_id)),
+        Some(Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)))
+    );
+    assert_eq!(
+        record(&a, RecordKey::AiGrant("grant-1")),
+        Some(Record::AiGrant(grant(true, "Original")))
+    );
+    sync(&a, &ka, &b, &kb, "a");
+    assert_eq!(
+        record(&b, RecordKey::ClipNote(&clip_id)),
+        Some(Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)))
+    );
+    assert_eq!(
+        record(&b, RecordKey::AiGrant("grant-1")),
+        Some(Record::AiGrant(grant(true, "Original")))
+    );
+}
+
+#[test]
+fn a_purge_stays_purged_whatever_the_stamp_order() {
+    let (a, ka) = store(65);
+    let (b, kb) = store(66);
+    write(&a, &ka, Record::Snippet(snippet("s1", "Address")));
+    write(
+        &a,
+        &ka,
+        Record::SnippetBody(body("s1", 'a', "1 Main Street")),
+    );
+    sync(&a, &ka, &b, &kb, "a");
+
+    let stub = SnippetRecord {
+        title: String::new(),
+        abbreviation: None,
+        purged: true,
+        ..snippet("s1", "")
+    };
+    write(&a, &ka, Record::Snippet(stub.clone()));
+    write(&a, &ka, Record::SnippetBody(body("s1", 'b', "")));
+    // An edit made later on a device that has not seen the purge.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    write(&b, &kb, Record::Snippet(snippet("s1", "Home address")));
+    write(
+        &b,
+        &kb,
+        Record::SnippetBody(body("s1", 'c', "2 Main Street")),
+    );
+
+    sync(&b, &kb, &a, &ka, "b");
+    sync(&a, &ka, &b, &kb, "a");
+    for store in [&a, &b] {
+        assert_eq!(
+            record(store, RecordKey::Snippet("s1")),
+            Some(Record::Snippet(stub.clone()))
+        );
+        let Some(Record::SnippetBody(body)) = record(store, RecordKey::SnippetBody("s1")) else {
+            panic!("the body projection is missing");
+        };
+        assert!(body.text.is_empty());
+    }
+}
+
+#[test]
+fn clip_notes_wait_for_their_clip_and_only_notes_accept_a_tombstone() {
+    let (a, ka) = store(67);
+    let (b, kb) = store(68);
+    let clip_id = clip(&a, &ka, "noted", 100);
+    write(&a, &ka, Record::ClipNote(note(&clip_id, true, 1, 0, false)));
+    write(
+        &a,
+        &ka,
+        Record::ClipNote(note("never-arrives", true, 1, 0, false)),
+    );
+    transfer(&a, &ka, &b, &kb, "a", |row| {
+        row.content_type == ORGANIZATION
+    });
+    assert!(record(&b, RecordKey::ClipNote(&clip_id)).is_some());
+    sync(&a, &ka, &b, &kb, "a");
+
+    let month = 31 * 24 * 60 * 60 * 1000;
+    assert_eq!(
+        b.prune_orphan_clip_notes(copypaste_core::now_ms()).unwrap(),
+        0
+    );
+    assert_eq!(
+        b.prune_orphan_clip_notes(copypaste_core::now_ms() + month)
+            .unwrap(),
+        1
+    );
+    assert!(record(&b, RecordKey::ClipNote("never-arrives")).is_none());
+    assert!(record(&b, RecordKey::ClipNote(&clip_id)).is_some());
+
+    assert!(a.tombstone_clip_note(&clip_id).unwrap());
+    sync(&a, &ka, &b, &kb, "a");
+    assert!(record(&b, RecordKey::ClipNote(&clip_id)).is_none());
+
+    write(&a, &ka, Record::Snippet(snippet("s1", "Kept")));
+    sync(&a, &ka, &b, &kb, "a");
+    let snippet_row = b.version(&record_id("snippet:s1")).unwrap().unwrap();
+    let forged = apply_remote_version(
+        &b,
+        &kb,
+        "receiver",
+        &RemoteVersion {
+            item_id: &snippet_row.id,
+            content: "",
+            binary_content: None,
+            payload_metadata: None,
+            content_type: ORGANIZATION,
+            created_at: snippet_row.created_at + 1,
+            deleted: true,
+            content_hash: Some(&snippet_row.content_hash),
+            origin_device_id: "a",
+            app_bundle_id: None,
+            app_name: None,
+        },
+    )
+    .unwrap();
+    assert!(!forged, "only a clip note may be tombstoned");
+    assert!(record(&b, RecordKey::Snippet("s1")).is_some());
 }

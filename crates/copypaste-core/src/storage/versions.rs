@@ -90,7 +90,7 @@ macro_rules! version_columns {
     };
 }
 
-const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, 0 AS deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
+const ORGANIZATION_VERSION_COLUMNS: &str = "created_at, id, content_hash, deleted, origin_device_id, 0 AS pinned, NULL AS pin_order, 0 AS pin_updated_at";
 
 fn summary_query(predicate: &str) -> String {
     format!("SELECT {} FROM clipboard_items WHERE {predicate} UNION ALL SELECT {ORGANIZATION_VERSION_COLUMNS} FROM organization_records WHERE {predicate}", version_columns!())
@@ -421,6 +421,9 @@ pub(super) fn upsert_in_tx(
     }
     if super::organization::is_record_id(incoming.id) {
         return Ok(false);
+    }
+    if super::receipt::on_received(tx, incoming)? == super::receipt::ReceiptOutcome::Discard {
+        return Ok(true);
     }
     // Before the write below clears `fts_rowid`, and rolled back with it if
     // the dedup index refuses the version.
