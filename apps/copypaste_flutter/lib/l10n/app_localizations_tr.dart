@@ -792,6 +792,48 @@ class AppLocalizationsTr extends AppLocalizations {
       'İsteğe bağlı modülleri yükleyin ve yönetin.';
 
   @override
+  String get settingsSectionRules => 'İçerik kuralları';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Öğeleri otomatik olarak etiketleyin, atlayın, koruyun veya süresini doldurun.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Hızlı erişim';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Klavye, kutucuklar ve ana ekran widget\'ı.';
+
+  @override
+  String get settingsSectionSnippets => 'Parçacıklar';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Yeniden kullanılabilir metinler ve şablonlar.';
+
+  @override
+  String get settingsSectionTransforms => 'Metin dönüşümleri';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoriler, işlem hatları ve yapıştırmada varsayılan dönüşümler.';
+
+  @override
+  String get settingsSectionAiTools => 'Yapay zekâ araçları';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Yapay zekâ asistanlarını bağlayın ve neleri görebileceklerini denetleyin.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Birden çok kopyayı toplayın ve sırayla yapıştırın.';
+
+  @override
   String get settingsSectionAbout => 'Hakkında';
 
   @override
@@ -1437,6 +1479,9 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Kısayola basın…';
+
+  @override
+  String get settingsShortcutNotSet => 'Ayarlanmadı';
 
   @override
   String get settingsShortcutReset => 'Kısayolu sıfırla';

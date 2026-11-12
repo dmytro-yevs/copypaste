@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
@@ -128,30 +127,68 @@ extension DesktopShortcutModifierPresentation on DesktopShortcutModifier {
   };
 }
 
-abstract interface class DesktopShortcutRegistrar {
-  Future<void> register(
-    DesktopShortcut shortcut,
-    Future<void> Function() callback,
-  );
+/// Stable registration ids of application global shortcuts.
+abstract final class DesktopShortcutId {
+  static const quickPaste = 'copypaste.quick-paste';
+}
 
-  Future<void> unregister();
+/// Another application shortcut already holds the requested key combination.
+class DesktopShortcutConflict implements Exception {
+  const DesktopShortcutConflict(this.heldBy);
+
+  /// The id whose binding was kept.
+  final String heldBy;
+
+  @override
+  String toString() => 'Shortcut already registered for $heldBy.';
+}
+
+/// Global shortcuts keyed by a stable id; each id holds at most one binding.
+abstract interface class DesktopShortcutRegistrar {
+  /// Replaces the binding of [id] and runs [callback] on activation.
+  ///
+  /// Throws [DesktopShortcutConflict] when another id holds [shortcut]; the
+  /// current binding of [id] is then kept. [description] names the action
+  /// where the system lists registered shortcuts.
+  Future<void> register(
+    String id,
+    DesktopShortcut shortcut,
+    Future<void> Function() callback, {
+    required String description,
+  });
+
+  Future<void> unregister(String id);
+}
+
+void _ensureRegistrable(
+  Map<String, DesktopShortcut> registered,
+  String id,
+  DesktopShortcut shortcut,
+) {
+  if (!shortcut.isValid) {
+    throw ArgumentError.value(shortcut, 'shortcut', 'Shortcut is invalid.');
+  }
+  for (final MapEntry(key: heldBy, value: held) in registered.entries) {
+    if (heldBy != id && held == shortcut) throw DesktopShortcutConflict(heldBy);
+  }
 }
 
 class HotKeyManagerDesktopShortcutRegistrar
     implements DesktopShortcutRegistrar {
-  HotKey? _registered;
+  final Map<String, DesktopShortcut> _shortcuts = {};
+  final Map<String, HotKey> _hotKeys = {};
 
   @override
   Future<void> register(
+    String id,
     DesktopShortcut shortcut,
-    Future<void> Function() callback,
-  ) async {
-    if (!shortcut.isValid) {
-      throw ArgumentError.value(shortcut, 'shortcut', 'Shortcut is invalid.');
-    }
-    await unregister();
+    Future<void> Function() callback, {
+    required String description,
+  }) async {
+    _ensureRegistrable(_shortcuts, id, shortcut);
+    await unregister(id);
     final hotKey = HotKey(
-      identifier: 'copypaste.quick-paste',
+      identifier: id,
       key: shortcut.key,
       modifiers: shortcut.modifiers
           .map((modifier) => modifier.hotKeyModifier)
@@ -164,16 +201,17 @@ class HotKeyManagerDesktopShortcutRegistrar
         unawaited(callback());
       },
     );
-    _registered = hotKey;
+    _hotKeys[id] = hotKey;
+    _shortcuts[id] = shortcut;
   }
 
   @override
-  Future<void> unregister() async {
-    final hotKey = _registered;
-    if (hotKey != null) {
-      await hotKeyManager.unregister(hotKey);
-      _registered = null;
-    }
+  Future<void> unregister(String id) async {
+    final hotKey = _hotKeys[id];
+    if (hotKey == null) return;
+    await hotKeyManager.unregister(hotKey);
+    _hotKeys.remove(id);
+    _shortcuts.remove(id);
   }
 }
 
@@ -188,32 +226,30 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
     _channel.setMethodCallHandler(_handleMethodCall);
   }
 
-  static const _shortcutId = 'copypaste.quick-paste';
-
   final MethodChannel _channel;
-  Future<void> Function()? _callback;
-  String? _registeredId;
-  String? _registeredTriggerDescription;
+  final Map<String, DesktopShortcut> _shortcuts = {};
+  final Map<String, Future<void> Function()> _callbacks = {};
+  final Map<String, String?> _triggerDescriptions = {};
 
-  /// The trigger confirmed by the desktop portal, when it reports one.
-  String? get registeredTriggerDescription => _registeredTriggerDescription;
+  /// The trigger the desktop portal confirmed for [id], when it reports one.
+  String? registeredTriggerDescription(String id) => _triggerDescriptions[id];
 
   @override
   Future<void> register(
+    String id,
     DesktopShortcut shortcut,
-    Future<void> Function() callback,
-  ) async {
-    if (!shortcut.isValid) {
-      throw ArgumentError.value(shortcut, 'shortcut', 'Shortcut is invalid.');
-    }
-    await unregister();
+    Future<void> Function() callback, {
+    required String description,
+  }) async {
+    _ensureRegistrable(_shortcuts, id, shortcut);
+    await unregister(id);
     final supported = await _channel.invokeMethod<bool>('isSupported');
     if (supported != true) {
       throw PlatformException(code: 'shortcut_unavailable');
     }
     final result = await _channel.invokeMapMethod<String, Object?>('register', {
-      'id': _shortcutId,
-      'description': AppStrings.current.platformGlobalShortcutDescription,
+      'id': id,
+      'description': description,
       'preferredTrigger': shortcut.linuxPreferredTrigger,
       'usage': shortcut.key.usbHidUsage,
       'modifiers': shortcut.modifiers.map((modifier) => modifier.name).toList(),
@@ -224,21 +260,20 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
         message: result?['reason'] as String?,
       );
     }
-    _registeredId = _shortcutId;
-    _registeredTriggerDescription = result?['triggerDescription'] as String?;
-    _callback = callback;
+    _shortcuts[id] = shortcut;
+    _triggerDescriptions[id] = result?['triggerDescription'] as String?;
+    _callbacks[id] = callback;
   }
 
   @override
-  Future<void> unregister() async {
-    final id = _registeredId;
-    if (id == null) return;
+  Future<void> unregister(String id) async {
+    if (!_callbacks.containsKey(id)) return;
     if (await _channel.invokeMethod<bool>('unregister', {'id': id}) != true) {
       throw PlatformException(code: 'shortcut_unregistration_failed');
     }
-    _registeredId = null;
-    _registeredTriggerDescription = null;
-    _callback = null;
+    _shortcuts.remove(id);
+    _triggerDescriptions.remove(id);
+    _callbacks.remove(id);
   }
 
   Future<Object?> _handleMethodCall(MethodCall call) async {
@@ -248,11 +283,9 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
       );
     }
     final arguments = call.arguments;
-    if (arguments is! Map<Object?, Object?> ||
-        arguments['id'] != _registeredId) {
-      return false;
-    }
-    final callback = _callback;
+    final callback = arguments is Map<Object?, Object?>
+        ? _callbacks[arguments['id']]
+        : null;
     if (callback == null) return false;
     unawaited(callback());
     return true;

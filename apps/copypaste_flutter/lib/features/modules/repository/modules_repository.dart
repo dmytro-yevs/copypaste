@@ -1,3 +1,4 @@
+import '../../../shared/forms/dynamic_form_draft.dart';
 import '../models/module_models.dart';
 
 abstract interface class ModulesRepository {
@@ -13,20 +14,9 @@ abstract interface class ModulesRepository {
   );
 }
 
-abstract interface class ModuleInputPicker {
-  Future<SelectedModuleInput?> chooseInput(ModuleField field);
-}
+typedef ModuleInputPicker = DynamicFormInputPicker;
 
-class SelectedModuleInput {
-  const SelectedModuleInput({
-    required this.path,
-    required this.name,
-    required this.dispose,
-  });
-  final String path;
-  final String name;
-  final Future<void> Function() dispose;
-}
+typedef SelectedModuleInput = SelectedDynamicFormInput;
 
 class SelectedModulePackage {
   const SelectedModulePackage({required this.path, required this.dispose});

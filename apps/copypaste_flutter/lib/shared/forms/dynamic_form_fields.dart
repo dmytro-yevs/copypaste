@@ -1,20 +1,28 @@
-import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../../../app/theme/app_overlays.dart';
-import '../../../app/theme/app_theme.dart';
-import '../../../app/theme/app_tokens.dart';
-import '../../../l10n/l10n.dart';
-import '../../../shared/state_view.dart';
-import '../controller/module_form_draft.dart';
-import '../models/module_models.dart';
+import '../../app/theme/app_icon_frame.dart';
+import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_theme.dart';
+import '../../app/theme/app_tokens.dart';
+import '../../l10n/l10n.dart';
+import '../state_view.dart';
+import 'dynamic_form_draft.dart';
 
-/// Renders module fields in preferences and command forms.
-class ModuleFormFields extends StatelessWidget {
-  const ModuleFormFields({super.key, required this.draft, this.enabled = true});
+/// Renders the fields of a [DynamicFormDraft], such as module preferences,
+/// module commands and template fill-in forms.
+class DynamicFormFields extends StatelessWidget {
+  const DynamicFormFields({
+    super.key,
+    required this.draft,
+    this.enabled = true,
+    this.footer,
+  });
 
-  final ModuleFormDraft draft;
+  final DynamicFormDraft draft;
   final bool enabled;
+
+  /// Owner content after the fields, rebuilt with the draft.
+  final Widget? Function(BuildContext context)? footer;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -31,7 +39,7 @@ class ModuleFormFields extends StatelessWidget {
           const Gap(AppSpacing.md),
         ],
         for (final field in draft.fields) ...[
-          if (field.kind == ModuleFieldKind.boolean)
+          if (field.kind == DynamicFormFieldKind.boolean)
             Switch(
               value: draft.values[field.id] as bool,
               leading: Text(field.title),
@@ -42,7 +50,7 @@ class ModuleFormFields extends StatelessWidget {
           else ...[
             Text(field.title).small(),
             const Gap(AppSpacing.xs),
-            if (field.kind == ModuleFieldKind.choices)
+            if (field.kind == DynamicFormFieldKind.choices)
               MultiSelect<String>(
                 key: ValueKey('module-choices-${field.id}'),
                 enabled: enabled,
@@ -73,7 +81,7 @@ class ModuleFormFields extends StatelessWidget {
                   ),
                 ).call,
               )
-            else if (field.kind == ModuleFieldKind.file)
+            else if (field.kind == DynamicFormFieldKind.file)
               Button.secondary(
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.secondary(),
@@ -115,15 +123,7 @@ class ModuleFormFields extends StatelessWidget {
           ],
           const Gap(AppSpacing.md),
         ],
-        if (draft.selectedModel case final model?)
-          Text(
-            model.available
-                ? context.l10n.modulesModelReady(model.title)
-                : context.l10n.modulesModelDownload(
-                    model.title,
-                    (model.sizeBytes / (1024 * 1024)).toStringAsFixed(1),
-                  ),
-          ).small().muted(),
+        ?footer?.call(context),
       ],
     ),
   );

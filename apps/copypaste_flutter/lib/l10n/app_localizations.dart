@@ -1414,6 +1414,78 @@ abstract class AppLocalizations {
   /// **'Install and manage optional modules.'**
   String get settingsSectionModulesSummary;
 
+  /// Settings section name in navigation and as the section heading. Rules that act on copied content automatically.
+  ///
+  /// In en, this message translates to:
+  /// **'Content rules'**
+  String get settingsSectionRules;
+
+  /// Short summary of the Content rules settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag, skip, protect, or expire clips automatically.'**
+  String get settingsSectionRulesSummary;
+
+  /// Android settings section name for the clipboard keyboard, Quick Settings tiles and home-screen widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick access'**
+  String get settingsSectionQuickAccess;
+
+  /// Short summary of the Quick access settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard, tiles, and home-screen widget.'**
+  String get settingsSectionQuickAccessSummary;
+
+  /// Settings section name in navigation and as the section heading. Noun: saved reusable texts.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets'**
+  String get settingsSectionSnippets;
+
+  /// Short summary of the Snippets settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Reusable text and templates.'**
+  String get settingsSectionSnippetsSummary;
+
+  /// Settings section name in navigation and as the section heading. Text conversions such as case changes or JSON formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Text transforms'**
+  String get settingsSectionTransforms;
+
+  /// Short summary of the Text transforms settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites, pipelines, and default paste transforms.'**
+  String get settingsSectionTransformsSummary;
+
+  /// Settings section name in navigation and as the section heading. External AI assistants that can read clipboard history.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools'**
+  String get settingsSectionAiTools;
+
+  /// Short summary of the AI tools settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect AI assistants and control what they can see.'**
+  String get settingsSectionAiToolsSummary;
+
+  /// Heading of the Paste Queue settings group. Paste Queue is the product feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste Queue'**
+  String get pasteQueueSettingsTitle;
+
+  /// Description of the Paste Queue settings group.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect several copies and paste them in order.'**
+  String get pasteQueueSettingsSummary;
+
   /// Settings section name in navigation and as the section heading, about the application.
   ///
   /// In en, this message translates to:
@@ -2493,6 +2565,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Press shortcut…'**
   String get settingsShortcutRecording;
+
+  /// Label of a global shortcut recorder button when no shortcut is assigned.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get settingsShortcutNotSet;
 
   /// Tooltip of the button that restores the default Quick Paste shortcut.
   ///

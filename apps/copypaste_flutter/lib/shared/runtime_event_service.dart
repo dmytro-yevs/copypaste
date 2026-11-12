@@ -2,6 +2,43 @@ import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
 
+/// Wire names of [runtime.RuntimeEvent.kind].
+abstract final class RuntimeEventKind {
+  /// Sent once a watch is subscribed; readers re-read all state after it.
+  static const ready = 'ready';
+  static const items = 'items';
+  static const peers = 'peers';
+  static const pasteQueue = 'paste_queue';
+  static const library = 'library';
+  static const aiApproval = 'ai_approval';
+  static const operationProgress = 'operation_progress';
+}
+
+/// Synced record kinds a [RuntimeEventKind.library] event can cover.
+enum LibraryKind {
+  snippets(1),
+  collections(1 << 1),
+  rules(1 << 2),
+  pipelines(1 << 3),
+  preferences(1 << 4),
+  setMembers(1 << 5),
+  grants(1 << 6);
+
+  const LibraryKind(this.bit);
+
+  final int bit;
+}
+
+extension RuntimeEventInvalidation on runtime.RuntimeEvent {
+  /// Whether readers of [kinds] must re-read; a reconnect always requires it.
+  bool invalidatesLibrary(Set<LibraryKind> kinds) {
+    if (kind == RuntimeEventKind.ready) return true;
+    if (kind != RuntimeEventKind.library) return false;
+    final bits = libraryKinds;
+    return bits == null || kinds.any((library) => bits & library.bit != 0);
+  }
+}
+
 /// One lazy runtime connection shared by features in this engine.
 class RuntimeEventService {
   RuntimeEventService({
@@ -30,6 +67,16 @@ class RuntimeEventService {
   int _generation = 0;
 
   Stream<runtime.RuntimeEvent> get events => _events.stream;
+
+  /// Events of [kinds], plus [RuntimeEventKind.ready] after (re)connecting.
+  Stream<runtime.RuntimeEvent> eventsOf(Set<String> kinds) => events.where(
+    (event) =>
+        event.kind == RuntimeEventKind.ready || kinds.contains(event.kind),
+  );
+
+  /// Re-read signals for library records of [kinds].
+  Stream<runtime.RuntimeEvent> libraryChanges(Set<LibraryKind> kinds) =>
+      events.where((event) => event.invalidatesLibrary(kinds));
 
   /// Must be called while listening to [events]. Completes after the backend
   /// has subscribed, so a file operation cannot race its progress watcher.

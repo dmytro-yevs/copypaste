@@ -14,12 +14,12 @@ import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/equal_height_grid.dart';
 import '../controller/modules_controller.dart';
-import '../controller/module_form_draft.dart';
+import '../../../shared/forms/dynamic_form_draft.dart';
+import '../../../shared/forms/dynamic_form_fields.dart';
 import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
 import 'sms_access_setup_drawer.dart';
 import 'module_settings_drawer.dart';
-import 'module_form_fields.dart';
 
 /// Marketplace and installed modules share the host's components and state.
 class ModulesSettingsView extends StatefulWidget {
@@ -464,7 +464,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
   }
 }
 
-Future<ModuleFormDraft?> _fieldsDialog(
+Future<DynamicFormDraft?> _fieldsDialog(
   BuildContext context, {
   required ModulesController controller,
   required String title,
@@ -490,7 +490,7 @@ class _ModuleFieldsDialog extends StatelessWidget {
     required this.action,
   });
   final String title;
-  final ModuleFormDraft draft;
+  final DynamicFormDraft draft;
   final String action;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -498,7 +498,7 @@ class _ModuleFieldsDialog extends StatelessWidget {
     builder: (context, _) => AppOverlays.alertDialog(
       icon: LucideIcons.puzzle,
       title: Text(title),
-      content: SingleChildScrollView(child: ModuleFormFields(draft: draft)),
+      content: SingleChildScrollView(child: DynamicFormFields(draft: draft)),
       actions: [
         Button.ghost(
           style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),

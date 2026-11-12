@@ -10,10 +10,10 @@ import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
-import '../controller/module_form_draft.dart';
+import '../../../shared/forms/dynamic_form_draft.dart';
+import '../../../shared/forms/dynamic_form_fields.dart';
 import '../controller/modules_controller.dart';
 import '../models/module_models.dart';
-import 'module_form_fields.dart';
 
 /// Shared module management layout for desktop and mobile drawers.
 class ModuleSettingsDrawer extends StatefulWidget {
@@ -35,7 +35,7 @@ class ModuleSettingsDrawer extends StatefulWidget {
 }
 
 class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
-  ModuleFormDraft? _draft;
+  DynamicFormDraft? _draft;
 
   ModulesController get controller => widget.controller;
   String get moduleId => widget.moduleId;
@@ -253,9 +253,13 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                           ],
                           if (_draft case final draft?) ...[
                             const Gap(AppSpacing.md),
-                            ModuleFormFields(
+                            DynamicFormFields(
                               draft: draft,
                               enabled: !controller.busy && module.error == null,
+                              footer: (context) => _searchModelNote(
+                                context,
+                                module.searchModelFor(draft.values),
+                              ),
                             ),
                           ],
                           if (module.restartRequired &&
@@ -316,3 +320,15 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
     ),
   );
 }
+
+Widget? _searchModelNote(BuildContext context, ModuleSearchModel? model) =>
+    model == null
+    ? null
+    : Text(
+        model.available
+            ? context.l10n.modulesModelReady(model.title)
+            : context.l10n.modulesModelDownload(
+                model.title,
+                (model.sizeBytes / (1024 * 1024)).toStringAsFixed(1),
+              ),
+      ).small().muted();

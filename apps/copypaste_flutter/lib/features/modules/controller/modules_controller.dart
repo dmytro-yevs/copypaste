@@ -7,7 +7,7 @@ import '../models/module_models.dart';
 import '../repository/module_marketplace_repository.dart';
 import '../repository/modules_repository.dart';
 import '../repository/module_access_repository.dart';
-import 'module_form_draft.dart';
+import '../../../shared/forms/dynamic_form_draft.dart';
 import 'sms_access_setup_controller.dart';
 
 class ModulesController extends ChangeNotifier {
@@ -31,16 +31,15 @@ class ModulesController extends ChangeNotifier {
   Future<void> restartApplication() => _perform(() async {
     await _restart?.call();
   }, refresh: false);
-  ModuleFormDraft form(
+  DynamicFormDraft form(
     List<ModuleField> fields,
     Map<String, Object> initial, {
     InstalledModule? module,
-  }) => ModuleFormDraft(
+  }) => DynamicFormDraft(
     fields: fields,
     initial: initial,
     picker: _inputPicker,
-    models: module?.searchModels ?? const [],
-    languageField: module?.searchLanguageField,
+    accepts: module?.acceptsPreferences,
   );
   ModulesLoadState _state = ModulesLoadState.loading;
   List<InstalledModule> _modules = const [];

@@ -703,6 +703,42 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSectionModulesSummary => '安装和管理可选模块。';
 
   @override
+  String get settingsSectionRules => '内容规则';
+
+  @override
+  String get settingsSectionRulesSummary => '自动为剪贴项添加标签、跳过、保护或设置过期。';
+
+  @override
+  String get settingsSectionQuickAccess => '快速访问';
+
+  @override
+  String get settingsSectionQuickAccessSummary => '键盘、快捷设置图块和主屏幕小组件。';
+
+  @override
+  String get settingsSectionSnippets => '片段';
+
+  @override
+  String get settingsSectionSnippetsSummary => '可重复使用的文本和模板。';
+
+  @override
+  String get settingsSectionTransforms => '文本转换';
+
+  @override
+  String get settingsSectionTransformsSummary => '收藏、流程和粘贴时的默认转换。';
+
+  @override
+  String get settingsSectionAiTools => 'AI 工具';
+
+  @override
+  String get settingsSectionAiToolsSummary => '连接 AI 助手并控制它们可以查看的内容。';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary => '收集多次复制的内容并按顺序粘贴。';
+
+  @override
   String get settingsSectionAbout => '关于';
 
   @override
@@ -1288,6 +1324,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => '请按快捷键…';
+
+  @override
+  String get settingsShortcutNotSet => '未设置';
 
   @override
   String get settingsShortcutReset => '重置快捷键';

@@ -11,30 +11,57 @@ class AppFilterIndicator extends StatelessWidget {
     required this.active,
     required this.child,
     this.tooltip,
-  });
+  }) : count = null;
+
+  /// Shows [count] on the control instead of a dot; zero shows nothing.
+  const AppFilterIndicator.count({
+    super.key,
+    required int this.count,
+    required this.child,
+    this.tooltip,
+  }) : active = count > 0;
+
+  static const _maxShownCount = 99;
+
   final bool active;
+  final int? count;
   final Widget child;
   final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
+    final count = this.count;
     final control = Stack(
       clipBehavior: Clip.none,
       children: [
         child,
         if (active)
           PositionedDirectional(
-            top: AppSpacing.xs,
-            end: AppSpacing.xs,
+            top: count == null ? AppSpacing.xs : AppSpacing.zero,
+            end: count == null ? AppSpacing.xs : AppSpacing.zero,
             child: IgnorePointer(
-              child: Semantics(
-                label: context.l10n.appActiveFilter,
-                child: const AvatarBadge(
-                  size: AppIconSize.statusIndicator,
-                  borderRadius: AppRadius.full,
-                  color: AppTheme.navigationAccent,
-                ),
-              ),
+              child: count == null
+                  ? Semantics(
+                      label: context.l10n.appActiveFilter,
+                      child: const AvatarBadge(
+                        size: AppIconSize.statusIndicator,
+                        borderRadius: AppRadius.full,
+                        color: AppTheme.navigationAccent,
+                      ),
+                    )
+                  : Semantics(
+                      value: '$count',
+                      child: ExcludeSemantics(
+                        child: PrimaryBadge(
+                          style: AppTheme.countBadgeStyle,
+                          child: Text(
+                            count > _maxShownCount
+                                ? '$_maxShownCount+'
+                                : '$count',
+                          ),
+                        ),
+                      ),
+                    ),
             ),
           ),
       ],

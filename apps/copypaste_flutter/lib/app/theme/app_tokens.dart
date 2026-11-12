@@ -62,6 +62,9 @@ abstract final class AppControlSize {
   static const double large = 40;
   static const double touch = 48;
   static const double navigation = 56;
+
+  /// One key of an in-app text keypad, such as a template fill-in form.
+  static const double keypadKey = touch;
   static const double navigationLabelHeight =
       touch -
       AppSpacing.xs * 2 -
@@ -91,6 +94,7 @@ abstract final class AppLayoutSize {
   static const double quickPasteMenuWidth = 448;
   static const double quickPasteTransferStatusWidth = 64;
   static const double quickPasteInspectorWidth = 360;
+  static const double transformPaletteWidth = 640;
   static const double settingsStackedControlWidth = 420;
   static const double settingsNavigationWidth = 240;
   static const double settingsContentMaxWidth = 900;
@@ -107,6 +111,9 @@ abstract final class AppOverlaySize {
   static const double dialogContentHeightFactor = 0.5;
   static const double drawerHeightFactor = 0.86;
   static const double drawerPanelWidth = 480;
+
+  /// Smallest height of a multi-line body field in an editor drawer.
+  static const double editorBodyMinHeight = 160;
   static const double toastMaxWidth = 360;
   static const double dragHandleWidth = 36;
   static const double dragHandleHeight = 4;

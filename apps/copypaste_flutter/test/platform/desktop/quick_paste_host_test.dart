@@ -49,6 +49,42 @@ void main() {
     expect(finds, 1);
   });
 
+  test('foreground paste port follows the native channel contract', () async {
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return switch (call.method) {
+        'pasteForeground' => 'elevatedTarget',
+        'moveCaretLeft' => true,
+        'secureFieldFocused' => null,
+        _ => true,
+      };
+    });
+    final ForegroundPasteHost port = host;
+
+    expect(
+      await port.pasteForeground(plainText: true),
+      PasteOutcome.elevatedTarget,
+    );
+    expect(await port.moveCaretLeft(0), isTrue);
+    expect(await port.moveCaretLeft(3), isTrue);
+    expect(() => port.moveCaretLeft(2001), throwsRangeError);
+    expect(await port.secureFieldFocused(), isNull);
+    expect(calls.map((call) => call.method), [
+      'pasteForeground',
+      'moveCaretLeft',
+      'secureFieldFocused',
+    ]);
+    expect(calls[0].arguments, {'plainText': true});
+    expect(calls[1].arguments, {'count': 3});
+
+    messenger.setMockMethodCallHandler(channel, (call) async => 'later');
+    expect(await port.pasteForeground(), PasteOutcome.unsupported);
+    messenger.setMockMethodCallHandler(channel, null);
+    expect(await port.pasteForeground(), PasteOutcome.unsupported);
+    expect(await port.secureFieldFocused(), isNull);
+  });
+
   for (final method in ['prepare', 'open']) {
     test('$method accepts native true', () async {
       await (method == 'prepare' ? host.prepare() : host.open());
@@ -381,14 +417,16 @@ class _Registrar implements DesktopShortcutRegistrar {
 
   @override
   Future<void> register(
+    String id,
     DesktopShortcut shortcut,
-    Future<void> Function() callback,
-  ) async {
+    Future<void> Function() callback, {
+    required String description,
+  }) async {
     this.callback = callback;
   }
 
   @override
-  Future<void> unregister() async {
+  Future<void> unregister(String id) async {
     callback = null;
   }
 }

@@ -815,6 +815,48 @@ class AppLocalizationsEs extends AppLocalizations {
       'Instalación y gestión de módulos opcionales.';
 
   @override
+  String get settingsSectionRules => 'Reglas de contenido';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Etiqueta, omite, protege o caduca clips automáticamente.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Acceso rápido';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Teclado, iconos y widget de la pantalla de inicio.';
+
+  @override
+  String get settingsSectionSnippets => 'Fragmentos';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Texto reutilizable y plantillas.';
+
+  @override
+  String get settingsSectionTransforms => 'Transformaciones de texto';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoritos, secuencias y transformaciones predeterminadas al pegar.';
+
+  @override
+  String get settingsSectionAiTools => 'Herramientas de IA';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Conecta asistentes de IA y controla lo que pueden ver.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Reúne varias copias y pégalas en orden.';
+
+  @override
   String get settingsSectionAbout => 'Acerca de';
 
   @override
@@ -1470,6 +1512,9 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Pulsa el atajo…';
+
+  @override
+  String get settingsShortcutNotSet => 'Sin asignar';
 
   @override
   String get settingsShortcutReset => 'Restablecer atajo';

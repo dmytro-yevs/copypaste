@@ -805,6 +805,48 @@ class AppLocalizationsUk extends AppLocalizations {
       'Встановлення й керування додатковими модулями.';
 
   @override
+  String get settingsSectionRules => 'Правила вмісту';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Автоматично додавайте теги, пропускайте, захищайте або видаляйте записи за часом.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Швидкий доступ';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Клавіатура, плитки й віджет головного екрана.';
+
+  @override
+  String get settingsSectionSnippets => 'Фрагменти';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Повторно використовуваний текст і шаблони.';
+
+  @override
+  String get settingsSectionTransforms => 'Перетворення тексту';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Улюблені, конвеєри й типові перетворення під час вставлення.';
+
+  @override
+  String get settingsSectionAiTools => 'Інструменти ШІ';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'Підключайте ШІ-асистентів і керуйте тим, що вони бачать.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Збирайте кілька копій і вставляйте їх по черзі.';
+
+  @override
   String get settingsSectionAbout => 'Про програму';
 
   @override
@@ -1454,6 +1496,9 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Натисніть скорочення…';
+
+  @override
+  String get settingsShortcutNotSet => 'Не задано';
 
   @override
   String get settingsShortcutReset => 'Скинути скорочення';

@@ -734,6 +734,44 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSectionModulesSummary => '선택적 모듈 설치 및 관리.';
 
   @override
+  String get settingsSectionRules => '콘텐츠 규칙';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      '클립에 자동으로 태그를 지정하거나 건너뛰거나 보호하거나 만료합니다.';
+
+  @override
+  String get settingsSectionQuickAccess => '빠른 액세스';
+
+  @override
+  String get settingsSectionQuickAccessSummary => '키보드, 타일, 홈 화면 위젯.';
+
+  @override
+  String get settingsSectionSnippets => '스니펫';
+
+  @override
+  String get settingsSectionSnippetsSummary => '재사용 가능한 텍스트와 템플릿.';
+
+  @override
+  String get settingsSectionTransforms => '텍스트 변환';
+
+  @override
+  String get settingsSectionTransformsSummary => '즐겨찾기, 파이프라인, 붙여넣기 기본 변환.';
+
+  @override
+  String get settingsSectionAiTools => 'AI 도구';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'AI 어시스턴트를 연결하고 볼 수 있는 내용을 관리합니다.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary => '여러 복사 항목을 모아 순서대로 붙여넣습니다.';
+
+  @override
   String get settingsSectionAbout => '정보';
 
   @override
@@ -1335,6 +1373,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => '단축키 입력…';
+
+  @override
+  String get settingsShortcutNotSet => '설정 안 됨';
 
   @override
   String get settingsShortcutReset => '단축키 재설정';

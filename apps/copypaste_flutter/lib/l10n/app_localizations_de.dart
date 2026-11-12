@@ -810,6 +810,48 @@ class AppLocalizationsDe extends AppLocalizations {
       'Optionale Module installieren und verwalten.';
 
   @override
+  String get settingsSectionRules => 'Inhaltsregeln';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Clips automatisch taggen, überspringen, schützen oder ablaufen lassen.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Schnellzugriff';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Tastatur, Kacheln und Startbildschirm-Widget.';
+
+  @override
+  String get settingsSectionSnippets => 'Textbausteine';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Wiederverwendbare Texte und Vorlagen.';
+
+  @override
+  String get settingsSectionTransforms => 'Texttransformationen';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoriten, Abläufe und Standardtransformationen beim Einfügen.';
+
+  @override
+  String get settingsSectionAiTools => 'KI-Tools';
+
+  @override
+  String get settingsSectionAiToolsSummary =>
+      'KI-Assistenten verbinden und festlegen, was sie sehen dürfen.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Mehrere Kopien sammeln und der Reihe nach einfügen.';
+
+  @override
   String get settingsSectionAbout => 'Info';
 
   @override
@@ -1461,6 +1503,9 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get settingsShortcutRecording => 'Tastenkürzel drücken …';
+
+  @override
+  String get settingsShortcutNotSet => 'Nicht festgelegt';
 
   @override
   String get settingsShortcutReset => 'Tastenkürzel zurücksetzen';
