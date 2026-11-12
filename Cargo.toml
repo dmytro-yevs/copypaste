@@ -144,6 +144,9 @@ icu_calendar = { version = "2.2.1", default-features = false, features = ["compi
 icu_locale = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 icu_casemap = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
 icu_normalizer = { version = "2.2.0", default-features = false, features = ["compiled_data"] }
+# Output trait of ICU4X formatters. A CLDR pattern formatter only implements
+# `TryWriteable`, so the template crate names it. Already locked through ICU.
+writeable = "0.6.3"
 # RFC 4180 with quoted fields that span lines.
 csv = "1.4.0"
 # YAML 1.2 in pure Rust (no C libyaml port and no unsafe parser). Chosen over
