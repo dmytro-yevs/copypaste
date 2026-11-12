@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -35,6 +36,8 @@ constexpr guint kKeyboardDevice = 1;
 constexpr guint kPersistUntilRevoked = 2;
 constexpr gint kEvdevLeftControl = 29;
 constexpr gint kEvdevV = 47;
+constexpr gint kEvdevLeft = 105;
+constexpr guint kRebindDelayMilliseconds = 250;
 
 std::atomic_uint64_t next_token{0};
 
@@ -222,6 +225,11 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     std::function<void(GVariant*, GError*)> complete;
   };
 
+  struct PendingBinding {
+    std::string id;
+    std::function<void(ShortcutResult)> done;
+  };
+
   struct ParentIdentifierLease {
     explicit ParentIdentifierLease(std::string value)
         : identifier(std::move(value)) {}
@@ -314,6 +322,7 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
       return;
     }
     cancelled = true;
+    cancel_scheduled_rebind();
     g_cancellable_cancel(cancellable);
     // Copy the gates first: completion is allowed to re-enter the host and
     // therefore must not iterate a vector it can mutate.
@@ -536,6 +545,192 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     complete({});
   }
 
+  bool requested(const std::string& id) const {
+    return std::any_of(shortcut_requests.begin(), shortcut_requests.end(),
+                       [&id](const ShortcutRequest& request) { return request.id == id; });
+  }
+
+  void cancel_scheduled_rebind() {
+    if (rebind_source != 0) g_source_remove(rebind_source);
+    rebind_source = 0;
+  }
+
+  void schedule_rebind() {
+    if (rebind_source != 0 || cancelled) return;
+    rebind_source = g_timeout_add_full(
+        G_PRIORITY_DEFAULT, kRebindDelayMilliseconds,
+        [](gpointer data) {
+          if (const auto owner = static_cast<std::weak_ptr<Impl>*>(data)->lock()) {
+            owner->rebind_source = 0;
+            owner->rebind();
+          }
+          return G_SOURCE_REMOVE;
+        },
+        new std::weak_ptr<Impl>(shared_from_this()),
+        [](gpointer data) { delete static_cast<std::weak_ptr<Impl>*>(data); });
+  }
+
+  void release_shortcut_session() {
+    if (connection != nullptr && shortcut_activation_subscription != 0) {
+      g_dbus_connection_signal_unsubscribe(connection, shortcut_activation_subscription);
+    }
+    shortcut_activation_subscription = 0;
+    close_session(shortcut_session, shortcut_session_subscription);
+    shortcut_triggers.clear();
+  }
+
+  // Binds every requested shortcut in one new session. A rebind requested
+  // while a bind is in flight runs once that bind completes.
+  void rebind() {
+    cancel_scheduled_rebind();
+    if (bind_in_flight) {
+      rebind_requested = true;
+      return;
+    }
+    release_shortcut_session();
+    std::vector<PendingBinding> waiting = std::move(pending_bindings);
+    pending_bindings.clear();
+    if (shortcut_requests.empty() || cancelled) {
+      finish_bindings(std::move(waiting), "Global shortcuts are unavailable.");
+      return;
+    }
+    bind_in_flight = true;
+    const std::shared_ptr<Impl> portal = shared_from_this();
+    with_parent_identifier([portal, requests = shortcut_requests,
+                            waiting = std::move(waiting)](auto parent_identifier) mutable {
+      if (parent_identifier == nullptr && portal->parent != nullptr) {
+        portal->complete_bind(std::move(waiting), {},
+                              "The application window is not ready for portal consent.");
+        return;
+      }
+      GVariantBuilder options;
+      g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+      option_string(&options, "handle_token", token("shortcut_create"));
+      option_string(&options, "session_handle_token", token("shortcut_session"));
+      portal->request(kGlobalShortcuts, "CreateSession",
+                      g_variant_new("(@a{sv})", g_variant_builder_end(&options)),
+                      [portal, requests, parent_identifier = std::move(parent_identifier),
+                       waiting = std::move(waiting)](guint response,
+                                                     GVariant* results) mutable {
+        const std::string session = response == 0
+            ? variant_object_path(results, "session_handle") : std::string();
+        if (session.empty() || portal->cancelled) {
+          portal->complete_bind(std::move(waiting), {},
+                                "The portal did not create a shortcut session.");
+          return;
+        }
+        portal->observe_session(session, false);
+        GVariantBuilder shortcuts;
+        g_variant_builder_init(&shortcuts, G_VARIANT_TYPE("a(sa{sv})"));
+        for (const ShortcutRequest& request : requests) {
+          GVariantBuilder details;
+          g_variant_builder_init(&details, G_VARIANT_TYPE_VARDICT);
+          option_string(&details, "description", request.description);
+          const std::string trigger = preferred_trigger(request);
+          if (!trigger.empty()) option_string(&details, "preferred_trigger", trigger);
+          g_variant_builder_add(&shortcuts, "(s@a{sv})", request.id.c_str(),
+                                g_variant_builder_end(&details));
+        }
+        GVariantBuilder options;
+        g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+        option_string(&options, "handle_token", token("shortcut_bind"));
+        portal->request(kGlobalShortcuts, "BindShortcuts",
+                        g_variant_new("(o@a(sa{sv})s@a{sv})", session.c_str(),
+                                      g_variant_builder_end(&shortcuts),
+                                      parent_identifier == nullptr
+                                          ? ""
+                                          : parent_identifier->identifier.c_str(),
+                                      g_variant_builder_end(&options)),
+                        [portal, requests, parent_identifier,
+                         waiting = std::move(waiting)](guint bind_response,
+                                                       GVariant* bind_results) mutable {
+          (void)parent_identifier;
+          std::map<std::string, std::string> triggers;
+          g_autoptr(GVariant) bound = bind_response == 0 && bind_results != nullptr
+              ? g_variant_lookup_value(bind_results, "shortcuts", G_VARIANT_TYPE("a(sa{sv})"))
+              : nullptr;
+          if (bound != nullptr) {
+            GVariantIter iterator;
+            g_variant_iter_init(&iterator, bound);
+            const gchar* id = nullptr;
+            GVariant* details = nullptr;
+            while (g_variant_iter_next(&iterator, "(&s@a{sv})", &id, &details)) {
+              const std::string trigger = variant_string(details, "trigger_description");
+              const bool known = std::any_of(
+                  requests.begin(), requests.end(),
+                  [id](const ShortcutRequest& request) { return request.id == id; });
+              if (known && !trigger.empty()) triggers[id] = trigger;
+              g_variant_unref(details);
+            }
+          }
+          portal->complete_bind(std::move(waiting), std::move(triggers),
+                                "The portal did not bind the requested shortcut.");
+        });
+      });
+    });
+  }
+
+  void complete_bind(std::vector<PendingBinding> waiting,
+                     std::map<std::string, std::string> triggers,
+                     const char* failure) {
+    bind_in_flight = false;
+    if (triggers.empty() || cancelled) {
+      close_session(shortcut_session, shortcut_session_subscription);
+    } else {
+      shortcut_triggers = std::move(triggers);
+      subscribe_activations();
+    }
+    finish_bindings(std::move(waiting), failure);
+    if (rebind_requested && !cancelled) {
+      rebind_requested = false;
+      rebind();
+    }
+  }
+
+  void finish_bindings(std::vector<PendingBinding> waiting, const char* failure) {
+    for (PendingBinding& binding : waiting) {
+      const auto trigger = shortcut_triggers.find(binding.id);
+      if (trigger != shortcut_triggers.end()) {
+        binding.done({true, trigger->second, {}});
+        continue;
+      }
+      // A refused shortcut is not offered again in later sessions.
+      shortcut_requests.erase(
+          std::remove_if(shortcut_requests.begin(), shortcut_requests.end(),
+                         [&binding](const ShortcutRequest& request) {
+                           return request.id == binding.id;
+                         }),
+          shortcut_requests.end());
+      binding.done({false, {}, failure});
+    }
+  }
+
+  void subscribe_activations() {
+    if (connection == nullptr || shortcut_activation_subscription != 0) return;
+    auto* callback_owner = new std::shared_ptr<Impl>(shared_from_this());
+    shortcut_activation_subscription = g_dbus_connection_signal_subscribe(
+        connection, kPortalName, kGlobalShortcuts, "Activated", kPortalPath, nullptr,
+        G_DBUS_SIGNAL_FLAGS_NONE,
+        [](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+           GVariant* parameters, gpointer data) {
+          const auto owner = *static_cast<std::shared_ptr<Impl>*>(data);
+          const gchar* session = nullptr;
+          const gchar* id = nullptr;
+          guint64 timestamp = 0;
+          GVariant* options = nullptr;
+          g_variant_get(parameters, "(&o&st@a{sv})", &session, &id, &timestamp, &options);
+          // An unregistered id may stay bound until the delayed rebind.
+          if (!owner->cancelled && owner->shortcut_session == session &&
+              owner->shortcut_triggers.count(id) != 0 && owner->requested(id) &&
+              owner->callbacks.shortcut_activated != nullptr) {
+            owner->callbacks.shortcut_activated(id, variant_string(options, "activation_token"));
+          }
+          g_variant_unref(options);
+        },
+        callback_owner,
+        [](gpointer data) { delete static_cast<std::shared_ptr<Impl>*>(data); });
+  }
+
   void observe_session(const std::string& path, bool remote) {
     guint* subscription = remote ? &remote_session_subscription
                                  : &shortcut_session_subscription;
@@ -562,8 +757,7 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
             }
           }
           if (owner->shortcut_session == object_path) {
-            owner->shortcut_bound = false;
-            owner->shortcut_id.clear();
+            owner->shortcut_triggers.clear();
             owner->shortcut_session.clear();
             if (owner->connection != nullptr &&
                 owner->shortcut_session_subscription != 0) {
@@ -587,10 +781,17 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
   bool remote_desktop_available = false;
   bool remote_request_in_flight = false;
   bool remote_active = false;
-  bool shortcut_bound = false;
   std::string remote_session;
   std::string shortcut_session;
-  std::string shortcut_id;
+  // Every shortcut the host registered, in registration order.
+  std::vector<ShortcutRequest> shortcut_requests;
+  // Shortcut ids bound in the current session and their portal triggers.
+  std::map<std::string, std::string> shortcut_triggers;
+  // Registrations answered by the next BindShortcuts response.
+  std::vector<PendingBinding> pending_bindings;
+  bool bind_in_flight = false;
+  bool rebind_requested = false;
+  guint rebind_source = 0;
   guint remote_session_subscription = 0;
   guint shortcut_session_subscription = 0;
   guint shortcut_activation_subscription = 0;
@@ -626,7 +827,7 @@ bool LinuxPortal::is_available() const {
 }
 
 bool LinuxPortal::quick_paste_ready() const {
-  return impl_->remote_active && impl_->shortcut_bound;
+  return impl_->remote_active && !impl_->shortcut_triggers.empty();
 }
 
 bool LinuxPortal::remote_desktop_active() const { return impl_->remote_active; }
@@ -635,7 +836,13 @@ bool LinuxPortal::remote_desktop_available() const {
   return impl_->remote_desktop_available;
 }
 
-bool LinuxPortal::shortcut_registered() const { return impl_->shortcut_bound; }
+bool LinuxPortal::shortcut_registered() const {
+  return !impl_->shortcut_triggers.empty();
+}
+
+bool LinuxPortal::shortcut_registered(const std::string& id) const {
+  return impl_->shortcut_triggers.count(id) != 0 && impl_->requested(id);
+}
 
 void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
   const std::shared_ptr<Impl> portal = impl_;
@@ -733,144 +940,38 @@ void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
 void LinuxPortal::register_shortcut(const ShortcutRequest& request,
                                     std::function<void(ShortcutResult)> done) {
   const std::shared_ptr<Impl> portal = impl_;
-  if (!portal->global_shortcuts_available || request.id.empty() ||
+  if (!portal->global_shortcuts_available || portal->cancelled || request.id.empty() ||
       request.description.empty()) {
     done({false, {}, "Global shortcuts are unavailable."});
     return;
   }
-
-  // BindShortcuts can only be invoked once per session. Replacing a configured
-  // shortcut therefore closes its old session before making a new user-visible
-  // request.
-  portal->close_session(portal->shortcut_session,
-                        portal->shortcut_session_subscription);
-  if (portal->shortcut_activation_subscription != 0) {
-    g_dbus_connection_signal_unsubscribe(portal->connection,
-                                         portal->shortcut_activation_subscription);
-    portal->shortcut_activation_subscription = 0;
+  const auto existing = std::find_if(
+      portal->shortcut_requests.begin(), portal->shortcut_requests.end(),
+      [&request](const ShortcutRequest& current) { return current.id == request.id; });
+  if (existing == portal->shortcut_requests.end()) {
+    portal->shortcut_requests.push_back(request);
+  } else {
+    *existing = request;
   }
-  portal->shortcut_bound = false;
-  portal->shortcut_id.clear();
-  portal->with_parent_identifier(
-      [portal, request, done = std::move(done)](auto parent_identifier) mutable {
-        if (parent_identifier == nullptr && portal->parent != nullptr) {
-          done({false, {}, "The application window is not ready for portal consent."});
-          return;
-        }
-        GVariantBuilder options;
-        g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
-        option_string(&options, "handle_token", token("shortcut_create"));
-        option_string(&options, "session_handle_token", token("shortcut_session"));
-        portal->request(kGlobalShortcuts, "CreateSession",
-                        g_variant_new("(@a{sv})", g_variant_builder_end(&options)),
-                        [portal, request, parent_identifier = std::move(parent_identifier),
-                         done = std::move(done)](guint response,
-                                                  GVariant* results) mutable {
-          const std::string session = response == 0
-              ? variant_object_path(results, "session_handle") : std::string();
-          if (session.empty()) {
-            done({false, {}, "The portal did not create a shortcut session."});
-            return;
-          }
-          portal->observe_session(session, false);
-          GVariantBuilder details;
-          g_variant_builder_init(&details, G_VARIANT_TYPE_VARDICT);
-          option_string(&details, "description", request.description);
-          const std::string trigger = preferred_trigger(request);
-          if (!trigger.empty()) {
-            option_string(&details, "preferred_trigger", trigger);
-          }
-          GVariantBuilder shortcuts;
-          g_variant_builder_init(&shortcuts, G_VARIANT_TYPE("a(sa{sv})"));
-          g_variant_builder_add(&shortcuts, "(s@a{sv})", request.id.c_str(),
-                                g_variant_builder_end(&details));
-          GVariantBuilder options;
-          g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
-          option_string(&options, "handle_token", token("shortcut_bind"));
-          portal->request(kGlobalShortcuts, "BindShortcuts",
-                          g_variant_new("(o@a(sa{sv})s@a{sv})", session.c_str(),
-                                        g_variant_builder_end(&shortcuts),
-                                        parent_identifier == nullptr
-                                            ? ""
-                                            : parent_identifier->identifier.c_str(),
-                                        g_variant_builder_end(&options)),
-                          [portal, session, request, parent_identifier,
-                           done = std::move(done)](
-                              guint bind_response, GVariant* bind_results) mutable {
-            (void)parent_identifier;
-            std::string trigger_description;
-            if (bind_response == 0 && bind_results != nullptr) {
-              g_autoptr(GVariant) shortcuts = g_variant_lookup_value(
-                  bind_results, "shortcuts", G_VARIANT_TYPE("a(sa{sv})"));
-              if (shortcuts != nullptr) {
-                GVariantIter iterator;
-                g_variant_iter_init(&iterator, shortcuts);
-                const gchar* id = nullptr;
-                GVariant* details = nullptr;
-                while (g_variant_iter_next(&iterator, "(&s@a{sv})", &id, &details)) {
-                  if (request.id == id) {
-                    trigger_description = variant_string(details, "trigger_description");
-                  }
-                  g_variant_unref(details);
-                }
-              }
-            }
-            if (trigger_description.empty()) {
-              portal->close_session(portal->shortcut_session,
-                                    portal->shortcut_session_subscription);
-              done({false, {}, "The portal did not bind the requested shortcut."});
-              return;
-            }
-            portal->shortcut_id = request.id;
-            portal->shortcut_bound = true;
-            auto* callback_owner =
-                new std::shared_ptr<LinuxPortal::Impl>(portal);
-            portal->shortcut_activation_subscription =
-                g_dbus_connection_signal_subscribe(
-                    portal->connection, kPortalName, kGlobalShortcuts, "Activated",
-                    kPortalPath, nullptr, G_DBUS_SIGNAL_FLAGS_NONE,
-                    [](GDBusConnection*, const gchar*, const gchar*, const gchar*,
-                       const gchar*, GVariant* parameters, gpointer data) {
-                      const auto owner =
-                          *static_cast<std::shared_ptr<LinuxPortal::Impl>*>(data);
-                      const gchar* session = nullptr;
-                      const gchar* id = nullptr;
-                      guint64 timestamp = 0;
-                      GVariant* options = nullptr;
-                      g_variant_get(parameters, "(&o&st@a{sv})", &session, &id,
-                                    &timestamp, &options);
-                      if (!owner->cancelled && owner->shortcut_session == session &&
-                          owner->callbacks.shortcut_activated != nullptr) {
-                        owner->callbacks.shortcut_activated(
-                            id, variant_string(options, "activation_token"));
-                      }
-                      g_variant_unref(options);
-                    },
-                    callback_owner, [](gpointer data) {
-                      delete static_cast<std::shared_ptr<LinuxPortal::Impl>*>(data);
-                    });
-            done({true, trigger_description, {}});
-          });
-        });
-      });
+  portal->pending_bindings.push_back({request.id, std::move(done)});
+  portal->rebind();
 }
 
 void LinuxPortal::unregister_shortcut(const std::string& id,
                                       std::function<void(bool)> done) {
   const std::shared_ptr<Impl> portal = impl_;
-  if (portal->shortcut_id != id && !portal->shortcut_id.empty()) {
-    done(false);
-    return;
+  const bool bound = portal->shortcut_triggers.count(id) != 0;
+  const auto previous = portal->shortcut_requests.size();
+  portal->shortcut_requests.erase(
+      std::remove_if(portal->shortcut_requests.begin(), portal->shortcut_requests.end(),
+                     [&id](const ShortcutRequest& request) { return request.id == id; }),
+      portal->shortcut_requests.end());
+  if (portal->shortcut_requests.empty()) {
+    // Release the accelerators now; there is nothing left to coalesce with.
+    portal->rebind();
+  } else if (bound && portal->shortcut_requests.size() != previous) {
+    portal->schedule_rebind();
   }
-  if (portal->shortcut_activation_subscription != 0) {
-    g_dbus_connection_signal_unsubscribe(portal->connection,
-                                         portal->shortcut_activation_subscription);
-    portal->shortcut_activation_subscription = 0;
-  }
-  portal->close_session(portal->shortcut_session,
-                        portal->shortcut_session_subscription);
-  portal->shortcut_id.clear();
-  portal->shortcut_bound = false;
   done(true);
 }
 
@@ -930,4 +1031,26 @@ bool LinuxPortal::send_ctrl_v() {
   }
   return control_down.delivered && v_down.delivered && v_up.delivered &&
          control_up.delivered;
+}
+
+bool LinuxPortal::send_caret_left(int count) {
+  const std::shared_ptr<Impl> portal = impl_;
+  if (count <= 0) return count == 0;
+  if (!portal->remote_active || portal->remote_session.empty() ||
+      portal->connection == nullptr) {
+    return false;
+  }
+  // Messages on one connection are delivered in order, so the presses stay
+  // ordered without blocking the UI thread on each reply.
+  for (int index = 0; index < count; ++index) {
+    for (const guint state : {1U, 0U}) {
+      g_dbus_connection_call(
+          portal->connection, kPortalName, kPortalPath, kRemoteDesktop,
+          "NotifyKeyboardKeycode",
+          g_variant_new("(o@a{sv}iu)", portal->remote_session.c_str(), empty_options(),
+                        kEvdevLeft, state),
+          nullptr, G_DBUS_CALL_FLAGS_NONE, -1, nullptr, nullptr, nullptr);
+    }
+  }
+  return true;
 }

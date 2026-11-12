@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -160,11 +161,45 @@ void test_register_activate_and_owner_loss() {
   }));
 }
 
+void test_several_ids_stay_bound_independently() {
+  CompanionFixture fixture;
+  std::vector<std::string> activations;
+  LinuxGnomeShortcuts shortcuts([&activations](const std::string& id) {
+    activations.push_back(id);
+  });
+  g_assert_true(wait_until([&shortcuts] { return shortcuts.is_available(); }));
+  for (const char* id : {"copypaste.quick-paste", "copypaste.paste-next"}) {
+    ShortcutRequest request;
+    request.id = id;
+    request.usage = std::to_string(0x70006U);
+    request.modifiers = {"control", "shift"};
+    bool registered = false;
+    shortcuts.register_shortcut(request, [&registered](ShortcutResult response) {
+      registered = response.registered;
+    });
+    g_assert_true(wait_until([&registered] { return registered; }));
+  }
+  g_assert_true(shortcuts.shortcut_registered("copypaste.quick-paste"));
+  g_assert_true(shortcuts.shortcut_registered("copypaste.paste-next"));
+
+  bool removed = false;
+  shortcuts.unregister_shortcut("copypaste.quick-paste",
+                                [&removed](bool result) { removed = result; });
+  g_assert_true(wait_until([&removed] { return removed; }));
+  fixture.emit_activated("copypaste.quick-paste");
+  fixture.emit_activated("copypaste.paste-next");
+  g_assert_true(wait_until([&activations] { return !activations.empty(); }));
+  g_assert_true(activations == std::vector<std::string>{"copypaste.paste-next"});
+  g_assert_true(shortcuts.shortcut_registered());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   g_test_init(&argc, &argv, nullptr);
   g_test_add_func("/linux_gnome_shortcuts/register_activate_and_owner_loss",
                   test_register_activate_and_owner_loss);
+  g_test_add_func("/linux_gnome_shortcuts/several_ids_stay_bound_independently",
+                  test_several_ids_stay_bound_independently);
   return g_test_run();
 }

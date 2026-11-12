@@ -21,7 +21,9 @@ class LinuxGnomeShortcuts {
 
   // True only after the current well-known-name owner has confirmed version 1.
   bool is_available() const;
+  // True when any shortcut, or the shortcut with `id`, is bound.
   bool shortcut_registered() const;
+  bool shortcut_registered(const std::string& id) const;
 
   void register_shortcut(const ShortcutRequest& request,
                          std::function<void(ShortcutResult)> done);

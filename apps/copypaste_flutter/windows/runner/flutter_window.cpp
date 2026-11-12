@@ -6,8 +6,12 @@
 #include <optional>
 #include <limits>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#include <UIAutomation.h>
+#include <wrl/client.h>
 
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
@@ -27,7 +31,16 @@ constexpr UINT kRetireQuickPaste = WM_APP + 42;
 constexpr UINT kFinishQuickPasteRetirement = WM_APP + 43;
 constexpr UINT kFailQuickPasteOpen = WM_APP + 44;
 constexpr UINT kMemoryPressure = WM_APP + 45;
+constexpr UINT kSecureFieldResult = WM_APP + 46;
 constexpr UINT_PTR kQuickPasteShutdownTimer = 1;
+constexpr UINT_PTR kCaretMoveTimer = 2;
+// Caret placement waits up to 1 s for the activating keys to be released.
+constexpr UINT kCaretMoveRetryMilliseconds = 25;
+constexpr int kCaretMoveAttempts = 40;
+constexpr int64_t kMaxCaretMove = 2000;
+constexpr LPARAM kFieldPlain = 0;
+constexpr LPARAM kFieldPassword = 1;
+constexpr LPARAM kFieldUnknown = 2;
 constexpr char kQuickPasteHostChannel[] =
     "com.copypaste.app/quick_paste_host";
 constexpr char kQuickPasteContextChannel[] =
@@ -108,7 +121,120 @@ const bool* BoolArgument(const flutter::MethodCall<flutter::EncodableValue>& cal
       ? nullptr : std::get_if<bool>(&iterator->second);
 }
 
+std::optional<int64_t> IntArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
+                                   const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) return std::nullopt;
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  if (iterator == arguments->end()) return std::nullopt;
+  if (const auto* value = std::get_if<int32_t>(&iterator->second)) return *value;
+  if (const auto* value = std::get_if<int64_t>(&iterator->second)) return *value;
+  return std::nullopt;
+}
+
+std::optional<DWORD> IntegrityLevel(HANDLE process) {
+  HANDLE token = nullptr;
+  if (!::OpenProcessToken(process, TOKEN_QUERY, &token)) return std::nullopt;
+  std::optional<DWORD> level;
+  DWORD size = 0;
+  ::GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &size);
+  if (size >= sizeof(TOKEN_MANDATORY_LABEL)) {
+    std::vector<BYTE> buffer(size);
+    if (::GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), size, &size)) {
+      const auto* label = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(buffer.data());
+      const PUCHAR count = ::GetSidSubAuthorityCount(label->Label.Sid);
+      if (count != nullptr && *count > 0) {
+        level = *::GetSidSubAuthority(label->Label.Sid, static_cast<DWORD>(*count - 1));
+      }
+    }
+  }
+  ::CloseHandle(token);
+  return level;
+}
+
+// UIPI silently drops input sent to a higher integrity level, so a target this
+// process cannot inspect counts as elevated.
+bool RunsAboveOwnIntegrity(DWORD pid) {
+  const auto own = IntegrityLevel(::GetCurrentProcess());
+  const HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (process == nullptr) return true;
+  const auto target = IntegrityLevel(process);
+  ::CloseHandle(process);
+  return !own || !target || *target > *own;
+}
+
+bool ModifierHeld(const QuickPasteTargetApi& api) {
+  for (const int key : {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN}) {
+    if (api.get_async_key_state(key) < 0) return true;
+  }
+  return false;
+}
+
+// Runs on a worker thread: a UI Automation client must not block the UI
+// thread on a slow provider.
+LPARAM FocusedFieldState() {
+  const HRESULT initialized = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  LPARAM state = kFieldUnknown;
+  {
+    Microsoft::WRL::ComPtr<IUIAutomation> automation;
+    if (FAILED(::CoCreateInstance(__uuidof(CUIAutomation8), nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&automation)))) {
+      ::CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(&automation));
+    }
+    Microsoft::WRL::ComPtr<IUIAutomation2> bounded;
+    if (automation && SUCCEEDED(automation.As(&bounded))) {
+      bounded->put_ConnectionTimeout(500);
+      bounded->put_TransactionTimeout(500);
+    }
+    Microsoft::WRL::ComPtr<IUIAutomationElement> focused;
+    int pid = 0;
+    BOOL password = FALSE;
+    // An element of this process means a CopyPaste window already took focus.
+    if (automation && SUCCEEDED(automation->GetFocusedElement(&focused)) && focused &&
+        SUCCEEDED(focused->get_CurrentProcessId(&pid)) &&
+        static_cast<DWORD>(pid) != ::GetCurrentProcessId() &&
+        SUCCEEDED(focused->get_CurrentIsPassword(&password))) {
+      state = password ? kFieldPassword : kFieldPlain;
+    }
+  }
+  if (SUCCEEDED(initialized)) ::CoUninitialize();
+  return state;
+}
+
 }  // namespace
+
+std::optional<std::string> ForegroundInputBlocked(const QuickPasteTargetApi& api,
+                                                  HWND* target_root) {
+  const HWND foreground = api.get_foreground_window();
+  const HWND root = foreground ? api.get_ancestor(foreground, GA_ROOT) : nullptr;
+  DWORD pid = 0;
+  if (!root || api.get_owner(root, &pid) == 0 || pid == 0 ||
+      pid == api.get_current_process_id()) {
+    return "noTarget";
+  }
+  if (RunsAboveOwnIntegrity(pid)) return "elevatedTarget";
+  if (target_root) *target_root = root;
+  return std::nullopt;
+}
+
+bool SendCaretLeft(const QuickPasteTargetApi& api, int count) {
+  if (count <= 0) return count == 0;
+  std::vector<INPUT> inputs(static_cast<size_t>(count) * 2);
+  for (size_t index = 0; index < inputs.size(); ++index) {
+    inputs[index].type = INPUT_KEYBOARD;
+    inputs[index].ki.wVk = VK_LEFT;
+    inputs[index].ki.dwFlags = KEYEVENTF_EXTENDEDKEY | (index % 2 ? KEYEVENTF_KEYUP : 0);
+  }
+  const auto total = static_cast<UINT>(inputs.size());
+  const UINT inserted = api.send_input(total, inputs.data(), sizeof(INPUT));
+  if (inserted == total) return true;
+  // Never leave an injected arrow held after a partial batch.
+  if (inserted < total && inserted % 2 == 1) {
+    api.send_input(1, &inputs[inserted], sizeof(INPUT));
+  }
+  return false;
+}
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
                              bool is_protected_pairing_context,
@@ -241,7 +367,7 @@ bool FlutterWindow::OnCreate() {
             quick_paste_session_.Invalidate();
             result->Success(flutter::EncodableValue(true));
             ::PostQuitMessage(0);
-          } else {
+          } else if (!HandleForegroundInputCall(call, result)) {
             result->NotImplemented();
           }
         });
@@ -270,7 +396,7 @@ bool FlutterWindow::OnCreate() {
           } else if (call.method_name() == "dispose") {
             CloseQuickPasteContext();
             result->Success(flutter::EncodableValue(true));
-          } else {
+          } else if (!HandleForegroundInputCall(call, result)) {
             result->NotImplemented();
           }
         });
@@ -453,6 +579,13 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (pending_caret_move_) {
+    ::KillTimer(GetHandle(), kCaretMoveTimer);
+    pending_caret_move_->result->Success(flutter::EncodableValue(false));
+    pending_caret_move_.reset();
+  }
+  for (auto& waiter : secure_field_waiters_) waiter->Success(flutter::EncodableValue());
+  secure_field_waiters_.clear();
   memory_pressure_monitor_.reset();
   quick_paste_session_.Invalidate();
   CloseProtectedPairingContext(pairing_context_id_);
@@ -649,6 +782,19 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
   if (!current()) return fail();
   if (api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root &&
       !api_.set_foreground_window(target.root)) return fail();
+  const auto sent = SendNeutralPaste(api_, [&] {
+    if (!current() || api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root ||
+        requested_id != id_) return false;
+    // There is no atomic public compare-foreground-and-SendInput operation.
+    Invalidate();
+    return true;
+  });
+  if (sent == NeutralPasteResult::kCancelled) return fail();
+  return sent == NeutralPasteResult::kSent;
+}
+
+NeutralPasteResult SendNeutralPaste(const QuickPasteTargetApi& api,
+                                    const std::function<bool()>& ready) {
   // SendInput preserves existing key state. Alt/Shift used to activate a clip
   // must not turn the target's Ctrl+V into another command. Keep any physical
   // Ctrl held, and restore the other held modifiers in the same input batch.
@@ -659,7 +805,7 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
       VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN};
   std::array<bool, 8> original{};
   for (size_t index = 0; index < modifiers.size(); ++index) {
-    original[index] = api_.get_async_key_state(modifiers[index]) < 0;
+    original[index] = api.get_async_key_state(modifiers[index]) < 0;
   }
   const bool control_held = original[0] || original[1];
   std::vector<INPUT> inputs;
@@ -689,14 +835,11 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
     append(key, extended);
   }
   if (!control_held) append(VK_CONTROL, KEYEVENTF_KEYUP);
-  if (!current() || api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root ||
-      requested_id != id_) return fail();
-  // There is no atomic public compare-foreground-and-SendInput operation.
-  Invalidate();
+  if (!ready()) return NeutralPasteResult::kCancelled;
   const auto count = static_cast<UINT>(inputs.size());
-  const UINT inserted = api_.send_input(count, inputs.data(), sizeof(INPUT));
-  if (inserted == count) return true;
-  if (inserted == 0 || inserted > count) return false;
+  const UINT inserted = api.send_input(count, inputs.data(), sizeof(INPUT));
+  if (inserted == count) return NeutralPasteResult::kSent;
+  if (inserted == 0 || inserted > count) return NeutralPasteResult::kFailed;
 
   // A partial batch may leave our Ctrl held or a physical modifier released.
   // Recover only modifier differences from the accepted prefix, once. Never
@@ -722,9 +865,9 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
   if (!control_held && remaining[0]) append(VK_CONTROL, KEYEVENTF_KEYUP);
   if (!inputs.empty()) {
     // Recovery can also be rejected by the OS. Do not retry or report success.
-    api_.send_input(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+    api.send_input(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
   }
-  return false;
+  return NeutralPasteResult::kFailed;
 }
 
 RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
@@ -842,9 +985,9 @@ bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
   if (!is_quick_paste_context_) return false;
   // Hiding an active popup restores its previous foreground window. Keep the
   // original opening snapshot so the prepared-frame check still owns that target.
-  const HWND pending_foreground = sampled_foreground == GetHandle() &&
-      quick_paste_session_.id() > 0 && ::IsWindowVisible(GetHandle())
-      ? quick_paste_pending_foreground_ : sampled_foreground;
+  const bool reopening = sampled_foreground == GetHandle() &&
+      quick_paste_session_.id() > 0 && ::IsWindowVisible(GetHandle());
+  const HWND pending_foreground = reopening ? quick_paste_pending_foreground_ : sampled_foreground;
   const int64_t id = quick_paste_session_.Begin(sampled_foreground, GetHandle());
   if (id == 0) {
     if (quick_paste_session_.id() == 0) ::ShowWindow(GetHandle(), SW_HIDE);
@@ -855,6 +998,10 @@ bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
   if (!quick_paste_session_.HideForPreparation(id, GetHandle())) return false;
   quick_paste_inspector_visible_ = quick_paste_inspector_pinned_;
   quick_paste_tray_anchor_ = tray_anchor;
+  // A reopened active popup keeps the sample taken for its target.
+  if (!reopening || (!secure_field_state_ && !secure_field_query_pending_)) {
+    StartSecureFieldQuery();
+  }
   quick_paste_pending_foreground_ = pending_foreground;
   return ShowQuickPastePresentation(
       GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{},
@@ -962,6 +1109,103 @@ void FlutterWindow::ShowMainWindow(bool open_settings) {
   }
 }
 
+bool FlutterWindow::HandleForegroundInputCall(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>& result) {
+  const QuickPasteTargetApi api;
+  if (call.method_name() == "pasteForeground") {
+    if (const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments())) {
+      const auto plain = arguments->find(flutter::EncodableValue("plainText"));
+      if (plain != arguments->end() && std::get_if<bool>(&plain->second) == nullptr) {
+        result->Error("invalid_arguments");
+        return true;
+      }
+    }
+    // Plain text is decided by the delivered clipboard content, so the
+    // standard paste chord serves both variants.
+    HWND root = nullptr;
+    const auto blocked = ForegroundInputBlocked(api, &root);
+    std::string outcome = blocked.value_or("pasted");
+    if (!blocked) {
+      const auto sent = SendNeutralPaste(api, [&api, root] {
+        return api.get_ancestor(api.get_foreground_window(), GA_ROOT) == root;
+      });
+      if (sent == NeutralPasteResult::kCancelled) outcome = "noTarget";
+      if (sent == NeutralPasteResult::kFailed) outcome = "copiedOnly";
+    }
+    result->Success(flutter::EncodableValue(outcome));
+    return true;
+  }
+  if (call.method_name() == "moveCaretLeft") {
+    const auto count = IntArgument(call, "count");
+    if (!count || *count < 0 || *count > kMaxCaretMove) {
+      result->Error("invalid_arguments");
+    } else if (*count == 0) {
+      result->Success(flutter::EncodableValue(true));
+    } else if (pending_caret_move_) {
+      result->Success(flutter::EncodableValue(false));
+    } else {
+      pending_caret_move_ = PendingCaretMove{std::move(result), static_cast<int>(*count), 0};
+      ContinueCaretMove();
+    }
+    return true;
+  }
+  if (call.method_name() == "secureFieldFocused") {
+    // The main window answers for the current focus; Quick Paste answers for
+    // the target sampled when it opened.
+    if (!secure_field_query_pending_ && (!is_quick_paste_context_ || !secure_field_state_)) {
+      StartSecureFieldQuery();
+    }
+    if (secure_field_state_) {
+      result->Success(*secure_field_state_);
+    } else {
+      secure_field_waiters_.push_back(std::move(result));
+    }
+    return true;
+  }
+  return false;
+}
+
+void FlutterWindow::ContinueCaretMove() {
+  if (!pending_caret_move_) return;
+  const QuickPasteTargetApi api;
+  // Injected arrows combine with held keys, so wait for the activating
+  // modifiers to be released instead of turning the move into a selection.
+  if (ModifierHeld(api) && ++pending_caret_move_->attempts < kCaretMoveAttempts) {
+    ::SetTimer(GetHandle(), kCaretMoveTimer, kCaretMoveRetryMilliseconds, nullptr);
+    return;
+  }
+  ::KillTimer(GetHandle(), kCaretMoveTimer);
+  auto result = std::move(pending_caret_move_->result);
+  const int count = pending_caret_move_->count;
+  pending_caret_move_.reset();
+  const bool moved = !ModifierHeld(api) && !ForegroundInputBlocked(api) &&
+      SendCaretLeft(api, count);
+  result->Success(flutter::EncodableValue(moved));
+}
+
+void FlutterWindow::StartSecureFieldQuery() {
+  secure_field_state_.reset();
+  secure_field_query_pending_ = true;
+  const uint64_t generation = ++secure_field_generation_;
+  const HWND window = GetHandle();
+  std::thread([window, generation] {
+    ::PostMessage(window, kSecureFieldResult, static_cast<WPARAM>(generation),
+                  FocusedFieldState());
+  }).detach();
+}
+
+void FlutterWindow::CompleteSecureFieldQuery(uint64_t generation, LPARAM state) {
+  if (generation != secure_field_generation_) return;
+  secure_field_query_pending_ = false;
+  secure_field_state_ = state == kFieldUnknown
+      ? flutter::EncodableValue()
+      : flutter::EncodableValue(state == kFieldPassword);
+  auto waiters = std::move(secure_field_waiters_);
+  secure_field_waiters_.clear();
+  for (auto& waiter : waiters) waiter->Success(*secure_field_state_);
+}
+
 void FlutterWindow::CloseProtectedPairingContext(const std::string& context_id) {
   if (is_protected_pairing_context_ || !protected_pairing_window_) {
     return;
@@ -1000,6 +1244,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       }
     }
     return TRUE;
+  }
+  if (message == WM_TIMER && wparam == kCaretMoveTimer) {
+    ContinueCaretMove();
+    return 0;
+  }
+  if (message == kSecureFieldResult) {
+    CompleteSecureFieldQuery(static_cast<uint64_t>(wparam), lparam);
+    return 0;
   }
   if (is_protected_pairing_context_ && message == WM_CLOSE && !pairing_cancellation_approved_) {
     pairing_cancellation_approved_ = CancelProtectedPairingContext();

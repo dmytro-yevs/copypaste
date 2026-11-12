@@ -267,7 +267,9 @@ class MainFlutterWindow: NSWindow {
         self.quickPastePresentation?.shutdown()
         result(true)
       default:
-        result(FlutterMethodNotImplemented)
+        if !MacosForegroundInput.handle(call, secureField: { IsSecureEventInputEnabled() }, result: result) {
+          result(FlutterMethodNotImplemented)
+        }
       }
     }
   }
@@ -419,6 +421,93 @@ enum MacosAccessibility {
     return { post(keyDown); post(keyUp) }
   }
 
+  // Explicit flags keep held hotkey modifiers from turning arrows into selections.
+  static func prepareCaretMove(
+    count: Int,
+    source: () -> CGEventSource? = { CGEventSource(stateID: .combinedSessionState) },
+    event: (CGEventSource, Bool) -> CGEvent? = {
+      CGEvent(keyboardEventSource: $0, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: $1)
+    },
+    post: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }
+  ) -> (() -> Void)? {
+    guard count > 0, let source = source() else { return nil }
+    var events: [CGEvent] = []
+    events.reserveCapacity(count * 2)
+    for _ in 0..<count {
+      guard let keyDown = event(source, true), let keyUp = event(source, false) else { return nil }
+      keyDown.flags = [.maskNumericPad, .maskSecondaryFn]
+      keyUp.flags = [.maskNumericPad, .maskSecondaryFn]
+      events.append(keyDown)
+      events.append(keyUp)
+    }
+    return { events.forEach(post) }
+  }
+}
+
+/// Synthesized input into whichever application has focus, for actions that
+/// do not go through a Quick Paste presentation.
+enum MacosForegroundInput {
+  static let maxCaretMove = 2000
+
+  static func blockedOutcome(
+    frontmost: pid_t?, ownPID: pid_t, trusted: Bool, secureInput: Bool
+  ) -> String? {
+    guard let frontmost, frontmost > 0, frontmost != ownPID else { return "noTarget" }
+    return trusted && !secureInput ? nil : "copiedOnly"
+  }
+
+  static func currentBlockedOutcome() -> String? {
+    blockedOutcome(
+      frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+      ownPID: ProcessInfo.processInfo.processIdentifier,
+      trusted: MacosAccessibility.isTrusted(prompt: false),
+      secureInput: IsSecureEventInputEnabled()
+    )
+  }
+
+  static func paste() -> String {
+    if let blocked = currentBlockedOutcome() { return blocked }
+    guard let submit = MacosAccessibility.preparePaste() else { return "copiedOnly" }
+    submit()
+    return "pasted"
+  }
+
+  static func moveCaretLeft(_ count: Int) -> Bool {
+    if count == 0 { return true }
+    guard currentBlockedOutcome() == nil,
+          let submit = MacosAccessibility.prepareCaretMove(count: count) else { return false }
+    submit()
+    return true
+  }
+
+  /// Handles the foreground-input methods shared by the main and Quick Paste
+  /// channels. `secureField` answers `secureFieldFocused`.
+  static func handle(
+    _ call: FlutterMethodCall, secureField: () -> Bool, result: @escaping FlutterResult
+  ) -> Bool {
+    let arguments = call.arguments as? [String: Any]
+    switch call.method {
+    case "pasteForeground":
+      guard arguments?["plainText"] == nil || arguments?["plainText"] is Bool else {
+        result(FlutterError(code: "invalid_arguments", message: nil, details: nil))
+        return true
+      }
+      // Plain text is decided by the delivered clipboard content, so the
+      // standard paste chord serves both variants.
+      result(paste())
+    case "moveCaretLeft":
+      guard let count = arguments?["count"] as? Int, (0...maxCaretMove).contains(count) else {
+        result(FlutterError(code: "invalid_arguments", message: nil, details: nil))
+        return true
+      }
+      result(moveCaretLeft(count))
+    case "secureFieldFocused":
+      result(secureField())
+    default:
+      return false
+    }
+    return true
+  }
 }
 
 protocol QuickPasteApplicationTarget: AnyObject {
@@ -614,6 +703,8 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private var engineStopped = false
   private var trayAnchor: NSRect?
   private var pendingForegroundPID: pid_t?
+  // Sampled before the panel takes focus; secure input belongs to the target.
+  private var secureInputAtOpen = false
   private let retirement = QuickPasteRetirement()
 
   init?(
@@ -686,6 +777,8 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.orderOut(nil)
     performingAction = false
     pendingForegroundPID = frontmost?.processIdentifier
+    // A reopened active panel keeps the sample taken for its target.
+    if !popupActive { secureInputAtOpen = IsSecureEventInputEnabled() }
     guard let id = pasteSession.begin(
       frontmost: frontmost,
       popupActive: popupActive
@@ -890,7 +983,9 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         result(true)
         NSApplication.shared.terminate(nil)
       default:
-        result(FlutterMethodNotImplemented)
+        if !MacosForegroundInput.handle(call, secureField: { self.secureInputAtOpen }, result: result) {
+          result(FlutterMethodNotImplemented)
+        }
       }
     }
   }

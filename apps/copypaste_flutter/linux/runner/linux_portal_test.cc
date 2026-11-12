@@ -166,6 +166,12 @@ class PortalFixture {
     return shortcut_bind_parent_;
   }
 
+  // The shortcut ids of every BindShortcuts call, in call order.
+  std::vector<std::vector<std::string>> bound_shortcut_ids() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return bound_shortcut_ids_;
+  }
+
   void set_keyboard_granted(bool granted) {
     std::lock_guard<std::mutex> lock(mutex_);
     keyboard_granted_ = granted;
@@ -360,14 +366,16 @@ class PortalFixture {
     return g_variant_builder_end(&results);
   }
 
-  static GVariant* shortcut_result(const std::string& shortcut_id) {
-    GVariantBuilder details;
-    g_variant_builder_init(&details, G_VARIANT_TYPE_VARDICT);
-    option_string(&details, "trigger_description", "Ctrl+Shift+V");
+  static GVariant* shortcut_result(const std::vector<std::string>& shortcut_ids) {
     GVariantBuilder shortcuts;
     g_variant_builder_init(&shortcuts, G_VARIANT_TYPE("a(sa{sv})"));
-    g_variant_builder_add(&shortcuts, "(s@a{sv})", shortcut_id.c_str(),
-                          g_variant_builder_end(&details));
+    for (const std::string& shortcut_id : shortcut_ids) {
+      GVariantBuilder details;
+      g_variant_builder_init(&details, G_VARIANT_TYPE_VARDICT);
+      option_string(&details, "trigger_description", "Ctrl+Shift+V");
+      g_variant_builder_add(&shortcuts, "(s@a{sv})", shortcut_id.c_str(),
+                            g_variant_builder_end(&details));
+    }
     GVariantBuilder results;
     g_variant_builder_init(&results, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add(&results, "{sv}", "shortcuts",
@@ -538,10 +546,12 @@ class PortalFixture {
       g_variant_iter_init(&iterator, shortcuts);
       const gchar* shortcut_id = nullptr;
       GVariant* details = nullptr;
-      g_assert_true(g_variant_iter_next(&iterator, "(&s@a{sv})", &shortcut_id,
-                                        &details));
-      const std::string requested_shortcut_id = shortcut_id;
-      g_variant_unref(details);
+      std::vector<std::string> requested_shortcut_ids;
+      while (g_variant_iter_next(&iterator, "(&s@a{sv})", &shortcut_id, &details)) {
+        requested_shortcut_ids.emplace_back(shortcut_id);
+        g_variant_unref(details);
+      }
+      g_assert_false(requested_shortcut_ids.empty());
       g_variant_unref(shortcuts);
       g_variant_unref(options);
       g_assert_cmpstr(session, ==,
@@ -549,9 +559,10 @@ class PortalFixture {
       {
         std::lock_guard<std::mutex> lock(fixture->mutex_);
         fixture->shortcut_bind_parent_ = parent;
+        fixture->bound_shortcut_ids_.push_back(requested_shortcut_ids);
       }
       fixture->emit_response(server, path, 0,
-                             shortcut_result(requested_shortcut_id));
+                             shortcut_result(requested_shortcut_ids));
       g_dbus_method_invocation_return_value(invocation,
                                             g_variant_new("(o)", path.c_str()));
       fixture->record_call(interface_name, method_name);
@@ -612,6 +623,7 @@ class PortalFixture {
   bool keyboard_granted_ = true;
   std::string remote_start_parent_;
   std::string shortcut_bind_parent_;
+  std::vector<std::vector<std::string>> bound_shortcut_ids_;
   guint calls_ = 0;
   std::vector<std::string> method_calls_;
   std::vector<std::pair<gint, guint>> key_events_;
@@ -1008,6 +1020,56 @@ void test_global_shortcuts_object_path_session_binds_and_activates() {
   g_assert_cmpuint(completions, ==, 1);
 }
 
+void test_global_shortcuts_share_one_session() {
+  PortalFixture fixture;
+  std::vector<std::string> activated_ids;
+  LinuxPortal client(nullptr, LinuxPortalCallbacks{
+                                [&activated_ids](const std::string& shortcut_id,
+                                                 const std::string&) {
+                                  activated_ids.push_back(shortcut_id);
+                                },
+                                {},
+                            });
+  const auto shortcut = [](const char* id) {
+    ShortcutRequest request;
+    request.id = id;
+    request.description = id;
+    request.usage = "V";
+    request.modifiers = {"Control", "Shift"};
+    return request;
+  };
+  guint registered = 0;
+  const auto done = [&registered](ShortcutResult result) {
+    g_assert_true(result.registered);
+    ++registered;
+  };
+
+  client.register_shortcut(shortcut("quick_paste"), done);
+  g_assert_true(wait_until([&] { return registered == 1; }));
+  client.register_shortcut(shortcut("paste_next"), done);
+  g_assert_true(wait_until([&] { return registered == 2; }));
+  const std::vector<std::vector<std::string>> joined = {
+      {"quick_paste"}, {"quick_paste", "paste_next"}};
+  g_assert_true(fixture.bound_shortcut_ids() == joined);
+  g_assert_true(client.shortcut_registered("quick_paste"));
+  g_assert_true(client.shortcut_registered("paste_next"));
+
+  synchronize_subscriptions(client.impl_);
+  const std::string session = "/org/freedesktop/portal/desktop/session/shortcuts";
+  g_assert_true(fixture.emit_shortcut_activated(session, "paste_next", "token"));
+  g_assert_true(wait_until([&] { return activated_ids.size() == 1; }));
+
+  // An unregistered id is ignored at once; the rest is bound again later.
+  bool removed = false;
+  client.unregister_shortcut("quick_paste", [&removed](bool result) { removed = result; });
+  g_assert_true(removed);
+  g_assert_false(client.shortcut_registered("quick_paste"));
+  g_assert_true(fixture.emit_shortcut_activated(session, "quick_paste", "token"));
+  g_assert_true(wait_until([&] { return fixture.bound_shortcut_ids().size() == 3; }));
+  g_assert_true(fixture.bound_shortcut_ids().back() == std::vector<std::string>{"paste_next"});
+  g_assert_true(activated_ids == std::vector<std::string>{"paste_next"});
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1053,6 +1115,8 @@ int main(int argc, char** argv) {
                   test_remote_desktop_denied_keyboard_never_activates);
   g_test_add_func("/linux_portal/global_shortcuts_object_path_session_binds_and_activates",
                   test_global_shortcuts_object_path_session_binds_and_activates);
+  g_test_add_func("/linux_portal/global_shortcuts_share_one_session",
+                  test_global_shortcuts_share_one_session);
   const int result = g_test_run();
   g_autofree gchar* token_path =
       g_build_filename(config_home, "copypaste", "remote-desktop-token", nullptr);

@@ -312,10 +312,74 @@ void test_x11_shortcut_grabs_all_lock_subsets() {
   XCloseDisplay(foreign_display);
 }
 
+void test_x11_shortcuts_coexist_and_foreground_input() {
+  int argc = 0;
+  char** argv = nullptr;
+  g_assert_true(gtk_init_check(&argc, &argv));
+  Display* display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+  const Window root = DefaultRootWindow(display);
+
+  GtkWidget* target_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  GtkWidget* entry = gtk_entry_new();
+  gtk_container_add(GTK_CONTAINER(target_window), entry);
+  gtk_widget_show_all(target_window);
+  g_assert_true(wait_until([target_window] {
+    return gtk_widget_get_window(target_window) != nullptr;
+  }));
+  const Window target_xid = xid_for(target_window);
+  set_active_window(display, root, target_xid);
+  XSetInputFocus(display, target_xid, RevertToPointerRoot, CurrentTime);
+  XSync(display, False);
+  gtk_widget_grab_focus(entry);
+
+  LinuxX11QuickPaste quick_paste;
+  int first = 0;
+  int second = 0;
+  const auto shortcut = [](const char* id, guint usage) {
+    return ShortcutRequest{id, id, std::to_string(kHidKeyboardPage | usage),
+                           {"control", "shift"}, "Ctrl+Shift+test"};
+  };
+  bool registered = false;
+  const auto done = [&registered](ShortcutResult result) { registered = result.registered; };
+  quick_paste.register_shortcut(shortcut("first", 0x06), done, [&first] { ++first; });
+  g_assert_true(registered);
+  quick_paste.register_shortcut(shortcut("second", 0x3a), done, [&second] { ++second; });
+  g_assert_true(registered);
+  quick_paste.register_shortcut(shortcut("duplicate", 0x06), done, [] {});
+  g_assert_false(registered);
+
+  send_shortcut(display, static_cast<KeyCode>(KEY_C + 8));
+  send_shortcut(display, static_cast<KeyCode>(KEY_F1 + 8));
+  g_assert_true(wait_until([&first, &second] { return first == 1 && second == 1; }));
+  bool removed = false;
+  quick_paste.unregister_shortcut("first", [&removed](bool result) { removed = result; });
+  g_assert_true(removed);
+  send_shortcut(display, static_cast<KeyCode>(KEY_F1 + 8));
+  g_assert_true(wait_until([&second] { return second == 2; }));
+  g_assert_cmpint(first, ==, 1);
+  g_assert_true(quick_paste.keys_released());
+
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  gtk_clipboard_set_text(clipboard, "abc", -1);
+  g_assert_true(quick_paste.paste_into_focused());
+  g_assert_true(wait_until([entry] {
+    return std::string(gtk_entry_get_text(GTK_ENTRY(entry))) == "abc";
+  }));
+  g_assert_true(quick_paste.move_caret_left(2));
+  g_assert_true(wait_until([entry] {
+    return gtk_editable_get_position(GTK_EDITABLE(entry)) == 1;
+  }));
+
+  quick_paste.unregister_shortcut("second", [](bool) {});
+  gtk_widget_destroy(target_window);
+  drain_main_context();
+}
+
 }  // namespace
 
 int main() {
   test_x11_quick_paste();
   test_x11_shortcut_grabs_all_lock_subsets();
+  test_x11_shortcuts_coexist_and_foreground_input();
   return 0;
 }
