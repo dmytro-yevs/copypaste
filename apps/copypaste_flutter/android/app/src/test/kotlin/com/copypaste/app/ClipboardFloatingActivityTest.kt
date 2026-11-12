@@ -1,6 +1,9 @@
 package com.copypaste.app
 
+import android.os.Bundle
+import android.os.Handler
 import android.os.Looper
+import android.os.ResultReceiver
 import android.view.View
 import android.view.WindowManager
 import org.junit.Assert.assertEquals
@@ -35,5 +38,26 @@ class ClipboardFloatingActivityTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(activity.isFinishing)
         controller.destroy()
+    }
+
+    @Test
+    fun authenticationHandOffKeepsTheKeyboardPanelSessionAndAlwaysAnswers() {
+        val outcomes = mutableListOf<DeviceAuthenticator.Outcome>()
+        val receiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                outcomes += QuickAccessActivity.outcome(resultCode)
+            }
+        }
+        val intent = QuickAccessActivity.authenticationIntent(
+            org.robolectric.RuntimeEnvironment.getApplication(),
+            "Unlock secret items",
+            receiver,
+        )
+        val controller = Robolectric.buildActivity(QuickAccessActivity::class.java, intent).create()
+
+        assertFalse(WindowManager.LayoutParams.mayUseInputMethod(controller.get().window.attributes.flags))
+        controller.destroy()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, outcomes.size)
     }
 }

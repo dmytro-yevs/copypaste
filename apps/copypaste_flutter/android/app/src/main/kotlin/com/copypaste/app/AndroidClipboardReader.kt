@@ -98,9 +98,10 @@ internal object AndroidClipboardReader {
             captureClipboard(context, host, background = true)
         }
     }
-    fun captureForeground(context: Context, host: Host?) {
+    /** [onSaved] runs on the ingestion thread after a clip was stored. */
+    fun captureForeground(context: Context, host: Host?, onSaved: (() -> Unit)? = null) {
         if (host != null && AndroidCaptureState.foregroundCaptureEnabled(context)) {
-            captureClipboard(context, host, background = false)
+            captureClipboard(context, host, background = false, onSaved)
         }
     }
 
@@ -312,7 +313,7 @@ internal object AndroidClipboardReader {
         pending.enqueue(captured) { data -> materialize(app, pending, data) }
     }
 
-    private fun captureClipboard(context: Context, host: Host, background: Boolean) {
+    private fun captureClipboard(context: Context, host: Host, background: Boolean, onSaved: (() -> Unit)? = null) {
         val pending = begin(host) ?: return
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         var snapshot: Snapshot? = null
@@ -344,6 +345,7 @@ internal object AndroidClipboardReader {
                 NativeRuntimeCapture.scoped(pending.token, true, "text/plain") {
                     if (background) AndroidCaptureState.recordBackgroundCapture(app, data.capturedAt)
                     AndroidCaptureFeedback.onCaptured(app, pending.feedbackPreview())
+                    onSaved?.invoke()
                 }
             }
             saved

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">Resize panel</string>
+    <string name="ime_search_hint">Search clips</string>
+    <string name="ime_backspace">Delete</string>
+    <string name="ime_undo_insert">Undo insert</string>
+    <string name="ime_enter">Enter</string>
+    <string name="ime_keypad_switch_layout">Switch layout</string>
+    <string name="ime_keypad_space">Space</string>
+    <string name="ime_keypad_done">Done</string>
+    <string name="ime_keypad_backspace">Backspace</string>
+    <string name="ime_kind_text">Text</string>
+    <string name="ime_kind_link">Link</string>
+    <string name="ime_kind_email">Email</string>
+    <string name="ime_kind_phone">Phone number</string>
+    <string name="ime_kind_color">Color</string>
+    <string name="ime_kind_code">Code</string>
+    <string name="ime_kind_image">Image</string>
+    <string name="ime_kind_file">File</string>
+    <string name="ime_current_clipboard">Current clipboard</string>
+    <string name="ime_secret_item">Secret item, double-tap and authenticate to insert</string>
+    <string name="ime_pinned">Pinned</string>
+    <string name="ime_loading">Loading clips…</string>
+    <string name="ime_locked">Unlock your device to see your clips</string>
+    <string name="ime_error">Couldn\'t open your clips</string>
+    <string name="ime_retry">Retry</string>
+    <string name="ime_no_results">No matches for “%1$s”</string>
+    <string name="ime_empty_history">Nothing here yet. Copy something, or tap Save clipboard.</string>
+    <string name="ime_empty_pinned">No pinned clips yet</string>
+    <string name="ime_tab_history">History</string>
+    <string name="ime_tab_pinned">Pinned</string>
+    <string name="ime_tab_snippets">Snippets</string>
+    <string name="ime_tab_queue">Queue</string>
+    <string name="ime_action_cancel">Cancel</string>
+    <string name="ime_action_insert">Insert</string>
+    <string name="ime_action_insert_plain">Insert as plain text</string>
+    <string name="ime_action_copy">Copy to clipboard</string>
+    <string name="ime_action_pin">Pin</string>
+    <string name="ime_action_unpin">Unpin</string>
+    <string name="ime_action_delete">Delete</string>
+    <string name="ime_action_reveal">Reveal</string>
+    <string name="ime_delete_confirm">Delete this clip?</string>
+    <string name="ime_delete_failed">Couldn\'t delete the clip</string>
+    <string name="ime_inserted">Inserted</string>
+    <string name="ime_copied">Copied</string>
+    <string name="ime_copy_failed">Couldn\'t copy the clip</string>
+    <string name="ime_insert_failed">Couldn\'t insert here</string>
+    <string name="ime_insert_too_large">Too large to insert here</string>
+    <string name="ime_paste_via_clipboard">Paste via clipboard</string>
+    <string name="ime_image_not_accepted">This field doesn\'t accept images</string>
+    <string name="ime_file_not_accepted">This field doesn\'t accept files</string>
+    <string name="ime_item_unavailable">This clip is no longer available</string>
+    <string name="ime_unlock_failed">Couldn\'t unlock secret items</string>
+    <string name="ime_masked_mode">Password field: previews hidden</string>
+    <string name="ime_private_field">Private field: nothing is saved</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="one">%d character</item>
+        <item quantity="other">%d characters</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="one">%d in queue</item>
+        <item quantity="other">%d in queue</item>
+    </plurals>
+</resources>
