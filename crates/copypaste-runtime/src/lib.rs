@@ -772,13 +772,10 @@ impl Runtime {
         token: u64,
         content: &str,
     ) -> Result<(String, copypaste_ipc::ClipboardPrivacy), RuntimeError> {
-        if let Some(privacy) =
+        // Detection only marks the item; producer markers alone gate capture.
+        let detected =
             copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
-        {
-            if !self.capture_admission().classify(token, privacy) {
-                return Err(RuntimeError::CaptureRefused);
-            }
-        }
+                .unwrap_or_default();
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
@@ -804,7 +801,7 @@ impl Runtime {
                 || self.settings.config(),
             )
             .map_err(|_| RuntimeError::Capture)?;
-        let privacy = permit.privacy;
+        let privacy = permit.privacy.union(detected);
         let item = ingested.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
@@ -1523,21 +1520,10 @@ mod tests {
     }
 
     #[test]
-    fn detected_credentials_share_the_android_capture_gate_and_hidden_preview() {
+    fn detected_credentials_are_captured_with_a_hidden_preview() {
         let (runtime, _dir) = fixture();
+        assert!(runtime.settings.config().skip_secret);
         let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic";
-        assert!(matches!(
-            runtime.capture_text(content),
-            Err(RuntimeError::CaptureRefused)
-        ));
-        assert_eq!(runtime.store.count().unwrap(), 0);
-        runtime
-            .settings
-            .apply(&copypaste_ipc::ConfigPatch {
-                skip_secret: Some(false),
-                ..Default::default()
-            })
-            .unwrap();
         runtime.capture_text(content).unwrap();
         let row = runtime.store.list(10, 0).unwrap().pop().unwrap();
         let preview = runtime.item_value(row, true).unwrap();
