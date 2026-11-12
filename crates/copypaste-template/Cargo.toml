@@ -18,3 +18,4 @@ serde.workspace = true
 thiserror.workspace = true
 unicode-segmentation.workspace = true
 uuid.workspace = true
+writeable.workspace = true
