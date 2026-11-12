@@ -993,6 +993,553 @@
   "@pasteQueueSettingsSummary": {
     "description": "Description of the Paste Queue settings group."
   },
+  "pasteQueuePasted": "Pasted {position} of {total}",
+  "@pasteQueuePasted": {
+    "description": "Announcement after Paste next pasted one queue item.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopied": "Item {position} of {total} is on the clipboard",
+  "@pasteQueueCopied": {
+    "description": "Announcement after one queue item was put on the clipboard for the user to paste.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueuePastedAll": "{count, plural, =1{Pasted 1 item} other{Pasted {count} items}}",
+  "@pasteQueuePastedAll": {
+    "description": "Announcement after Paste all pasted several queue items at once.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopiedAll": "{count, plural, =1{1 item is on the clipboard} other{{count} items are on the clipboard}}",
+  "@pasteQueueCopiedAll": {
+    "description": "Announcement after several queue items were joined and put on the clipboard.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueFinished": "Queue finished",
+  "@pasteQueueFinished": {
+    "description": "Announcement when the last queue item was pasted."
+  },
+  "pasteQueueAdded": "{total, plural, =1{Added, 1 in queue} other{Added, {total} in queue}}",
+  "@pasteQueueAdded": {
+    "description": "Announcement after items were added to the queue, with the number now waiting.",
+    "placeholders": {
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueNothingToPaste": "Queue empty, nothing pasted",
+  "@pasteQueueNothingToPaste": {
+    "description": "Feedback when Paste next found no pending item; nothing was pasted."
+  },
+  "pasteQueueMixed": "Paste all works with text-only or files-only queues",
+  "@pasteQueueMixed": {
+    "description": "Why Paste all is unavailable: the queue mixes kinds of content."
+  },
+  "pasteQueueSeveralFiles": "Pasting several files at once isn't available yet. Paste them one at a time.",
+  "@pasteQueueSeveralFiles": {
+    "description": "Why Paste all is unavailable for a queue of several files."
+  },
+  "pasteQueueUnavailable": "{count, plural, =1{1 item no longer available} other{{count} items no longer available}}",
+  "@pasteQueueUnavailable": {
+    "description": "Notice that queued items were skipped because their history item no longer exists.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopyOnlyTitle": "Paste next copies only",
+  "@pasteQueueCopyOnlyTitle": {
+    "description": "Title of the notice that Paste next only puts items on the clipboard."
+  },
+  "pasteQueueAccessibilityMessage": "Allow Accessibility to paste automatically. Until then, the item is on the clipboard for you to paste.",
+  "@pasteQueueAccessibilityMessage": {
+    "description": "macOS notice: without the Accessibility permission the item is only put on the clipboard."
+  },
+  "pasteQueuePasteUnsupported": "Couldn't paste automatically. The item is on the clipboard; paste it with the usual shortcut.",
+  "@pasteQueuePasteUnsupported": {
+    "description": "Notice that automatic pasting is not possible here, so the item is only on the clipboard."
+  },
+  "pasteQueueTargetElevated": "Couldn't paste into an app running as administrator. The item is kept in the queue and is on the clipboard.",
+  "@pasteQueueTargetElevated": {
+    "description": "Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue."
+  },
+  "pasteQueueNoTarget": "No app to paste into. The item is kept in the queue and is on the clipboard.",
+  "@pasteQueueNoTarget": {
+    "description": "Notice that no app could receive the paste, so the item stays in the queue."
+  },
+  "pasteQueueCollectingStarted": "Collecting copies",
+  "@pasteQueueCollectingStarted": {
+    "description": "Announcement and notification when the queue starts collecting copies."
+  },
+  "pasteQueueCollectingStopped": "Stopped collecting",
+  "@pasteQueueCollectingStopped": {
+    "description": "Announcement and notification when the queue stops collecting copies."
+  },
+  "pasteQueueFailed": "Couldn't complete the Paste Queue action",
+  "@pasteQueueFailed": {
+    "description": "Generic error when a Paste Queue action could not be completed."
+  },
+  "pasteQueueSummary": "{count, plural, =1{1 pending} other{{count} pending}}",
+  "@pasteQueueSummary": {
+    "description": "Queue header summary: the number of items still to paste.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueSummaryCollecting": "{count, plural, =1{1 pending · Collecting} other{{count} pending · Collecting}}",
+  "@pasteQueueSummaryCollecting": {
+    "description": "Queue header summary while collecting: the number of items still to paste.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCollectingLabel": "Collecting",
+  "@pasteQueueCollectingLabel": {
+    "description": "Short header label while the queue collects copies."
+  },
+  "pasteQueueFinishedSummary": "Finished",
+  "@pasteQueueFinishedSummary": {
+    "description": "Queue header summary when every item was pasted."
+  },
+  "pasteQueueFull": "Queue full ({max})",
+  "@pasteQueueFull": {
+    "description": "Warning that the queue reached its size limit.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueFullMessage": "New copies are no longer added. Nothing was removed.",
+  "@pasteQueueFullMessage": {
+    "description": "Explains what happens while the queue is full."
+  },
+  "pasteQueueEmptyTitle": "Paste Queue is empty",
+  "@pasteQueueEmptyTitle": {
+    "description": "Empty state title of the queue drawer."
+  },
+  "pasteQueueEmptyMessage": "Collect copies to paste them in order, or add items from history.",
+  "@pasteQueueEmptyMessage": {
+    "description": "Empty state message of the queue drawer."
+  },
+  "pasteQueueCollectingEmptyTitle": "Copy items to add them",
+  "@pasteQueueCollectingEmptyTitle": {
+    "description": "Empty state title while collecting and nothing was copied yet."
+  },
+  "pasteQueueCollectingEmptyMessage": "Each copy joins the queue until you stop collecting.",
+  "@pasteQueueCollectingEmptyMessage": {
+    "description": "Empty state message while collecting."
+  },
+  "pasteQueueStartCollecting": "Start collecting",
+  "@pasteQueueStartCollecting": {
+    "description": "Button that starts collecting copies into the queue."
+  },
+  "pasteQueueStopCollecting": "Stop collecting",
+  "@pasteQueueStopCollecting": {
+    "description": "Button that stops collecting copies; existing items stay."
+  },
+  "pasteQueueLoading": "Loading the queue…",
+  "@pasteQueueLoading": {
+    "description": "Loading message of the queue drawer."
+  },
+  "pasteQueueLoadFailed": "Couldn't load the queue",
+  "@pasteQueueLoadFailed": {
+    "description": "Error state title when the queue could not be read."
+  },
+  "pasteQueuePasteNext": "Paste next",
+  "@pasteQueuePasteNext": {
+    "description": "Action and shortcut name: paste the next queue item into the front app."
+  },
+  "pasteQueueCopyNext": "Copy next",
+  "@pasteQueueCopyNext": {
+    "description": "Action that puts the next queue item on the clipboard without pasting."
+  },
+  "pasteQueuePasteAll": "Paste all",
+  "@pasteQueuePasteAll": {
+    "description": "Action and shortcut name: paste every pending item at once, joined by the separator."
+  },
+  "pasteQueueCopyAll": "Copy all",
+  "@pasteQueueCopyAll": {
+    "description": "Action that puts every pending item, joined, on the clipboard without pasting."
+  },
+  "pasteQueueReverse": "Reverse order",
+  "@pasteQueueReverse": {
+    "description": "Action that reverses the order of the pending items."
+  },
+  "pasteQueueStepBack": "Step back",
+  "@pasteQueueStepBack": {
+    "description": "Action and shortcut name: return the last pasted item to the head of the queue."
+  },
+  "pasteQueueSkip": "Skip",
+  "@pasteQueueSkip": {
+    "description": "Action and shortcut name: mark the next item skipped without pasting it."
+  },
+  "pasteQueueRemovePasted": "Remove pasted",
+  "@pasteQueueRemovePasted": {
+    "description": "Action that removes pasted and skipped items from the queue."
+  },
+  "pasteQueueCleared": "Queue cleared",
+  "@pasteQueueCleared": {
+    "description": "Notice after the queue was cleared, shown with Undo."
+  },
+  "pasteQueueUndo": "Undo",
+  "@pasteQueueUndo": {
+    "description": "Button that restores the entries the last Clear removed."
+  },
+  "pasteQueueStartFresh": "Start fresh",
+  "@pasteQueueStartFresh": {
+    "description": "Choice when collecting restarts after the queue finished: remove pasted items first."
+  },
+  "pasteQueueAppend": "Append",
+  "@pasteQueueAppend": {
+    "description": "Choice when collecting restarts after the queue finished: keep pasted items."
+  },
+  "pasteQueueRestartTitle": "Start a new collection?",
+  "@pasteQueueRestartTitle": {
+    "description": "Dialog title when collecting starts again on a finished queue."
+  },
+  "pasteQueueRestartMessage": "Start fresh removes the pasted items. Append keeps them.",
+  "@pasteQueueRestartMessage": {
+    "description": "Dialog message explaining Start fresh and Append."
+  },
+  "pasteQueueStale": "Queue from {time}",
+  "@pasteQueueStale": {
+    "description": "One-line hint that the pending items are old.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueStatusPasted": "Pasted",
+  "@pasteQueueStatusPasted": {
+    "description": "Status word of a queue item that was pasted."
+  },
+  "pasteQueueStatusSkipped": "Skipped",
+  "@pasteQueueStatusSkipped": {
+    "description": "Status word of a queue item that was skipped."
+  },
+  "pasteQueueStatusUnavailable": "No longer available",
+  "@pasteQueueStatusUnavailable": {
+    "description": "Status word of a queue item whose history item was deleted."
+  },
+  "pasteQueueEdited": "Edited",
+  "@pasteQueueEdited": {
+    "description": "Marker of a queue item whose text was edited in the queue."
+  },
+  "pasteQueueSecret": "Secret",
+  "@pasteQueueSecret": {
+    "description": "Placeholder shown instead of the content of a secret queue item."
+  },
+  "pasteQueueKindImage": "Image",
+  "@pasteQueueKindImage": {
+    "description": "Shown for a queued image."
+  },
+  "pasteQueueKindFiles": "Files",
+  "@pasteQueueKindFiles": {
+    "description": "Shown for queued files without a name."
+  },
+  "pasteQueueRenderedAt": "Rendered at {time}",
+  "@pasteQueueRenderedAt": {
+    "description": "When a queued snippet was rendered.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueRowLabel": "Item {position}: {content}",
+  "@pasteQueueRowLabel": {
+    "description": "Screen-reader label of a queue row: its position and content.",
+    "placeholders": {
+      "position": {
+        "type": "String"
+      },
+      "content": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueMoved": "Moved to position {position}",
+  "@pasteQueueMoved": {
+    "description": "Announcement after an item was moved.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueMoveUp": "Move up",
+  "@pasteQueueMoveUp": {
+    "description": "Row action that moves an item one place earlier."
+  },
+  "pasteQueueMoveDown": "Move down",
+  "@pasteQueueMoveDown": {
+    "description": "Row action that moves an item one place later."
+  },
+  "pasteQueueMoveToTop": "Move to top",
+  "@pasteQueueMoveToTop": {
+    "description": "Row action that moves an item to the start of the queue."
+  },
+  "pasteQueueMoveToBottom": "Move to bottom",
+  "@pasteQueueMoveToBottom": {
+    "description": "Row action that moves an item to the end of the queue."
+  },
+  "pasteQueueReorder": "Drag to reorder",
+  "@pasteQueueReorder": {
+    "description": "Tooltip of the drag handle that reorders a queue item."
+  },
+  "pasteQueueMoreActions": "More actions",
+  "@pasteQueueMoreActions": {
+    "description": "Tooltip of the button that opens a queue row's actions."
+  },
+  "pasteQueuePasteNow": "Paste now",
+  "@pasteQueuePasteNow": {
+    "description": "Row action that pastes this item now, out of order."
+  },
+  "pasteQueueEdit": "Edit text",
+  "@pasteQueueEdit": {
+    "description": "Row action that edits a queued text item."
+  },
+  "pasteQueueUseOriginal": "Use original text",
+  "@pasteQueueUseOriginal": {
+    "description": "Row action that drops the queue-local edit and pastes the original text again."
+  },
+  "pasteQueueRemove": "Remove from queue",
+  "@pasteQueueRemove": {
+    "description": "Row action that removes the item from the queue; history keeps it."
+  },
+  "pasteQueueEditTitle": "Edit queued text",
+  "@pasteQueueEditTitle": {
+    "description": "Title of the dialog that edits a queued text item."
+  },
+  "pasteQueueEditMessage": "Changes apply only to this queue. History keeps the original.",
+  "@pasteQueueEditMessage": {
+    "description": "Explains that a queue edit does not change history."
+  },
+  "pasteQueueShortcutPromptTitle": "Set shortcuts",
+  "@pasteQueueShortcutPromptTitle": {
+    "description": "Prompt title and button that leads to setting queue shortcuts."
+  },
+  "pasteQueueShortcutPromptMessage": "Choose shortcuts to collect and paste without opening CopyPaste.",
+  "@pasteQueueShortcutPromptMessage": {
+    "description": "Explains why to set queue shortcuts; they start unbound on Windows and Linux."
+  },
+  "pasteQueueShortcutToggleCollecting": "Start or stop collecting",
+  "@pasteQueueShortcutToggleCollecting": {
+    "description": "Shortcut name: start or stop collecting copies."
+  },
+  "pasteQueueShortcutPasteNextPlain": "Paste next as plain text",
+  "@pasteQueueShortcutPasteNextPlain": {
+    "description": "Shortcut name: paste the next item without formatting."
+  },
+  "pasteQueueShortcutDescription": "A global shortcut that works in any app.",
+  "@pasteQueueShortcutDescription": {
+    "description": "Description of each queue shortcut row."
+  },
+  "pasteQueueShortcutHeldByApp": "Another CopyPaste shortcut uses this combination. The previous one is kept.",
+  "@pasteQueueShortcutHeldByApp": {
+    "description": "Shortcut refused because another CopyPaste shortcut uses it."
+  },
+  "pasteQueueShortcutInUse": "Another app uses this combination. The previous one is kept; choose another.",
+  "@pasteQueueShortcutInUse": {
+    "description": "Shortcut refused because another app holds it."
+  },
+  "pasteQueueShortcutRejected": "The system refused this combination. The previous one is kept.",
+  "@pasteQueueShortcutRejected": {
+    "description": "Shortcut refused by the operating system."
+  },
+  "pasteQueueShortcutAltGr": "Ctrl+Alt types characters on many keyboard layouts (AltGr). Choose another combination.",
+  "@pasteQueueShortcutAltGr": {
+    "description": "Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts."
+  },
+  "pasteQueueShortcutUnavailable": "Global shortcuts aren't available in this session. Use the queue from the window or Quick Paste.",
+  "@pasteQueueShortcutUnavailable": {
+    "description": "This desktop session offers no global shortcuts (for example some Wayland sessions)."
+  },
+  "pasteQueueShortcutFailed": "Couldn't set this shortcut.",
+  "@pasteQueueShortcutFailed": {
+    "description": "Generic failure when a queue shortcut could not be set."
+  },
+  "pasteQueueEnableTitle": "Enable Paste Queue",
+  "@pasteQueueEnableTitle": {
+    "description": "Settings switch that turns the Paste Queue feature on or off."
+  },
+  "pasteQueueEnableDescription": "When off, queue shortcuts are released and nothing is collected.",
+  "@pasteQueueEnableDescription": {
+    "description": "Description of the Paste Queue switch."
+  },
+  "pasteQueuePasteNextStyleTitle": "Paste next does",
+  "@pasteQueuePasteNextStyleTitle": {
+    "description": "Setting: what Paste next does on this device."
+  },
+  "pasteQueuePasteNextStyleDescription": "Pasting into the front app needs permission to send keystrokes. Clipboard only leaves the paste to you.",
+  "@pasteQueuePasteNextStyleDescription": {
+    "description": "Description of the Paste next delivery style."
+  },
+  "pasteQueuePasteIntoApp": "Paste into the front app",
+  "@pasteQueuePasteIntoApp": {
+    "description": "Delivery style: paste into the front app."
+  },
+  "pasteQueueClipboardOnly": "Put on the clipboard only",
+  "@pasteQueueClipboardOnly": {
+    "description": "Delivery style: only put the item on the clipboard."
+  },
+  "pasteQueueInsertTitle": "New items go to",
+  "@pasteQueueInsertTitle": {
+    "description": "Setting: where new items join the queue."
+  },
+  "pasteQueueInsertDescription": "Where collected and added items join the queue.",
+  "@pasteQueueInsertDescription": {
+    "description": "Description of the insertion position setting."
+  },
+  "pasteQueueInsertEnd": "End (first in, first out)",
+  "@pasteQueueInsertEnd": {
+    "description": "Insertion position: at the end (first in, first out)."
+  },
+  "pasteQueueInsertStart": "Start (last in, first out)",
+  "@pasteQueueInsertStart": {
+    "description": "Insertion position: at the start (last in, first out)."
+  },
+  "pasteQueueEndBehaviorTitle": "After the last item",
+  "@pasteQueueEndBehaviorTitle": {
+    "description": "Setting: what happens after the last item was pasted."
+  },
+  "pasteQueueEndBehaviorDescription": "What Paste next does once every item was pasted.",
+  "@pasteQueueEndBehaviorDescription": {
+    "description": "Description of the end behavior setting."
+  },
+  "pasteQueueEndStop": "Stop",
+  "@pasteQueueEndStop": {
+    "description": "End behavior: stop and finish the queue."
+  },
+  "pasteQueueEndLoop": "Start over",
+  "@pasteQueueEndLoop": {
+    "description": "End behavior: start over from the first item."
+  },
+  "pasteQueueEndKeepLast": "Keep pasting the last item",
+  "@pasteQueueEndKeepLast": {
+    "description": "End behavior: keep pasting the last item."
+  },
+  "pasteQueueSeparatorTitle": "Paste all separator",
+  "@pasteQueueSeparatorTitle": {
+    "description": "Setting: the separator placed between items by Paste all."
+  },
+  "pasteQueueSeparatorDescription": "Placed between items when pasting all at once.",
+  "@pasteQueueSeparatorDescription": {
+    "description": "Description of the separator setting."
+  },
+  "pasteQueueSeparatorNewLine": "New line",
+  "@pasteQueueSeparatorNewLine": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorBlankLine": "Blank line",
+  "@pasteQueueSeparatorBlankLine": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorTab": "Tab",
+  "@pasteQueueSeparatorTab": {
+    "description": "Separator choice: a tab character."
+  },
+  "pasteQueueSeparatorSpace": "Space",
+  "@pasteQueueSeparatorSpace": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorComma": "Comma",
+  "@pasteQueueSeparatorComma": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorCommaSpace": "Comma and space",
+  "@pasteQueueSeparatorCommaSpace": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorNone": "None",
+  "@pasteQueueSeparatorNone": {
+    "description": "Separator choice: nothing between items."
+  },
+  "pasteQueueSeparatorCustom": "Custom",
+  "@pasteQueueSeparatorCustom": {
+    "description": "Separator choice: text the user enters."
+  },
+  "pasteQueueCustomSeparatorPlaceholder": "Up to 32 characters; \\n and \\t allowed",
+  "@pasteQueueCustomSeparatorPlaceholder": {
+    "description": "Placeholder of the custom separator field; \\n and \\t are typed literally by the user."
+  },
+  "pasteQueuePlainTextTitle": "Always paste as plain text",
+  "@pasteQueuePlainTextTitle": {
+    "description": "Setting: always paste queue items without formatting."
+  },
+  "pasteQueuePlainTextDescription": "Drops formatting from queued items.",
+  "@pasteQueuePlainTextDescription": {
+    "description": "Description of the plain-text setting."
+  },
+  "pasteQueueIdleStopTitle": "Stop collecting after",
+  "@pasteQueueIdleStopTitle": {
+    "description": "Setting: stop collecting after a period without copies."
+  },
+  "pasteQueueIdleStopDescription": "Collecting turns off when nothing was copied for this long. Items stay.",
+  "@pasteQueueIdleStopDescription": {
+    "description": "Description of the idle stop setting."
+  },
+  "pasteQueueIdleMinutes": "{minutes} min",
+  "@pasteQueueIdleMinutes": {
+    "description": "Idle stop choice in minutes.",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueIdleNever": "Never",
+  "@pasteQueueIdleNever": {
+    "description": "Idle stop choice: never stop on its own."
+  },
+  "pasteQueueMaxEntriesTitle": "Queue size limit",
+  "@pasteQueueMaxEntriesTitle": {
+    "description": "Setting: the queue size limit."
+  },
+  "pasteQueueMaxEntriesDescription": "When full, collecting stops adding items. Nothing is dropped.",
+  "@pasteQueueMaxEntriesDescription": {
+    "description": "Description of the size limit setting."
+  },
+  "pasteQueueRestoreTitle": "Restore the previous clipboard when finished",
+  "@pasteQueueRestoreTitle": {
+    "description": "Setting: restore the clipboard from before the queue started pasting."
+  },
+  "pasteQueueRestoreDescription": "Puts back what you had copied before the queue started pasting.",
+  "@pasteQueueRestoreDescription": {
+    "description": "Description of the restore clipboard setting."
+  },
+  "pasteQueueSettingsKeywords": "paste queue collect sequence order shortcut hotkey separator stack",
+  "@pasteQueueSettingsKeywords": {
+    "description": "Search keywords for the Paste Queue settings, space separated."
+  },
   "settingsSectionAbout": "About",
   "@settingsSectionAbout": {
     "description": "Settings section name in navigation and as the section heading, about the application."

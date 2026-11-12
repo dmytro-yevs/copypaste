@@ -1480,6 +1480,708 @@ abstract class AppLocalizations {
   /// **'Collect several copies and paste them in order.'**
   String get pasteQueueSettingsSummary;
 
+  /// Announcement after Paste next pasted one queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasted {position} of {total}'**
+  String pasteQueuePasted(int position, int total);
+
+  /// Announcement after one queue item was put on the clipboard for the user to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Item {position} of {total} is on the clipboard'**
+  String pasteQueueCopied(int position, int total);
+
+  /// Announcement after Paste all pasted several queue items at once.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Pasted 1 item} other{Pasted {count} items}}'**
+  String pasteQueuePastedAll(int count);
+
+  /// Announcement after several queue items were joined and put on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item is on the clipboard} other{{count} items are on the clipboard}}'**
+  String pasteQueueCopiedAll(int count);
+
+  /// Announcement when the last queue item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue finished'**
+  String get pasteQueueFinished;
+
+  /// Announcement after items were added to the queue, with the number now waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'{total, plural, =1{Added, 1 in queue} other{Added, {total} in queue}}'**
+  String pasteQueueAdded(int total);
+
+  /// Feedback when Paste next found no pending item; nothing was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue empty, nothing pasted'**
+  String get pasteQueueNothingToPaste;
+
+  /// Why Paste all is unavailable: the queue mixes kinds of content.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all works with text-only or files-only queues'**
+  String get pasteQueueMixed;
+
+  /// Why Paste all is unavailable for a queue of several files.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasting several files at once isn\'t available yet. Paste them one at a time.'**
+  String get pasteQueueSeveralFiles;
+
+  /// Notice that queued items were skipped because their history item no longer exists.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item no longer available} other{{count} items no longer available}}'**
+  String pasteQueueUnavailable(int count);
+
+  /// Title of the notice that Paste next only puts items on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next copies only'**
+  String get pasteQueueCopyOnlyTitle;
+
+  /// macOS notice: without the Accessibility permission the item is only put on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow Accessibility to paste automatically. Until then, the item is on the clipboard for you to paste.'**
+  String get pasteQueueAccessibilityMessage;
+
+  /// Notice that automatic pasting is not possible here, so the item is only on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t paste automatically. The item is on the clipboard; paste it with the usual shortcut.'**
+  String get pasteQueuePasteUnsupported;
+
+  /// Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t paste into an app running as administrator. The item is kept in the queue and is on the clipboard.'**
+  String get pasteQueueTargetElevated;
+
+  /// Notice that no app could receive the paste, so the item stays in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'No app to paste into. The item is kept in the queue and is on the clipboard.'**
+  String get pasteQueueNoTarget;
+
+  /// Announcement and notification when the queue starts collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting copies'**
+  String get pasteQueueCollectingStarted;
+
+  /// Announcement and notification when the queue stops collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped collecting'**
+  String get pasteQueueCollectingStopped;
+
+  /// Generic error when a Paste Queue action could not be completed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t complete the Paste Queue action'**
+  String get pasteQueueFailed;
+
+  /// Queue header summary: the number of items still to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 pending} other{{count} pending}}'**
+  String pasteQueueSummary(int count);
+
+  /// Queue header summary while collecting: the number of items still to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 pending · Collecting} other{{count} pending · Collecting}}'**
+  String pasteQueueSummaryCollecting(int count);
+
+  /// Short header label while the queue collects copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting'**
+  String get pasteQueueCollectingLabel;
+
+  /// Queue header summary when every item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get pasteQueueFinishedSummary;
+
+  /// Warning that the queue reached its size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue full ({max})'**
+  String pasteQueueFull(int max);
+
+  /// Explains what happens while the queue is full.
+  ///
+  /// In en, this message translates to:
+  /// **'New copies are no longer added. Nothing was removed.'**
+  String get pasteQueueFullMessage;
+
+  /// Empty state title of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste Queue is empty'**
+  String get pasteQueueEmptyTitle;
+
+  /// Empty state message of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect copies to paste them in order, or add items from history.'**
+  String get pasteQueueEmptyMessage;
+
+  /// Empty state title while collecting and nothing was copied yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy items to add them'**
+  String get pasteQueueCollectingEmptyTitle;
+
+  /// Empty state message while collecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Each copy joins the queue until you stop collecting.'**
+  String get pasteQueueCollectingEmptyMessage;
+
+  /// Button that starts collecting copies into the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Start collecting'**
+  String get pasteQueueStartCollecting;
+
+  /// Button that stops collecting copies; existing items stay.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop collecting'**
+  String get pasteQueueStopCollecting;
+
+  /// Loading message of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading the queue…'**
+  String get pasteQueueLoading;
+
+  /// Error state title when the queue could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load the queue'**
+  String get pasteQueueLoadFailed;
+
+  /// Action and shortcut name: paste the next queue item into the front app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next'**
+  String get pasteQueuePasteNext;
+
+  /// Action that puts the next queue item on the clipboard without pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy next'**
+  String get pasteQueueCopyNext;
+
+  /// Action and shortcut name: paste every pending item at once, joined by the separator.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all'**
+  String get pasteQueuePasteAll;
+
+  /// Action that puts every pending item, joined, on the clipboard without pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy all'**
+  String get pasteQueueCopyAll;
+
+  /// Action that reverses the order of the pending items.
+  ///
+  /// In en, this message translates to:
+  /// **'Reverse order'**
+  String get pasteQueueReverse;
+
+  /// Action and shortcut name: return the last pasted item to the head of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Step back'**
+  String get pasteQueueStepBack;
+
+  /// Action and shortcut name: mark the next item skipped without pasting it.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get pasteQueueSkip;
+
+  /// Action that removes pasted and skipped items from the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove pasted'**
+  String get pasteQueueRemovePasted;
+
+  /// Notice after the queue was cleared, shown with Undo.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue cleared'**
+  String get pasteQueueCleared;
+
+  /// Button that restores the entries the last Clear removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get pasteQueueUndo;
+
+  /// Choice when collecting restarts after the queue finished: remove pasted items first.
+  ///
+  /// In en, this message translates to:
+  /// **'Start fresh'**
+  String get pasteQueueStartFresh;
+
+  /// Choice when collecting restarts after the queue finished: keep pasted items.
+  ///
+  /// In en, this message translates to:
+  /// **'Append'**
+  String get pasteQueueAppend;
+
+  /// Dialog title when collecting starts again on a finished queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a new collection?'**
+  String get pasteQueueRestartTitle;
+
+  /// Dialog message explaining Start fresh and Append.
+  ///
+  /// In en, this message translates to:
+  /// **'Start fresh removes the pasted items. Append keeps them.'**
+  String get pasteQueueRestartMessage;
+
+  /// One-line hint that the pending items are old.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue from {time}'**
+  String pasteQueueStale(String time);
+
+  /// Status word of a queue item that was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasted'**
+  String get pasteQueueStatusPasted;
+
+  /// Status word of a queue item that was skipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped'**
+  String get pasteQueueStatusSkipped;
+
+  /// Status word of a queue item whose history item was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'No longer available'**
+  String get pasteQueueStatusUnavailable;
+
+  /// Marker of a queue item whose text was edited in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited'**
+  String get pasteQueueEdited;
+
+  /// Placeholder shown instead of the content of a secret queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret'**
+  String get pasteQueueSecret;
+
+  /// Shown for a queued image.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get pasteQueueKindImage;
+
+  /// Shown for queued files without a name.
+  ///
+  /// In en, this message translates to:
+  /// **'Files'**
+  String get pasteQueueKindFiles;
+
+  /// When a queued snippet was rendered.
+  ///
+  /// In en, this message translates to:
+  /// **'Rendered at {time}'**
+  String pasteQueueRenderedAt(String time);
+
+  /// Screen-reader label of a queue row: its position and content.
+  ///
+  /// In en, this message translates to:
+  /// **'Item {position}: {content}'**
+  String pasteQueueRowLabel(String position, String content);
+
+  /// Announcement after an item was moved.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to position {position}'**
+  String pasteQueueMoved(int position);
+
+  /// Row action that moves an item one place earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get pasteQueueMoveUp;
+
+  /// Row action that moves an item one place later.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get pasteQueueMoveDown;
+
+  /// Row action that moves an item to the start of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to top'**
+  String get pasteQueueMoveToTop;
+
+  /// Row action that moves an item to the end of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to bottom'**
+  String get pasteQueueMoveToBottom;
+
+  /// Tooltip of the drag handle that reorders a queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag to reorder'**
+  String get pasteQueueReorder;
+
+  /// Tooltip of the button that opens a queue row's actions.
+  ///
+  /// In en, this message translates to:
+  /// **'More actions'**
+  String get pasteQueueMoreActions;
+
+  /// Row action that pastes this item now, out of order.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste now'**
+  String get pasteQueuePasteNow;
+
+  /// Row action that edits a queued text item.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit text'**
+  String get pasteQueueEdit;
+
+  /// Row action that drops the queue-local edit and pastes the original text again.
+  ///
+  /// In en, this message translates to:
+  /// **'Use original text'**
+  String get pasteQueueUseOriginal;
+
+  /// Row action that removes the item from the queue; history keeps it.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from queue'**
+  String get pasteQueueRemove;
+
+  /// Title of the dialog that edits a queued text item.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit queued text'**
+  String get pasteQueueEditTitle;
+
+  /// Explains that a queue edit does not change history.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes apply only to this queue. History keeps the original.'**
+  String get pasteQueueEditMessage;
+
+  /// Prompt title and button that leads to setting queue shortcuts.
+  ///
+  /// In en, this message translates to:
+  /// **'Set shortcuts'**
+  String get pasteQueueShortcutPromptTitle;
+
+  /// Explains why to set queue shortcuts; they start unbound on Windows and Linux.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose shortcuts to collect and paste without opening CopyPaste.'**
+  String get pasteQueueShortcutPromptMessage;
+
+  /// Shortcut name: start or stop collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Start or stop collecting'**
+  String get pasteQueueShortcutToggleCollecting;
+
+  /// Shortcut name: paste the next item without formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next as plain text'**
+  String get pasteQueueShortcutPasteNextPlain;
+
+  /// Description of each queue shortcut row.
+  ///
+  /// In en, this message translates to:
+  /// **'A global shortcut that works in any app.'**
+  String get pasteQueueShortcutDescription;
+
+  /// Shortcut refused because another CopyPaste shortcut uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'Another CopyPaste shortcut uses this combination. The previous one is kept.'**
+  String get pasteQueueShortcutHeldByApp;
+
+  /// Shortcut refused because another app holds it.
+  ///
+  /// In en, this message translates to:
+  /// **'Another app uses this combination. The previous one is kept; choose another.'**
+  String get pasteQueueShortcutInUse;
+
+  /// Shortcut refused by the operating system.
+  ///
+  /// In en, this message translates to:
+  /// **'The system refused this combination. The previous one is kept.'**
+  String get pasteQueueShortcutRejected;
+
+  /// Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts.
+  ///
+  /// In en, this message translates to:
+  /// **'Ctrl+Alt types characters on many keyboard layouts (AltGr). Choose another combination.'**
+  String get pasteQueueShortcutAltGr;
+
+  /// This desktop session offers no global shortcuts (for example some Wayland sessions).
+  ///
+  /// In en, this message translates to:
+  /// **'Global shortcuts aren\'t available in this session. Use the queue from the window or Quick Paste.'**
+  String get pasteQueueShortcutUnavailable;
+
+  /// Generic failure when a queue shortcut could not be set.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t set this shortcut.'**
+  String get pasteQueueShortcutFailed;
+
+  /// Settings switch that turns the Paste Queue feature on or off.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable Paste Queue'**
+  String get pasteQueueEnableTitle;
+
+  /// Description of the Paste Queue switch.
+  ///
+  /// In en, this message translates to:
+  /// **'When off, queue shortcuts are released and nothing is collected.'**
+  String get pasteQueueEnableDescription;
+
+  /// Setting: what Paste next does on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next does'**
+  String get pasteQueuePasteNextStyleTitle;
+
+  /// Description of the Paste next delivery style.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasting into the front app needs permission to send keystrokes. Clipboard only leaves the paste to you.'**
+  String get pasteQueuePasteNextStyleDescription;
+
+  /// Delivery style: paste into the front app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste into the front app'**
+  String get pasteQueuePasteIntoApp;
+
+  /// Delivery style: only put the item on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Put on the clipboard only'**
+  String get pasteQueueClipboardOnly;
+
+  /// Setting: where new items join the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'New items go to'**
+  String get pasteQueueInsertTitle;
+
+  /// Description of the insertion position setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Where collected and added items join the queue.'**
+  String get pasteQueueInsertDescription;
+
+  /// Insertion position: at the end (first in, first out).
+  ///
+  /// In en, this message translates to:
+  /// **'End (first in, first out)'**
+  String get pasteQueueInsertEnd;
+
+  /// Insertion position: at the start (last in, first out).
+  ///
+  /// In en, this message translates to:
+  /// **'Start (last in, first out)'**
+  String get pasteQueueInsertStart;
+
+  /// Setting: what happens after the last item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'After the last item'**
+  String get pasteQueueEndBehaviorTitle;
+
+  /// Description of the end behavior setting.
+  ///
+  /// In en, this message translates to:
+  /// **'What Paste next does once every item was pasted.'**
+  String get pasteQueueEndBehaviorDescription;
+
+  /// End behavior: stop and finish the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get pasteQueueEndStop;
+
+  /// End behavior: start over from the first item.
+  ///
+  /// In en, this message translates to:
+  /// **'Start over'**
+  String get pasteQueueEndLoop;
+
+  /// End behavior: keep pasting the last item.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep pasting the last item'**
+  String get pasteQueueEndKeepLast;
+
+  /// Setting: the separator placed between items by Paste all.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all separator'**
+  String get pasteQueueSeparatorTitle;
+
+  /// Description of the separator setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Placed between items when pasting all at once.'**
+  String get pasteQueueSeparatorDescription;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'New line'**
+  String get pasteQueueSeparatorNewLine;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Blank line'**
+  String get pasteQueueSeparatorBlankLine;
+
+  /// Separator choice: a tab character.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab'**
+  String get pasteQueueSeparatorTab;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Space'**
+  String get pasteQueueSeparatorSpace;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma'**
+  String get pasteQueueSeparatorComma;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma and space'**
+  String get pasteQueueSeparatorCommaSpace;
+
+  /// Separator choice: nothing between items.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get pasteQueueSeparatorNone;
+
+  /// Separator choice: text the user enters.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get pasteQueueSeparatorCustom;
+
+  /// Placeholder of the custom separator field; \n and \t are typed literally by the user.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to 32 characters; \\n and \\t allowed'**
+  String get pasteQueueCustomSeparatorPlaceholder;
+
+  /// Setting: always paste queue items without formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Always paste as plain text'**
+  String get pasteQueuePlainTextTitle;
+
+  /// Description of the plain-text setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Drops formatting from queued items.'**
+  String get pasteQueuePlainTextDescription;
+
+  /// Setting: stop collecting after a period without copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop collecting after'**
+  String get pasteQueueIdleStopTitle;
+
+  /// Description of the idle stop setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting turns off when nothing was copied for this long. Items stay.'**
+  String get pasteQueueIdleStopDescription;
+
+  /// Idle stop choice in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String pasteQueueIdleMinutes(int minutes);
+
+  /// Idle stop choice: never stop on its own.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get pasteQueueIdleNever;
+
+  /// Setting: the queue size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue size limit'**
+  String get pasteQueueMaxEntriesTitle;
+
+  /// Description of the size limit setting.
+  ///
+  /// In en, this message translates to:
+  /// **'When full, collecting stops adding items. Nothing is dropped.'**
+  String get pasteQueueMaxEntriesDescription;
+
+  /// Setting: restore the clipboard from before the queue started pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore the previous clipboard when finished'**
+  String get pasteQueueRestoreTitle;
+
+  /// Description of the restore clipboard setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Puts back what you had copied before the queue started pasting.'**
+  String get pasteQueueRestoreDescription;
+
+  /// Search keywords for the Paste Queue settings, space separated.
+  ///
+  /// In en, this message translates to:
+  /// **'paste queue collect sequence order shortcut hotkey separator stack'**
+  String get pasteQueueSettingsKeywords;
+
   /// Settings section name in navigation and as the section heading, about the application.
   ///
   /// In en, this message translates to:

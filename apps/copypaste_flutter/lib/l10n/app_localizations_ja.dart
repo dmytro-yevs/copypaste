@@ -767,6 +767,429 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pasteQueueSettingsSummary => '複数のコピーを集めて順番に貼り付けます。';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return '$total 件中 $position 件目を貼り付けました';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '$total 件中 $position 件目をクリップボードに置きました';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件を貼り付けました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件をクリップボードに置きました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'キューが完了しました';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '追加しました。キューに $total 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'キューが空のため、何も貼り付けていません';
+
+  @override
+  String get pasteQueueMixed => '「すべて貼り付け」はテキストのみ、またはファイルのみのキューで使えます';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      '複数のファイルを一度に貼り付けることはまだできません。1 件ずつ貼り付けてください。';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件は利用できなくなりました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '「次を貼り付け」はコピーのみ行います';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      '自動で貼り付けるにはアクセシビリティを許可してください。それまでは項目がクリップボードにあるので、手動で貼り付けてください。';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      '自動で貼り付けられませんでした。項目はクリップボードにあるので、いつものショートカットで貼り付けてください。';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      '管理者として実行中のアプリには貼り付けられません。項目はキューに残り、クリップボードにもあります。';
+
+  @override
+  String get pasteQueueNoTarget => '貼り付け先のアプリがありません。項目はキューに残り、クリップボードにもあります。';
+
+  @override
+  String get pasteQueueCollectingStarted => 'コピーを収集中';
+
+  @override
+  String get pasteQueueCollectingStopped => '収集を停止しました';
+
+  @override
+  String get pasteQueueFailed => 'Paste Queue の操作を完了できませんでした';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '残り $count 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '残り $count 件 · 収集中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => '収集中';
+
+  @override
+  String get pasteQueueFinishedSummary => '完了';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'キューが満杯です（$max）';
+  }
+
+  @override
+  String get pasteQueueFullMessage => '新しいコピーは追加されません。削除された項目はありません。';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue は空です';
+
+  @override
+  String get pasteQueueEmptyMessage => 'コピーを収集して順番に貼り付けるか、履歴から項目を追加します。';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'コピーすると追加されます';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      '収集を停止するまで、コピーした内容がキューに追加されます。';
+
+  @override
+  String get pasteQueueStartCollecting => '収集を開始';
+
+  @override
+  String get pasteQueueStopCollecting => '収集を停止';
+
+  @override
+  String get pasteQueueLoading => 'キューを読み込んでいます…';
+
+  @override
+  String get pasteQueueLoadFailed => 'キューを読み込めませんでした';
+
+  @override
+  String get pasteQueuePasteNext => '次を貼り付け';
+
+  @override
+  String get pasteQueueCopyNext => '次をコピー';
+
+  @override
+  String get pasteQueuePasteAll => 'すべて貼り付け';
+
+  @override
+  String get pasteQueueCopyAll => 'すべてコピー';
+
+  @override
+  String get pasteQueueReverse => '順序を反転';
+
+  @override
+  String get pasteQueueStepBack => '1 つ戻る';
+
+  @override
+  String get pasteQueueSkip => 'スキップ';
+
+  @override
+  String get pasteQueueRemovePasted => '貼り付け済みを削除';
+
+  @override
+  String get pasteQueueCleared => 'キューを消去しました';
+
+  @override
+  String get pasteQueueUndo => '元に戻す';
+
+  @override
+  String get pasteQueueStartFresh => '新しく始める';
+
+  @override
+  String get pasteQueueAppend => '追加する';
+
+  @override
+  String get pasteQueueRestartTitle => '新しい収集を開始しますか？';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '「新しく始める」は貼り付け済みの項目を削除します。「追加する」は残します。';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time のキュー';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => '貼り付け済み';
+
+  @override
+  String get pasteQueueStatusSkipped => 'スキップ済み';
+
+  @override
+  String get pasteQueueStatusUnavailable => '利用できません';
+
+  @override
+  String get pasteQueueEdited => '編集済み';
+
+  @override
+  String get pasteQueueSecret => 'シークレット';
+
+  @override
+  String get pasteQueueKindImage => '画像';
+
+  @override
+  String get pasteQueueKindFiles => 'ファイル';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '$time に生成';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return '項目 $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '$position 番目に移動しました';
+  }
+
+  @override
+  String get pasteQueueMoveUp => '上へ移動';
+
+  @override
+  String get pasteQueueMoveDown => '下へ移動';
+
+  @override
+  String get pasteQueueMoveToTop => '先頭へ移動';
+
+  @override
+  String get pasteQueueMoveToBottom => '末尾へ移動';
+
+  @override
+  String get pasteQueueReorder => 'ドラッグして並べ替え';
+
+  @override
+  String get pasteQueueMoreActions => 'その他の操作';
+
+  @override
+  String get pasteQueuePasteNow => '今すぐ貼り付け';
+
+  @override
+  String get pasteQueueEdit => 'テキストを編集';
+
+  @override
+  String get pasteQueueUseOriginal => '元のテキストを使用';
+
+  @override
+  String get pasteQueueRemove => 'キューから削除';
+
+  @override
+  String get pasteQueueEditTitle => 'キューのテキストを編集';
+
+  @override
+  String get pasteQueueEditMessage => '変更はこのキューにのみ適用されます。履歴には元の内容が残ります。';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'ショートカットを設定';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'CopyPaste を開かずに収集と貼り付けを行うショートカットを選択してください。';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => '収集の開始・停止';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => '次をプレーンテキストで貼り付け';
+
+  @override
+  String get pasteQueueShortcutDescription => 'どのアプリでも使えるグローバルショートカットです。';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'この組み合わせは別の CopyPaste ショートカットで使われています。以前の設定を維持します。';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'この組み合わせは別のアプリで使われています。以前の設定を維持します。別の組み合わせを選んでください。';
+
+  @override
+  String get pasteQueueShortcutRejected => 'システムがこの組み合わせを拒否しました。以前の設定を維持します。';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt は多くのキーボード配列で文字入力に使われます（AltGr）。別の組み合わせを選んでください。';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'このセッションではグローバルショートカットを使えません。ウインドウまたは Quick Paste からキューを使ってください。';
+
+  @override
+  String get pasteQueueShortcutFailed => 'このショートカットを設定できませんでした。';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue を有効にする';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'オフにすると、キューのショートカットは解除され、何も収集されません。';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '「次を貼り付け」の動作';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      '前面のアプリに貼り付けるにはキー入力を送る権限が必要です。「クリップボードのみ」では貼り付けは手動です。';
+
+  @override
+  String get pasteQueuePasteIntoApp => '前面のアプリに貼り付け';
+
+  @override
+  String get pasteQueueClipboardOnly => 'クリップボードのみ';
+
+  @override
+  String get pasteQueueInsertTitle => '新しい項目の追加先';
+
+  @override
+  String get pasteQueueInsertDescription => '収集・追加した項目をキューのどこに入れるか。';
+
+  @override
+  String get pasteQueueInsertEnd => '末尾（先入れ先出し）';
+
+  @override
+  String get pasteQueueInsertStart => '先頭（後入れ先出し）';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => '最後の項目の後';
+
+  @override
+  String get pasteQueueEndBehaviorDescription => 'すべて貼り付けた後に「次を貼り付け」が行う動作。';
+
+  @override
+  String get pasteQueueEndStop => '停止';
+
+  @override
+  String get pasteQueueEndLoop => '最初から繰り返す';
+
+  @override
+  String get pasteQueueEndKeepLast => '最後の項目を貼り付け続ける';
+
+  @override
+  String get pasteQueueSeparatorTitle => '「すべて貼り付け」の区切り';
+
+  @override
+  String get pasteQueueSeparatorDescription => 'まとめて貼り付けるときに項目の間に入れます。';
+
+  @override
+  String get pasteQueueSeparatorNewLine => '改行';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => '空行';
+
+  @override
+  String get pasteQueueSeparatorTab => 'タブ';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'スペース';
+
+  @override
+  String get pasteQueueSeparatorComma => 'カンマ';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'カンマとスペース';
+
+  @override
+  String get pasteQueueSeparatorNone => 'なし';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'カスタム';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder => '32 文字まで。\\n と \\t を使用可';
+
+  @override
+  String get pasteQueuePlainTextTitle => '常にプレーンテキストで貼り付け';
+
+  @override
+  String get pasteQueuePlainTextDescription => 'キューの項目から書式を取り除きます。';
+
+  @override
+  String get pasteQueueIdleStopTitle => '収集を自動停止するまでの時間';
+
+  @override
+  String get pasteQueueIdleStopDescription => 'この時間コピーがなければ収集を停止します。項目は残ります。';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes 分';
+  }
+
+  @override
+  String get pasteQueueIdleNever => '停止しない';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'キューの上限';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      '満杯になると項目は追加されません。削除される項目はありません。';
+
+  @override
+  String get pasteQueueRestoreTitle => '完了時に以前のクリップボードを復元';
+
+  @override
+  String get pasteQueueRestoreDescription => 'キューが貼り付けを始める前にコピーしていた内容に戻します。';
+
+  @override
+  String get pasteQueueSettingsKeywords => 'paste queue キュー 収集 順番 ショートカット 区切り';
+
+  @override
   String get settingsSectionAbout => '情報';
 
   @override

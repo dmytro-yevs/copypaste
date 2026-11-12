@@ -853,6 +853,456 @@ class AppLocalizationsEs extends AppLocalizations {
       'Reúne varias copias y pégalas en orden.';
 
   @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Pegado $position de $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'El elemento $position de $total está en el portapapeles';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementos pegados',
+      one: '1 elemento pegado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementos están en el portapapeles',
+      one: '1 elemento está en el portapapeles',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Cola terminada';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Añadido, $total en la cola',
+      one: 'Añadido, 1 en la cola',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Cola vacía, no se pegó nada';
+
+  @override
+  String get pasteQueueMixed =>
+      'Pegar todo funciona con colas solo de texto o solo de archivos';
+
+  @override
+  String get pasteQueueSeveralFiles =>
+      'Aún no se pueden pegar varios archivos a la vez. Pégalos de uno en uno.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementos ya no están disponibles',
+      one: '1 elemento ya no está disponible',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Pegar siguiente solo copia';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Permite Accesibilidad para pegar automáticamente. Mientras tanto, el elemento está en el portapapeles para que lo pegues.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'No se pudo pegar automáticamente. El elemento está en el portapapeles; pégalo con el atajo habitual.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'No se pudo pegar en una app que se ejecuta como administrador. El elemento sigue en la cola y está en el portapapeles.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'No hay ninguna app donde pegar. El elemento sigue en la cola y está en el portapapeles.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Recopilando copias';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Recopilación detenida';
+
+  @override
+  String get pasteQueueFailed =>
+      'No se pudo completar la acción de Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendientes',
+      one: '1 pendiente',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendientes · Recopilando',
+      one: '1 pendiente · Recopilando',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Recopilando';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Terminada';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Cola llena ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage =>
+      'Las nuevas copias ya no se añaden. No se eliminó nada.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue está vacía';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Recopila copias para pegarlas en orden o añade elementos desde el historial.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copia elementos para añadirlos';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Cada copia se une a la cola hasta que detengas la recopilación.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Empezar a recopilar';
+
+  @override
+  String get pasteQueueStopCollecting => 'Dejar de recopilar';
+
+  @override
+  String get pasteQueueLoading => 'Cargando la cola…';
+
+  @override
+  String get pasteQueueLoadFailed => 'No se pudo cargar la cola';
+
+  @override
+  String get pasteQueuePasteNext => 'Pegar siguiente';
+
+  @override
+  String get pasteQueueCopyNext => 'Copiar siguiente';
+
+  @override
+  String get pasteQueuePasteAll => 'Pegar todo';
+
+  @override
+  String get pasteQueueCopyAll => 'Copiar todo';
+
+  @override
+  String get pasteQueueReverse => 'Invertir orden';
+
+  @override
+  String get pasteQueueStepBack => 'Retroceder';
+
+  @override
+  String get pasteQueueSkip => 'Omitir';
+
+  @override
+  String get pasteQueueRemovePasted => 'Quitar los pegados';
+
+  @override
+  String get pasteQueueCleared => 'Cola vaciada';
+
+  @override
+  String get pasteQueueUndo => 'Deshacer';
+
+  @override
+  String get pasteQueueStartFresh => 'Empezar de cero';
+
+  @override
+  String get pasteQueueAppend => 'Añadir al final';
+
+  @override
+  String get pasteQueueRestartTitle => '¿Empezar una nueva recopilación?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Empezar de cero quita los elementos pegados. Añadir al final los conserva.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Cola del $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Pegado';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Omitido';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Ya no disponible';
+
+  @override
+  String get pasteQueueEdited => 'Editado';
+
+  @override
+  String get pasteQueueSecret => 'Secreto';
+
+  @override
+  String get pasteQueueKindImage => 'Imagen';
+
+  @override
+  String get pasteQueueKindFiles => 'Archivos';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Generado a las $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Elemento $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Movido a la posición $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Subir';
+
+  @override
+  String get pasteQueueMoveDown => 'Bajar';
+
+  @override
+  String get pasteQueueMoveToTop => 'Mover al principio';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Mover al final';
+
+  @override
+  String get pasteQueueReorder => 'Arrastra para reordenar';
+
+  @override
+  String get pasteQueueMoreActions => 'Más acciones';
+
+  @override
+  String get pasteQueuePasteNow => 'Pegar ahora';
+
+  @override
+  String get pasteQueueEdit => 'Editar texto';
+
+  @override
+  String get pasteQueueUseOriginal => 'Usar el texto original';
+
+  @override
+  String get pasteQueueRemove => 'Quitar de la cola';
+
+  @override
+  String get pasteQueueEditTitle => 'Editar texto en cola';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Los cambios solo se aplican a esta cola. El historial conserva el original.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Configurar atajos';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Elige atajos para recopilar y pegar sin abrir CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Iniciar o detener la recopilación';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Pegar siguiente como texto sin formato';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Un atajo global que funciona en cualquier app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Otro atajo de CopyPaste usa esta combinación. Se mantiene el anterior.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Otra app usa esta combinación. Se mantiene la anterior; elige otra.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'El sistema rechazó esta combinación. Se mantiene la anterior.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt escribe caracteres en muchas distribuciones de teclado (AltGr). Elige otra combinación.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Los atajos globales no están disponibles en esta sesión. Usa la cola desde la ventana o Quick Paste.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'No se pudo configurar este atajo.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Activar Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Si está desactivada, se liberan los atajos de la cola y no se recopila nada.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Pegar siguiente hace';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Pegar en la app activa requiere permiso para enviar pulsaciones. Solo portapapeles deja el pegado en tus manos.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Pegar en la app activa';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Solo al portapapeles';
+
+  @override
+  String get pasteQueueInsertTitle => 'Los elementos nuevos van';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Dónde se unen a la cola los elementos recopilados y añadidos.';
+
+  @override
+  String get pasteQueueInsertEnd =>
+      'Al final (primero en entrar, primero en salir)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'Al principio (último en entrar, primero en salir)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Tras el último elemento';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Qué hace Pegar siguiente cuando ya se pegaron todos los elementos.';
+
+  @override
+  String get pasteQueueEndStop => 'Detener';
+
+  @override
+  String get pasteQueueEndLoop => 'Volver a empezar';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Seguir pegando el último';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Separador de Pegar todo';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Se coloca entre los elementos al pegarlos todos a la vez.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Nueva línea';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Línea en blanco';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tabulación';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Espacio';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Coma';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Coma y espacio';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Ninguno';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Personalizado';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Hasta 32 caracteres; se admiten \\n y \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Pegar siempre como texto sin formato';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Quita el formato de los elementos en cola.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Dejar de recopilar tras';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'La recopilación se desactiva si no se copia nada durante este tiempo. Los elementos se mantienen.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Nunca';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Límite de tamaño de la cola';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Cuando está llena, ya no se añaden elementos. No se descarta nada.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Restaurar el portapapeles anterior al terminar';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Devuelve lo que habías copiado antes de que la cola empezara a pegar.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue cola recopilar orden atajo separador';
+
+  @override
   String get settingsSectionAbout => 'Acerca de';
 
   @override
