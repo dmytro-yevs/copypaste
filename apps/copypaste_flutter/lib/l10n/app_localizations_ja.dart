@@ -3589,4 +3589,471 @@ class AppLocalizationsJa extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get transformsPaletteTitle => 'テキストを変換';
+
+  @override
+  String get transformsFilterPlaceholder => '変換を絞り込む';
+
+  @override
+  String get transformsNoMatches => '一致する変換はありません';
+
+  @override
+  String get transformsGroupResults => '結果';
+
+  @override
+  String get transformsGroupSuggested => 'おすすめ';
+
+  @override
+  String get transformsGroupRecent => '最近';
+
+  @override
+  String get transformsGroupFavorites => 'お気に入り';
+
+  @override
+  String get transformsGroupPipelines => 'パイプライン';
+
+  @override
+  String get transformsCategoryStructure => 'JSON・YAML・CSV・XML';
+
+  @override
+  String get transformsCategoryEncode => 'エンコードとデコード';
+
+  @override
+  String get transformsCategoryCase => '大文字と小文字';
+
+  @override
+  String get transformsCategoryHash => 'ハッシュ';
+
+  @override
+  String get transformsCategoryLines => '行と空白';
+
+  @override
+  String get transformsCategoryClean => 'クリーンアップ';
+
+  @override
+  String get transformsCategoryUrl => 'リンク';
+
+  @override
+  String get transformsCategoryMarkup => 'リッチテキストと Markdown';
+
+  @override
+  String get transformsCategoryDev => '開発者';
+
+  @override
+  String get transformsCategoryOther => 'その他';
+
+  @override
+  String get transformsChainEmpty => 'ステップはまだありません';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return '次に: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'このステップを実行';
+
+  @override
+  String get transformsMoveEarlier => '上へ移動';
+
+  @override
+  String get transformsMoveLater => '下へ移動';
+
+  @override
+  String get transformsRemoveStep => 'ステップを削除';
+
+  @override
+  String get transformsSavePipeline => 'パイプラインとして保存';
+
+  @override
+  String get transformsSavePipelineTitle => 'パイプラインを保存';
+
+  @override
+  String get transformsSavePipelineFailed => 'パイプラインを保存できませんでした。';
+
+  @override
+  String get transformsPipelineNameLabel => '名前';
+
+  @override
+  String get transformsPipelineDescriptionLabel => '説明（任意）';
+
+  @override
+  String get transformsPipelineStepsLabel => 'ステップ';
+
+  @override
+  String get transformsPipelineNoSteps => 'ステップを1つ以上追加してください。';
+
+  @override
+  String get transformsPipelineNameRequired => '名前を入力してください。';
+
+  @override
+  String get transformsPipelineNameTooLong => '80文字以内にしてください。';
+
+  @override
+  String get transformsPipelineNameTaken => '同じ名前のパイプラインがすでにあります。';
+
+  @override
+  String get transformsPipelineSavedTitle => 'パイプラインを保存しました';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name はすべての変換パレットで使えます。';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'ステップ: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => '削除されたパイプライン';
+
+  @override
+  String get transformsNeedsNewerVersion => '新しいバージョンの CopyPaste が必要です';
+
+  @override
+  String get transformsLoadFailed => '変換を読み込めませんでした。';
+
+  @override
+  String get transformsNotTextTitle => '変換はテキストに対して行います';
+
+  @override
+  String get transformsNotTextMessage =>
+      'この項目は画像、ファイル、または色です。テキスト項目を選ぶか、テキストをコピーしてください。';
+
+  @override
+  String get transformsNothingTitle => '変換するものがありません';
+
+  @override
+  String get transformsNothingMessage => 'テキストをコピーするか、履歴の項目を選んでください。';
+
+  @override
+  String get transformsPickTransform => '変換を選んでください';
+
+  @override
+  String get transformsPickTransformHint => 'Tab でステップとして追加、Enter で結果を適用します。';
+
+  @override
+  String get transformsPreviewing => 'プレビューを更新中…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return '行: $lines · 単語: $words · 文字: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => '変更なし';
+
+  @override
+  String transformsTruncated(String size) {
+    return '$size のうち最初の 64 KiB を表示しています';
+  }
+
+  @override
+  String get transformsRandom => 'ランダム';
+
+  @override
+  String get transformsNotRun => '未実行';
+
+  @override
+  String get transformsSensitiveHidden => '結果は機密のため非表示です。';
+
+  @override
+  String get transformsReveal => '表示';
+
+  @override
+  String get transformsPaneOutput => '出力';
+
+  @override
+  String get transformsPaneInput => '入力';
+
+  @override
+  String get transformsPaneChanges => '変更点';
+
+  @override
+  String get transformsCannotTransform => 'このテキストは変換できません';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'ステップ $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => '16進数で表示';
+
+  @override
+  String get transformsActionPaste => '貼り付け';
+
+  @override
+  String get transformsActionSave => '新しい項目として保存';
+
+  @override
+  String get transformsCopiedMessage => '結果はクリップボードと履歴にあります。';
+
+  @override
+  String get transformsSavedTitle => '保存しました';
+
+  @override
+  String get transformsSavedMessage => '結果は新しい履歴項目になりました。クリップボードは変わりません。';
+
+  @override
+  String get transformsPasteFailedTitle => '貼り付けできませんでした';
+
+  @override
+  String get transformsPasteFailedMessage => '結果はクリップボードにあります。手動で貼り付けてください。';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message（$line 行 $column 列）';
+  }
+
+  @override
+  String get transformsErrorBinary => 'デコードしたデータはテキストではなくバイナリです';
+
+  @override
+  String get transformsErrorTooLarge => '大きすぎて変換できません';
+
+  @override
+  String get transformsErrorInvalidParam => 'このステップの設定が無効です';
+
+  @override
+  String get transformsErrorCancelled => 'キャンセルしました';
+
+  @override
+  String get transformsErrorTooExpensive => 'パターンの処理が重すぎます';
+
+  @override
+  String get transformsErrorPattern => 'パターンが無効です';
+
+  @override
+  String get transformsErrorTimestampUnit => '数値が秒かミリ秒かを選んでください';
+
+  @override
+  String get transformsErrorExternalEntity => '外部エンティティは使用できません';
+
+  @override
+  String get transformsErrorJwtEncrypted => '暗号化されたトークンはデコードできません';
+
+  @override
+  String get transformsErrorJson => '無効な JSON';
+
+  @override
+  String get transformsErrorYaml => '無効な YAML';
+
+  @override
+  String get transformsErrorXml => '無効な XML';
+
+  @override
+  String get transformsErrorCsv => '無効な CSV';
+
+  @override
+  String get transformsErrorBase64 => '無効な Base64';
+
+  @override
+  String get transformsErrorHex => '無効な16進数';
+
+  @override
+  String get transformsErrorEscape => '無効なエスケープシーケンス';
+
+  @override
+  String get transformsErrorUrl => 'パーセントエンコードが不正です';
+
+  @override
+  String get transformsErrorJwt => '有効な JWT ではありません';
+
+  @override
+  String get transformsErrorDate => '認識できる日付またはタイムスタンプではありません';
+
+  @override
+  String get transformsErrorGeneric => 'このステップは入力を変換できません';
+
+  @override
+  String get transformsWarningSignedLink => '署名付きリンクは変更していません';
+
+  @override
+  String get transformsWarningExpired => '期限切れ';
+
+  @override
+  String get transformsWarningNotYetValid => 'まだ有効ではありません';
+
+  @override
+  String get transformsWarningSignatureNotVerified => '署名は検証されていません';
+
+  @override
+  String get transformsWarningDuplicateKeys => '重複したキー';
+
+  @override
+  String get transformsWarningLenientJson => '標準外の JSON を受け入れました';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON が二重にエンコードされていました';
+
+  @override
+  String get transformsWarningEscapes => '不明なエスケープシーケンスはそのまま残しました';
+
+  @override
+  String get transformsWarningLocalZone => 'ローカルのタイムゾーンとみなしました';
+
+  @override
+  String get transformsWarningNoMatches => '一致なし';
+
+  @override
+  String get transformsWarningGeneric => '結果を確認してください';
+
+  @override
+  String get transformsRestoreTitle => '貼り付け後にクリップボードを復元';
+
+  @override
+  String get transformsRestoreDescription =>
+      '変換して貼り付けた後、その間に別のコピーがなければ以前のクリップボードに戻します。';
+
+  @override
+  String get transformsDefaultTitle => '貼り付け時の既定の変換';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste はこのパイプラインをテキストに適用し、貼り付け前に表示します。失敗した場合は元のテキストを貼り付けます。';
+
+  @override
+  String get transformsNoDefault => 'なし';
+
+  @override
+  String get transformsAppDefaultsTitle => 'アプリごとの既定';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'バンドル ID、実行ファイル、またはパッケージ名でアプリごとに既定を上書きします。他のプラットフォームの設定は同期されますが、ここでは効果がありません。';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => 'アプリ識別子';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return '$platform のみ';
+  }
+
+  @override
+  String get transformsAdd => '追加';
+
+  @override
+  String get transformsRemove => '削除';
+
+  @override
+  String get transformsFavoritesTitle => 'お気に入り';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'お気に入りはすべてのパレットで先頭に表示されます。最初の9件は Mod+1〜Mod+9 で実行できます。';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'パレットで Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => 'お気に入りを追加';
+
+  @override
+  String get transformsPipelinesTitle => 'パイプライン';
+
+  @override
+  String get transformsPipelinesDescription =>
+      '設定付きで保存した変換の組み合わせです。他のデバイスと同期されます。';
+
+  @override
+  String get transformsNewPipeline => '新しいパイプライン';
+
+  @override
+  String get transformsEditPipeline => 'パイプラインを編集';
+
+  @override
+  String get transformsDuplicatePipeline => '複製';
+
+  @override
+  String get transformsDeletePipeline => '削除';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name を削除しますか？';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'これを使うお気に入りと貼り付けの既定は、すべてのデバイスで「なし」に戻ります。';
+
+  @override
+  String get transformsDeletePipelineFailed => 'パイプラインを削除できませんでした。';
+
+  @override
+  String get transformsAddStep => 'ステップを追加';
+
+  @override
+  String get transformsHiddenTitle => '非表示の変換';
+
+  @override
+  String get transformsHiddenDescription =>
+      '非表示の変換はパレットとおすすめに表示されません。それを使うパイプラインは引き続き実行できます。';
+
+  @override
+  String get transformsHideTransform => '変換を非表示にする';
+
+  @override
+  String get transformsShow => '表示';
+
+  @override
+  String get transformsSuggestionsTitle => 'おすすめ';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'パレットを開くと、テキストの先頭 64 KiB を以下の種類で確認し、最大3つの変換をおすすめします。バックグラウンドでは何も実行しません。';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web トークン';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'トラッキングパラメーター付きリンク';
+
+  @override
+  String get transformsDetectorTimestamp => 'タイムスタンプ';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'トラッキングパラメーター';
+
+  @override
+  String get transformsTrackingDescription =>
+      '組み込みリストはアプリに含まれ、アップデートでのみ変わります。削除または保持する名前を追加できます。name@domain と書くとドメインを限定できます。';
+
+  @override
+  String get transformsTrackingRemoveLabel => '追加で削除';
+
+  @override
+  String get transformsTrackingAllowLabel => '常に保持';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'name または name@domain を入力して Enter';
 }

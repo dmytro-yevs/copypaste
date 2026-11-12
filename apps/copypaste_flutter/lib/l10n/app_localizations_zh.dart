@@ -3475,4 +3475,465 @@ class AppLocalizationsZh extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get transformsPaletteTitle => '转换文本';
+
+  @override
+  String get transformsFilterPlaceholder => '筛选转换';
+
+  @override
+  String get transformsNoMatches => '没有匹配的转换';
+
+  @override
+  String get transformsGroupResults => '结果';
+
+  @override
+  String get transformsGroupSuggested => '建议';
+
+  @override
+  String get transformsGroupRecent => '最近';
+
+  @override
+  String get transformsGroupFavorites => '收藏';
+
+  @override
+  String get transformsGroupPipelines => '流水线';
+
+  @override
+  String get transformsCategoryStructure => 'JSON、YAML、CSV 和 XML';
+
+  @override
+  String get transformsCategoryEncode => '编码与解码';
+
+  @override
+  String get transformsCategoryCase => '大小写';
+
+  @override
+  String get transformsCategoryHash => '哈希';
+
+  @override
+  String get transformsCategoryLines => '行与空白';
+
+  @override
+  String get transformsCategoryClean => '清理';
+
+  @override
+  String get transformsCategoryUrl => '链接';
+
+  @override
+  String get transformsCategoryMarkup => '富文本与 Markdown';
+
+  @override
+  String get transformsCategoryDev => '开发者';
+
+  @override
+  String get transformsCategoryOther => '其他';
+
+  @override
+  String get transformsChainEmpty => '尚无步骤';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return '然后：$name';
+  }
+
+  @override
+  String get transformsStepEnabled => '运行此步骤';
+
+  @override
+  String get transformsMoveEarlier => '上移';
+
+  @override
+  String get transformsMoveLater => '下移';
+
+  @override
+  String get transformsRemoveStep => '移除步骤';
+
+  @override
+  String get transformsSavePipeline => '另存为流水线';
+
+  @override
+  String get transformsSavePipelineTitle => '保存流水线';
+
+  @override
+  String get transformsSavePipelineFailed => '无法保存流水线。';
+
+  @override
+  String get transformsPipelineNameLabel => '名称';
+
+  @override
+  String get transformsPipelineDescriptionLabel => '描述（可选）';
+
+  @override
+  String get transformsPipelineStepsLabel => '步骤';
+
+  @override
+  String get transformsPipelineNoSteps => '请至少添加一个步骤。';
+
+  @override
+  String get transformsPipelineNameRequired => '请输入名称。';
+
+  @override
+  String get transformsPipelineNameTooLong => '最多 80 个字符。';
+
+  @override
+  String get transformsPipelineNameTaken => '已有同名流水线。';
+
+  @override
+  String get transformsPipelineSavedTitle => '流水线已保存';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name 已可在所有转换面板中使用。';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return '步骤：$count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => '已删除的流水线';
+
+  @override
+  String get transformsNeedsNewerVersion => '需要更新版本的 CopyPaste';
+
+  @override
+  String get transformsLoadFailed => '无法加载转换。';
+
+  @override
+  String get transformsNotTextTitle => '转换仅适用于文本';
+
+  @override
+  String get transformsNotTextMessage => '此项目是图片、文件或颜色。请选择文本项目或复制一些文本。';
+
+  @override
+  String get transformsNothingTitle => '没有可转换的内容';
+
+  @override
+  String get transformsNothingMessage => '复制一些文本，或选择一个历史项目。';
+
+  @override
+  String get transformsPickTransform => '选择一个转换';
+
+  @override
+  String get transformsPickTransformHint => 'Tab 将其添加为步骤，Enter 应用结果。';
+
+  @override
+  String get transformsPreviewing => '正在更新预览…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return '行：$lines · 词：$words · 字符：$chars';
+  }
+
+  @override
+  String get transformsNoChanges => '无更改';
+
+  @override
+  String transformsTruncated(String size) {
+    return '显示 $size 中的前 64 KiB';
+  }
+
+  @override
+  String get transformsRandom => '随机';
+
+  @override
+  String get transformsNotRun => '未运行';
+
+  @override
+  String get transformsSensitiveHidden => '结果为敏感内容，已隐藏。';
+
+  @override
+  String get transformsReveal => '显示';
+
+  @override
+  String get transformsPaneOutput => '输出';
+
+  @override
+  String get transformsPaneInput => '输入';
+
+  @override
+  String get transformsPaneChanges => '更改';
+
+  @override
+  String get transformsCannotTransform => '无法转换此文本';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return '步骤 $step · $name：$message';
+  }
+
+  @override
+  String get transformsUseHexOutput => '以十六进制显示';
+
+  @override
+  String get transformsActionPaste => '粘贴';
+
+  @override
+  String get transformsActionSave => '另存为新项目';
+
+  @override
+  String get transformsCopiedMessage => '结果已在剪贴板和历史记录中。';
+
+  @override
+  String get transformsSavedTitle => '已保存';
+
+  @override
+  String get transformsSavedMessage => '结果已成为新的历史项目，剪贴板未改变。';
+
+  @override
+  String get transformsPasteFailedTitle => '无法粘贴';
+
+  @override
+  String get transformsPasteFailedMessage => '结果已在剪贴板中，请手动粘贴。';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message（第 $line 行，第 $column 列）';
+  }
+
+  @override
+  String get transformsErrorBinary => '解码后的数据是二进制而非文本';
+
+  @override
+  String get transformsErrorTooLarge => '内容过大，无法转换';
+
+  @override
+  String get transformsErrorInvalidParam => '此步骤的设置无效';
+
+  @override
+  String get transformsErrorCancelled => '已取消';
+
+  @override
+  String get transformsErrorTooExpensive => '模式开销过大';
+
+  @override
+  String get transformsErrorPattern => '模式无效';
+
+  @override
+  String get transformsErrorTimestampUnit => '请选择该数字的单位是秒还是毫秒';
+
+  @override
+  String get transformsErrorExternalEntity => '不允许外部实体';
+
+  @override
+  String get transformsErrorJwtEncrypted => '无法解码加密令牌';
+
+  @override
+  String get transformsErrorJson => '无效的 JSON';
+
+  @override
+  String get transformsErrorYaml => '无效的 YAML';
+
+  @override
+  String get transformsErrorXml => '无效的 XML';
+
+  @override
+  String get transformsErrorCsv => '无效的 CSV';
+
+  @override
+  String get transformsErrorBase64 => '无效的 Base64';
+
+  @override
+  String get transformsErrorHex => '无效的十六进制';
+
+  @override
+  String get transformsErrorEscape => '无效的转义序列';
+
+  @override
+  String get transformsErrorUrl => '百分号编码格式错误';
+
+  @override
+  String get transformsErrorJwt => '不是有效的 JWT';
+
+  @override
+  String get transformsErrorDate => '无法识别的日期或时间戳';
+
+  @override
+  String get transformsErrorGeneric => '此步骤无法转换其输入';
+
+  @override
+  String get transformsWarningSignedLink => '已签名链接保持不变';
+
+  @override
+  String get transformsWarningExpired => '已过期';
+
+  @override
+  String get transformsWarningNotYetValid => '尚未生效';
+
+  @override
+  String get transformsWarningSignatureNotVerified => '签名未验证';
+
+  @override
+  String get transformsWarningDuplicateKeys => '重复的键';
+
+  @override
+  String get transformsWarningLenientJson => '已接受非标准 JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON 被编码了两次';
+
+  @override
+  String get transformsWarningEscapes => '未知转义序列已按原样保留';
+
+  @override
+  String get transformsWarningLocalZone => '已假定为本地时区';
+
+  @override
+  String get transformsWarningNoMatches => '无匹配项';
+
+  @override
+  String get transformsWarningGeneric => '请检查结果';
+
+  @override
+  String get transformsRestoreTitle => '粘贴后恢复剪贴板';
+
+  @override
+  String get transformsRestoreDescription => '转换粘贴后，如果期间未复制其他内容，将恢复之前的剪贴板。';
+
+  @override
+  String get transformsDefaultTitle => '默认粘贴转换';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste 会对文本应用此流水线，并在粘贴前显示。若失败则粘贴原文。';
+
+  @override
+  String get transformsNoDefault => '无';
+
+  @override
+  String get transformsAppDefaultsTitle => '按应用设置默认值';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      '通过包 ID、可执行文件或软件包名称为单个应用覆盖默认值。在其他平台创建的条目会同步，但在此处无效。';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => '应用标识符';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return '仅限 $platform';
+  }
+
+  @override
+  String get transformsAdd => '添加';
+
+  @override
+  String get transformsRemove => '移除';
+
+  @override
+  String get transformsFavoritesTitle => '收藏';
+
+  @override
+  String get transformsFavoritesDescription =>
+      '收藏会在每个面板中优先显示。前九个可用 Mod+1 至 Mod+9 运行。';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return '面板中按 Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => '添加收藏';
+
+  @override
+  String get transformsPipelinesTitle => '流水线';
+
+  @override
+  String get transformsPipelinesDescription => '已保存的转换链及其设置，会同步到您的其他设备。';
+
+  @override
+  String get transformsNewPipeline => '新建流水线';
+
+  @override
+  String get transformsEditPipeline => '编辑流水线';
+
+  @override
+  String get transformsDuplicatePipeline => '复制';
+
+  @override
+  String get transformsDeletePipeline => '删除';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '删除 $name？';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage => '使用它的收藏和粘贴默认值将在所有设备上恢复为无。';
+
+  @override
+  String get transformsDeletePipelineFailed => '无法删除流水线。';
+
+  @override
+  String get transformsAddStep => '添加步骤';
+
+  @override
+  String get transformsHiddenTitle => '隐藏的转换';
+
+  @override
+  String get transformsHiddenDescription => '隐藏的转换不会出现在面板和建议中，使用它们的流水线仍可运行。';
+
+  @override
+  String get transformsHideTransform => '隐藏转换';
+
+  @override
+  String get transformsShow => '显示';
+
+  @override
+  String get transformsSuggestionsTitle => '建议';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      '打开面板时，会检查其文本的前 64 KiB 是否属于以下类型，并建议最多三个转换。不会在后台运行任何内容。';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web 令牌';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => '带跟踪参数的链接';
+
+  @override
+  String get transformsDetectorTimestamp => '时间戳';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => '跟踪参数';
+
+  @override
+  String get transformsTrackingDescription =>
+      '内置列表随应用提供，仅随更新而变化。添加要移除或保留的名称；写成 名称@域名 可限定到某个域名。';
+
+  @override
+  String get transformsTrackingRemoveLabel => '额外移除';
+
+  @override
+  String get transformsTrackingAllowLabel => '始终保留';
+
+  @override
+  String get transformsTrackingPlaceholder => '名称或 名称@域名，然后按 Enter';
 }

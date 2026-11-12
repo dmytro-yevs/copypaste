@@ -3856,4 +3856,493 @@ class AppLocalizationsDe extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get transformsPaletteTitle => 'Text umwandeln';
+
+  @override
+  String get transformsFilterPlaceholder => 'Umwandlungen filtern';
+
+  @override
+  String get transformsNoMatches => 'Keine passenden Umwandlungen';
+
+  @override
+  String get transformsGroupResults => 'Ergebnisse';
+
+  @override
+  String get transformsGroupSuggested => 'Vorgeschlagen';
+
+  @override
+  String get transformsGroupRecent => 'Zuletzt verwendet';
+
+  @override
+  String get transformsGroupFavorites => 'Favoriten';
+
+  @override
+  String get transformsGroupPipelines => 'Pipelines';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV und XML';
+
+  @override
+  String get transformsCategoryEncode => 'Kodieren und dekodieren';
+
+  @override
+  String get transformsCategoryCase => 'Groß-/Kleinschreibung';
+
+  @override
+  String get transformsCategoryHash => 'Hashes';
+
+  @override
+  String get transformsCategoryLines => 'Zeilen und Leerraum';
+
+  @override
+  String get transformsCategoryClean => 'Bereinigen';
+
+  @override
+  String get transformsCategoryUrl => 'Links';
+
+  @override
+  String get transformsCategoryMarkup => 'Rich Text und Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Entwickler';
+
+  @override
+  String get transformsCategoryOther => 'Sonstige';
+
+  @override
+  String get transformsChainEmpty => 'Noch keine Schritte';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Dann: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Diesen Schritt ausführen';
+
+  @override
+  String get transformsMoveEarlier => 'Nach oben';
+
+  @override
+  String get transformsMoveLater => 'Nach unten';
+
+  @override
+  String get transformsRemoveStep => 'Schritt entfernen';
+
+  @override
+  String get transformsSavePipeline => 'Als Pipeline speichern';
+
+  @override
+  String get transformsSavePipelineTitle => 'Pipeline speichern';
+
+  @override
+  String get transformsSavePipelineFailed =>
+      'Die Pipeline konnte nicht gespeichert werden.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Name';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Beschreibung (optional)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Schritte';
+
+  @override
+  String get transformsPipelineNoSteps =>
+      'Fügen Sie mindestens einen Schritt hinzu.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Geben Sie einen Namen ein.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Höchstens 80 Zeichen.';
+
+  @override
+  String get transformsPipelineNameTaken =>
+      'Eine andere Pipeline hat bereits diesen Namen.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Pipeline gespeichert';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name ist in jeder Umwandlungspalette verfügbar.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Schritte: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Gelöschte Pipeline';
+
+  @override
+  String get transformsNeedsNewerVersion =>
+      'Erfordert eine neuere CopyPaste-Version';
+
+  @override
+  String get transformsLoadFailed =>
+      'Umwandlungen konnten nicht geladen werden.';
+
+  @override
+  String get transformsNotTextTitle => 'Umwandlungen funktionieren mit Text';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Dieses Element ist ein Bild, eine Datei oder eine Farbe. Wählen Sie ein Textelement oder kopieren Sie Text.';
+
+  @override
+  String get transformsNothingTitle => 'Nichts umzuwandeln';
+
+  @override
+  String get transformsNothingMessage =>
+      'Kopieren Sie Text oder wählen Sie ein Element aus dem Verlauf.';
+
+  @override
+  String get transformsPickTransform => 'Wählen Sie eine Umwandlung';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab fügt sie als Schritt hinzu. Enter übernimmt das Ergebnis.';
+
+  @override
+  String get transformsPreviewing => 'Vorschau wird aktualisiert…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Zeilen: $lines · Wörter: $words · Zeichen: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Keine Änderungen';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Die ersten 64 KiB von $size werden angezeigt';
+  }
+
+  @override
+  String get transformsRandom => 'Zufällig';
+
+  @override
+  String get transformsNotRun => 'Nicht ausgeführt';
+
+  @override
+  String get transformsSensitiveHidden =>
+      'Das Ergebnis ist vertraulich und ausgeblendet.';
+
+  @override
+  String get transformsReveal => 'Anzeigen';
+
+  @override
+  String get transformsPaneOutput => 'Ausgabe';
+
+  @override
+  String get transformsPaneInput => 'Eingabe';
+
+  @override
+  String get transformsPaneChanges => 'Änderungen';
+
+  @override
+  String get transformsCannotTransform =>
+      'Dieser Text kann nicht umgewandelt werden';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Schritt $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Als Hex anzeigen';
+
+  @override
+  String get transformsActionPaste => 'Einfügen';
+
+  @override
+  String get transformsActionSave => 'Als neuen Eintrag speichern';
+
+  @override
+  String get transformsCopiedMessage =>
+      'Das Ergebnis ist in der Zwischenablage und im Verlauf.';
+
+  @override
+  String get transformsSavedTitle => 'Gespeichert';
+
+  @override
+  String get transformsSavedMessage =>
+      'Das Ergebnis ist ein neuer Verlaufseintrag. Die Zwischenablage bleibt unverändert.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Einfügen nicht möglich';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'Das Ergebnis ist in der Zwischenablage. Fügen Sie es manuell ein.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message in Zeile $line, Spalte $column';
+  }
+
+  @override
+  String get transformsErrorBinary =>
+      'Die dekodierten Daten sind binär, kein Text';
+
+  @override
+  String get transformsErrorTooLarge => 'Zu groß zum Umwandeln';
+
+  @override
+  String get transformsErrorInvalidParam =>
+      'Eine Einstellung dieses Schritts ist ungültig';
+
+  @override
+  String get transformsErrorCancelled => 'Abgebrochen';
+
+  @override
+  String get transformsErrorTooExpensive => 'Muster zu aufwendig';
+
+  @override
+  String get transformsErrorPattern => 'Das Muster ist ungültig';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Wählen Sie, ob die Zahl in Sekunden oder Millisekunden angegeben ist';
+
+  @override
+  String get transformsErrorExternalEntity =>
+      'Externe Entitäten sind nicht erlaubt';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'Verschlüsselte Token können nicht dekodiert werden';
+
+  @override
+  String get transformsErrorJson => 'Ungültiges JSON';
+
+  @override
+  String get transformsErrorYaml => 'Ungültiges YAML';
+
+  @override
+  String get transformsErrorXml => 'Ungültiges XML';
+
+  @override
+  String get transformsErrorCsv => 'Ungültiges CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Ungültiges Base64';
+
+  @override
+  String get transformsErrorHex => 'Ungültiges Hex';
+
+  @override
+  String get transformsErrorEscape => 'Ungültige Escape-Sequenz';
+
+  @override
+  String get transformsErrorUrl => 'Fehlerhafte Prozent-Kodierung';
+
+  @override
+  String get transformsErrorJwt => 'Kein gültiges JWT';
+
+  @override
+  String get transformsErrorDate => 'Kein erkanntes Datum und kein Zeitstempel';
+
+  @override
+  String get transformsErrorGeneric =>
+      'Dieser Schritt kann seine Eingabe nicht umwandeln';
+
+  @override
+  String get transformsWarningSignedLink => 'Signierter Link unverändert';
+
+  @override
+  String get transformsWarningExpired => 'Abgelaufen';
+
+  @override
+  String get transformsWarningNotYetValid => 'Noch nicht gültig';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Signatur nicht geprüft';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Doppelte Schlüssel';
+
+  @override
+  String get transformsWarningLenientJson =>
+      'Nicht standardkonformes JSON akzeptiert';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'Das JSON wurde doppelt kodiert';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Unbekannte Escape-Sequenzen unverändert übernommen';
+
+  @override
+  String get transformsWarningLocalZone => 'Lokale Zeitzone angenommen';
+
+  @override
+  String get transformsWarningNoMatches => 'Keine Treffer';
+
+  @override
+  String get transformsWarningGeneric => 'Prüfen Sie das Ergebnis';
+
+  @override
+  String get transformsRestoreTitle =>
+      'Zwischenablage nach dem Einfügen wiederherstellen';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Nach dem umgewandelten Einfügen kehrt die vorherige Zwischenablage zurück, sofern inzwischen nichts anderes kopiert wurde.';
+
+  @override
+  String get transformsDefaultTitle => 'Standardumwandlung beim Einfügen';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste wendet diese Pipeline auf Text an und zeigt sie vor dem Einfügen an. Schlägt sie fehl, wird das Original eingefügt.';
+
+  @override
+  String get transformsNoDefault => 'Keine';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Standards pro App';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Überschreiben Sie den Standard für eine App über Bundle-ID, Programmdatei oder Paketnamen. Einträge anderer Plattformen werden synchronisiert, wirken hier aber nicht.';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => 'App-Kennung';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'nur auf $platform';
+  }
+
+  @override
+  String get transformsAdd => 'Hinzufügen';
+
+  @override
+  String get transformsRemove => 'Entfernen';
+
+  @override
+  String get transformsFavoritesTitle => 'Favoriten';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Favoriten erscheinen in jeder Palette zuerst. Die ersten neun starten mit Mod+1 bis Mod+9.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number in der Palette';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Favorit hinzufügen';
+
+  @override
+  String get transformsPipelinesTitle => 'Pipelines';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Gespeicherte Ketten von Umwandlungen mit ihren Einstellungen. Sie werden mit Ihren anderen Geräten synchronisiert.';
+
+  @override
+  String get transformsNewPipeline => 'Neue Pipeline';
+
+  @override
+  String get transformsEditPipeline => 'Pipeline bearbeiten';
+
+  @override
+  String get transformsDuplicatePipeline => 'Duplizieren';
+
+  @override
+  String get transformsDeletePipeline => 'Löschen';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name löschen?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Favoriten und Einfüge-Standards, die sie verwenden, fallen auf allen Geräten auf „Keine“ zurück.';
+
+  @override
+  String get transformsDeletePipelineFailed =>
+      'Die Pipeline konnte nicht gelöscht werden.';
+
+  @override
+  String get transformsAddStep => 'Schritt hinzufügen';
+
+  @override
+  String get transformsHiddenTitle => 'Ausgeblendete Umwandlungen';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Ausgeblendete Umwandlungen erscheinen nicht in Paletten und Vorschlägen. Pipelines, die sie nutzen, laufen weiter.';
+
+  @override
+  String get transformsHideTransform => 'Umwandlung ausblenden';
+
+  @override
+  String get transformsShow => 'Einblenden';
+
+  @override
+  String get transformsSuggestionsTitle => 'Vorschläge';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Beim Öffnen einer Palette werden die ersten 64 KiB ihres Texts auf die folgenden Arten geprüft, um bis zu drei Umwandlungen vorzuschlagen. Im Hintergrund läuft nichts.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Tokens';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'Links mit Tracking-Parametern';
+
+  @override
+  String get transformsDetectorTimestamp => 'Zeitstempel';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Tracking-Parameter';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Die integrierte Liste ist Teil der App und ändert sich nur mit Updates. Fügen Sie Namen zum Entfernen oder Behalten hinzu; name@domain beschränkt einen Eintrag auf eine Domain.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Zusätzlich entfernen';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Immer behalten';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'name oder name@domain, dann Enter';
 }

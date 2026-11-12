@@ -3567,4 +3567,470 @@ class AppLocalizationsKo extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get transformsPaletteTitle => '텍스트 변환';
+
+  @override
+  String get transformsFilterPlaceholder => '변환 필터';
+
+  @override
+  String get transformsNoMatches => '일치하는 변환 없음';
+
+  @override
+  String get transformsGroupResults => '결과';
+
+  @override
+  String get transformsGroupSuggested => '추천';
+
+  @override
+  String get transformsGroupRecent => '최근';
+
+  @override
+  String get transformsGroupFavorites => '즐겨찾기';
+
+  @override
+  String get transformsGroupPipelines => '파이프라인';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV 및 XML';
+
+  @override
+  String get transformsCategoryEncode => '인코딩 및 디코딩';
+
+  @override
+  String get transformsCategoryCase => '대소문자';
+
+  @override
+  String get transformsCategoryHash => '해시';
+
+  @override
+  String get transformsCategoryLines => '줄 및 공백';
+
+  @override
+  String get transformsCategoryClean => '정리';
+
+  @override
+  String get transformsCategoryUrl => '링크';
+
+  @override
+  String get transformsCategoryMarkup => '서식 있는 텍스트 및 Markdown';
+
+  @override
+  String get transformsCategoryDev => '개발자';
+
+  @override
+  String get transformsCategoryOther => '기타';
+
+  @override
+  String get transformsChainEmpty => '아직 단계 없음';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return '다음: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => '이 단계 실행';
+
+  @override
+  String get transformsMoveEarlier => '위로 이동';
+
+  @override
+  String get transformsMoveLater => '아래로 이동';
+
+  @override
+  String get transformsRemoveStep => '단계 제거';
+
+  @override
+  String get transformsSavePipeline => '파이프라인으로 저장';
+
+  @override
+  String get transformsSavePipelineTitle => '파이프라인 저장';
+
+  @override
+  String get transformsSavePipelineFailed => '파이프라인을 저장할 수 없습니다.';
+
+  @override
+  String get transformsPipelineNameLabel => '이름';
+
+  @override
+  String get transformsPipelineDescriptionLabel => '설명(선택 사항)';
+
+  @override
+  String get transformsPipelineStepsLabel => '단계';
+
+  @override
+  String get transformsPipelineNoSteps => '단계를 하나 이상 추가하세요.';
+
+  @override
+  String get transformsPipelineNameRequired => '이름을 입력하세요.';
+
+  @override
+  String get transformsPipelineNameTooLong => '80자 이하로 입력하세요.';
+
+  @override
+  String get transformsPipelineNameTaken => '같은 이름의 파이프라인이 이미 있습니다.';
+
+  @override
+  String get transformsPipelineSavedTitle => '파이프라인 저장됨';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name을(를) 모든 변환 팔레트에서 사용할 수 있습니다.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return '단계: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => '삭제된 파이프라인';
+
+  @override
+  String get transformsNeedsNewerVersion => '최신 버전의 CopyPaste가 필요합니다';
+
+  @override
+  String get transformsLoadFailed => '변환을 불러올 수 없습니다.';
+
+  @override
+  String get transformsNotTextTitle => '변환은 텍스트에서 작동합니다';
+
+  @override
+  String get transformsNotTextMessage =>
+      '이 항목은 이미지, 파일 또는 색상입니다. 텍스트 항목을 선택하거나 텍스트를 복사하세요.';
+
+  @override
+  String get transformsNothingTitle => '변환할 내용 없음';
+
+  @override
+  String get transformsNothingMessage => '텍스트를 복사하거나 기록 항목을 선택하세요.';
+
+  @override
+  String get transformsPickTransform => '변환을 선택하세요';
+
+  @override
+  String get transformsPickTransformHint => 'Tab으로 단계를 추가하고 Enter로 결과를 적용합니다.';
+
+  @override
+  String get transformsPreviewing => '미리보기 업데이트 중…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return '줄: $lines · 단어: $words · 문자: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => '변경 사항 없음';
+
+  @override
+  String transformsTruncated(String size) {
+    return '$size 중 처음 64KiB 표시 중';
+  }
+
+  @override
+  String get transformsRandom => '무작위';
+
+  @override
+  String get transformsNotRun => '실행 안 됨';
+
+  @override
+  String get transformsSensitiveHidden => '결과가 민감하여 숨겨져 있습니다.';
+
+  @override
+  String get transformsReveal => '표시';
+
+  @override
+  String get transformsPaneOutput => '출력';
+
+  @override
+  String get transformsPaneInput => '입력';
+
+  @override
+  String get transformsPaneChanges => '변경 사항';
+
+  @override
+  String get transformsCannotTransform => '이 텍스트를 변환할 수 없습니다';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return '$step단계 · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => '16진수로 표시';
+
+  @override
+  String get transformsActionPaste => '붙여넣기';
+
+  @override
+  String get transformsActionSave => '새 항목으로 저장';
+
+  @override
+  String get transformsCopiedMessage => '결과가 클립보드와 기록에 있습니다.';
+
+  @override
+  String get transformsSavedTitle => '저장됨';
+
+  @override
+  String get transformsSavedMessage => '결과가 새 기록 항목이 되었습니다. 클립보드는 그대로입니다.';
+
+  @override
+  String get transformsPasteFailedTitle => '붙여넣을 수 없음';
+
+  @override
+  String get transformsPasteFailedMessage => '결과가 클립보드에 있습니다. 직접 붙여넣으세요.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message($line행 $column열)';
+  }
+
+  @override
+  String get transformsErrorBinary => '디코딩된 데이터가 텍스트가 아닌 바이너리입니다';
+
+  @override
+  String get transformsErrorTooLarge => '너무 커서 변환할 수 없습니다';
+
+  @override
+  String get transformsErrorInvalidParam => '이 단계의 설정이 올바르지 않습니다';
+
+  @override
+  String get transformsErrorCancelled => '취소됨';
+
+  @override
+  String get transformsErrorTooExpensive => '패턴 처리 비용이 너무 큽니다';
+
+  @override
+  String get transformsErrorPattern => '패턴이 올바르지 않습니다';
+
+  @override
+  String get transformsErrorTimestampUnit => '숫자가 초인지 밀리초인지 선택하세요';
+
+  @override
+  String get transformsErrorExternalEntity => '외부 엔터티는 허용되지 않습니다';
+
+  @override
+  String get transformsErrorJwtEncrypted => '암호화된 토큰은 디코딩할 수 없습니다';
+
+  @override
+  String get transformsErrorJson => '잘못된 JSON';
+
+  @override
+  String get transformsErrorYaml => '잘못된 YAML';
+
+  @override
+  String get transformsErrorXml => '잘못된 XML';
+
+  @override
+  String get transformsErrorCsv => '잘못된 CSV';
+
+  @override
+  String get transformsErrorBase64 => '잘못된 Base64';
+
+  @override
+  String get transformsErrorHex => '잘못된 16진수';
+
+  @override
+  String get transformsErrorEscape => '잘못된 이스케이프 시퀀스';
+
+  @override
+  String get transformsErrorUrl => '잘못된 퍼센트 인코딩';
+
+  @override
+  String get transformsErrorJwt => '유효한 JWT가 아닙니다';
+
+  @override
+  String get transformsErrorDate => '인식할 수 있는 날짜나 타임스탬프가 아닙니다';
+
+  @override
+  String get transformsErrorGeneric => '이 단계는 입력을 변환할 수 없습니다';
+
+  @override
+  String get transformsWarningSignedLink => '서명된 링크는 변경하지 않았습니다';
+
+  @override
+  String get transformsWarningExpired => '만료됨';
+
+  @override
+  String get transformsWarningNotYetValid => '아직 유효하지 않음';
+
+  @override
+  String get transformsWarningSignatureNotVerified => '서명이 확인되지 않음';
+
+  @override
+  String get transformsWarningDuplicateKeys => '중복된 키';
+
+  @override
+  String get transformsWarningLenientJson => '비표준 JSON을 허용했습니다';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON이 두 번 인코딩되어 있었습니다';
+
+  @override
+  String get transformsWarningEscapes => '알 수 없는 이스케이프 시퀀스를 그대로 유지했습니다';
+
+  @override
+  String get transformsWarningLocalZone => '현지 시간대로 가정했습니다';
+
+  @override
+  String get transformsWarningNoMatches => '일치 항목 없음';
+
+  @override
+  String get transformsWarningGeneric => '결과를 확인하세요';
+
+  @override
+  String get transformsRestoreTitle => '붙여넣은 후 클립보드 복원';
+
+  @override
+  String get transformsRestoreDescription =>
+      '변환 결과를 붙여넣은 후, 그사이에 다른 것을 복사하지 않았다면 이전 클립보드로 되돌립니다.';
+
+  @override
+  String get transformsDefaultTitle => '붙여넣기 기본 변환';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste가 텍스트에 이 파이프라인을 적용하고 붙여넣기 전에 표시합니다. 실패하면 원본을 붙여넣습니다.';
+
+  @override
+  String get transformsNoDefault => '없음';
+
+  @override
+  String get transformsAppDefaultsTitle => '앱별 기본값';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      '번들 ID, 실행 파일 또는 패키지 이름으로 앱별 기본값을 재정의합니다. 다른 플랫폼에서 만든 항목은 동기화되지만 여기서는 적용되지 않습니다.';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => '앱 식별자';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return '$platform에서만';
+  }
+
+  @override
+  String get transformsAdd => '추가';
+
+  @override
+  String get transformsRemove => '제거';
+
+  @override
+  String get transformsFavoritesTitle => '즐겨찾기';
+
+  @override
+  String get transformsFavoritesDescription =>
+      '즐겨찾기는 모든 팔레트에서 먼저 표시됩니다. 처음 9개는 Mod+1~Mod+9로 실행합니다.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return '팔레트에서 Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => '즐겨찾기 추가';
+
+  @override
+  String get transformsPipelinesTitle => '파이프라인';
+
+  @override
+  String get transformsPipelinesDescription =>
+      '설정과 함께 저장한 변환 체인입니다. 다른 기기와 동기화됩니다.';
+
+  @override
+  String get transformsNewPipeline => '새 파이프라인';
+
+  @override
+  String get transformsEditPipeline => '파이프라인 편집';
+
+  @override
+  String get transformsDuplicatePipeline => '복제';
+
+  @override
+  String get transformsDeletePipeline => '삭제';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name을(를) 삭제할까요?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      '이를 사용하는 즐겨찾기와 붙여넣기 기본값은 모든 기기에서 없음으로 돌아갑니다.';
+
+  @override
+  String get transformsDeletePipelineFailed => '파이프라인을 삭제할 수 없습니다.';
+
+  @override
+  String get transformsAddStep => '단계 추가';
+
+  @override
+  String get transformsHiddenTitle => '숨긴 변환';
+
+  @override
+  String get transformsHiddenDescription =>
+      '숨긴 변환은 팔레트와 추천에 표시되지 않습니다. 이를 사용하는 파이프라인은 계속 실행됩니다.';
+
+  @override
+  String get transformsHideTransform => '변환 숨기기';
+
+  @override
+  String get transformsShow => '표시';
+
+  @override
+  String get transformsSuggestionsTitle => '추천';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      '팔레트를 열면 텍스트의 처음 64KiB를 아래 유형으로 확인해 최대 3개의 변환을 추천합니다. 백그라운드에서는 아무것도 실행하지 않습니다.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON 웹 토큰';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => '추적 매개변수가 있는 링크';
+
+  @override
+  String get transformsDetectorTimestamp => '타임스탬프';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => '추적 매개변수';
+
+  @override
+  String get transformsTrackingDescription =>
+      '기본 제공 목록은 앱에 포함되며 업데이트할 때만 바뀝니다. 제거하거나 유지할 이름을 추가하세요. name@domain 형식으로 도메인을 한정할 수 있습니다.';
+
+  @override
+  String get transformsTrackingRemoveLabel => '추가로 제거';
+
+  @override
+  String get transformsTrackingAllowLabel => '항상 유지';
+
+  @override
+  String get transformsTrackingPlaceholder => 'name 또는 name@domain 입력 후 Enter';
 }
