@@ -1717,7 +1717,7 @@ mod tests {
         });
         let mut client = Client::new(client_stream);
         let mut frames = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..6 {
             frames.push(
                 tokio::time::timeout(Duration::from_secs(5), client.next_frame())
                     .await
@@ -1745,6 +1745,24 @@ mod tests {
         let peers = peers.change.as_ref().unwrap();
         assert_eq!(peers.event, copypaste_ipc::EventKind::Peers);
         assert!(peers.sync_status.is_some());
+        let refreshed: Vec<_> = frames[4..]
+            .iter()
+            .filter_map(|frame| match &frame.data {
+                Some(ResponseData::RuntimeEvent(event)) => event.change.as_ref(),
+                _ => None,
+            })
+            .map(|change| (change.event, change.library))
+            .collect();
+        assert_eq!(
+            refreshed,
+            [
+                (copypaste_ipc::EventKind::PasteQueue, None),
+                (
+                    copypaste_ipc::EventKind::Library,
+                    Some(copypaste_ipc::LibraryKinds::all())
+                ),
+            ]
+        );
         drop(client);
         tokio::time::timeout(Duration::from_secs(5), pump)
             .await

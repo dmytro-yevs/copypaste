@@ -174,7 +174,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Modules { json: "[]".into() },
         ResponseData::FileOperations(vec![]),
         ResponseData::DownloadedFile(Some("/saved/file.bin".into())),
-        ResponseData::RuntimeEvent(copypaste_ipc::RuntimeEventData {
+        ResponseData::RuntimeEvent(Box::new(copypaste_ipc::RuntimeEventData {
             file_operation: Some(copypaste_ipc::FileOperationUpdate {
                 id: Some("transfer".into()),
                 phase: Some(copypaste_ipc::FileOperationPhase::Running),
@@ -184,7 +184,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             change: None,
             progress: None,
             capture: None,
-        }),
+        })),
         ResponseData::HistoryTags(Default::default()),
         ResponseData::Status(StatusData {
             runtime_watch: false,

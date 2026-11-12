@@ -211,9 +211,12 @@ async fn send_runtime_event(
     if !WatchFilter::admits(filter, &event) {
         return true;
     }
-    send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
-        .await
-        .is_ok()
+    send(
+        writer,
+        &Response::ok(id, ResponseData::RuntimeEvent(Box::new(event))),
+    )
+    .await
+    .is_ok()
 }
 
 async fn send_capture_snapshot(
@@ -261,13 +264,17 @@ async fn send_recovery(
     else {
         return false;
     };
-    // A lost invalidation can cover both history and peers. Re-read both once.
+    // A lost invalidation can cover any kind. Ask for each to be re-read once.
     for kind in [
         copypaste_ipc::EventKind::Items,
         copypaste_ipc::EventKind::Peers,
+        copypaste_ipc::EventKind::PasteQueue,
+        copypaste_ipc::EventKind::Library,
     ] {
         let change = EventData {
             sync_status: (kind == copypaste_ipc::EventKind::Peers).then(|| sync_status.clone()),
+            library: (kind == copypaste_ipc::EventKind::Library)
+                .then(copypaste_ipc::LibraryKinds::all),
             ..EventData::change(kind, item_count)
         };
         let event = copypaste_ipc::RuntimeEventData {

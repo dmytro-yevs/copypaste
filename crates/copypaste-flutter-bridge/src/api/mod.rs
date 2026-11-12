@@ -560,6 +560,11 @@ pub struct RuntimeEvent {
     pub file_operation: Option<FileOperationUpdate>,
     pub capture: Option<CaptureState>,
     pub runtime_watch: bool,
+    /// Bitset of the library record kinds a `library` event covers.
+    pub library_kinds: Option<u32>,
+    pub paste_queue_revision: Option<u64>,
+    /// Counts of a long operation, on `operation_progress` events.
+    pub operation: Option<rules::OperationProgressView>,
 }
 
 #[derive(Debug, Clone)]

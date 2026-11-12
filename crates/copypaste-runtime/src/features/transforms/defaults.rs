@@ -1,1 +1,10 @@
-//! Default paste pipelines per application.
+//! Transform preferences and default paste pipelines per application.
+
+use copypaste_ipc::transforms::TransformOp;
+use copypaste_ipc::Response;
+
+use crate::Runtime;
+
+pub(super) fn handle(_runtime: &Runtime, id: u64, _op: TransformOp) -> Response {
+    crate::features::unsupported(id)
+}

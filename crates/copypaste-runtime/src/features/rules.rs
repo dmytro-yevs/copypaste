@@ -10,7 +10,14 @@ use copypaste_ipc::Response;
 use crate::Runtime;
 
 impl Runtime {
-    pub(crate) fn rules(&self, id: u64, _op: RuleOp) -> Response {
-        super::unsupported(id)
+    pub(crate) fn rules(&self, id: u64, op: RuleOp) -> Response {
+        match op {
+            RuleOp::Preview { .. } => preview::handle(self, id, op),
+            RuleOp::Apply { .. } | RuleOp::ApplyProgress { .. } | RuleOp::Cancel { .. } => {
+                apply::handle(self, id, op)
+            }
+            RuleOp::ResetBuiltin { .. } => builtins::handle(self, id, op),
+            _ => super::unsupported(id),
+        }
     }
 }

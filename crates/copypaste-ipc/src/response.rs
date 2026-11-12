@@ -431,7 +431,7 @@ pub enum ResponseData {
     Discovered(DiscoveredData),
     Config(ConfigApplied),
     Event(EventData),
-    RuntimeEvent(RuntimeEventData),
+    RuntimeEvent(Box<RuntimeEventData>),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
     HistoryTags(crate::HistoryTags),

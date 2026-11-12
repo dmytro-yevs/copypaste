@@ -116,7 +116,7 @@ pub struct SnippetDraft {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum SnippetSaveOutcome {
-    Saved(SnippetDetail),
+    Saved(Box<SnippetDetail>),
     AbbreviationTaken { snippet_id: String, title: String },
 }
 

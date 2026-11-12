@@ -199,8 +199,8 @@ pub struct SnippetImportRow {
 
 #[derive(Debug, Clone)]
 pub struct SnippetImportCounts {
-    pub new: u32,
-    pub identical: u32,
+    pub new_rows: u32,
+    pub identical_rows: u32,
     pub updated: u32,
     pub abbreviation_conflicts: u32,
     pub invalid: u32,
@@ -410,7 +410,7 @@ pub async fn save_snippet(draft: SnippetDraftInput) -> Result<SnippetSaveResult,
     );
     Ok(match outcome {
         ipc::SnippetSaveOutcome::Saved(value) => SnippetSaveResult {
-            saved: Some(detail(value)),
+            saved: Some(detail(*value)),
             abbreviation_taken_by_id: None,
             abbreviation_taken_by_title: None,
         },
@@ -648,8 +648,8 @@ pub async fn preview_snippet_import(
     Ok(SnippetImportPlanView {
         token: plan.token,
         counts: SnippetImportCounts {
-            new: plan.counts.new,
-            identical: plan.counts.identical,
+            new_rows: plan.counts.new,
+            identical_rows: plan.counts.identical,
             updated: plan.counts.updated,
             abbreviation_conflicts: plan.counts.abbreviation_conflicts,
             invalid: plan.counts.invalid,

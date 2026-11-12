@@ -573,6 +573,8 @@ mod tests {
                 notify_on_copy: Some(true),
                 notification_preview: Some(false),
                 sound_on_copy: Some(false),
+                paste_queue: None,
+                mcp_enabled: None,
             }
         );
     }
