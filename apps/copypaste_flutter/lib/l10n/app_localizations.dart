@@ -6518,6 +6518,870 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'tray menu bar recent preview privacy count'**
   String get trayRecentSettingsKeywords;
+
+  /// Title of the transform palette dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Transform text'**
+  String get transformsPaletteTitle;
+
+  /// Placeholder of the filter field in the transform palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter transforms'**
+  String get transformsFilterPlaceholder;
+
+  /// Shown in the palette list when the filter matches nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'No transforms match'**
+  String get transformsNoMatches;
+
+  /// Palette list group with filtered results.
+  ///
+  /// In en, this message translates to:
+  /// **'Results'**
+  String get transformsGroupResults;
+
+  /// Palette list group with transforms suggested for the content.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggested'**
+  String get transformsGroupSuggested;
+
+  /// Palette list group with recently used transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get transformsGroupRecent;
+
+  /// Palette list group with favorite transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites'**
+  String get transformsGroupFavorites;
+
+  /// Palette list group with saved pipelines (chains of transforms).
+  ///
+  /// In en, this message translates to:
+  /// **'Pipelines'**
+  String get transformsGroupPipelines;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON, YAML, CSV and XML'**
+  String get transformsCategoryStructure;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Encode and decode'**
+  String get transformsCategoryEncode;
+
+  /// Transform category name: letter case changes.
+  ///
+  /// In en, this message translates to:
+  /// **'Case'**
+  String get transformsCategoryCase;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Hashes'**
+  String get transformsCategoryHash;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines and whitespace'**
+  String get transformsCategoryLines;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Clean up'**
+  String get transformsCategoryClean;
+
+  /// Transform category name: URL cleanup.
+  ///
+  /// In en, this message translates to:
+  /// **'Links'**
+  String get transformsCategoryUrl;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Rich text and Markdown'**
+  String get transformsCategoryMarkup;
+
+  /// Transform category name: tokens, timestamps, find and replace.
+  ///
+  /// In en, this message translates to:
+  /// **'Developer'**
+  String get transformsCategoryDev;
+
+  /// Transform category name for transforms of an unknown category.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get transformsCategoryOther;
+
+  /// Shown in the palette chain strip when no transform is picked.
+  ///
+  /// In en, this message translates to:
+  /// **'No steps yet'**
+  String get transformsChainEmpty;
+
+  /// Label of one step in a transform chain: its position and transform name.
+  ///
+  /// In en, this message translates to:
+  /// **'{step} · {name}'**
+  String transformsStepLabel(int step, String name);
+
+  /// Label of the highlighted transform that is not yet a step of the chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Then: {name}'**
+  String transformsThenLabel(String name);
+
+  /// Switch label that enables or disables one step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Run this step'**
+  String get transformsStepEnabled;
+
+  /// Button that moves a step or favorite one place earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get transformsMoveEarlier;
+
+  /// Button that moves a step or favorite one place later.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get transformsMoveLater;
+
+  /// Button that removes one step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove step'**
+  String get transformsRemoveStep;
+
+  /// Button that saves the current chain as a named pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as pipeline'**
+  String get transformsSavePipeline;
+
+  /// Title of the dialog that names a new pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Save pipeline'**
+  String get transformsSavePipelineTitle;
+
+  /// Error when saving a pipeline fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The pipeline could not be saved.'**
+  String get transformsSavePipelineFailed;
+
+  /// Label of the pipeline name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get transformsPipelineNameLabel;
+
+  /// Label of the pipeline description field.
+  ///
+  /// In en, this message translates to:
+  /// **'Description (optional)'**
+  String get transformsPipelineDescriptionLabel;
+
+  /// Heading of the step list in the pipeline editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Steps'**
+  String get transformsPipelineStepsLabel;
+
+  /// Shown in the pipeline editor when it has no steps.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one step.'**
+  String get transformsPipelineNoSteps;
+
+  /// Validation message when the pipeline name is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a name.'**
+  String get transformsPipelineNameRequired;
+
+  /// Validation message when the pipeline name is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most 80 characters.'**
+  String get transformsPipelineNameTooLong;
+
+  /// Validation message when the pipeline name is already used.
+  ///
+  /// In en, this message translates to:
+  /// **'Another pipeline already has this name.'**
+  String get transformsPipelineNameTaken;
+
+  /// Toast title after saving a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Pipeline saved'**
+  String get transformsPipelineSavedTitle;
+
+  /// Toast message after saving a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is available in every transform palette.'**
+  String transformsPipelineSavedMessage(String name);
+
+  /// Number of steps of a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Steps: {count}'**
+  String transformsPipelineSteps(int count);
+
+  /// Name of a duplicated pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} ({index})'**
+  String transformsPipelineCopyName(String name, int index);
+
+  /// Shown where a favorite or default names a pipeline that no longer exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted pipeline'**
+  String get transformsRemovedPipeline;
+
+  /// Shown for a pipeline or step made by a newer app version; it cannot run here.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs a newer CopyPaste version'**
+  String get transformsNeedsNewerVersion;
+
+  /// Error when the transform catalogue or settings cannot be loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Transforms could not be loaded.'**
+  String get transformsLoadFailed;
+
+  /// Title shown when the palette opens on an image, file or color item.
+  ///
+  /// In en, this message translates to:
+  /// **'Transforms work on text'**
+  String get transformsNotTextTitle;
+
+  /// Explanation shown when the palette opens on a non-text item.
+  ///
+  /// In en, this message translates to:
+  /// **'This item is an image, a file or a color. Pick a text item or copy some text.'**
+  String get transformsNotTextMessage;
+
+  /// Title shown when there is no source text for the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to transform'**
+  String get transformsNothingTitle;
+
+  /// Hint shown when there is no source text for the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy some text or pick a history item.'**
+  String get transformsNothingMessage;
+
+  /// Shown in the preview before any transform is highlighted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a transform'**
+  String get transformsPickTransform;
+
+  /// Keyboard hint in the empty preview on desktop.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab adds it as a step. Enter applies the result.'**
+  String get transformsPickTransformHint;
+
+  /// Status line while the preview is computed.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating preview…'**
+  String get transformsPreviewing;
+
+  /// Counts of the shown output, announced to screen readers when the preview updates.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines: {lines} · Words: {words} · Characters: {chars}'**
+  String transformsCounts(int lines, int words, int chars);
+
+  /// Preview status when the output equals the input.
+  ///
+  /// In en, this message translates to:
+  /// **'No changes'**
+  String get transformsNoChanges;
+
+  /// Preview status when only a prefix of a long text is shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing the first 64 KiB of {size}'**
+  String transformsTruncated(String size);
+
+  /// Preview status when the chain contains a random transform such as shuffle.
+  ///
+  /// In en, this message translates to:
+  /// **'Random'**
+  String get transformsRandom;
+
+  /// Preview of a step after a failed step.
+  ///
+  /// In en, this message translates to:
+  /// **'Not run'**
+  String get transformsNotRun;
+
+  /// Shown instead of a sensitive preview until it is revealed.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is sensitive and hidden.'**
+  String get transformsSensitiveHidden;
+
+  /// Button that shows a hidden sensitive preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Reveal'**
+  String get transformsReveal;
+
+  /// Preview tab with the transform output.
+  ///
+  /// In en, this message translates to:
+  /// **'Output'**
+  String get transformsPaneOutput;
+
+  /// Preview tab with the transform input.
+  ///
+  /// In en, this message translates to:
+  /// **'Input'**
+  String get transformsPaneInput;
+
+  /// Preview tab that highlights what the transform changed.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes'**
+  String get transformsPaneChanges;
+
+  /// Title of an error about the source text.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t transform this text'**
+  String get transformsCannotTransform;
+
+  /// Preview error naming the failed step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Step {step} · {name}: {message}'**
+  String transformsStepFailed(int step, String name, String message);
+
+  /// Button offered when decoded data is binary: switch the step to hex output.
+  ///
+  /// In en, this message translates to:
+  /// **'Show as hex'**
+  String get transformsUseHexOutput;
+
+  /// Palette action that pastes the result into the previous app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get transformsActionPaste;
+
+  /// Palette action that stores the result as a new history item.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as new clip'**
+  String get transformsActionSave;
+
+  /// Toast message after copying a transform result.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is on the clipboard and in history.'**
+  String get transformsCopiedMessage;
+
+  /// Toast title after saving a transform result as a new item.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get transformsSavedTitle;
+
+  /// Toast message after saving a transform result as a new item.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is a new history item. The clipboard is unchanged.'**
+  String get transformsSavedMessage;
+
+  /// Toast title when a transformed paste cannot reach the target app.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t paste'**
+  String get transformsPasteFailedTitle;
+
+  /// Toast message when a transformed paste cannot reach the target app.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is on the clipboard. Paste it manually.'**
+  String get transformsPasteFailedMessage;
+
+  /// A transform error with its position in the input.
+  ///
+  /// In en, this message translates to:
+  /// **'{message} at line {line}, column {column}'**
+  String transformsErrorAt(String message, int line, int column);
+
+  /// Transform error: decoded bytes are not text.
+  ///
+  /// In en, this message translates to:
+  /// **'Decoded data is binary, not text'**
+  String get transformsErrorBinary;
+
+  /// Transform error: input or output is over the size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Too large to transform'**
+  String get transformsErrorTooLarge;
+
+  /// Transform error: a parameter value is refused.
+  ///
+  /// In en, this message translates to:
+  /// **'A setting of this step is not valid'**
+  String get transformsErrorInvalidParam;
+
+  /// Transform error: the computation was cancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get transformsErrorCancelled;
+
+  /// Transform error: a pattern exceeded the time budget.
+  ///
+  /// In en, this message translates to:
+  /// **'Pattern too expensive'**
+  String get transformsErrorTooExpensive;
+
+  /// Transform error: an empty or invalid search pattern.
+  ///
+  /// In en, this message translates to:
+  /// **'The pattern is not valid'**
+  String get transformsErrorPattern;
+
+  /// Transform error: a timestamp needs its unit.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose whether the number is in seconds or milliseconds'**
+  String get transformsErrorTimestampUnit;
+
+  /// Transform error: XML that references external entities.
+  ///
+  /// In en, this message translates to:
+  /// **'External entities are not allowed'**
+  String get transformsErrorExternalEntity;
+
+  /// Transform error: the JWT is encrypted.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted tokens can\'t be decoded'**
+  String get transformsErrorJwtEncrypted;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid JSON'**
+  String get transformsErrorJson;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid YAML'**
+  String get transformsErrorYaml;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid XML'**
+  String get transformsErrorXml;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid CSV'**
+  String get transformsErrorCsv;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid Base64'**
+  String get transformsErrorBase64;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid hex'**
+  String get transformsErrorHex;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid escape sequence'**
+  String get transformsErrorEscape;
+
+  /// Transform error in URL decoding.
+  ///
+  /// In en, this message translates to:
+  /// **'Malformed percent-encoding'**
+  String get transformsErrorUrl;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a valid JWT'**
+  String get transformsErrorJwt;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a recognized date or timestamp'**
+  String get transformsErrorDate;
+
+  /// Transform error with an unknown code.
+  ///
+  /// In en, this message translates to:
+  /// **'This step can\'t transform its input'**
+  String get transformsErrorGeneric;
+
+  /// Transform warning: a signed URL was not modified.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed link left unchanged'**
+  String get transformsWarningSignedLink;
+
+  /// Transform warning: the decoded token has expired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get transformsWarningExpired;
+
+  /// Transform warning: the decoded token is not valid yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not yet valid'**
+  String get transformsWarningNotYetValid;
+
+  /// Transform warning: a decoded token's signature is not checked.
+  ///
+  /// In en, this message translates to:
+  /// **'Signature not verified'**
+  String get transformsWarningSignatureNotVerified;
+
+  /// Transform warning: the input has duplicate keys.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate keys'**
+  String get transformsWarningDuplicateKeys;
+
+  /// Transform warning: trailing commas or comments were accepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted non-standard JSON'**
+  String get transformsWarningLenientJson;
+
+  /// Transform warning.
+  ///
+  /// In en, this message translates to:
+  /// **'The JSON was encoded twice'**
+  String get transformsWarningDoubleEncoded;
+
+  /// Transform warning.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown escape sequences kept as written'**
+  String get transformsWarningEscapes;
+
+  /// Transform warning: a date without a zone was read as local time.
+  ///
+  /// In en, this message translates to:
+  /// **'Local time zone assumed'**
+  String get transformsWarningLocalZone;
+
+  /// Transform warning: an extraction found nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'No matches'**
+  String get transformsWarningNoMatches;
+
+  /// Transform warning with an unknown code.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the result'**
+  String get transformsWarningGeneric;
+
+  /// Settings row title: put the previous clipboard back after a transformed paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore clipboard after paste'**
+  String get transformsRestoreTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'After a transformed paste, the previous clipboard comes back unless something else was copied meanwhile.'**
+  String get transformsRestoreDescription;
+
+  /// Settings row title: a pipeline applied when pasting from Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Default paste transform'**
+  String get transformsDefaultTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Paste applies this pipeline to text and shows it before pasting. A failing pipeline pastes the original.'**
+  String get transformsDefaultDescription;
+
+  /// Option meaning no default paste transform.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get transformsNoDefault;
+
+  /// Settings row title: default paste transforms for specific apps.
+  ///
+  /// In en, this message translates to:
+  /// **'Defaults per app'**
+  String get transformsAppDefaultsTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.'**
+  String get transformsAppDefaultsDescription;
+
+  /// Placeholder of the app identifier field for a per-app default.
+  ///
+  /// In en, this message translates to:
+  /// **'App identifier'**
+  String get transformsAppIdentifierPlaceholder;
+
+  /// Marks a per-app default made for another platform.
+  ///
+  /// In en, this message translates to:
+  /// **'only on {platform}'**
+  String transformsOtherPlatform(String platform);
+
+  /// Button that adds an entry to a list.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get transformsAdd;
+
+  /// Button that removes an entry from a list.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get transformsRemove;
+
+  /// Settings row title: favorite transforms and pipelines.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites'**
+  String get transformsFavoritesTitle;
+
+  /// Settings row description; Mod is Command on macOS and Ctrl elsewhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites appear first in every palette. The first nine run with Mod+1 to Mod+9.'**
+  String get transformsFavoritesDescription;
+
+  /// Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Mod+{number} in the palette'**
+  String transformsFavoriteShortcut(int number);
+
+  /// Placeholder of the selector that adds a favorite.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a favorite'**
+  String get transformsAddFavorite;
+
+  /// Settings row title: saved chains of transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Pipelines'**
+  String get transformsPipelinesTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved chains of transforms with their settings. They sync to your other devices.'**
+  String get transformsPipelinesDescription;
+
+  /// Button and drawer title for creating a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'New pipeline'**
+  String get transformsNewPipeline;
+
+  /// Button and drawer title for editing a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit pipeline'**
+  String get transformsEditPipeline;
+
+  /// Button that copies a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate'**
+  String get transformsDuplicatePipeline;
+
+  /// Button that deletes a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get transformsDeletePipeline;
+
+  /// Title of the dialog confirming a pipeline deletion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name}?'**
+  String transformsDeletePipelineTitle(String name);
+
+  /// Explanation in the delete pipeline dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites and paste defaults that use it fall back to none on every device.'**
+  String get transformsDeletePipelineMessage;
+
+  /// Error when deleting a pipeline fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The pipeline could not be deleted.'**
+  String get transformsDeletePipelineFailed;
+
+  /// Placeholder of the selector that adds a step to a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a step'**
+  String get transformsAddStep;
+
+  /// Settings row title: transforms hidden from the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden transforms'**
+  String get transformsHiddenTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden transforms are left out of palettes and suggestions. Pipelines that use them still run.'**
+  String get transformsHiddenDescription;
+
+  /// Placeholder of the selector that hides a transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide a transform'**
+  String get transformsHideTransform;
+
+  /// Button that shows a hidden transform again.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get transformsShow;
+
+  /// Settings row title: suggested transforms in the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggestions'**
+  String get transformsSuggestionsTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'When a palette opens, the first 64 KiB of its text is checked for the kinds below to suggest up to three transforms. Nothing runs in the background.'**
+  String get transformsSuggestionsDescription;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON'**
+  String get transformsDetectorJson;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON Web Tokens'**
+  String get transformsDetectorJwt;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Base64'**
+  String get transformsDetectorBase64;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Links with tracking parameters'**
+  String get transformsDetectorTrackingUrl;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Timestamps'**
+  String get transformsDetectorTimestamp;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'HTML'**
+  String get transformsDetectorHtml;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Markdown'**
+  String get transformsDetectorMarkdown;
+
+  /// Settings row title: URL parameters removed by the Remove tracking parameters transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Tracking parameters'**
+  String get transformsTrackingTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'The built-in list ships with the app and changes only with updates. Add names to remove or to keep; write name@domain to limit one to a domain.'**
+  String get transformsTrackingDescription;
+
+  /// Label of the custom list of tracking parameters to remove.
+  ///
+  /// In en, this message translates to:
+  /// **'Also remove'**
+  String get transformsTrackingRemoveLabel;
+
+  /// Label of the list of parameters that are never removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Always keep'**
+  String get transformsTrackingAllowLabel;
+
+  /// Placeholder of the tracking parameter field.
+  ///
+  /// In en, this message translates to:
+  /// **'name or name@domain, then Enter'**
+  String get transformsTrackingPlaceholder;
 }
 
 class _AppLocalizationsDelegate

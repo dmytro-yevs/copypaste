@@ -3987,4 +3987,484 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get trayRecentSettingsKeywords =>
       'трей смуга меню нещодавні перегляд приватність кількість';
+
+  @override
+  String get transformsPaletteTitle => 'Перетворити текст';
+
+  @override
+  String get transformsFilterPlaceholder => 'Фільтрувати перетворення';
+
+  @override
+  String get transformsNoMatches => 'Немає відповідних перетворень';
+
+  @override
+  String get transformsGroupResults => 'Результати';
+
+  @override
+  String get transformsGroupSuggested => 'Рекомендовані';
+
+  @override
+  String get transformsGroupRecent => 'Нещодавні';
+
+  @override
+  String get transformsGroupFavorites => 'Улюблені';
+
+  @override
+  String get transformsGroupPipelines => 'Конвеєри';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV і XML';
+
+  @override
+  String get transformsCategoryEncode => 'Кодування й декодування';
+
+  @override
+  String get transformsCategoryCase => 'Регістр';
+
+  @override
+  String get transformsCategoryHash => 'Хеші';
+
+  @override
+  String get transformsCategoryLines => 'Рядки й пробіли';
+
+  @override
+  String get transformsCategoryClean => 'Очищення';
+
+  @override
+  String get transformsCategoryUrl => 'Посилання';
+
+  @override
+  String get transformsCategoryMarkup => 'Форматований текст і Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Для розробників';
+
+  @override
+  String get transformsCategoryOther => 'Інше';
+
+  @override
+  String get transformsChainEmpty => 'Кроків ще немає';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Далі: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Виконувати цей крок';
+
+  @override
+  String get transformsMoveEarlier => 'Перемістити вище';
+
+  @override
+  String get transformsMoveLater => 'Перемістити нижче';
+
+  @override
+  String get transformsRemoveStep => 'Видалити крок';
+
+  @override
+  String get transformsSavePipeline => 'Зберегти як конвеєр';
+
+  @override
+  String get transformsSavePipelineTitle => 'Зберегти конвеєр';
+
+  @override
+  String get transformsSavePipelineFailed => 'Не вдалося зберегти конвеєр.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Назва';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Опис (необов\'язково)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Кроки';
+
+  @override
+  String get transformsPipelineNoSteps => 'Додайте принаймні один крок.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Введіть назву.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Не більше 80 символів.';
+
+  @override
+  String get transformsPipelineNameTaken => 'Інший конвеєр уже має цю назву.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Конвеєр збережено';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name доступний у кожній палітрі перетворень.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Кроків: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Видалений конвеєр';
+
+  @override
+  String get transformsNeedsNewerVersion => 'Потрібна новіша версія CopyPaste';
+
+  @override
+  String get transformsLoadFailed => 'Не вдалося завантажити перетворення.';
+
+  @override
+  String get transformsNotTextTitle => 'Перетворення працюють із текстом';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Цей елемент — зображення, файл або колір. Виберіть текстовий елемент або скопіюйте текст.';
+
+  @override
+  String get transformsNothingTitle => 'Немає що перетворювати';
+
+  @override
+  String get transformsNothingMessage =>
+      'Скопіюйте текст або виберіть елемент з історії.';
+
+  @override
+  String get transformsPickTransform => 'Виберіть перетворення';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab додає його як крок. Enter застосовує результат.';
+
+  @override
+  String get transformsPreviewing => 'Оновлення попереднього перегляду…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Рядків: $lines · Слів: $words · Символів: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Без змін';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Показано перші 64 КіБ із $size';
+  }
+
+  @override
+  String get transformsRandom => 'Випадково';
+
+  @override
+  String get transformsNotRun => 'Не виконано';
+
+  @override
+  String get transformsSensitiveHidden =>
+      'Результат конфіденційний і прихований.';
+
+  @override
+  String get transformsReveal => 'Показати';
+
+  @override
+  String get transformsPaneOutput => 'Результат';
+
+  @override
+  String get transformsPaneInput => 'Вхідні дані';
+
+  @override
+  String get transformsPaneChanges => 'Зміни';
+
+  @override
+  String get transformsCannotTransform => 'Не вдається перетворити цей текст';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Крок $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Показати в hex';
+
+  @override
+  String get transformsActionPaste => 'Вставити';
+
+  @override
+  String get transformsActionSave => 'Зберегти як новий елемент';
+
+  @override
+  String get transformsCopiedMessage =>
+      'Результат у буфері обміну та в історії.';
+
+  @override
+  String get transformsSavedTitle => 'Збережено';
+
+  @override
+  String get transformsSavedMessage =>
+      'Результат — новий елемент історії. Буфер обміну не змінено.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Не вдалося вставити';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'Результат у буфері обміну. Вставте його вручну.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message у рядку $line, стовпці $column';
+  }
+
+  @override
+  String get transformsErrorBinary => 'Декодовані дані двійкові, а не текст';
+
+  @override
+  String get transformsErrorTooLarge => 'Завеликий для перетворення';
+
+  @override
+  String get transformsErrorInvalidParam => 'Налаштування цього кроку недійсне';
+
+  @override
+  String get transformsErrorCancelled => 'Скасовано';
+
+  @override
+  String get transformsErrorTooExpensive => 'Шаблон надто складний';
+
+  @override
+  String get transformsErrorPattern => 'Шаблон недійсний';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Виберіть, чи число в секундах, чи в мілісекундах';
+
+  @override
+  String get transformsErrorExternalEntity => 'Зовнішні сутності заборонені';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'Зашифровані токени не можна декодувати';
+
+  @override
+  String get transformsErrorJson => 'Недійсний JSON';
+
+  @override
+  String get transformsErrorYaml => 'Недійсний YAML';
+
+  @override
+  String get transformsErrorXml => 'Недійсний XML';
+
+  @override
+  String get transformsErrorCsv => 'Недійсний CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Недійсний Base64';
+
+  @override
+  String get transformsErrorHex => 'Недійсний hex';
+
+  @override
+  String get transformsErrorEscape => 'Недійсна escape-послідовність';
+
+  @override
+  String get transformsErrorUrl => 'Неправильне відсоткове кодування';
+
+  @override
+  String get transformsErrorJwt => 'Недійсний JWT';
+
+  @override
+  String get transformsErrorDate => 'Нерозпізнана дата або позначка часу';
+
+  @override
+  String get transformsErrorGeneric =>
+      'Цей крок не може перетворити вхідні дані';
+
+  @override
+  String get transformsWarningSignedLink =>
+      'Підписане посилання залишено без змін';
+
+  @override
+  String get transformsWarningExpired => 'Термін дії минув';
+
+  @override
+  String get transformsWarningNotYetValid => 'Ще не дійсний';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Підпис не перевірено';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Дубльовані ключі';
+
+  @override
+  String get transformsWarningLenientJson => 'Прийнято нестандартний JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON було закодовано двічі';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Невідомі escape-послідовності залишено як є';
+
+  @override
+  String get transformsWarningLocalZone => 'Припущено локальний часовий пояс';
+
+  @override
+  String get transformsWarningNoMatches => 'Збігів немає';
+
+  @override
+  String get transformsWarningGeneric => 'Перевірте результат';
+
+  @override
+  String get transformsRestoreTitle =>
+      'Відновлювати буфер обміну після вставлення';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Після вставлення перетвореного тексту повертається попередній вміст буфера, якщо тим часом нічого не скопійовано.';
+
+  @override
+  String get transformsDefaultTitle => 'Типове перетворення під час вставлення';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste застосовує цей конвеєр до тексту й показує його перед вставленням. Якщо він не спрацює, вставляється оригінал.';
+
+  @override
+  String get transformsNoDefault => 'Немає';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Типові для програм';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Перевизначте типове для програми за ідентифікатором пакета, виконуваним файлом або назвою пакета. Записи з іншої платформи синхронізуються, але тут не діють.';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => 'Ідентифікатор програми';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'лише на $platform';
+  }
+
+  @override
+  String get transformsAdd => 'Додати';
+
+  @override
+  String get transformsRemove => 'Видалити';
+
+  @override
+  String get transformsFavoritesTitle => 'Улюблені';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Улюблені показуються першими в кожній палітрі. Перші дев\'ять запускаються клавішами Mod+1–Mod+9.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number у палітрі';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Додати улюблене';
+
+  @override
+  String get transformsPipelinesTitle => 'Конвеєри';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Збережені ланцюжки перетворень із налаштуваннями. Вони синхронізуються з іншими пристроями.';
+
+  @override
+  String get transformsNewPipeline => 'Новий конвеєр';
+
+  @override
+  String get transformsEditPipeline => 'Редагувати конвеєр';
+
+  @override
+  String get transformsDuplicatePipeline => 'Дублювати';
+
+  @override
+  String get transformsDeletePipeline => 'Видалити';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return 'Видалити $name?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Улюблені й типові налаштування вставлення, що його використовують, на всіх пристроях повернуться до «Немає».';
+
+  @override
+  String get transformsDeletePipelineFailed => 'Не вдалося видалити конвеєр.';
+
+  @override
+  String get transformsAddStep => 'Додати крок';
+
+  @override
+  String get transformsHiddenTitle => 'Приховані перетворення';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Приховані перетворення не показуються в палітрах і рекомендаціях. Конвеєри, що їх використовують, і далі працюють.';
+
+  @override
+  String get transformsHideTransform => 'Приховати перетворення';
+
+  @override
+  String get transformsShow => 'Показати';
+
+  @override
+  String get transformsSuggestionsTitle => 'Рекомендації';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Під час відкриття палітри перші 64 КіБ тексту перевіряються на наведені нижче типи, щоб запропонувати до трьох перетворень. У фоні нічого не працює.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Tokens';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl =>
+      'Посилання з параметрами відстеження';
+
+  @override
+  String get transformsDetectorTimestamp => 'Позначки часу';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Параметри відстеження';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Вбудований список постачається з програмою й змінюється лише з оновленнями. Додайте назви, які треба видаляти або зберігати; формат назва@домен обмежує запис доменом.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Також видаляти';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Завжди зберігати';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'назва або назва@домен, потім Enter';
 }

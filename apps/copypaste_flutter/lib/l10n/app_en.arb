@@ -4877,5 +4877,685 @@
   "trayRecentSettingsKeywords": "tray menu bar recent preview privacy count",
   "@trayRecentSettingsKeywords": {
     "description": "Space-separated search keywords for the menu-bar and tray settings."
+  },
+  "transformsPaletteTitle": "Transform text",
+  "@transformsPaletteTitle": {
+    "description": "Title of the transform palette dialog."
+  },
+  "transformsFilterPlaceholder": "Filter transforms",
+  "@transformsFilterPlaceholder": {
+    "description": "Placeholder of the filter field in the transform palette."
+  },
+  "transformsNoMatches": "No transforms match",
+  "@transformsNoMatches": {
+    "description": "Shown in the palette list when the filter matches nothing."
+  },
+  "transformsGroupResults": "Results",
+  "@transformsGroupResults": {
+    "description": "Palette list group with filtered results."
+  },
+  "transformsGroupSuggested": "Suggested",
+  "@transformsGroupSuggested": {
+    "description": "Palette list group with transforms suggested for the content."
+  },
+  "transformsGroupRecent": "Recent",
+  "@transformsGroupRecent": {
+    "description": "Palette list group with recently used transforms."
+  },
+  "transformsGroupFavorites": "Favorites",
+  "@transformsGroupFavorites": {
+    "description": "Palette list group with favorite transforms."
+  },
+  "transformsGroupPipelines": "Pipelines",
+  "@transformsGroupPipelines": {
+    "description": "Palette list group with saved pipelines (chains of transforms)."
+  },
+  "transformsCategoryStructure": "JSON, YAML, CSV and XML",
+  "@transformsCategoryStructure": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryEncode": "Encode and decode",
+  "@transformsCategoryEncode": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryCase": "Case",
+  "@transformsCategoryCase": {
+    "description": "Transform category name: letter case changes."
+  },
+  "transformsCategoryHash": "Hashes",
+  "@transformsCategoryHash": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryLines": "Lines and whitespace",
+  "@transformsCategoryLines": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryClean": "Clean up",
+  "@transformsCategoryClean": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryUrl": "Links",
+  "@transformsCategoryUrl": {
+    "description": "Transform category name: URL cleanup."
+  },
+  "transformsCategoryMarkup": "Rich text and Markdown",
+  "@transformsCategoryMarkup": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryDev": "Developer",
+  "@transformsCategoryDev": {
+    "description": "Transform category name: tokens, timestamps, find and replace."
+  },
+  "transformsCategoryOther": "Other",
+  "@transformsCategoryOther": {
+    "description": "Transform category name for transforms of an unknown category."
+  },
+  "transformsChainEmpty": "No steps yet",
+  "@transformsChainEmpty": {
+    "description": "Shown in the palette chain strip when no transform is picked."
+  },
+  "transformsStepLabel": "{step} · {name}",
+  "@transformsStepLabel": {
+    "description": "Label of one step in a transform chain: its position and transform name.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "description": "1-based step position."
+      },
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      }
+    }
+  },
+  "transformsThenLabel": "Then: {name}",
+  "@transformsThenLabel": {
+    "description": "Label of the highlighted transform that is not yet a step of the chain.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      }
+    }
+  },
+  "transformsStepEnabled": "Run this step",
+  "@transformsStepEnabled": {
+    "description": "Switch label that enables or disables one step of a chain."
+  },
+  "transformsMoveEarlier": "Move up",
+  "@transformsMoveEarlier": {
+    "description": "Button that moves a step or favorite one place earlier."
+  },
+  "transformsMoveLater": "Move down",
+  "@transformsMoveLater": {
+    "description": "Button that moves a step or favorite one place later."
+  },
+  "transformsRemoveStep": "Remove step",
+  "@transformsRemoveStep": {
+    "description": "Button that removes one step of a chain."
+  },
+  "transformsSavePipeline": "Save as pipeline",
+  "@transformsSavePipeline": {
+    "description": "Button that saves the current chain as a named pipeline."
+  },
+  "transformsSavePipelineTitle": "Save pipeline",
+  "@transformsSavePipelineTitle": {
+    "description": "Title of the dialog that names a new pipeline."
+  },
+  "transformsSavePipelineFailed": "The pipeline could not be saved.",
+  "@transformsSavePipelineFailed": {
+    "description": "Error when saving a pipeline fails."
+  },
+  "transformsPipelineNameLabel": "Name",
+  "@transformsPipelineNameLabel": {
+    "description": "Label of the pipeline name field."
+  },
+  "transformsPipelineDescriptionLabel": "Description (optional)",
+  "@transformsPipelineDescriptionLabel": {
+    "description": "Label of the pipeline description field."
+  },
+  "transformsPipelineStepsLabel": "Steps",
+  "@transformsPipelineStepsLabel": {
+    "description": "Heading of the step list in the pipeline editor."
+  },
+  "transformsPipelineNoSteps": "Add at least one step.",
+  "@transformsPipelineNoSteps": {
+    "description": "Shown in the pipeline editor when it has no steps."
+  },
+  "transformsPipelineNameRequired": "Enter a name.",
+  "@transformsPipelineNameRequired": {
+    "description": "Validation message when the pipeline name is empty."
+  },
+  "transformsPipelineNameTooLong": "Use at most 80 characters.",
+  "@transformsPipelineNameTooLong": {
+    "description": "Validation message when the pipeline name is too long."
+  },
+  "transformsPipelineNameTaken": "Another pipeline already has this name.",
+  "@transformsPipelineNameTaken": {
+    "description": "Validation message when the pipeline name is already used."
+  },
+  "transformsPipelineSavedTitle": "Pipeline saved",
+  "@transformsPipelineSavedTitle": {
+    "description": "Toast title after saving a pipeline."
+  },
+  "transformsPipelineSavedMessage": "{name} is available in every transform palette.",
+  "@transformsPipelineSavedMessage": {
+    "description": "Toast message after saving a pipeline.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Pipeline name."
+      }
+    }
+  },
+  "transformsPipelineSteps": "Steps: {count}",
+  "@transformsPipelineSteps": {
+    "description": "Number of steps of a pipeline.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "description": "Step count."
+      }
+    }
+  },
+  "transformsPipelineCopyName": "{name} ({index})",
+  "@transformsPipelineCopyName": {
+    "description": "Name of a duplicated pipeline.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Original pipeline name."
+      },
+      "index": {
+        "type": "int",
+        "description": "Copy number, starting at 2."
+      }
+    }
+  },
+  "transformsRemovedPipeline": "Deleted pipeline",
+  "@transformsRemovedPipeline": {
+    "description": "Shown where a favorite or default names a pipeline that no longer exists."
+  },
+  "transformsNeedsNewerVersion": "Needs a newer CopyPaste version",
+  "@transformsNeedsNewerVersion": {
+    "description": "Shown for a pipeline or step made by a newer app version; it cannot run here."
+  },
+  "transformsLoadFailed": "Transforms could not be loaded.",
+  "@transformsLoadFailed": {
+    "description": "Error when the transform catalogue or settings cannot be loaded."
+  },
+  "transformsNotTextTitle": "Transforms work on text",
+  "@transformsNotTextTitle": {
+    "description": "Title shown when the palette opens on an image, file or color item."
+  },
+  "transformsNotTextMessage": "This item is an image, a file or a color. Pick a text item or copy some text.",
+  "@transformsNotTextMessage": {
+    "description": "Explanation shown when the palette opens on a non-text item."
+  },
+  "transformsNothingTitle": "Nothing to transform",
+  "@transformsNothingTitle": {
+    "description": "Title shown when there is no source text for the palette."
+  },
+  "transformsNothingMessage": "Copy some text or pick a history item.",
+  "@transformsNothingMessage": {
+    "description": "Hint shown when there is no source text for the palette."
+  },
+  "transformsPickTransform": "Pick a transform",
+  "@transformsPickTransform": {
+    "description": "Shown in the preview before any transform is highlighted."
+  },
+  "transformsPickTransformHint": "Tab adds it as a step. Enter applies the result.",
+  "@transformsPickTransformHint": {
+    "description": "Keyboard hint in the empty preview on desktop."
+  },
+  "transformsPreviewing": "Updating preview…",
+  "@transformsPreviewing": {
+    "description": "Status line while the preview is computed."
+  },
+  "transformsCounts": "Lines: {lines} · Words: {words} · Characters: {chars}",
+  "@transformsCounts": {
+    "description": "Counts of the shown output, announced to screen readers when the preview updates.",
+    "placeholders": {
+      "lines": {
+        "type": "int",
+        "description": "Line count."
+      },
+      "words": {
+        "type": "int",
+        "description": "Word count."
+      },
+      "chars": {
+        "type": "int",
+        "description": "Character count."
+      }
+    }
+  },
+  "transformsNoChanges": "No changes",
+  "@transformsNoChanges": {
+    "description": "Preview status when the output equals the input."
+  },
+  "transformsTruncated": "Showing the first 64 KiB of {size}",
+  "@transformsTruncated": {
+    "description": "Preview status when only a prefix of a long text is shown.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "description": "Formatted size of the whole text."
+      }
+    }
+  },
+  "transformsRandom": "Random",
+  "@transformsRandom": {
+    "description": "Preview status when the chain contains a random transform such as shuffle."
+  },
+  "transformsNotRun": "Not run",
+  "@transformsNotRun": {
+    "description": "Preview of a step after a failed step."
+  },
+  "transformsSensitiveHidden": "The result is sensitive and hidden.",
+  "@transformsSensitiveHidden": {
+    "description": "Shown instead of a sensitive preview until it is revealed."
+  },
+  "transformsReveal": "Reveal",
+  "@transformsReveal": {
+    "description": "Button that shows a hidden sensitive preview."
+  },
+  "transformsPaneOutput": "Output",
+  "@transformsPaneOutput": {
+    "description": "Preview tab with the transform output."
+  },
+  "transformsPaneInput": "Input",
+  "@transformsPaneInput": {
+    "description": "Preview tab with the transform input."
+  },
+  "transformsPaneChanges": "Changes",
+  "@transformsPaneChanges": {
+    "description": "Preview tab that highlights what the transform changed."
+  },
+  "transformsCannotTransform": "Can't transform this text",
+  "@transformsCannotTransform": {
+    "description": "Title of an error about the source text."
+  },
+  "transformsStepFailed": "Step {step} · {name}: {message}",
+  "@transformsStepFailed": {
+    "description": "Preview error naming the failed step of a chain.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "description": "1-based failed step."
+      },
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      },
+      "message": {
+        "type": "String",
+        "description": "What failed, possibly with its position."
+      }
+    }
+  },
+  "transformsUseHexOutput": "Show as hex",
+  "@transformsUseHexOutput": {
+    "description": "Button offered when decoded data is binary: switch the step to hex output."
+  },
+  "transformsActionPaste": "Paste",
+  "@transformsActionPaste": {
+    "description": "Palette action that pastes the result into the previous app."
+  },
+  "transformsActionSave": "Save as new clip",
+  "@transformsActionSave": {
+    "description": "Palette action that stores the result as a new history item."
+  },
+  "transformsCopiedMessage": "The result is on the clipboard and in history.",
+  "@transformsCopiedMessage": {
+    "description": "Toast message after copying a transform result."
+  },
+  "transformsSavedTitle": "Saved",
+  "@transformsSavedTitle": {
+    "description": "Toast title after saving a transform result as a new item."
+  },
+  "transformsSavedMessage": "The result is a new history item. The clipboard is unchanged.",
+  "@transformsSavedMessage": {
+    "description": "Toast message after saving a transform result as a new item."
+  },
+  "transformsPasteFailedTitle": "Couldn't paste",
+  "@transformsPasteFailedTitle": {
+    "description": "Toast title when a transformed paste cannot reach the target app."
+  },
+  "transformsPasteFailedMessage": "The result is on the clipboard. Paste it manually.",
+  "@transformsPasteFailedMessage": {
+    "description": "Toast message when a transformed paste cannot reach the target app."
+  },
+  "transformsErrorAt": "{message} at line {line}, column {column}",
+  "@transformsErrorAt": {
+    "description": "A transform error with its position in the input.",
+    "placeholders": {
+      "message": {
+        "type": "String",
+        "description": "What failed."
+      },
+      "line": {
+        "type": "int",
+        "description": "1-based line."
+      },
+      "column": {
+        "type": "int",
+        "description": "1-based column."
+      }
+    }
+  },
+  "transformsErrorBinary": "Decoded data is binary, not text",
+  "@transformsErrorBinary": {
+    "description": "Transform error: decoded bytes are not text."
+  },
+  "transformsErrorTooLarge": "Too large to transform",
+  "@transformsErrorTooLarge": {
+    "description": "Transform error: input or output is over the size limit."
+  },
+  "transformsErrorInvalidParam": "A setting of this step is not valid",
+  "@transformsErrorInvalidParam": {
+    "description": "Transform error: a parameter value is refused."
+  },
+  "transformsErrorCancelled": "Cancelled",
+  "@transformsErrorCancelled": {
+    "description": "Transform error: the computation was cancelled."
+  },
+  "transformsErrorTooExpensive": "Pattern too expensive",
+  "@transformsErrorTooExpensive": {
+    "description": "Transform error: a pattern exceeded the time budget."
+  },
+  "transformsErrorPattern": "The pattern is not valid",
+  "@transformsErrorPattern": {
+    "description": "Transform error: an empty or invalid search pattern."
+  },
+  "transformsErrorTimestampUnit": "Choose whether the number is in seconds or milliseconds",
+  "@transformsErrorTimestampUnit": {
+    "description": "Transform error: a timestamp needs its unit."
+  },
+  "transformsErrorExternalEntity": "External entities are not allowed",
+  "@transformsErrorExternalEntity": {
+    "description": "Transform error: XML that references external entities."
+  },
+  "transformsErrorJwtEncrypted": "Encrypted tokens can't be decoded",
+  "@transformsErrorJwtEncrypted": {
+    "description": "Transform error: the JWT is encrypted."
+  },
+  "transformsErrorJson": "Invalid JSON",
+  "@transformsErrorJson": {
+    "description": "Transform error."
+  },
+  "transformsErrorYaml": "Invalid YAML",
+  "@transformsErrorYaml": {
+    "description": "Transform error."
+  },
+  "transformsErrorXml": "Invalid XML",
+  "@transformsErrorXml": {
+    "description": "Transform error."
+  },
+  "transformsErrorCsv": "Invalid CSV",
+  "@transformsErrorCsv": {
+    "description": "Transform error."
+  },
+  "transformsErrorBase64": "Invalid Base64",
+  "@transformsErrorBase64": {
+    "description": "Transform error."
+  },
+  "transformsErrorHex": "Invalid hex",
+  "@transformsErrorHex": {
+    "description": "Transform error."
+  },
+  "transformsErrorEscape": "Invalid escape sequence",
+  "@transformsErrorEscape": {
+    "description": "Transform error."
+  },
+  "transformsErrorUrl": "Malformed percent-encoding",
+  "@transformsErrorUrl": {
+    "description": "Transform error in URL decoding."
+  },
+  "transformsErrorJwt": "Not a valid JWT",
+  "@transformsErrorJwt": {
+    "description": "Transform error."
+  },
+  "transformsErrorDate": "Not a recognized date or timestamp",
+  "@transformsErrorDate": {
+    "description": "Transform error."
+  },
+  "transformsErrorGeneric": "This step can't transform its input",
+  "@transformsErrorGeneric": {
+    "description": "Transform error with an unknown code."
+  },
+  "transformsWarningSignedLink": "Signed link left unchanged",
+  "@transformsWarningSignedLink": {
+    "description": "Transform warning: a signed URL was not modified."
+  },
+  "transformsWarningExpired": "Expired",
+  "@transformsWarningExpired": {
+    "description": "Transform warning: the decoded token has expired."
+  },
+  "transformsWarningNotYetValid": "Not yet valid",
+  "@transformsWarningNotYetValid": {
+    "description": "Transform warning: the decoded token is not valid yet."
+  },
+  "transformsWarningSignatureNotVerified": "Signature not verified",
+  "@transformsWarningSignatureNotVerified": {
+    "description": "Transform warning: a decoded token's signature is not checked."
+  },
+  "transformsWarningDuplicateKeys": "Duplicate keys",
+  "@transformsWarningDuplicateKeys": {
+    "description": "Transform warning: the input has duplicate keys."
+  },
+  "transformsWarningLenientJson": "Accepted non-standard JSON",
+  "@transformsWarningLenientJson": {
+    "description": "Transform warning: trailing commas or comments were accepted."
+  },
+  "transformsWarningDoubleEncoded": "The JSON was encoded twice",
+  "@transformsWarningDoubleEncoded": {
+    "description": "Transform warning."
+  },
+  "transformsWarningEscapes": "Unknown escape sequences kept as written",
+  "@transformsWarningEscapes": {
+    "description": "Transform warning."
+  },
+  "transformsWarningLocalZone": "Local time zone assumed",
+  "@transformsWarningLocalZone": {
+    "description": "Transform warning: a date without a zone was read as local time."
+  },
+  "transformsWarningNoMatches": "No matches",
+  "@transformsWarningNoMatches": {
+    "description": "Transform warning: an extraction found nothing."
+  },
+  "transformsWarningGeneric": "Check the result",
+  "@transformsWarningGeneric": {
+    "description": "Transform warning with an unknown code."
+  },
+  "transformsRestoreTitle": "Restore clipboard after paste",
+  "@transformsRestoreTitle": {
+    "description": "Settings row title: put the previous clipboard back after a transformed paste."
+  },
+  "transformsRestoreDescription": "After a transformed paste, the previous clipboard comes back unless something else was copied meanwhile.",
+  "@transformsRestoreDescription": {
+    "description": "Settings row description."
+  },
+  "transformsDefaultTitle": "Default paste transform",
+  "@transformsDefaultTitle": {
+    "description": "Settings row title: a pipeline applied when pasting from Quick Paste."
+  },
+  "transformsDefaultDescription": "Quick Paste applies this pipeline to text and shows it before pasting. A failing pipeline pastes the original.",
+  "@transformsDefaultDescription": {
+    "description": "Settings row description."
+  },
+  "transformsNoDefault": "None",
+  "@transformsNoDefault": {
+    "description": "Option meaning no default paste transform."
+  },
+  "transformsAppDefaultsTitle": "Defaults per app",
+  "@transformsAppDefaultsTitle": {
+    "description": "Settings row title: default paste transforms for specific apps."
+  },
+  "transformsAppDefaultsDescription": "Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.",
+  "@transformsAppDefaultsDescription": {
+    "description": "Settings row description."
+  },
+  "transformsAppIdentifierPlaceholder": "App identifier",
+  "@transformsAppIdentifierPlaceholder": {
+    "description": "Placeholder of the app identifier field for a per-app default."
+  },
+  "transformsOtherPlatform": "only on {platform}",
+  "@transformsOtherPlatform": {
+    "description": "Marks a per-app default made for another platform.",
+    "placeholders": {
+      "platform": {
+        "type": "String",
+        "description": "Platform name such as macos."
+      }
+    }
+  },
+  "transformsAdd": "Add",
+  "@transformsAdd": {
+    "description": "Button that adds an entry to a list."
+  },
+  "transformsRemove": "Remove",
+  "@transformsRemove": {
+    "description": "Button that removes an entry from a list."
+  },
+  "transformsFavoritesTitle": "Favorites",
+  "@transformsFavoritesTitle": {
+    "description": "Settings row title: favorite transforms and pipelines."
+  },
+  "transformsFavoritesDescription": "Favorites appear first in every palette. The first nine run with Mod+1 to Mod+9.",
+  "@transformsFavoritesDescription": {
+    "description": "Settings row description; Mod is Command on macOS and Ctrl elsewhere."
+  },
+  "transformsFavoriteShortcut": "Mod+{number} in the palette",
+  "@transformsFavoriteShortcut": {
+    "description": "Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.",
+    "placeholders": {
+      "number": {
+        "type": "int",
+        "description": "1 to 9."
+      }
+    }
+  },
+  "transformsAddFavorite": "Add a favorite",
+  "@transformsAddFavorite": {
+    "description": "Placeholder of the selector that adds a favorite."
+  },
+  "transformsPipelinesTitle": "Pipelines",
+  "@transformsPipelinesTitle": {
+    "description": "Settings row title: saved chains of transforms."
+  },
+  "transformsPipelinesDescription": "Saved chains of transforms with their settings. They sync to your other devices.",
+  "@transformsPipelinesDescription": {
+    "description": "Settings row description."
+  },
+  "transformsNewPipeline": "New pipeline",
+  "@transformsNewPipeline": {
+    "description": "Button and drawer title for creating a pipeline."
+  },
+  "transformsEditPipeline": "Edit pipeline",
+  "@transformsEditPipeline": {
+    "description": "Button and drawer title for editing a pipeline."
+  },
+  "transformsDuplicatePipeline": "Duplicate",
+  "@transformsDuplicatePipeline": {
+    "description": "Button that copies a pipeline."
+  },
+  "transformsDeletePipeline": "Delete",
+  "@transformsDeletePipeline": {
+    "description": "Button that deletes a pipeline."
+  },
+  "transformsDeletePipelineTitle": "Delete {name}?",
+  "@transformsDeletePipelineTitle": {
+    "description": "Title of the dialog confirming a pipeline deletion.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Pipeline name."
+      }
+    }
+  },
+  "transformsDeletePipelineMessage": "Favorites and paste defaults that use it fall back to none on every device.",
+  "@transformsDeletePipelineMessage": {
+    "description": "Explanation in the delete pipeline dialog."
+  },
+  "transformsDeletePipelineFailed": "The pipeline could not be deleted.",
+  "@transformsDeletePipelineFailed": {
+    "description": "Error when deleting a pipeline fails."
+  },
+  "transformsAddStep": "Add a step",
+  "@transformsAddStep": {
+    "description": "Placeholder of the selector that adds a step to a pipeline."
+  },
+  "transformsHiddenTitle": "Hidden transforms",
+  "@transformsHiddenTitle": {
+    "description": "Settings row title: transforms hidden from the palette."
+  },
+  "transformsHiddenDescription": "Hidden transforms are left out of palettes and suggestions. Pipelines that use them still run.",
+  "@transformsHiddenDescription": {
+    "description": "Settings row description."
+  },
+  "transformsHideTransform": "Hide a transform",
+  "@transformsHideTransform": {
+    "description": "Placeholder of the selector that hides a transform."
+  },
+  "transformsShow": "Show",
+  "@transformsShow": {
+    "description": "Button that shows a hidden transform again."
+  },
+  "transformsSuggestionsTitle": "Suggestions",
+  "@transformsSuggestionsTitle": {
+    "description": "Settings row title: suggested transforms in the palette."
+  },
+  "transformsSuggestionsDescription": "When a palette opens, the first 64 KiB of its text is checked for the kinds below to suggest up to three transforms. Nothing runs in the background.",
+  "@transformsSuggestionsDescription": {
+    "description": "Settings row description."
+  },
+  "transformsDetectorJson": "JSON",
+  "@transformsDetectorJson": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorJwt": "JSON Web Tokens",
+  "@transformsDetectorJwt": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorBase64": "Base64",
+  "@transformsDetectorBase64": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorTrackingUrl": "Links with tracking parameters",
+  "@transformsDetectorTrackingUrl": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorTimestamp": "Timestamps",
+  "@transformsDetectorTimestamp": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorHtml": "HTML",
+  "@transformsDetectorHtml": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorMarkdown": "Markdown",
+  "@transformsDetectorMarkdown": {
+    "description": "Content detector name."
+  },
+  "transformsTrackingTitle": "Tracking parameters",
+  "@transformsTrackingTitle": {
+    "description": "Settings row title: URL parameters removed by the Remove tracking parameters transform."
+  },
+  "transformsTrackingDescription": "The built-in list ships with the app and changes only with updates. Add names to remove or to keep; write name@domain to limit one to a domain.",
+  "@transformsTrackingDescription": {
+    "description": "Settings row description."
+  },
+  "transformsTrackingRemoveLabel": "Also remove",
+  "@transformsTrackingRemoveLabel": {
+    "description": "Label of the custom list of tracking parameters to remove."
+  },
+  "transformsTrackingAllowLabel": "Always keep",
+  "@transformsTrackingAllowLabel": {
+    "description": "Label of the list of parameters that are never removed."
+  },
+  "transformsTrackingPlaceholder": "name or name@domain, then Enter",
+  "@transformsTrackingPlaceholder": {
+    "description": "Placeholder of the tracking parameter field."
   }
 }

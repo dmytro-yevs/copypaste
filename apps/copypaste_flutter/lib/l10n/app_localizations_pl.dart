@@ -4000,4 +4000,485 @@ class AppLocalizationsPl extends AppLocalizations {
   @override
   String get trayRecentSettingsKeywords =>
       'zasobnik pasek menu ostatnie podgląd prywatność liczba';
+
+  @override
+  String get transformsPaletteTitle => 'Przekształć tekst';
+
+  @override
+  String get transformsFilterPlaceholder => 'Filtruj przekształcenia';
+
+  @override
+  String get transformsNoMatches => 'Brak pasujących przekształceń';
+
+  @override
+  String get transformsGroupResults => 'Wyniki';
+
+  @override
+  String get transformsGroupSuggested => 'Sugerowane';
+
+  @override
+  String get transformsGroupRecent => 'Ostatnie';
+
+  @override
+  String get transformsGroupFavorites => 'Ulubione';
+
+  @override
+  String get transformsGroupPipelines => 'Potoki';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV i XML';
+
+  @override
+  String get transformsCategoryEncode => 'Kodowanie i dekodowanie';
+
+  @override
+  String get transformsCategoryCase => 'Wielkość liter';
+
+  @override
+  String get transformsCategoryHash => 'Skróty';
+
+  @override
+  String get transformsCategoryLines => 'Wiersze i odstępy';
+
+  @override
+  String get transformsCategoryClean => 'Porządkowanie';
+
+  @override
+  String get transformsCategoryUrl => 'Linki';
+
+  @override
+  String get transformsCategoryMarkup => 'Tekst sformatowany i Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Dla programistów';
+
+  @override
+  String get transformsCategoryOther => 'Inne';
+
+  @override
+  String get transformsChainEmpty => 'Brak kroków';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Następnie: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Wykonaj ten krok';
+
+  @override
+  String get transformsMoveEarlier => 'Przenieś wyżej';
+
+  @override
+  String get transformsMoveLater => 'Przenieś niżej';
+
+  @override
+  String get transformsRemoveStep => 'Usuń krok';
+
+  @override
+  String get transformsSavePipeline => 'Zapisz jako potok';
+
+  @override
+  String get transformsSavePipelineTitle => 'Zapisz potok';
+
+  @override
+  String get transformsSavePipelineFailed => 'Nie udało się zapisać potoku.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Nazwa';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Opis (opcjonalnie)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Kroki';
+
+  @override
+  String get transformsPipelineNoSteps => 'Dodaj co najmniej jeden krok.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Wpisz nazwę.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Użyj maksymalnie 80 znaków.';
+
+  @override
+  String get transformsPipelineNameTaken => 'Inny potok ma już tę nazwę.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Zapisano potok';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name jest dostępny w każdej palecie przekształceń.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Kroki: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Usunięty potok';
+
+  @override
+  String get transformsNeedsNewerVersion => 'Wymaga nowszej wersji CopyPaste';
+
+  @override
+  String get transformsLoadFailed => 'Nie udało się wczytać przekształceń.';
+
+  @override
+  String get transformsNotTextTitle => 'Przekształcenia działają na tekście';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Ten element to obraz, plik lub kolor. Wybierz element tekstowy lub skopiuj tekst.';
+
+  @override
+  String get transformsNothingTitle => 'Nie ma czego przekształcić';
+
+  @override
+  String get transformsNothingMessage =>
+      'Skopiuj tekst lub wybierz element z historii.';
+
+  @override
+  String get transformsPickTransform => 'Wybierz przekształcenie';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab dodaje je jako krok. Enter stosuje wynik.';
+
+  @override
+  String get transformsPreviewing => 'Aktualizowanie podglądu…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Wiersze: $lines · Słowa: $words · Znaki: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Brak zmian';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Wyświetlanie pierwszych 64 KiB z $size';
+  }
+
+  @override
+  String get transformsRandom => 'Losowe';
+
+  @override
+  String get transformsNotRun => 'Nie wykonano';
+
+  @override
+  String get transformsSensitiveHidden => 'Wynik jest poufny i ukryty.';
+
+  @override
+  String get transformsReveal => 'Pokaż';
+
+  @override
+  String get transformsPaneOutput => 'Wynik';
+
+  @override
+  String get transformsPaneInput => 'Wejście';
+
+  @override
+  String get transformsPaneChanges => 'Zmiany';
+
+  @override
+  String get transformsCannotTransform => 'Nie można przekształcić tego tekstu';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Krok $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Pokaż jako hex';
+
+  @override
+  String get transformsActionPaste => 'Wklej';
+
+  @override
+  String get transformsActionSave => 'Zapisz jako nowy element';
+
+  @override
+  String get transformsCopiedMessage => 'Wynik jest w schowku i w historii.';
+
+  @override
+  String get transformsSavedTitle => 'Zapisano';
+
+  @override
+  String get transformsSavedMessage =>
+      'Wynik to nowy element historii. Schowek pozostaje bez zmian.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Nie udało się wkleić';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'Wynik jest w schowku. Wklej go ręcznie.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message w wierszu $line, kolumnie $column';
+  }
+
+  @override
+  String get transformsErrorBinary =>
+      'Zdekodowane dane są binarne, nie tekstowe';
+
+  @override
+  String get transformsErrorTooLarge => 'Za duże do przekształcenia';
+
+  @override
+  String get transformsErrorInvalidParam =>
+      'Ustawienie tego kroku jest nieprawidłowe';
+
+  @override
+  String get transformsErrorCancelled => 'Anulowano';
+
+  @override
+  String get transformsErrorTooExpensive => 'Wzorzec jest zbyt kosztowny';
+
+  @override
+  String get transformsErrorPattern => 'Wzorzec jest nieprawidłowy';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Wybierz, czy liczba jest w sekundach, czy milisekundach';
+
+  @override
+  String get transformsErrorExternalEntity =>
+      'Encje zewnętrzne są niedozwolone';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'Zaszyfrowanych tokenów nie można zdekodować';
+
+  @override
+  String get transformsErrorJson => 'Nieprawidłowy JSON';
+
+  @override
+  String get transformsErrorYaml => 'Nieprawidłowy YAML';
+
+  @override
+  String get transformsErrorXml => 'Nieprawidłowy XML';
+
+  @override
+  String get transformsErrorCsv => 'Nieprawidłowy CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Nieprawidłowy Base64';
+
+  @override
+  String get transformsErrorHex => 'Nieprawidłowy hex';
+
+  @override
+  String get transformsErrorEscape => 'Nieprawidłowa sekwencja ucieczki';
+
+  @override
+  String get transformsErrorUrl => 'Nieprawidłowe kodowanie procentowe';
+
+  @override
+  String get transformsErrorJwt => 'Nieprawidłowy JWT';
+
+  @override
+  String get transformsErrorDate => 'Nierozpoznana data lub znacznik czasu';
+
+  @override
+  String get transformsErrorGeneric =>
+      'Ten krok nie może przekształcić danych wejściowych';
+
+  @override
+  String get transformsWarningSignedLink =>
+      'Podpisany link pozostawiono bez zmian';
+
+  @override
+  String get transformsWarningExpired => 'Wygasł';
+
+  @override
+  String get transformsWarningNotYetValid => 'Jeszcze nieważny';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Podpis niezweryfikowany';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Zduplikowane klucze';
+
+  @override
+  String get transformsWarningLenientJson =>
+      'Zaakceptowano niestandardowy JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON był zakodowany dwukrotnie';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Nieznane sekwencje ucieczki pozostawiono bez zmian';
+
+  @override
+  String get transformsWarningLocalZone => 'Przyjęto lokalną strefę czasową';
+
+  @override
+  String get transformsWarningNoMatches => 'Brak dopasowań';
+
+  @override
+  String get transformsWarningGeneric => 'Sprawdź wynik';
+
+  @override
+  String get transformsRestoreTitle => 'Przywróć schowek po wklejeniu';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Po wklejeniu przekształconego tekstu wraca poprzednia zawartość schowka, chyba że w międzyczasie skopiowano coś innego.';
+
+  @override
+  String get transformsDefaultTitle =>
+      'Domyślne przekształcenie przy wklejaniu';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste stosuje ten potok do tekstu i pokazuje go przed wklejeniem. Jeśli zawiedzie, wkleja oryginał.';
+
+  @override
+  String get transformsNoDefault => 'Brak';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Domyślne dla aplikacji';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Zastąp wartość domyślną dla aplikacji przez identyfikator pakietu, plik wykonywalny lub nazwę pakietu. Wpisy z innej platformy są synchronizowane, ale tu nie działają.';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => 'Identyfikator aplikacji';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'tylko na $platform';
+  }
+
+  @override
+  String get transformsAdd => 'Dodaj';
+
+  @override
+  String get transformsRemove => 'Usuń';
+
+  @override
+  String get transformsFavoritesTitle => 'Ulubione';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Ulubione są wyświetlane jako pierwsze w każdej palecie. Pierwsze dziewięć uruchomisz skrótami Mod+1–Mod+9.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number w palecie';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Dodaj ulubione';
+
+  @override
+  String get transformsPipelinesTitle => 'Potoki';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Zapisane łańcuchy przekształceń z ustawieniami. Synchronizują się z innymi urządzeniami.';
+
+  @override
+  String get transformsNewPipeline => 'Nowy potok';
+
+  @override
+  String get transformsEditPipeline => 'Edytuj potok';
+
+  @override
+  String get transformsDuplicatePipeline => 'Duplikuj';
+
+  @override
+  String get transformsDeletePipeline => 'Usuń';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return 'Usunąć $name?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Ulubione i domyślne ustawienia wklejania, które go używają, na każdym urządzeniu wrócą do braku.';
+
+  @override
+  String get transformsDeletePipelineFailed => 'Nie udało się usunąć potoku.';
+
+  @override
+  String get transformsAddStep => 'Dodaj krok';
+
+  @override
+  String get transformsHiddenTitle => 'Ukryte przekształcenia';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Ukryte przekształcenia nie pojawiają się w paletach ani sugestiach. Potoki, które ich używają, nadal działają.';
+
+  @override
+  String get transformsHideTransform => 'Ukryj przekształcenie';
+
+  @override
+  String get transformsShow => 'Pokaż';
+
+  @override
+  String get transformsSuggestionsTitle => 'Sugestie';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Po otwarciu palety pierwsze 64 KiB tekstu jest sprawdzane pod kątem poniższych rodzajów, aby zasugerować do trzech przekształceń. Nic nie działa w tle.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'Tokeny JSON Web';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'Linki z parametrami śledzącymi';
+
+  @override
+  String get transformsDetectorTimestamp => 'Znaczniki czasu';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Parametry śledzące';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Wbudowana lista jest częścią aplikacji i zmienia się tylko wraz z aktualizacjami. Dodaj nazwy do usunięcia lub zachowania; zapis nazwa@domena ogranicza wpis do domeny.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Usuwaj także';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Zawsze zachowuj';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'nazwa lub nazwa@domena, potem Enter';
 }

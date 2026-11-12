@@ -3909,4 +3909,479 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get trayRecentSettingsKeywords =>
       'tepsi menü çubuğu son önizleme gizlilik sayı';
+
+  @override
+  String get transformsPaletteTitle => 'Metni dönüştür';
+
+  @override
+  String get transformsFilterPlaceholder => 'Dönüşümleri filtrele';
+
+  @override
+  String get transformsNoMatches => 'Eşleşen dönüşüm yok';
+
+  @override
+  String get transformsGroupResults => 'Sonuçlar';
+
+  @override
+  String get transformsGroupSuggested => 'Önerilen';
+
+  @override
+  String get transformsGroupRecent => 'Son kullanılan';
+
+  @override
+  String get transformsGroupFavorites => 'Favoriler';
+
+  @override
+  String get transformsGroupPipelines => 'İşlem hatları';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV ve XML';
+
+  @override
+  String get transformsCategoryEncode => 'Kodla ve çöz';
+
+  @override
+  String get transformsCategoryCase => 'Büyük/küçük harf';
+
+  @override
+  String get transformsCategoryHash => 'Özetler';
+
+  @override
+  String get transformsCategoryLines => 'Satırlar ve boşluklar';
+
+  @override
+  String get transformsCategoryClean => 'Temizle';
+
+  @override
+  String get transformsCategoryUrl => 'Bağlantılar';
+
+  @override
+  String get transformsCategoryMarkup => 'Zengin metin ve Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Geliştirici';
+
+  @override
+  String get transformsCategoryOther => 'Diğer';
+
+  @override
+  String get transformsChainEmpty => 'Henüz adım yok';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Sonra: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Bu adımı çalıştır';
+
+  @override
+  String get transformsMoveEarlier => 'Yukarı taşı';
+
+  @override
+  String get transformsMoveLater => 'Aşağı taşı';
+
+  @override
+  String get transformsRemoveStep => 'Adımı kaldır';
+
+  @override
+  String get transformsSavePipeline => 'İşlem hattı olarak kaydet';
+
+  @override
+  String get transformsSavePipelineTitle => 'İşlem hattını kaydet';
+
+  @override
+  String get transformsSavePipelineFailed => 'İşlem hattı kaydedilemedi.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Ad';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Açıklama (isteğe bağlı)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Adımlar';
+
+  @override
+  String get transformsPipelineNoSteps => 'En az bir adım ekleyin.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Bir ad girin.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'En fazla 80 karakter kullanın.';
+
+  @override
+  String get transformsPipelineNameTaken =>
+      'Bu ada sahip başka bir işlem hattı var.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'İşlem hattı kaydedildi';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name her dönüşüm paletinde kullanılabilir.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Adımlar: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Silinmiş işlem hattı';
+
+  @override
+  String get transformsNeedsNewerVersion =>
+      'Daha yeni bir CopyPaste sürümü gerekir';
+
+  @override
+  String get transformsLoadFailed => 'Dönüşümler yüklenemedi.';
+
+  @override
+  String get transformsNotTextTitle => 'Dönüşümler metin üzerinde çalışır';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Bu öğe bir görsel, dosya veya renk. Bir metin öğesi seçin ya da metin kopyalayın.';
+
+  @override
+  String get transformsNothingTitle => 'Dönüştürülecek bir şey yok';
+
+  @override
+  String get transformsNothingMessage =>
+      'Metin kopyalayın veya geçmişten bir öğe seçin.';
+
+  @override
+  String get transformsPickTransform => 'Bir dönüşüm seçin';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab adım olarak ekler. Enter sonucu uygular.';
+
+  @override
+  String get transformsPreviewing => 'Önizleme güncelleniyor…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Satır: $lines · Sözcük: $words · Karakter: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Değişiklik yok';
+
+  @override
+  String transformsTruncated(String size) {
+    return '$size içinden ilk 64 KiB gösteriliyor';
+  }
+
+  @override
+  String get transformsRandom => 'Rastgele';
+
+  @override
+  String get transformsNotRun => 'Çalıştırılmadı';
+
+  @override
+  String get transformsSensitiveHidden => 'Sonuç hassas olduğundan gizlendi.';
+
+  @override
+  String get transformsReveal => 'Göster';
+
+  @override
+  String get transformsPaneOutput => 'Çıktı';
+
+  @override
+  String get transformsPaneInput => 'Girdi';
+
+  @override
+  String get transformsPaneChanges => 'Değişiklikler';
+
+  @override
+  String get transformsCannotTransform => 'Bu metin dönüştürülemiyor';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Adım $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Onaltılık göster';
+
+  @override
+  String get transformsActionPaste => 'Yapıştır';
+
+  @override
+  String get transformsActionSave => 'Yeni öğe olarak kaydet';
+
+  @override
+  String get transformsCopiedMessage => 'Sonuç panoda ve geçmişte.';
+
+  @override
+  String get transformsSavedTitle => 'Kaydedildi';
+
+  @override
+  String get transformsSavedMessage =>
+      'Sonuç yeni bir geçmiş öğesi oldu. Pano değişmedi.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Yapıştırılamadı';
+
+  @override
+  String get transformsPasteFailedMessage => 'Sonuç panoda. Elle yapıştırın.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message ($line. satır, $column. sütun)';
+  }
+
+  @override
+  String get transformsErrorBinary => 'Çözülen veri metin değil, ikili';
+
+  @override
+  String get transformsErrorTooLarge => 'Dönüştürmek için çok büyük';
+
+  @override
+  String get transformsErrorInvalidParam => 'Bu adımın bir ayarı geçersiz';
+
+  @override
+  String get transformsErrorCancelled => 'İptal edildi';
+
+  @override
+  String get transformsErrorTooExpensive => 'Desen çok maliyetli';
+
+  @override
+  String get transformsErrorPattern => 'Desen geçersiz';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Sayının saniye mi milisaniye mi olduğunu seçin';
+
+  @override
+  String get transformsErrorExternalEntity => 'Harici varlıklara izin verilmez';
+
+  @override
+  String get transformsErrorJwtEncrypted => 'Şifreli belirteçler çözülemez';
+
+  @override
+  String get transformsErrorJson => 'Geçersiz JSON';
+
+  @override
+  String get transformsErrorYaml => 'Geçersiz YAML';
+
+  @override
+  String get transformsErrorXml => 'Geçersiz XML';
+
+  @override
+  String get transformsErrorCsv => 'Geçersiz CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Geçersiz Base64';
+
+  @override
+  String get transformsErrorHex => 'Geçersiz onaltılık';
+
+  @override
+  String get transformsErrorEscape => 'Geçersiz kaçış dizisi';
+
+  @override
+  String get transformsErrorUrl => 'Hatalı yüzde kodlaması';
+
+  @override
+  String get transformsErrorJwt => 'Geçerli bir JWT değil';
+
+  @override
+  String get transformsErrorDate =>
+      'Tanınan bir tarih veya zaman damgası değil';
+
+  @override
+  String get transformsErrorGeneric => 'Bu adım girdisini dönüştüremiyor';
+
+  @override
+  String get transformsWarningSignedLink => 'İmzalı bağlantı değiştirilmedi';
+
+  @override
+  String get transformsWarningExpired => 'Süresi dolmuş';
+
+  @override
+  String get transformsWarningNotYetValid => 'Henüz geçerli değil';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'İmza doğrulanmadı';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Yinelenen anahtarlar';
+
+  @override
+  String get transformsWarningLenientJson => 'Standart dışı JSON kabul edildi';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON iki kez kodlanmıştı';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Bilinmeyen kaçış dizileri olduğu gibi bırakıldı';
+
+  @override
+  String get transformsWarningLocalZone => 'Yerel saat dilimi varsayıldı';
+
+  @override
+  String get transformsWarningNoMatches => 'Eşleşme yok';
+
+  @override
+  String get transformsWarningGeneric => 'Sonucu kontrol edin';
+
+  @override
+  String get transformsRestoreTitle => 'Yapıştırdıktan sonra panoyu geri yükle';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Dönüştürülmüş yapıştırmadan sonra, arada başka bir şey kopyalanmadıysa önceki pano geri gelir.';
+
+  @override
+  String get transformsDefaultTitle => 'Varsayılan yapıştırma dönüşümü';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste bu işlem hattını metne uygular ve yapıştırmadan önce gösterir. Başarısız olursa orijinali yapıştırır.';
+
+  @override
+  String get transformsNoDefault => 'Yok';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Uygulamaya göre varsayılanlar';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Bir uygulamanın varsayılanını paket kimliği, yürütülebilir dosya veya paket adıyla geçersiz kılın. Başka platformda yapılan girişler eşitlenir ama burada etkisizdir.';
+
+  @override
+  String get transformsAppIdentifierPlaceholder => 'Uygulama tanımlayıcısı';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'yalnızca $platform';
+  }
+
+  @override
+  String get transformsAdd => 'Ekle';
+
+  @override
+  String get transformsRemove => 'Kaldır';
+
+  @override
+  String get transformsFavoritesTitle => 'Favoriler';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Favoriler her palette önce görünür. İlk dokuzu Mod+1–Mod+9 ile çalışır.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Palette Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Favori ekle';
+
+  @override
+  String get transformsPipelinesTitle => 'İşlem hatları';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Ayarlarıyla kaydedilmiş dönüşüm zincirleri. Diğer cihazlarınızla eşitlenir.';
+
+  @override
+  String get transformsNewPipeline => 'Yeni işlem hattı';
+
+  @override
+  String get transformsEditPipeline => 'İşlem hattını düzenle';
+
+  @override
+  String get transformsDuplicatePipeline => 'Çoğalt';
+
+  @override
+  String get transformsDeletePipeline => 'Sil';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name silinsin mi?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Bunu kullanan favoriler ve yapıştırma varsayılanları tüm cihazlarda yok olarak döner.';
+
+  @override
+  String get transformsDeletePipelineFailed => 'İşlem hattı silinemedi.';
+
+  @override
+  String get transformsAddStep => 'Adım ekle';
+
+  @override
+  String get transformsHiddenTitle => 'Gizli dönüşümler';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Gizli dönüşümler paletlerde ve önerilerde görünmez. Onları kullanan işlem hatları çalışmaya devam eder.';
+
+  @override
+  String get transformsHideTransform => 'Bir dönüşümü gizle';
+
+  @override
+  String get transformsShow => 'Göster';
+
+  @override
+  String get transformsSuggestionsTitle => 'Öneriler';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Bir palet açıldığında, metnin ilk 64 KiB\'ı aşağıdaki türler için denetlenir ve en fazla üç dönüşüm önerilir. Arka planda hiçbir şey çalışmaz.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Token\'ları';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'İzleme parametreli bağlantılar';
+
+  @override
+  String get transformsDetectorTimestamp => 'Zaman damgaları';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'İzleme parametreleri';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Yerleşik liste uygulamayla gelir ve yalnızca güncellemelerle değişir. Kaldırılacak veya tutulacak adlar ekleyin; bir alan adıyla sınırlamak için ad@alanadı yazın.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Ayrıca kaldır';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Her zaman tut';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'ad veya ad@alanadı, ardından Enter';
 }
