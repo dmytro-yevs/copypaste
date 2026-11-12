@@ -568,13 +568,14 @@ pub async fn quick_search_snippets(
 }
 
 /// Render a saved snippet (`snippet_id`) or an unsaved body (`body`); exactly
-/// one must be set.
+/// one must be set. `locale` is the app's BCP 47 locale.
 pub async fn render_snippet(
     snippet_id: Option<String>,
     body: Option<String>,
     values: Vec<TemplateValue>,
     clipboard: TemplateClipboard,
     final_render: bool,
+    locale: Option<String>,
 ) -> Result<RenderedSnippet, RuntimeError> {
     let source = match (snippet_id, body) {
         (Some(id), None) => ipc::RenderSource::Snippet { id },
@@ -591,6 +592,7 @@ pub async fn render_snippet(
             } else {
                 ipc::RenderPurpose::Preview
             },
+            locale,
         }),
         ResponseData::Rendered
     );
@@ -608,6 +610,7 @@ pub async fn use_snippet(
     values: Vec<TemplateValue>,
     clipboard: TemplateClipboard,
     delivery: TextDelivery,
+    locale: Option<String>,
 ) -> Result<DeliveredText, RuntimeError> {
     let delivered = expect_data!(
         snippet_op(SnippetOp::Use {
@@ -615,6 +618,7 @@ pub async fn use_snippet(
             values: template_values(values),
             clipboard: clipboard_input(clipboard)?,
             delivery: delivery.into(),
+            locale,
         }),
         ResponseData::Delivered
     );

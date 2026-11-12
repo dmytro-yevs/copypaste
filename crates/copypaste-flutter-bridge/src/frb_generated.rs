@@ -4123,6 +4123,7 @@ fn wire__crate__api__snippets__render_snippet_impl(
             let api_clipboard =
                 <crate::api::snippets::TemplateClipboard>::sse_decode(&mut deserializer);
             let api_final_render = <bool>::sse_decode(&mut deserializer);
+            let api_locale = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::RuntimeError>(
@@ -4133,6 +4134,7 @@ fn wire__crate__api__snippets__render_snippet_impl(
                             api_values,
                             api_clipboard,
                             api_final_render,
+                            api_locale,
                         )
                         .await?;
                         Ok(output_ok)
@@ -6469,6 +6471,7 @@ fn wire__crate__api__snippets__use_snippet_impl(
             let api_clipboard =
                 <crate::api::snippets::TemplateClipboard>::sse_decode(&mut deserializer);
             let api_delivery = <crate::api::clips::TextDelivery>::sse_decode(&mut deserializer);
+            let api_locale = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::RuntimeError>(
@@ -6478,6 +6481,7 @@ fn wire__crate__api__snippets__use_snippet_impl(
                             api_values,
                             api_clipboard,
                             api_delivery,
+                            api_locale,
                         )
                         .await?;
                         Ok(output_ok)

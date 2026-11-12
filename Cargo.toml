@@ -131,11 +131,13 @@ security-framework = "3.7"
 # `regex` is linear-time (no backtracking blow-up on user patterns); callers
 # still set `size_limit` and `dfa_size_limit` on every user-supplied pattern.
 regex = "1.13.1"
-# IANA zones with DST-correct calendar arithmetic. `tz-system` is left out:
-# the template renderer is always handed the zone id and never detects it.
+# IANA zones with DST-correct calendar arithmetic. The template renderer is
+# always handed the zone id; the runtime reads it once per expansion through
+# `tz-system` (/etc/localtime, the Windows zone mapped by CLDR, Android's
+# persist.sys.timezone), so every OS resolves the device zone the same way.
 # Zone data comes from zoneinfo on macOS and Linux, the concatenated tzdata on
 # Android, and a bundled copy on Windows only.
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
 # One CLDR engine, so a date template and case folding give byte-identical
 # output on every OS. Kept on the 2.2 line that `url` already locks, so the
 # ICU stack is not duplicated. Compiled data only; extras are opt-in.

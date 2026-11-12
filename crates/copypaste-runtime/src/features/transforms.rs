@@ -82,7 +82,7 @@ impl Runtime {
     /// Library records were written here since `since`: the transports send
     /// them and watchers get one coalesced `Library` event. History did not
     /// change, so no `Items` event is published.
-    fn library_written(&self, since: i64, kinds: LibraryKinds) {
+    pub(super) fn library_written(&self, since: i64, kinds: LibraryKinds) {
         self.p2p.node().note_local_version(since);
         self.p2p.wake();
         self.modules.note_version(since);

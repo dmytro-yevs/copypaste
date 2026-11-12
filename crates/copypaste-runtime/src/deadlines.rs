@@ -288,6 +288,7 @@ impl Runtime {
             Err(error) => tracing::warn!(?error, "deadline housekeeping failed"),
         }
         self.expire_due_clips(now);
+        self.purge_expired_snippets(now);
         let next = self.store.next_local_deadline(now).unwrap_or_else(|error| {
             tracing::warn!(?error, "could not read the next deadline");
             None

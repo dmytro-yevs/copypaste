@@ -188,6 +188,7 @@ pub struct Rendered {
     pub text: String,
     pub cursor_graphemes_from_end: Option<u32>,
     pub warnings: Vec<TemplateLint>,
+    /// Empty required inputs: a field name, or `clipboard:<index>`.
     pub missing_required: Vec<String>,
     /// Placeholders left verbatim because they could not be filled.
     pub unfilled: u32,
@@ -362,6 +363,9 @@ pub enum SnippetOp {
         values: BTreeMap<String, String>,
         clipboard: ClipboardInput,
         purpose: RenderPurpose,
+        /// BCP 47 app locale, the default for date placeholders.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locale: Option<String>,
     },
     Use {
         id: String,
@@ -369,6 +373,8 @@ pub enum SnippetOp {
         values: BTreeMap<String, String>,
         clipboard: ClipboardInput,
         delivery: Delivery,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        locale: Option<String>,
     },
     /// Drop the template parse cache and any outstanding import plan.
     Release,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::lint::Issue;
-use crate::syntax::{Params, Template};
+use crate::syntax::{Directive, Params, Template};
 use crate::{MAX_DEPTH, MAX_NESTED_EXPANSIONS};
 
 /// How a `snippet` placeholder names its target.
@@ -25,6 +25,52 @@ impl SnippetRef {
             (None, Some(id)) => Ok(Self::Id(id)),
             (None, None) => Err(Issue::MissingParameter { key: "abbr".into() }),
         }
+    }
+}
+
+impl Template {
+    /// The body with every well-formed top-level `snippet abbr=…` reference
+    /// whose abbreviation `matches` renamed to `to`, keeping its modifiers.
+    /// `None` when no reference matched.
+    pub fn rename_snippet_references(
+        &self,
+        matches: &dyn Fn(&str) -> bool,
+        to: &str,
+    ) -> Option<String> {
+        let source = self.source();
+        let mut out = String::with_capacity(source.len());
+        let mut copied = 0;
+        let mut renamed = false;
+        for placeholder in self.placeholders() {
+            let Ok(parsed) = &placeholder.parsed else {
+                continue;
+            };
+            match &parsed.directive {
+                Directive::Snippet(SnippetRef::Abbreviation(abbreviation))
+                    if matches(abbreviation) => {}
+                _ => continue,
+            }
+            out.push_str(&source[copied..placeholder.span.start]);
+            out.push_str("{{snippet abbr=\"");
+            for c in to.chars() {
+                if matches!(c, '"' | '\\') {
+                    out.push('\\');
+                }
+                out.push(c);
+            }
+            out.push('"');
+            for modifier in &parsed.modifiers {
+                out.push_str(" | ");
+                out.push_str(modifier);
+            }
+            out.push_str("}}");
+            copied = placeholder.span.end;
+            renamed = true;
+        }
+        renamed.then(|| {
+            out.push_str(&source[copied..]);
+            out
+        })
     }
 }
 
@@ -119,5 +165,25 @@ impl Chain {
 
     pub fn leave(&mut self) {
         self.stack.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parse;
+
+    #[test]
+    fn renaming_rewrites_only_matching_references_and_keeps_modifiers() {
+        let body = r#"a {{snippet abbr=sig | upper}} \{{snippet abbr=sig}} {{snippet abbr=x}}"#;
+        let renamed = parse(body)
+            .rename_snippet_references(&|abbr| abbr == "sig", "s\"2")
+            .unwrap();
+        assert_eq!(
+            renamed,
+            r#"a {{snippet abbr="s\"2" | upper}} \{{snippet abbr=sig}} {{snippet abbr=x}}"#
+        );
+        assert!(parse(body)
+            .rename_snippet_references(&|abbr| abbr == "none", "y")
+            .is_none());
     }
 }

@@ -220,6 +220,7 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             values: [("name".to_string(), text())].into(),
             clipboard: snippets::ClipboardInput::None,
             purpose: snippets::RenderPurpose::Preview,
+            locale: Some("uk".into()),
         },
         snippets::SnippetOp::ImportCommit {
             token: id(),
