@@ -76,8 +76,9 @@ android-native-keyring-store = { version = "1", optional = true }
 secret-service = { version = "5.2", default-features = false, features = ["rt-tokio-crypto-rust"], optional = true }
 
 # Local import descriptors must not block while rejecting FIFOs and devices.
+# `time` reads the clock that counts sleep, for clip expiry.
 [target.'cfg(unix)'.dependencies]
-rustix.workspace = true
+rustix = { workspace = true, features = ["time"] }
 
 # Windows has no system OpenSSL to link SQLCipher against and no third branch
 # in libsqlite3-sys's build.rs to fall into — it panics on a missing

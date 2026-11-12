@@ -16,6 +16,31 @@ use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
+/// The tombstone write of [`Store::delete`] in a caller's transaction,
+/// stamped no earlier than `now_ms`.
+pub(super) fn tombstone_in_tx(
+    tx: &rusqlite::Connection,
+    id: &str,
+    now_ms: i64,
+) -> Result<bool, StoreError> {
+    // Unconditional, and before the update that clears `fts_rowid`.
+    delete_fts_row_in_tx(tx, id)?;
+    let changed = tx.execute(
+        "UPDATE clipboard_items \
+            SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
+                content_hash = content_hash, \
+                created_at = CASE \
+                    WHEN created_at = 9223372036854775807 THEN created_at \
+                    ELSE MAX(created_at + 1, ?2) \
+                END, \
+                pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
+                fts_rowid = NULL \
+          WHERE id = ?1 AND deleted = 0",
+        params![id, now_ms],
+    )?;
+    Ok(changed > 0)
+}
+
 fn refresh_privacy(
     conn: &rusqlite::Connection,
     item: &mut StoredItem,
@@ -444,27 +469,13 @@ impl Store {
     pub fn delete(&self, id: &str) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        // Unconditional, and before the update that clears `fts_rowid`.
-        delete_fts_row_in_tx(&tx, id)?;
-        let changed = tx.execute(
-            "UPDATE clipboard_items \
-                SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
-                    content_hash = content_hash, \
-                    created_at = CASE \
-                        WHEN created_at = 9223372036854775807 THEN created_at \
-                        ELSE MAX(created_at + 1, ?2) \
-                    END, \
-                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
-                    fts_rowid = NULL \
-              WHERE id = ?1 AND deleted = 0",
-            params![id, crate::now_ms()],
-        )?;
+        let changed = tombstone_in_tx(&tx, id, crate::now_ms())?;
         tx.commit()?;
         drop(conn);
-        if changed > 0 {
+        if changed {
             self.request_space_reclaim();
         }
-        Ok(changed > 0)
+        Ok(changed)
     }
 
     /// Soft-deletes every live item, returning how many were affected.

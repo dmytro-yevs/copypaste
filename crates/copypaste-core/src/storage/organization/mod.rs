@@ -110,6 +110,11 @@ fn record_id(key: &str) -> String {
     format!("{PREFIX}{}", hex::encode(Sha256::digest(key.as_bytes())))
 }
 
+/// The id of a clip's synced note record.
+pub(crate) fn clip_note_record_id(clip_id: &str) -> String {
+    record_id(&clip_notes::note_key(clip_id))
+}
+
 fn identifier(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !is_record_id(id)
 }

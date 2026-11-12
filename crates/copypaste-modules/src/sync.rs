@@ -121,6 +121,32 @@ impl SyncServices {
         }
         Ok(())
     }
+    /// Offers rows to every cloud provider again although its upload floor
+    /// has passed them: they join the retry set the next scan reads first.
+    pub fn reoffer(&self, item_ids: &[String]) -> Result<(), ModuleError> {
+        if item_ids.is_empty() {
+            return Ok(());
+        }
+        let _progress = self.progress.lock().map_err(|_| ModuleError::State)?;
+        for id in self
+            .store
+            .sync_provider_ids()
+            .map_err(|_| ModuleError::State)?
+        {
+            let key = Self::key(&id, UNREADABLE_UPLOADS)?;
+            let previous = self.store.state(&key).map_err(|_| ModuleError::State)?;
+            let mut retry = UnreadableUploads::decode(previous.as_deref());
+            if retry.reset_floor {
+                // The next scan starts from the beginning and reaches them.
+                continue;
+            }
+            retry.ids.extend(item_ids.iter().cloned());
+            self.store
+                .set_state(&key, &retry.encode())
+                .map_err(|_| ModuleError::State)?;
+        }
+        Ok(())
+    }
     pub(crate) fn clear(&self, id: &str) -> Result<(), ModuleError> {
         self.store
             .clear_module_state(id)
@@ -552,5 +578,71 @@ mod tests {
         assert_eq!(tags.tags.len(), 1);
         assert_eq!(tags.tags[0].name, "Work");
         assert_eq!(tags.assignments[&clip], vec![tag]);
+    }
+
+    #[test]
+    fn short_lived_clips_and_their_tombstones_stay_out_of_cloud_until_kept() {
+        use copypaste_core::storage::expiry::Clocks;
+        const MODULE: &str = "copypaste.supabase";
+        const MIN: i64 = 60 * 1000;
+        let (service, keys) = device(63, "here");
+        let key = keys.item_key();
+        let now = copypaste_core::now_ms();
+        let capture = |text: &str| {
+            copypaste_core::ingest::ingest_into(
+                &service.store,
+                &keys,
+                text,
+                "text",
+                now,
+                &Default::default(),
+            )
+            .unwrap()
+            .into_item()
+            .id
+        };
+        let (short, gone, long) = (capture("482913"), capture("gone"), capture("long"));
+        for (id, duration) in [(&short, 10 * MIN), (&gone, 10 * MIN), (&long, 120 * MIN)] {
+            service
+                .store
+                .set_clip_expiry(&key, id, duration, false, Clocks::at(now))
+                .unwrap()
+                .unwrap();
+        }
+        service.store.delete(&gone).unwrap();
+        let scan = |since_ms| -> Vec<String> {
+            let scan: copypaste_sync::scan::Scan = serde_json::from_value(
+                service
+                    .request(
+                        MODULE,
+                        SyncHostRequest::Scan {
+                            since_ms,
+                            after_item_id: None,
+                        },
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+            scan.items.into_iter().map(|item| item.item_id).collect()
+        };
+
+        let first = scan(0);
+        assert_eq!(first.len(), 2, "the long-lived clip and its note");
+        assert!(first.contains(&long));
+        let started_ms = copypaste_core::now_ms();
+        service
+            .request(MODULE, SyncHostRequest::CommitUpload { started_ms })
+            .unwrap();
+
+        let kept = service
+            .store
+            .keep_clip(&key, &short, false)
+            .unwrap()
+            .unwrap();
+        service.reoffer(&kept.reoffer).unwrap();
+        let second = scan(service.floor(MODULE).unwrap().created_at);
+        assert!(second.contains(&short), "offered again after keep");
+        assert_eq!(second.len(), 2, "the kept clip and its new note");
+        assert!(!second.contains(&gone));
     }
 }

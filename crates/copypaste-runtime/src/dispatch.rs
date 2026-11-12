@@ -1009,6 +1009,9 @@ impl Runtime {
         {
             return storage_error(id, "set_pinned", &error);
         }
+        if pinned {
+            self.keep_pinned_clip(item_id);
+        }
         self.note_local_change_since(started);
         self.mutated_item(id, item_id)
     }
