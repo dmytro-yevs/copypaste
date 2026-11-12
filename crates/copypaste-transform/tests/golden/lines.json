@@ -1,0 +1,293 @@
+[
+  {
+    "transform": "lines.trim",
+    "input": "\u00a0 hello \u3000",
+    "output": "hello"
+  },
+  {
+    "transform": "lines.trim",
+    "input": "\n\nabc\n",
+    "output": "abc"
+  },
+  {
+    "transform": "lines.trim",
+    "input": "",
+    "output": ""
+  },
+  {
+    "transform": "lines.trim_each",
+    "input": "a  \n  b  \n",
+    "output": "a\n  b\n"
+  },
+  {
+    "transform": "lines.trim_each",
+    "params": {
+      "sides": "both"
+    },
+    "input": "  a  \r\n b ",
+    "output": "a\r\nb"
+  },
+  {
+    "transform": "lines.trim_each",
+    "params": {
+      "sides": "start"
+    },
+    "input": "  a \n\tb",
+    "output": "a \nb"
+  },
+  {
+    "transform": "lines.collapse_whitespace",
+    "input": "a  \t b\nc   d",
+    "output": "a b\nc d"
+  },
+  {
+    "transform": "lines.collapse_whitespace",
+    "params": {
+      "keep_line_breaks": false
+    },
+    "input": "a \n\n b",
+    "output": "a b"
+  },
+  {
+    "transform": "lines.collapse_whitespace",
+    "input": "a\u00a0\u00a0b",
+    "output": "a b"
+  },
+  {
+    "transform": "lines.remove_empty",
+    "input": "a\n\n  \nb\n",
+    "output": "a\nb\n"
+  },
+  {
+    "transform": "lines.remove_empty",
+    "params": {
+      "whitespace_only": false
+    },
+    "input": "a\n\n  \nb\n",
+    "output": "a\n  \nb\n"
+  },
+  {
+    "transform": "lines.remove_empty",
+    "input": "\n\n",
+    "output": ""
+  },
+  {
+    "transform": "lines.remove_empty",
+    "input": "a\r\n\r\nb",
+    "output": "a\r\nb"
+  },
+  {
+    "transform": "lines.sort",
+    "input": "file10\nfile2\nFile1",
+    "output": "File1\nfile2\nfile10"
+  },
+  {
+    "transform": "lines.sort",
+    "input": "b\r\na\r\nc",
+    "output": "a\r\nb\r\nc"
+  },
+  {
+    "transform": "lines.sort",
+    "input": "b\na\n",
+    "output": "a\nb\n"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "order": "desc"
+    },
+    "input": "a\nc\nb",
+    "output": "c\nb\na"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "code_point"
+    },
+    "input": "b\nB\na\nA",
+    "output": "A\nB\na\nb"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "case_insensitive"
+    },
+    "input": "b\nB\na\nA",
+    "output": "a\nA\nb\nB"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "case_insensitive",
+      "order": "desc"
+    },
+    "input": "a\nA\nb",
+    "output": "b\na\nA"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "numeric"
+    },
+    "input": "10 apples\n9 pears\n-1 debt\nnone",
+    "output": "-1 debt\n9 pears\n10 apples\nnone"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "length"
+    },
+    "input": "ccc\na\nbb\nd",
+    "output": "a\nd\nbb\nccc"
+  },
+  {
+    "transform": "lines.sort",
+    "params": {
+      "mode": "random"
+    },
+    "input": "x",
+    "error": "invalid_param"
+  },
+  {
+    "transform": "lines.dedupe",
+    "input": "b\na\nb\nc\na",
+    "output": "b\na\nc"
+  },
+  {
+    "transform": "lines.dedupe",
+    "params": {
+      "case_sensitive": false
+    },
+    "input": "Apple\napple\nAPPLE\nbanana",
+    "output": "Apple\nbanana"
+  },
+  {
+    "transform": "lines.dedupe",
+    "params": {
+      "compare_trimmed": true
+    },
+    "input": "x\n x \nx  ",
+    "output": "x"
+  },
+  {
+    "transform": "lines.dedupe",
+    "input": "a\r\na\r\n",
+    "output": "a\r\n"
+  },
+  {
+    "transform": "lines.reverse",
+    "input": "one\ntwo\nthree",
+    "output": "three\ntwo\none"
+  },
+  {
+    "transform": "lines.reverse",
+    "input": "1\n2\n",
+    "output": "2\n1\n"
+  },
+  {
+    "transform": "lines.reverse",
+    "input": "👨\u200d👩\u200d👧 family\n🇺🇦 flag",
+    "output": "🇺🇦 flag\n👨\u200d👩\u200d👧 family"
+  },
+  {
+    "transform": "lines.join",
+    "input": "red\ngreen\n\nblue",
+    "output": "red green blue"
+  },
+  {
+    "transform": "lines.join",
+    "params": {
+      "separator": "comma"
+    },
+    "input": "a\nb\nc\n",
+    "output": "a, b, c"
+  },
+  {
+    "transform": "lines.join",
+    "params": {
+      "separator": "none"
+    },
+    "input": "a\nb",
+    "output": "ab"
+  },
+  {
+    "transform": "lines.join",
+    "params": {
+      "separator": "custom",
+      "custom_separator": "|"
+    },
+    "input": "a\nb",
+    "output": "a|b"
+  },
+  {
+    "transform": "lines.join",
+    "params": {
+      "separator": "comma",
+      "drop_empty": false
+    },
+    "input": "a\n\nb",
+    "output": "a, , b"
+  },
+  {
+    "transform": "lines.unwrap",
+    "input": "exam-\nple text\nhere\n\nNext",
+    "output": "example text here\n\nNext"
+  },
+  {
+    "transform": "lines.unwrap",
+    "params": {
+      "dehyphenate": false
+    },
+    "input": "exam-\nple",
+    "output": "exam-ple"
+  },
+  {
+    "transform": "lines.unwrap",
+    "input": "Jean-\nPaul",
+    "output": "Jean-Paul"
+  },
+  {
+    "transform": "lines.unwrap",
+    "input": "one\r\ntwo\r\n\r\nthree\r\n",
+    "output": "one two\r\n\r\nthree\r\n"
+  },
+  {
+    "transform": "lines.prefix",
+    "input": "apples\npears",
+    "output": "- apples\n- pears"
+  },
+  {
+    "transform": "lines.prefix",
+    "params": {
+      "style": "number"
+    },
+    "input": "a\n\nb",
+    "output": "1. a\n\n2. b"
+  },
+  {
+    "transform": "lines.prefix",
+    "params": {
+      "style": "quote",
+      "skip_empty": false
+    },
+    "input": "a\n\nb",
+    "output": "> a\n> \n> b"
+  },
+  {
+    "transform": "lines.prefix",
+    "params": {
+      "style": "asterisk"
+    },
+    "input": "x",
+    "output": "* x"
+  },
+  {
+    "transform": "lines.prefix",
+    "params": {
+      "style": "custom",
+      "custom_prefix": "// "
+    },
+    "input": "a\nb",
+    "output": "// a\n// b"
+  }
+]

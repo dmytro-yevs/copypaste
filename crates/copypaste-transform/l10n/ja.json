@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "大文字",
+      "description": "Unicodeの完全な規則ですべての文字を大文字にします。",
+      "params": {
+        "locale": {
+          "label": "言語の規則",
+          "options": {
+            "invariant": "言語に依存しない",
+            "system": "デバイスの言語"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "小文字",
+      "description": "Unicodeの完全な規則ですべての文字を小文字にします。",
+      "params": {
+        "locale": {
+          "label": "言語の規則",
+          "options": {
+            "invariant": "言語に依存しない",
+            "system": "デバイスの言語"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "タイトルケース",
+      "description": "各単語の先頭を大文字にします。見出しスタイルでは短い語を小文字のままにします。",
+      "params": {
+        "style": {
+          "label": "スタイル",
+          "options": {
+            "headline": "見出し",
+            "all_words": "すべての単語"
+          }
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "文頭のみ大文字",
+      "description": "各文の最初の単語を大文字で始め、残りを小文字にします。",
+      "params": {
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "単語を小文字で始まる識別子にまとめます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "各単語を大文字で始める識別子にまとめます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "小文字の単語をアンダースコアでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "小文字の単語をハイフンでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "大文字の単語をアンダースコアでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "大文字と小文字を反転",
+      "description": "大文字を小文字に、小文字を大文字にします。"
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "前後の空白を削除",
+      "description": "テキストの先頭と末尾の空白と改行を削除します。"
+    },
+    "lines.trim_each": {
+      "name": "各行の空白を削除",
+      "description": "各行の先頭、末尾、または両端の空白を削除します。",
+      "params": {
+        "sides": {
+          "label": "対象",
+          "options": {
+            "both": "両端",
+            "start": "先頭",
+            "end": "末尾"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "空白をまとめる",
+      "description": "連続するスペースとタブを1つのスペースにします。",
+      "params": {
+        "keep_line_breaks": {
+          "label": "改行を保持"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "空行を削除",
+      "description": "空の行や空白だけの行を削除します。",
+      "params": {
+        "whitespace_only": {
+          "label": "空白だけの行を空行とみなす"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "行を並べ替え",
+      "description": "行をアルファベット順、自然順、数値順、または長さ順に並べ替えます。",
+      "params": {
+        "order": {
+          "label": "順序",
+          "options": {
+            "asc": "昇順",
+            "desc": "降順"
+          }
+        },
+        "mode": {
+          "label": "比較方法",
+          "options": {
+            "natural": "自然順",
+            "code_point": "コードポイント",
+            "case_insensitive": "大文字小文字を無視",
+            "numeric": "数値",
+            "length": "長さ"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "重複行を削除",
+      "description": "各行の最初の出現を元の順序のまま残します。",
+      "params": {
+        "case_sensitive": {
+          "label": "大文字と小文字を区別"
+        },
+        "compare_trimmed": {
+          "label": "前後の空白を無視"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "行を逆順にする",
+      "description": "行の順序を逆にします。"
+    },
+    "lines.join": {
+      "name": "行を結合",
+      "description": "すべての行を区切り文字で1行に結合します。",
+      "params": {
+        "separator": {
+          "label": "区切り文字",
+          "options": {
+            "space": "スペース",
+            "comma": "カンマ",
+            "none": "なし",
+            "custom": "カスタム"
+          }
+        },
+        "custom_separator": {
+          "label": "カスタム区切り文字"
+        },
+        "drop_empty": {
+          "label": "空行を除外"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "段落の改行を解除",
+      "description": "PDFからコピーしたテキストのように、段落内で折り返された行をつなぎます。",
+      "params": {
+        "dehyphenate": {
+          "label": "ハイフンで分割された単語をつなぐ"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "行頭に文字を追加",
+      "description": "各行の先頭に箇条書き記号、番号、引用符、または任意の文字列を追加します。",
+      "params": {
+        "style": {
+          "label": "スタイル",
+          "options": {
+            "dash": "ダッシュ",
+            "asterisk": "アスタリスク",
+            "number": "番号",
+            "quote": "引用",
+            "custom": "カスタム"
+          }
+        },
+        "custom_prefix": {
+          "label": "カスタム接頭辞"
+        },
+        "skip_empty": {
+          "label": "空行をスキップ"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "不可視文字を削除",
+      "description": "ゼロ幅文字、双方向制御文字、ソフトハイフンを削除し、ノーブレークスペースを通常のスペースにします。"
+    },
+    "clean.quotes": {
+      "name": "引用符をまっすぐにする",
+      "description": "曲がった引用符をまっすぐな引用符に置き換え、必要に応じてダッシュをハイフンにします。",
+      "params": {
+        "dashes": {
+          "label": "ダッシュもまっすぐにする"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

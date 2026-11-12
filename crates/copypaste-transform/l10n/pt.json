@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "MAIÚSCULAS",
+      "description": "Converte todas as letras em maiúsculas com as regras completas do Unicode.",
+      "params": {
+        "locale": {
+          "label": "Regras do idioma",
+          "options": {
+            "invariant": "Neutro",
+            "system": "Idioma do dispositivo"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "minúsculas",
+      "description": "Converte todas as letras em minúsculas com as regras completas do Unicode.",
+      "params": {
+        "locale": {
+          "label": "Regras do idioma",
+          "options": {
+            "invariant": "Neutro",
+            "system": "Idioma do dispositivo"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Estilo Título",
+      "description": "Coloca as palavras com inicial maiúscula; o estilo título mantém palavras curtas em minúsculas.",
+      "params": {
+        "style": {
+          "label": "Estilo",
+          "options": {
+            "headline": "Título",
+            "all_words": "Cada palavra"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Manter siglas"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Estilo frase",
+      "description": "Coloca em maiúscula a primeira palavra de cada frase e o resto em minúsculas.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Manter siglas"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Junta palavras num identificador que começa em minúscula.",
+      "params": {
+        "per_line": {
+          "label": "Cada linha separadamente"
+        },
+        "keep_acronyms": {
+          "label": "Manter siglas"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Junta palavras num identificador com cada palavra iniciada em maiúscula.",
+      "params": {
+        "per_line": {
+          "label": "Cada linha separadamente"
+        },
+        "keep_acronyms": {
+          "label": "Manter siglas"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Junta palavras minúsculas com sublinhados.",
+      "params": {
+        "per_line": {
+          "label": "Cada linha separadamente"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Junta palavras minúsculas com hífens.",
+      "params": {
+        "per_line": {
+          "label": "Cada linha separadamente"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Junta palavras maiúsculas com sublinhados.",
+      "params": {
+        "per_line": {
+          "label": "Cada linha separadamente"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Inverter maiúsculas",
+      "description": "Troca maiúsculas por minúsculas e minúsculas por maiúsculas."
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Aparar",
+      "description": "Remove espaços e quebras de linha do início e do fim do texto."
+    },
+    "lines.trim_each": {
+      "name": "Aparar cada linha",
+      "description": "Remove espaços no início, no fim ou dos dois lados de cada linha.",
+      "params": {
+        "sides": {
+          "label": "Lados",
+          "options": {
+            "both": "Ambos",
+            "start": "Início",
+            "end": "Fim"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Reduzir espaços",
+      "description": "Transforma sequências de espaços e tabulações num único espaço.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Manter quebras de linha"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Remover linhas vazias",
+      "description": "Apaga linhas vazias ou só com espaços.",
+      "params": {
+        "whitespace_only": {
+          "label": "Linhas só com espaços contam como vazias"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Ordenar linhas",
+      "description": "Ordena as linhas alfabética, natural ou numericamente, ou por comprimento.",
+      "params": {
+        "order": {
+          "label": "Ordem",
+          "options": {
+            "asc": "A a Z",
+            "desc": "Z a A"
+          }
+        },
+        "mode": {
+          "label": "Comparação",
+          "options": {
+            "natural": "Natural",
+            "code_point": "Ponto de código",
+            "case_insensitive": "Ignorar maiúsculas",
+            "numeric": "Numérico",
+            "length": "Comprimento"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Remover linhas duplicadas",
+      "description": "Mantém a primeira ocorrência de cada linha na ordem original.",
+      "params": {
+        "case_sensitive": {
+          "label": "Diferenciar maiúsculas"
+        },
+        "compare_trimmed": {
+          "label": "Ignorar espaços em volta"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Inverter linhas",
+      "description": "Coloca as linhas na ordem inversa."
+    },
+    "lines.join": {
+      "name": "Juntar linhas",
+      "description": "Combina todas as linhas numa só com um separador.",
+      "params": {
+        "separator": {
+          "label": "Separador",
+          "options": {
+            "space": "Espaço",
+            "comma": "Vírgula",
+            "none": "Nenhum",
+            "custom": "Próprio"
+          }
+        },
+        "custom_separator": {
+          "label": "Separador próprio"
+        },
+        "drop_empty": {
+          "label": "Ignorar linhas vazias"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Desfazer quebras de parágrafo",
+      "description": "Junta linhas quebradas dentro dos parágrafos, como em texto copiado de PDF.",
+      "params": {
+        "dehyphenate": {
+          "label": "Unir palavras hifenizadas"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Prefixar linhas",
+      "description": "Adiciona um marcador, número, sinal de citação ou texto próprio a cada linha.",
+      "params": {
+        "style": {
+          "label": "Estilo",
+          "options": {
+            "dash": "Traço",
+            "asterisk": "Asterisco",
+            "number": "Números",
+            "quote": "Citação",
+            "custom": "Próprio"
+          }
+        },
+        "custom_prefix": {
+          "label": "Prefixo próprio"
+        },
+        "skip_empty": {
+          "label": "Ignorar linhas vazias"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Remover caracteres invisíveis",
+      "description": "Apaga caracteres de largura zero, bidi e hífens suaves e troca espaços rígidos por espaços."
+    },
+    "clean.quotes": {
+      "name": "Endireitar aspas",
+      "description": "Substitui aspas tipográficas por retas e, opcionalmente, travessões por hífens.",
+      "params": {
+        "dashes": {
+          "label": "Endireitar também travessões"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

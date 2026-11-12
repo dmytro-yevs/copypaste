@@ -1,0 +1,373 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "UPPERCASE",
+      "description": "Converts all letters to capitals with full Unicode rules.",
+      "keywords": [
+        "caps",
+        "capital",
+        "uppercase"
+      ],
+      "params": {
+        "locale": {
+          "label": "Language rules",
+          "options": {
+            "invariant": "Language-neutral",
+            "system": "Device language"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "lowercase",
+      "description": "Converts all letters to lowercase with full Unicode rules.",
+      "keywords": [
+        "small",
+        "lowercase"
+      ],
+      "params": {
+        "locale": {
+          "label": "Language rules",
+          "options": {
+            "invariant": "Language-neutral",
+            "system": "Device language"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Title Case",
+      "description": "Capitalizes words; headline style keeps short words lowercase.",
+      "keywords": [
+        "capitalize",
+        "headline",
+        "title"
+      ],
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "headline": "Headline",
+            "all_words": "Every word"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Sentence case",
+      "description": "Capitalizes the first word of each sentence and lowercases the rest.",
+      "keywords": [
+        "capitalize",
+        "sentence"
+      ],
+      "params": {
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Joins words into an identifier that starts lowercase.",
+      "keywords": [
+        "identifier",
+        "variable",
+        "camel"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Joins words into an identifier with every word capitalized.",
+      "keywords": [
+        "identifier",
+        "class",
+        "upper camel"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Joins lowercase words with underscores.",
+      "keywords": [
+        "identifier",
+        "underscore",
+        "snake"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Joins lowercase words with hyphens.",
+      "keywords": [
+        "identifier",
+        "hyphen",
+        "slug"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Joins uppercase words with underscores.",
+      "keywords": [
+        "identifier",
+        "screaming",
+        "upper snake"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Swap case",
+      "description": "Turns uppercase letters lowercase and lowercase letters uppercase.",
+      "keywords": [
+        "invert",
+        "toggle",
+        "case"
+      ]
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Trim",
+      "description": "Removes spaces and line breaks from the start and end of the text.",
+      "keywords": [
+        "strip",
+        "whitespace",
+        "spaces"
+      ]
+    },
+    "lines.trim_each": {
+      "name": "Trim each line",
+      "description": "Removes spaces at the start, end or both sides of every line.",
+      "keywords": [
+        "strip",
+        "whitespace",
+        "trailing spaces"
+      ],
+      "params": {
+        "sides": {
+          "label": "Sides",
+          "options": {
+            "both": "Both",
+            "start": "Start",
+            "end": "End"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Collapse whitespace",
+      "description": "Turns runs of spaces and tabs into a single space.",
+      "keywords": [
+        "spaces",
+        "tabs",
+        "squeeze",
+        "normalize"
+      ],
+      "params": {
+        "keep_line_breaks": {
+          "label": "Keep line breaks"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Remove empty lines",
+      "description": "Deletes lines that are empty or hold only spaces.",
+      "keywords": [
+        "blank lines",
+        "empty"
+      ],
+      "params": {
+        "whitespace_only": {
+          "label": "Whitespace-only lines are empty"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Sort lines",
+      "description": "Sorts lines alphabetically, naturally, numerically or by length.",
+      "keywords": [
+        "order",
+        "alphabetical",
+        "natural sort"
+      ],
+      "params": {
+        "order": {
+          "label": "Order",
+          "options": {
+            "asc": "A to Z",
+            "desc": "Z to A"
+          }
+        },
+        "mode": {
+          "label": "Compare",
+          "options": {
+            "natural": "Natural",
+            "code_point": "Code point",
+            "case_insensitive": "Ignore case",
+            "numeric": "Numeric",
+            "length": "Length"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Remove duplicate lines",
+      "description": "Keeps the first occurrence of each line in the original order.",
+      "keywords": [
+        "unique",
+        "duplicates",
+        "distinct"
+      ],
+      "params": {
+        "case_sensitive": {
+          "label": "Case-sensitive"
+        },
+        "compare_trimmed": {
+          "label": "Ignore surrounding spaces"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Reverse lines",
+      "description": "Puts the lines in the opposite order.",
+      "keywords": [
+        "flip",
+        "invert",
+        "order"
+      ]
+    },
+    "lines.join": {
+      "name": "Join lines",
+      "description": "Combines all lines into one with a separator.",
+      "keywords": [
+        "merge",
+        "single line",
+        "concatenate"
+      ],
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "space": "Space",
+            "comma": "Comma",
+            "none": "None",
+            "custom": "Custom"
+          }
+        },
+        "custom_separator": {
+          "label": "Custom separator"
+        },
+        "drop_empty": {
+          "label": "Skip empty lines"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Unwrap paragraphs",
+      "description": "Joins hard-wrapped lines inside paragraphs, as in text copied from PDFs.",
+      "keywords": [
+        "pdf",
+        "line breaks",
+        "reflow",
+        "hyphenation"
+      ],
+      "params": {
+        "dehyphenate": {
+          "label": "Rejoin hyphenated words"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Prefix lines",
+      "description": "Adds a bullet, number, quote mark or custom text to each line.",
+      "keywords": [
+        "bullet",
+        "list",
+        "number",
+        "quote"
+      ],
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "dash": "Dash",
+            "asterisk": "Asterisk",
+            "number": "Numbers",
+            "quote": "Quote",
+            "custom": "Custom"
+          }
+        },
+        "custom_prefix": {
+          "label": "Custom prefix"
+        },
+        "skip_empty": {
+          "label": "Skip empty lines"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Remove invisible characters",
+      "description": "Deletes zero-width, bidi and soft-hyphen characters and turns no-break spaces into spaces.",
+      "keywords": [
+        "zero width",
+        "zwsp",
+        "bom",
+        "nbsp",
+        "hidden"
+      ]
+    },
+    "clean.quotes": {
+      "name": "Straighten quotes",
+      "description": "Replaces curly quotes with straight ones, and optionally dashes with hyphens.",
+      "keywords": [
+        "smart quotes",
+        "curly",
+        "typographic",
+        "dashes"
+      ],
+      "params": {
+        "dashes": {
+          "label": "Also straighten dashes"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "BÜYÜK HARF",
+      "description": "Tüm harfleri tam Unicode kurallarıyla büyük harfe çevirir.",
+      "params": {
+        "locale": {
+          "label": "Dil kuralları",
+          "options": {
+            "invariant": "Dilden bağımsız",
+            "system": "Cihaz dili"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "küçük harf",
+      "description": "Tüm harfleri tam Unicode kurallarıyla küçük harfe çevirir.",
+      "params": {
+        "locale": {
+          "label": "Dil kuralları",
+          "options": {
+            "invariant": "Dilden bağımsız",
+            "system": "Cihaz dili"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Başlık Biçimi",
+      "description": "Sözcüklerin ilk harfini büyütür; başlık stili kısa sözcükleri küçük bırakır.",
+      "params": {
+        "style": {
+          "label": "Stil",
+          "options": {
+            "headline": "Başlık",
+            "all_words": "Her sözcük"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Cümle biçimi",
+      "description": "Her cümlenin ilk sözcüğünü büyük harfle başlatır, gerisini küçültür.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Sözcükleri küçük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Sözcükleri her biri büyük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Küçük harfli sözcükleri alt çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Küçük harfli sözcükleri kısa çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Büyük harfli sözcükleri alt çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Harf büyüklüğünü değiştir",
+      "description": "Büyük harfleri küçük, küçük harfleri büyük yapar."
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Kırp",
+      "description": "Metnin başındaki ve sonundaki boşlukları ve satır sonlarını kaldırır."
+    },
+    "lines.trim_each": {
+      "name": "Her satırı kırp",
+      "description": "Her satırın başındaki, sonundaki ya da iki yanındaki boşlukları kaldırır.",
+      "params": {
+        "sides": {
+          "label": "Kenarlar",
+          "options": {
+            "both": "İkisi de",
+            "start": "Baş",
+            "end": "Son"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Boşlukları daralt",
+      "description": "Art arda gelen boşluk ve sekmeleri tek boşluğa indirir.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Satır sonlarını koru"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Boş satırları kaldır",
+      "description": "Boş ya da yalnızca boşluk içeren satırları siler.",
+      "params": {
+        "whitespace_only": {
+          "label": "Yalnızca boşluk içeren satırlar boş sayılır"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Satırları sırala",
+      "description": "Satırları alfabetik, doğal, sayısal ya da uzunluğa göre sıralar.",
+      "params": {
+        "order": {
+          "label": "Sıra",
+          "options": {
+            "asc": "A'dan Z'ye",
+            "desc": "Z'den A'ya"
+          }
+        },
+        "mode": {
+          "label": "Karşılaştırma",
+          "options": {
+            "natural": "Doğal",
+            "code_point": "Kod noktası",
+            "case_insensitive": "Harf büyüklüğünü yok say",
+            "numeric": "Sayısal",
+            "length": "Uzunluk"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Yinelenen satırları kaldır",
+      "description": "Her satırın ilk geçtiği yeri özgün sırayla korur.",
+      "params": {
+        "case_sensitive": {
+          "label": "Büyük/küçük harf duyarlı"
+        },
+        "compare_trimmed": {
+          "label": "Çevredeki boşlukları yok say"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Satırları ters çevir",
+      "description": "Satırları ters sıraya koyar."
+    },
+    "lines.join": {
+      "name": "Satırları birleştir",
+      "description": "Tüm satırları bir ayırıcıyla tek satırda birleştirir.",
+      "params": {
+        "separator": {
+          "label": "Ayırıcı",
+          "options": {
+            "space": "Boşluk",
+            "comma": "Virgül",
+            "none": "Yok",
+            "custom": "Özel"
+          }
+        },
+        "custom_separator": {
+          "label": "Özel ayırıcı"
+        },
+        "drop_empty": {
+          "label": "Boş satırları atla"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Paragrafları düzelt",
+      "description": "PDF'den kopyalanan metindeki gibi paragraf içinde bölünmüş satırları birleştirir.",
+      "params": {
+        "dehyphenate": {
+          "label": "Tireyle bölünmüş sözcükleri birleştir"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Satırlara önek ekle",
+      "description": "Her satırın başına madde işareti, numara, alıntı işareti ya da özel metin ekler.",
+      "params": {
+        "style": {
+          "label": "Stil",
+          "options": {
+            "dash": "Tire",
+            "asterisk": "Yıldız",
+            "number": "Numaralar",
+            "quote": "Alıntı",
+            "custom": "Özel"
+          }
+        },
+        "custom_prefix": {
+          "label": "Özel önek"
+        },
+        "skip_empty": {
+          "label": "Boş satırları atla"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Görünmez karakterleri kaldır",
+      "description": "Sıfır genişlikli, bidi ve yumuşak tire karakterlerini siler, bölünmez boşlukları normal boşluğa çevirir."
+    },
+    "clean.quotes": {
+      "name": "Tırnakları düzleştir",
+      "description": "Kıvrık tırnakları düz tırnakla, isteğe bağlı olarak uzun çizgileri kısa çizgiyle değiştirir.",
+      "params": {
+        "dashes": {
+          "label": "Çizgileri de düzleştir"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}

@@ -1,0 +1,260 @@
+{
+  "structure": {},
+  "encode": {},
+  "case": {
+    "case.upper": {
+      "name": "WIELKIE LITERY",
+      "description": "Zamienia wszystkie litery na wielkie według pełnych reguł Unicode.",
+      "params": {
+        "locale": {
+          "label": "Reguły językowe",
+          "options": {
+            "invariant": "Neutralne",
+            "system": "Język urządzenia"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "małe litery",
+      "description": "Zamienia wszystkie litery na małe według pełnych reguł Unicode.",
+      "params": {
+        "locale": {
+          "label": "Reguły językowe",
+          "options": {
+            "invariant": "Neutralne",
+            "system": "Język urządzenia"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Styl Tytułowy",
+      "description": "Zaczyna słowa wielką literą; styl nagłówka zostawia krótkie słowa małymi.",
+      "params": {
+        "style": {
+          "label": "Styl",
+          "options": {
+            "headline": "Nagłówek",
+            "all_words": "Każde słowo"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Zachowaj skrótowce"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Styl zdania",
+      "description": "Zaczyna każde zdanie wielką literą, a resztę zapisuje małymi.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Zachowaj skrótowce"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Łączy słowa w identyfikator zaczynający się małą literą.",
+      "params": {
+        "per_line": {
+          "label": "Każdy wiersz osobno"
+        },
+        "keep_acronyms": {
+          "label": "Zachowaj skrótowce"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Łączy słowa w identyfikator, w którym każde słowo zaczyna się wielką literą.",
+      "params": {
+        "per_line": {
+          "label": "Każdy wiersz osobno"
+        },
+        "keep_acronyms": {
+          "label": "Zachowaj skrótowce"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Łączy słowa pisane małymi literami podkreśleniami.",
+      "params": {
+        "per_line": {
+          "label": "Każdy wiersz osobno"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Łączy słowa pisane małymi literami łącznikami.",
+      "params": {
+        "per_line": {
+          "label": "Każdy wiersz osobno"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Łączy słowa pisane wielkimi literami podkreśleniami.",
+      "params": {
+        "per_line": {
+          "label": "Każdy wiersz osobno"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Zamień wielkość liter",
+      "description": "Zmienia wielkie litery na małe, a małe na wielkie."
+    }
+  },
+  "hash": {},
+  "lines": {
+    "lines.trim": {
+      "name": "Przytnij",
+      "description": "Usuwa spacje i podziały wiersza z początku i końca tekstu."
+    },
+    "lines.trim_each": {
+      "name": "Przytnij każdy wiersz",
+      "description": "Usuwa spacje na początku, na końcu lub po obu stronach każdego wiersza.",
+      "params": {
+        "sides": {
+          "label": "Strony",
+          "options": {
+            "both": "Obie",
+            "start": "Początek",
+            "end": "Koniec"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Scal białe znaki",
+      "description": "Zamienia ciągi spacji i tabulatorów na jedną spację.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Zachowaj podziały wierszy"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Usuń puste wiersze",
+      "description": "Usuwa wiersze puste lub zawierające tylko spacje.",
+      "params": {
+        "whitespace_only": {
+          "label": "Wiersze z samymi spacjami są puste"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Sortuj wiersze",
+      "description": "Sortuje wiersze alfabetycznie, naturalnie, liczbowo lub według długości.",
+      "params": {
+        "order": {
+          "label": "Kolejność",
+          "options": {
+            "asc": "A do Z",
+            "desc": "Z do A"
+          }
+        },
+        "mode": {
+          "label": "Porównanie",
+          "options": {
+            "natural": "Naturalne",
+            "code_point": "Punkt kodowy",
+            "case_insensitive": "Ignoruj wielkość liter",
+            "numeric": "Liczbowe",
+            "length": "Długość"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Usuń zduplikowane wiersze",
+      "description": "Zachowuje pierwsze wystąpienie każdego wiersza w pierwotnej kolejności.",
+      "params": {
+        "case_sensitive": {
+          "label": "Uwzględniaj wielkość liter"
+        },
+        "compare_trimmed": {
+          "label": "Ignoruj otaczające spacje"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Odwróć wiersze",
+      "description": "Ustawia wiersze w odwrotnej kolejności."
+    },
+    "lines.join": {
+      "name": "Połącz wiersze",
+      "description": "Łączy wszystkie wiersze w jeden z separatorem.",
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "space": "Spacja",
+            "comma": "Przecinek",
+            "none": "Brak",
+            "custom": "Własny"
+          }
+        },
+        "custom_separator": {
+          "label": "Własny separator"
+        },
+        "drop_empty": {
+          "label": "Pomiń puste wiersze"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Rozwiń akapity",
+      "description": "Łączy łamane wiersze w akapitach, np. w tekście skopiowanym z PDF.",
+      "params": {
+        "dehyphenate": {
+          "label": "Scal wyrazy z łącznikiem"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Dodaj prefiks do wierszy",
+      "description": "Dodaje punktor, numer, znak cytatu lub własny tekst do każdego wiersza.",
+      "params": {
+        "style": {
+          "label": "Styl",
+          "options": {
+            "dash": "Myślnik",
+            "asterisk": "Gwiazdka",
+            "number": "Numery",
+            "quote": "Cytat",
+            "custom": "Własny"
+          }
+        },
+        "custom_prefix": {
+          "label": "Własny prefiks"
+        },
+        "skip_empty": {
+          "label": "Pomiń puste wiersze"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Usuń niewidoczne znaki",
+      "description": "Usuwa znaki o zerowej szerokości, bidi i miękkie łączniki oraz zamienia twarde spacje na zwykłe."
+    },
+    "clean.quotes": {
+      "name": "Wyprostuj cudzysłowy",
+      "description": "Zastępuje drukarskie cudzysłowy prostymi, a opcjonalnie pauzy łącznikami.",
+      "params": {
+        "dashes": {
+          "label": "Prostuj też pauzy"
+        }
+      }
+    }
+  },
+  "url": {},
+  "markup": {},
+  "dev": {}
+}
