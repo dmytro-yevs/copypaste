@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One clip in the keyboard panel list. The row itself carries the merged
+     content description and accessibility actions. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="@dimen/app_control_size_touch"
+    android:orientation="horizontal"
+    android:paddingStart="@dimen/app_spacing_md"
+    android:paddingTop="@dimen/app_spacing_sm"
+    android:paddingEnd="@dimen/app_spacing_md"
+    android:paddingBottom="@dimen/app_spacing_sm">
+
+    <ImageView
+        android:id="@+id/ime_row_thumbnail"
+        android:layout_width="@dimen/app_icon_size_xl"
+        android:layout_height="@dimen/app_icon_size_xl"
+        android:layout_marginEnd="@dimen/app_spacing_md"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:importantForAccessibility="noHideDescendants"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/ime_row_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_base" />
+
+        <TextView
+            android:id="@+id/ime_row_meta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/app_spacing_xxs"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/app_color_muted_foreground"
+            android:textSize="@dimen/app_text_size_history_metadata" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/ime_row_badge"
+        android:layout_width="@dimen/app_icon_size_sm"
+        android:layout_height="@dimen/app_icon_size_sm"
+        android:layout_marginStart="@dimen/app_spacing_sm"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+</LinearLayout>

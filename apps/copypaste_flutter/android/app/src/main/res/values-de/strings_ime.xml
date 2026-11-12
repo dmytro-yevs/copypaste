@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">Panelgröße ändern</string>
+    <string name="ime_search_hint">Clips durchsuchen</string>
+    <string name="ime_backspace">Löschen</string>
+    <string name="ime_undo_insert">Einfügen rückgängig machen</string>
+    <string name="ime_enter">Eingabe</string>
+    <string name="ime_keypad_switch_layout">Layout wechseln</string>
+    <string name="ime_keypad_space">Leerzeichen</string>
+    <string name="ime_keypad_done">Fertig</string>
+    <string name="ime_keypad_backspace">Rücktaste</string>
+    <string name="ime_kind_text">Text</string>
+    <string name="ime_kind_link">Link</string>
+    <string name="ime_kind_email">E-Mail</string>
+    <string name="ime_kind_phone">Telefonnummer</string>
+    <string name="ime_kind_color">Farbe</string>
+    <string name="ime_kind_code">Code</string>
+    <string name="ime_kind_image">Bild</string>
+    <string name="ime_kind_file">Datei</string>
+    <string name="ime_current_clipboard">Aktuelle Zwischenablage</string>
+    <string name="ime_secret_item">Geheimes Element, zum Einfügen doppelt tippen und bestätigen</string>
+    <string name="ime_pinned">Angeheftet</string>
+    <string name="ime_loading">Clips werden geladen…</string>
+    <string name="ime_locked">Entsperre dein Gerät, um deine Clips zu sehen</string>
+    <string name="ime_error">Deine Clips konnten nicht geöffnet werden</string>
+    <string name="ime_retry">Erneut versuchen</string>
+    <string name="ime_no_results">Keine Treffer für „%1$s“</string>
+    <string name="ime_empty_history">Noch nichts hier. Kopiere etwas oder tippe auf „Zwischenablage speichern“.</string>
+    <string name="ime_empty_pinned">Noch keine angehefteten Clips</string>
+    <string name="ime_tab_history">Verlauf</string>
+    <string name="ime_tab_pinned">Angeheftet</string>
+    <string name="ime_tab_snippets">Snippets</string>
+    <string name="ime_tab_queue">Warteschlange</string>
+    <string name="ime_action_cancel">Abbrechen</string>
+    <string name="ime_action_insert">Einfügen</string>
+    <string name="ime_action_insert_plain">Als reinen Text einfügen</string>
+    <string name="ime_action_copy">In die Zwischenablage kopieren</string>
+    <string name="ime_action_pin">Anheften</string>
+    <string name="ime_action_unpin">Loslösen</string>
+    <string name="ime_action_delete">Löschen</string>
+    <string name="ime_action_reveal">Anzeigen</string>
+    <string name="ime_delete_confirm">Diesen Clip löschen?</string>
+    <string name="ime_delete_failed">Der Clip konnte nicht gelöscht werden</string>
+    <string name="ime_inserted">Eingefügt</string>
+    <string name="ime_copied">Kopiert</string>
+    <string name="ime_copy_failed">Der Clip konnte nicht kopiert werden</string>
+    <string name="ime_insert_failed">Hier kann nicht eingefügt werden</string>
+    <string name="ime_insert_too_large">Zu groß zum Einfügen</string>
+    <string name="ime_paste_via_clipboard">Über die Zwischenablage einfügen</string>
+    <string name="ime_image_not_accepted">Dieses Feld akzeptiert keine Bilder</string>
+    <string name="ime_file_not_accepted">Dieses Feld akzeptiert keine Dateien</string>
+    <string name="ime_item_unavailable">Dieser Clip ist nicht mehr verfügbar</string>
+    <string name="ime_unlock_failed">Geheime Elemente konnten nicht entsperrt werden</string>
+    <string name="ime_masked_mode">Passwortfeld: Vorschauen ausgeblendet</string>
+    <string name="ime_private_field">Privates Feld: Es wird nichts gespeichert</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="one">%d Zeichen</item>
+        <item quantity="other">%d Zeichen</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="one">%d in der Warteschlange</item>
+        <item quantity="other">%d in der Warteschlange</item>
+    </plurals>
+</resources>

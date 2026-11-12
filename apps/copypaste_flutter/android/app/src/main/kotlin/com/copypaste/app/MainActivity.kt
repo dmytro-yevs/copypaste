@@ -134,6 +134,9 @@ class MainActivity : FlutterActivity() {
         @JvmStatic
         private external fun releaseRuntimeMemory()
 
+        /** For surfaces without an activity, such as the keyboard panel after it hides. */
+        internal fun trimRuntimeMemory() = releaseRuntimeMemory()
+
         // Registered on the application context: capture services keep the
         // process-wide runtime open after this activity is gone.
         private val runtimeMemoryTrim = object : ComponentCallbacks2 {
