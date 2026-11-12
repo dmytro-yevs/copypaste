@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputContentInfo
 
@@ -51,6 +52,18 @@ internal class PanelInsert(private val connection: () -> InputConnection?) {
         }
         last = Committed(text.toString(), replaced, if (start >= 0) start + text.length else -1)
         return InsertOutcome.INSERTED
+    }
+
+    /** Puts the caret [chars] UTF-16 units before the end of the text just inserted (a template cursor). */
+    fun moveCaretBack(chars: Int): Boolean {
+        val record = last ?: return false
+        if (chars <= 0 || chars > record.text.length) return false
+        val ic = connection() ?: return false
+        val end = record.end.takeIf { it >= 0 }
+            ?: ic.getExtractedText(ExtractedTextRequest(), 0)?.let { it.startOffset + it.selectionEnd }
+            ?: return false
+        last = null
+        return ic.setSelection(end - chars, end - chars)
     }
 
     /** Commits [uri] as rich content when the editor declared [mimeType]. */

@@ -19,6 +19,7 @@ import com.copypaste.app.ime.NativePanelClipboard
 import com.copypaste.app.ime.PanelController
 import com.copypaste.app.ime.PanelHost
 import com.copypaste.app.ime.PanelPreferences
+import com.copypaste.app.ime.registerPanelFeatures
 
 /**
  * The keyboard panel. It never types into host fields; it retrieves and
@@ -56,13 +57,9 @@ class ClipboardInputMethodService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         ScreenshotProtection.install(application)
-        panel = PanelController(
-            this,
-            host,
-            RuntimeAccessWorker.native(this),
-            NativePanelClipboard(this),
-            PanelPreferences(this),
-        )
+        val worker = RuntimeAccessWorker.native(this)
+        panel = PanelController(this, host, worker, NativePanelClipboard(this), PanelPreferences(this))
+        registerPanelFeatures(this, panel, worker)
         panel.onCreate()
     }
 

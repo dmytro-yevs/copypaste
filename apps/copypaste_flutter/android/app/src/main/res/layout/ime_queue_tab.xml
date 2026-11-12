@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Queue tab body: option chips, a one-line status, the entry list (or its
+     state) and a fixed row of queue actions. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/ime_queue_options"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_spacing_sm"
+            android:paddingTop="@dimen/app_spacing_xs"
+            android:paddingEnd="@dimen/app_spacing_sm" />
+    </HorizontalScrollView>
+
+    <TextView
+        android:id="@+id/ime_queue_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:accessibilityLiveRegion="polite"
+        android:ellipsize="end"
+        android:paddingStart="@dimen/app_spacing_md"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_md"
+        android:singleLine="true"
+        android:textColor="@color/app_color_muted_foreground"
+        android:textSize="@dimen/app_text_size_x_small" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/ime_queue_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:scrollbarStyle="outsideOverlay" />
+
+        <include layout="@layout/ime_feature_state" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/ime_queue_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_sm" />
+</LinearLayout>

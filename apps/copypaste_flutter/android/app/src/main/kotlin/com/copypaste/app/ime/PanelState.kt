@@ -11,7 +11,8 @@ internal enum class PanelTab(val key: String) {
     HISTORY("history"),
     PINNED("pinned"),
     SNIPPETS("snippets"),
-    QUEUE("queue");
+    QUEUE("queue"),
+    TRANSFORMS("transforms");
 
     companion object {
         fun of(key: String?): PanelTab = entries.firstOrNull { it.key == key } ?: HISTORY

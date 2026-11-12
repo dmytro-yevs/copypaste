@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Transforms tab body: source chips, the transform list (or its state), a
+     preview strip with parameter chips, and a fixed row of output actions. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/ime_transforms_sources"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_spacing_sm"
+            android:paddingTop="@dimen/app_spacing_xs"
+            android:paddingEnd="@dimen/app_spacing_sm" />
+    </HorizontalScrollView>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/ime_transforms_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:scrollbarStyle="outsideOverlay" />
+
+        <include layout="@layout/ime_feature_state" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/ime_transforms_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/app_color_muted"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/app_spacing_md"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_md"
+        android:paddingBottom="@dimen/app_spacing_xs"
+        android:visibility="gone">
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/ime_transforms_params"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/ime_transforms_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityLiveRegion="polite"
+            android:ellipsize="end"
+            android:maxLines="3"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_small" />
+
+        <TextView
+            android:id="@+id/ime_transforms_meta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/app_color_muted_foreground"
+            android:textSize="@dimen/app_text_size_x_small" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/ime_transforms_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_sm"
+        android:visibility="gone" />
+</LinearLayout>
