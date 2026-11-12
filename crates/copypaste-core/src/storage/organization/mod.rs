@@ -85,6 +85,23 @@ pub enum RecordKey<'a> {
     ClipNote(&'a str),
 }
 
+impl RecordKey<'_> {
+    fn key(self) -> String {
+        match self {
+            Self::Snippet(id) => snippets::snippet_key(id),
+            Self::SnippetBody(id) => snippets::body_key(id),
+            Self::SnippetCollection(id) => snippets::collection_key(id),
+            Self::ContentRule(id) => rules::rule_key(id),
+            Self::ContentRulePlacement(id) => rules::placement_key(id),
+            Self::Pipeline(id) => transforms::pipeline_key(id),
+            Self::Preference { namespace, key } => preferences::preference_key(namespace, key),
+            Self::SetMember { set, member } => preferences::member_key(set, member),
+            Self::AiGrant(id) => ai::grant_key(id),
+            Self::ClipNote(clip_id) => clip_notes::note_key(clip_id),
+        }
+    }
+}
+
 pub(crate) fn is_record_id(id: &str) -> bool {
     id.starts_with(PREFIX)
 }
@@ -645,14 +662,38 @@ impl Store {
         key: &crate::ItemKey,
         record: Record,
     ) -> Result<(), StoreError> {
-        if record.kind_class() == LEGACY_KIND_CLASS {
-            return Err(StoreError::InvalidHistoryQuery);
-        }
+        self.write_organization_records(key, [record])
+    }
+
+    /// Writes library records in one transaction: all of them or none.
+    pub fn write_organization_records(
+        &self,
+        key: &crate::ItemKey,
+        records: impl IntoIterator<Item = Record>,
+    ) -> Result<(), StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        write(&tx, key, record)?;
+        for record in records {
+            if record.kind_class() == LEGACY_KIND_CLASS {
+                return Err(StoreError::InvalidHistoryQuery);
+            }
+            write(&tx, key, record)?;
+        }
         tx.commit()?;
         Ok(())
+    }
+
+    /// The stamp of the stored version of one library record: the base an
+    /// edit records, so a concurrent restrictive change is recognised.
+    pub fn organization_record_stamp(&self, key: RecordKey<'_>) -> Result<Option<i64>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT created_at FROM organization_records WHERE id=?1 AND deleted=0",
+                [record_id(&key.key())],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// The projected value of one library record, as every query sees it.

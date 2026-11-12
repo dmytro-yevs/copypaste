@@ -222,12 +222,18 @@ CREATE TABLE expired_ids (
 CREATE INDEX idx_expired_ids_at ON expired_ids(expired_at);
 
 -- Per-clip local state follows its clip. Inserts never clear it, so a restore
--- that copies clips before their state keeps every row.
+-- that copies clips before their state keeps every row. A tombstoned clip
+-- tombstones its synced note at a stamp derived from the clip's own, so the
+-- deleting device and every receiver write the same version.
 CREATE TRIGGER clip_state_tombstone AFTER UPDATE OF deleted ON clipboard_items
 WHEN OLD.deleted = 0 AND NEW.deleted = 1 BEGIN
   DELETE FROM clip_local_state WHERE clip_id = NEW.id;
   DELETE FROM clip_rule_tags WHERE clip_id = NEW.id;
   DELETE FROM rule_originals WHERE clip_id = NEW.id;
+  UPDATE organization_records SET deleted = 1, content_ciphertext = X'', nonce = X'',
+      created_at = MAX(created_at + 1, NEW.created_at)
+  WHERE deleted = 0 AND id IN (SELECT record_id FROM clip_notes WHERE clip_id = NEW.id);
+  DELETE FROM clip_notes WHERE clip_id = NEW.id;
 END;
 CREATE TRIGGER clip_state_delete AFTER DELETE ON clipboard_items BEGIN
   DELETE FROM clip_local_state WHERE clip_id = OLD.id;

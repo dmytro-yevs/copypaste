@@ -888,3 +888,37 @@ fn clip_notes_wait_for_their_clip_and_only_notes_accept_a_tombstone() {
     assert!(!forged, "only a clip note may be tombstoned");
     assert!(record(&b, RecordKey::Snippet("s1")).is_some());
 }
+
+#[test]
+fn deleting_a_clip_tombstones_its_note_with_one_version_everywhere() {
+    let (a, ka) = store(69);
+    let (b, kb) = store(70);
+    let clip_id = clip(&a, &ka, "short lived", 100);
+    write(&a, &ka, Record::ClipNote(note(&clip_id, true, 1, 0, false)));
+    sync(&a, &ka, &b, &kb, "a");
+    let note_id = record_id(&format!("clip_note:{clip_id}"));
+    let written = a
+        .organization_record_stamp(RecordKey::ClipNote(&clip_id))
+        .unwrap();
+    assert_eq!(
+        written,
+        Some(a.version(&note_id).unwrap().unwrap().created_at)
+    );
+
+    assert!(a.delete(&clip_id).unwrap());
+    sync(&a, &ka, &b, &kb, "a");
+
+    let versions = [&a, &b].map(|store| {
+        let row = store.version(&note_id).unwrap().unwrap();
+        (row.deleted, row.created_at, row.content_hash)
+    });
+    assert!(versions[0].0, "the note is tombstoned with its clip");
+    assert_eq!(versions[0], versions[1]);
+    for store in [&a, &b] {
+        assert!(record(store, RecordKey::ClipNote(&clip_id)).is_none());
+        assert!(store
+            .organization_record_stamp(RecordKey::ClipNote(&clip_id))
+            .unwrap()
+            .is_none());
+    }
+}
