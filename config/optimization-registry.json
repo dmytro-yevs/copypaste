@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-06",
+  "date": "2026-11-11",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -2545,9 +2545,10 @@
         "crates/copypaste-core/src/storage/history_preview.rs",
         "crates/copypaste-core/src/crypto/preview.rs",
         "crates/copypaste-core/src/history_item.rs",
+        "crates/copypaste-core/src/clipboard_payload.rs",
         "crates/copypaste-core/src/storage/migrations/007_history_preview_cache.sql"
       ],
-      "invariant": "Read metadata and streaming source fingerprint in one SQLite snapshot; domain-separated AEAD binds row ID, nonce, content type and exact metadata. Cache failure falls back to authenticating the original.",
+      "invariant": "Read metadata and streaming source fingerprint in one SQLite snapshot; domain-separated AEAD binds row ID, nonce, content type and exact metadata. Cache failure falls back to authenticating the original. The text line count is one byte scan of the body already opened to build a missed preview and is cached inside the sealed preview; a hit adds no work, no column or migration stores it, and secret items never carry it.",
       "allocation_lifetime": "Lazy page-scoped resolution and best-effort cache writes; restore/tombstones release entries. Fresh origins, pin/source labels and file availability are applied at presentation.",
       "bounds": {
         "ciphertext_entries": 1024,
@@ -2556,7 +2557,7 @@
         "hash_buffer_bytes": 65536
       },
       "cancellation": "Preserve existing cancellation and release ownership after actual work exits.",
-      "tradeoffs": "Logical cache limits exclude SQLite metadata, WAL/freelist and page caches. Adds SHA work and best-effort writes; workload-specific CPU/IO tradeoffs require measurement. Full get/copy/save authentication remains unchanged.",
+      "tradeoffs": "Logical cache limits exclude SQLite metadata, WAL/freelist and page caches. Adds SHA work and best-effort writes; workload-specific CPU/IO tradeoffs require measurement. Full get/copy/save authentication remains unchanged. Source version v4 (line counts) invalidates earlier entries, so each listed row is authenticated once more on its first read after upgrade; there is no background backfill.",
       "next_step": "This wave is closed. Resource qualification remains unestablished; no automatic follow-up is scheduled.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -4613,6 +4614,106 @@
       ],
       "invariant": "P2P planning requests a version for its pin state only when both the local and remote versions are live, matching apply, which never stores pin state on or from a tombstone. A deleted pinned item's tombstone keeps its pin stamp on the deleting device, but it is transferred once and then no longer re-sent and declined every session.",
       "next_step": "Measure app, daemon and workers separately and combined on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-104",
+      "title": "Storage usage readout from the quota's own index",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/retention.rs",
+        "crates/copypaste-ipc/src/response.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-flutter-bridge/src/api.rs",
+        "apps/copypaste_flutter/lib/features/settings/controller/settings_controller.dart",
+        "apps/copypaste_flutter/lib/features/settings/repository/runtime_settings_repository.dart",
+        "apps/copypaste_flutter/lib/features/settings/view/storage_header_action.dart"
+      ],
+      "invariant": "The used-of-quota readout is the byte sweep's own total (covering scan of idx_items_unpinned_bytes over live unpinned rows) plus one idx_items_evictable seek for the oldest unpinned capture time; no payload or table row is read and no counter, column or migration is added. It is computed only for a settings reply (GetConfig, SetConfig) and carried there, so it adds no request to settings loads and nothing to status, events or captures. The application re-reads it after a history change only while the readout has a listener, with one request in flight and one trailing read per burst; the header cell listens only in the stages that show it (not in the bottom-navigation header) and the Settings row only while Settings is presented; there is no timer, and an unreadable store reports no value rather than zero.",
+      "next_step": "Measure the settings-reply aggregate at the 10,000-item default and the 1,000,000-item maximum history on release builds of every listed platform, and daemon plus application CPU and wakeups during a capture burst with the readout visible and hidden. No budget exists for it in config/runtime-resource-budgets.json.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-105",
+      "title": "History group counts from covering indexes",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/history_counts.rs",
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-ipc/src/payload/mod.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-flutter-bridge/src/api.rs",
+        "apps/copypaste_flutter/lib/features/history/controller/history_group_counts_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_window_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/repository/runtime_history_repository.dart"
+      ],
+      "invariant": "The pinned count and one count per displayed day are exact and read from covering indexes in one snapshot: idx_items_history for pins, one idx_items_evictable range per client-supplied [from, before) instant pair, with origin and source-application filters answered by idx_items_syncable and idx_items_source_app seeks and tag filters by the tag tables. No table row, payload or FTS text is read, at most 256 ranges are accepted, and rows outside the requested groups are not visited. A query with text search, a content-class or a semantic-kind filter is answered as uncounted instead of estimated, because those columns follow the encrypted payload in the row. The application asks only when group headers are enabled, for days in resident pages, when the query, the displayed days or the history changes; one request is in flight, an uncountable query is asked once, and counts are withheld while a displayed page reports undecryptable rows. There is no timer.",
+      "next_step": "Measure the count request on release builds of every listed platform with 10,000 and 1,000,000 retained items, unfiltered and with origin and source-application filters, and daemon plus application CPU and wakeups during a capture burst with History visible. No budget exists for it in config/runtime-resource-budgets.json. Counting kind filters needs an index that carries the content type and a stored semantic kind, which is a schema change that has not been made.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-106",
+      "title": "Streamed text export and progress-reporting backup",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core transfer and history_backup",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/transfer/export.rs",
+        "crates/copypaste-core/src/history_backup.rs",
+        "crates/copypaste-core/src/storage/dbfile.rs",
+        "crates/copypaste-runtime/src/dispatch.rs",
+        "crates/copypaste-daemon/src/server/listener.rs",
+        "crates/copypaste-flutter-bridge/src/export_file.rs",
+        "crates/copypaste-flutter-bridge/src/api.rs"
+      ],
+      "invariant": "The app's text export reads history in one snapshot and hands it over in chunks of about 1 MiB through a one-frame queue, and the client appends each chunk to a same-directory temporary file, so no process holds the whole export or its pretty-printed copy; the single-reply export it replaces held the whole export (up to the 32 MiB frame) in the daemon reply and twice in the client. Backup uses SQLite's online backup in 256-page steps. Progress for both is sent at most every 250 ms and only while an operation runs; nothing polls.",
+      "next_step": "Measure app, daemon and workers separately and combined while exporting and backing up a large history on release builds of every listed platform (peak, steady, recovery, growth) before native resource qualification.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",

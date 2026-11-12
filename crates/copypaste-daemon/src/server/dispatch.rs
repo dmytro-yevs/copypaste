@@ -191,6 +191,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Search { .. }
         | Method::HistoryQuery { .. }
         | Method::HistoryFacets
+        | Method::HistoryCounts { .. }
         | Method::HistoryTags { .. }
         | Method::MutateHistoryTags { .. }
         | Method::Copy { .. }
@@ -238,8 +239,10 @@ fn requires_ready(method: &Method) -> bool {
         // anyway, deliberately: the degraded
         // mode to escape from, and v2 does not.
         | Method::Export { .. }
+        | Method::ExportStream
         | Method::Import { .. }
         | Method::Backup { .. }
+        | Method::BackupStream { .. }
         | Method::Restore { .. } => true,
         Method::CloudStatus => false,
         // Both are intercepted in `server::listener` before dispatch — one
@@ -290,7 +293,10 @@ fn blocking_weight(method: &Method) -> u32 {
             (2 * copypaste_ipc::MAX_FRAME_BYTES / MIB) as u32
         }
         method if interactive(method) => (4 * copypaste_ipc::MAX_CONTENT_BYTES / MIB) as u32,
-        Method::Get { .. } => (8 * copypaste_ipc::MAX_CONTENT_BYTES / MIB) as u32,
+        // Up to three chunks: queued, being written, and being read.
+        Method::Get { .. } | Method::ExportStream => {
+            (8 * copypaste_ipc::MAX_CONTENT_BYTES / MIB) as u32
+        }
         Method::List { .. }
         | Method::Search { .. }
         | Method::HistoryQuery { .. }
@@ -375,6 +381,37 @@ pub(super) async fn dispatch_request(
         Ok(response) => response,
         Err(e) => {
             error!(error = %e, "request handler did not complete");
+            AdmittedResponse {
+                response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
+                _lease: None,
+                _wire_lease: None,
+            }
+        }
+    }
+}
+
+/// [`dispatch_request`] for a streamed method: interim frames go to `frames`
+/// in order, and the final reply is returned. A closed `frames` abandons the
+/// operation.
+pub(super) async fn dispatch_stream(
+    state: &Arc<AppState>,
+    request: Request,
+    wire_lease: Option<WireLease>,
+    frames: tokio::sync::mpsc::Sender<Response>,
+) -> AdmittedResponse {
+    let id = request.id;
+    let method = request.method;
+    let units = blocking_weight(&method);
+    let state = Arc::clone(state);
+    match blocking_work(payload_pool(false), units, wire_lease, move || {
+        let mut emit = |frame| frames.blocking_send(frame).is_ok();
+        state.runtime.request_stream(id, method, &mut emit)
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(e) => {
+            error!(error = %e, "streamed request handler did not complete");
             AdmittedResponse {
                 response: Response::err(id, ErrorCode::Internal, MSG_INTERNAL),
                 _lease: None,

@@ -1856,6 +1856,113 @@ mod tests {
         }
     }
 
+    /// Local captures store no origin, so the local device filter must count
+    /// them exactly as the list shows them.
+    #[tokio::test]
+    async fn history_counts_answer_in_process_with_the_local_device_filter() {
+        let (runtime, _dir) = fixture();
+        for id in ["first", "second", "third"] {
+            seed_text(&runtime, id, id);
+        }
+        assert!(runtime.store.set_pinned("third", true).unwrap());
+        let local = copypaste_ipc::HistoryQuery {
+            origin_device_id: Some(runtime.meta.device_id().to_owned()),
+            ..Default::default()
+        };
+        let ranges = vec![copypaste_ipc::HistoryCountRange {
+            from_ms: 0,
+            before_ms: 2,
+        }];
+        let counted = runtime
+            .request(
+                1,
+                Method::HistoryCounts {
+                    query: local.clone(),
+                    ranges: ranges.clone(),
+                },
+            )
+            .await;
+        assert!(matches!(
+            counted.data,
+            Some(ResponseData::HistoryCounts(Some(counts)))
+                if counts.pinned == 1 && counts.ranges == [2]
+        ));
+
+        let searching = runtime
+            .request(
+                2,
+                Method::HistoryCounts {
+                    query: copypaste_ipc::HistoryQuery {
+                        search: Some("first".into()),
+                        ..local
+                    },
+                    ranges,
+                },
+            )
+            .await;
+        assert!(matches!(
+            searching.data,
+            Some(ResponseData::HistoryCounts(None))
+        ));
+    }
+
+    /// The readout rides the settings replies, and a reply that tightened
+    /// retention reports the history as the sweep left it.
+    #[tokio::test]
+    async fn settings_replies_report_quota_usage_through_pruning() {
+        fn usage(response: Response) -> copypaste_ipc::StorageUsage {
+            match response.data {
+                Some(ResponseData::Config(applied)) => {
+                    applied.storage_usage.expect("usage is reported")
+                }
+                other => panic!("expected config response, got {other:?}"),
+            }
+        }
+        let (runtime, _dir) = fixture();
+        assert_eq!(
+            usage(runtime.request(1, Method::GetConfig).await),
+            copypaste_ipc::StorageUsage {
+                used_bytes: 0,
+                oldest_unpinned_at: None,
+            }
+        );
+
+        for n in 0..12 {
+            seed_text(&runtime, &format!("clip-{n:02}"), &format!("text {n:02}"));
+        }
+        let clip_bytes = runtime
+            .store
+            .get("clip-00")
+            .unwrap()
+            .unwrap()
+            .content_ciphertext
+            .len() as u64;
+        assert_eq!(
+            usage(runtime.request(2, Method::GetConfig).await),
+            copypaste_ipc::StorageUsage {
+                used_bytes: 12 * clip_bytes,
+                oldest_unpinned_at: Some(1),
+            }
+        );
+
+        let tightened = runtime
+            .request(
+                3,
+                Method::SetConfig {
+                    patch: copypaste_ipc::ConfigPatch {
+                        history_limit: Some(10),
+                        ..Default::default()
+                    },
+                },
+            )
+            .await;
+        assert_eq!(usage(tightened).used_bytes, 10 * clip_bytes);
+        assert_eq!(
+            usage(runtime.request(4, Method::GetConfig).await).used_bytes,
+            10 * clip_bytes
+        );
+    }
+
     #[tokio::test]
     async fn ordinary_configuration_changes_publish_one_watch_revision() {
         let (runtime, _dir) = fixture();
@@ -1925,6 +2032,51 @@ mod tests {
         assert_eq!(runtime.store.count().unwrap(), 1);
         assert!(runtime.store.get("first").unwrap().is_some());
         assert!(runtime.store.get("second").unwrap().is_none());
+    }
+
+    #[test]
+    fn streamed_export_and_backup_emit_frames_then_their_reply() {
+        let (runtime, dir) = fixture();
+        seed_text(&runtime, "first", "first text");
+
+        let mut frames = Vec::new();
+        let reply = runtime.request_stream(8, Method::ExportStream, &mut |frame| {
+            frames.push(frame);
+            true
+        });
+        let Some(ResponseData::Export(summary)) = reply.data else {
+            panic!("expected an export summary, got {reply:?}")
+        };
+        assert!(summary.items.is_empty());
+        let Some(ResponseData::ExportChunk(chunk)) = &frames.last().unwrap().data else {
+            panic!("expected export chunks")
+        };
+        assert_eq!(chunk.progress.processed, chunk.progress.total);
+        assert!(frames.iter().all(|frame| frame.id == 8));
+
+        let dest = dir.path().join("streamed.copypaste-backup");
+        let method = Method::BackupStream {
+            dest_path: dest.to_string_lossy().into_owned(),
+        };
+        let mut progress = Vec::new();
+        let reply = runtime.request_stream(9, method.clone(), &mut |frame| {
+            progress.push(frame);
+            true
+        });
+        assert!(
+            matches!(reply.data, Some(ResponseData::Backup(_))),
+            "{reply:?}"
+        );
+        assert!(matches!(
+            progress.last().and_then(|frame| frame.data.as_ref()),
+            Some(ResponseData::Progress(p)) if p.processed == p.total
+        ));
+
+        std::fs::remove_file(&dest).unwrap();
+        let abandoned = runtime.request_stream(10, method, &mut |_| false);
+        assert!(!abandoned.ok);
+        assert!(!dest.exists());
+        assert!(!runtime.request_blocking(11, Method::ExportStream).ok);
     }
 
     #[test]

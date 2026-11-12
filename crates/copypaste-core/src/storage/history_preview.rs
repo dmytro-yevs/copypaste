@@ -75,7 +75,7 @@ fn hash_blob(
 
 fn fingerprint(conn: &Connection, row: &Row<'_>, item: &StoredItem) -> rusqlite::Result<[u8; 32]> {
     let mut hash = Sha256::new();
-    hash.update(b"copypaste/history-preview-source/v3");
+    hash.update(b"copypaste/history-preview-source/v4");
     hash_field(&mut hash, item.id.as_bytes());
     hash_field(&mut hash, &item.nonce);
     hash_field(&mut hash, item.content_type.as_bytes());
@@ -392,6 +392,65 @@ mod tests {
     }
 
     #[test]
+    fn line_counts_cover_the_whole_text_and_skip_secrets_and_stale_entries() {
+        let store = store();
+        let keys = Keyring::from_secret(&[42; 32]);
+        let long = "line\r\n".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        // Rows hold no count, so a row stored by any earlier version is listed
+        // exactly like this one.
+        let cut = inserted(&store, &keys, &format!("\n{long}\n \n"), T0);
+        let secret = inserted(&store, &keys, "a\nb\nc\nd\ne", T0 + 1);
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "UPDATE clipboard_items SET payload_metadata=?1 WHERE id=?2",
+                params![r#"{"privacy":{"secret":true}}"#, secret],
+            )
+            .unwrap();
+        let origin = crate::history_item::ItemOrigin {
+            device_id: "local".into(),
+            device_name: None,
+            device_class: copypaste_ipc::DeviceClass::Unknown,
+        };
+        let render = |page: &crate::HistoryPreviewPage, id: &str| {
+            let entry = page.items.iter().find(|entry| entry.row.id == id).unwrap();
+            let preview = entry.preview.clone().unwrap();
+            (
+                preview.clone(),
+                preview.into_item(&entry.row, &origin, "local"),
+            )
+        };
+        let mut cached = None;
+        for _ in 0..2 {
+            let page = query(&store, &keys);
+            let (preview, item) = render(&page, &cut);
+            assert!(item.truncated);
+            assert_eq!(item.line_count, Some(1024));
+            assert_eq!(render(&page, &secret).1.line_count, None);
+            cached = Some(preview);
+        }
+
+        // An entry sealed by an earlier preview version carries no count and
+        // must be rebuilt rather than served.
+        let mut stale = serde_json::to_value(cached.unwrap()).unwrap();
+        stale.as_object_mut().unwrap().remove("line_count");
+        let plaintext = serde_json::to_vec(&stale).unwrap();
+        let (nonce, ciphertext) =
+            seal_preview(&plaintext, &keys.preview_key(), &cut, &[0; 32]).unwrap();
+        store
+            .conn()
+            .unwrap()
+            .execute(
+                "UPDATE history_preview_cache SET nonce=?1, ciphertext=?2 WHERE item_id=?3",
+                params![nonce, ciphertext, cut],
+            )
+            .unwrap();
+        let page = query(&store, &keys);
+        assert_eq!(render(&page, &cut).1.line_count, Some(1024));
+    }
+
+    #[test]
     fn file_source_availability_is_recomputed_for_each_cache_hit() {
         let store = store();
         let keys = Keyring::from_secret(&[42; 32]);
@@ -639,7 +698,9 @@ mod tests {
         inserted(&store, &keys, "original", T0);
         assert!(query(&store, &keys).items[0].preview.is_some());
         let backup = dir.path().join("backup.db");
-        store.backup_to(&backup).unwrap();
+        store
+            .backup_to(&backup, &keys.db_key(), |_, _| true)
+            .unwrap();
         inserted(&store, &keys, "later", T0 + 1);
         assert_eq!(query(&store, &keys).items.len(), 2);
         let generation = store.resource_revisions().unwrap().generation;

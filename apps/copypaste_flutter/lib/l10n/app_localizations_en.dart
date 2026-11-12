@@ -57,6 +57,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonEnable => 'Enable';
 
   @override
+  String get commonOn => 'On';
+
+  @override
+  String get commonOff => 'Off';
+
+  @override
   String get settingsLanguageTitle => 'Language';
 
   @override
@@ -122,8 +128,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'You can exclude up to 256 applications.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Quick Paste could not be prepared.';
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste could not start, so its shortcut does not work.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut is used by another app. Choose another shortcut.';
+  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -1081,19 +1092,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsRestoreFailed => 'The backup could not be restored.';
 
   @override
-  String get settingsExportIncompleteTitle => 'Text export is incomplete';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved; $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first and $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => 'Sync';
 
   @override
@@ -1439,54 +1437,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count text clips were saved',
-      one: '1 text clip was saved',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count non-text clips were excluded',
-      one: '1 non-text clip was excluded',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count text clips could not be read',
-      one: '1 text clip could not be read',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get devicesLoading => 'Loading devices…';
 
   @override
@@ -1503,6 +1453,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'No devices nearby';
+
+  @override
+  String get devicesEmptyTitle => 'No other devices paired yet';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.';
 
   @override
   String get devicesThisDevice => 'This device';
@@ -1845,6 +1802,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pairingStateFailed => 'Pairing failed';
 
   @override
+  String get pairingStateNotCompleted => 'Pairing not completed';
+
+  @override
   String get pairingHandshakingDescription =>
       'The devices are establishing a secure channel.';
 
@@ -1866,6 +1826,48 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Start a pairing attempt to connect a device.';
+
+  @override
+  String get pairingStepInvite => 'Invite';
+
+  @override
+  String get pairingStepScan => 'Scan';
+
+  @override
+  String get pairingStepCode => 'Code';
+
+  @override
+  String get pairingStepRequest => 'Request';
+
+  @override
+  String get pairingStepConnect => 'Connect';
+
+  @override
+  String get pairingStepConfirm => 'Confirm';
+
+  @override
+  String get pairingStepPaired => 'Paired';
+
+  @override
+  String get pairingOtherDevice => 'Other device';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Not confirmed yet';
+
+  @override
+  String get pairingDecisionSending => 'Sending your decision…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Confirmed';
+
+  @override
+  String get pairingDecisionRejected => 'Rejected';
+
+  @override
+  String get pairingDecisionWaiting => 'Waiting for confirmation';
+
+  @override
+  String get pairingDecisionUnknown => 'Answer not known';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2041,6 +2043,17 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Synchronization: $status';
+  }
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count devices',
+      one: '1 device',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2436,6 +2449,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines',
+      one: '1 line',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get historyInspectorEmptyTitle => 'Select a clip';
 
   @override
@@ -2676,10 +2700,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appWindowSetupTitle => 'Window setup needs attention';
 
   @override
-  String get appCollapseNavigation => 'Collapse navigation';
-
-  @override
-  String get appExpandNavigation => 'Expand navigation';
+  String get appNavigationLabel => 'Main navigation';
 
   @override
   String get appOpenHistory => 'Open History';
@@ -2768,13 +2789,13 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
   }
 
   @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Step $step of $count: $name';
   }
 
   @override
@@ -3237,11 +3258,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modulesDownloadingModel => 'Downloading language model…';
 
   @override
-  String get modulesInstalling => 'Installing…';
+  String get modulesPhaseDownload => 'Download';
 
   @override
-  String modulesDownloadingProgress(int percent) {
-    return 'Downloading $percent%';
+  String get modulesPhaseInstall => 'Install';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Installing $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Updating $module';
   }
 
   @override
@@ -3514,4 +3543,150 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Tags…';
+
+  @override
+  String get commonDismiss => 'Dismiss';
+
+  @override
+  String get settingsRetentionConfirmTitle => 'Remove older history?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'New limit: $limit. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle => 'Reduce the storage quota?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'New quota: $size. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Apply limit';
+
+  @override
+  String get settingsHideEverywhereTitle => 'Hide CopyPaste completely?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'With both turned off, CopyPaste has no visible icon. To open it again, press $shortcut or start CopyPaste again.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Hide';
+
+  @override
+  String get settingsExportDoneTitle => 'Text history exported';
+
+  @override
+  String get settingsBackupDoneTitle => 'Backup created';
+
+  @override
+  String get settingsRestoreDoneTitle => 'History restored';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Exported $count text clips',
+      one: 'Exported 1 text clip',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count could not be read',
+      one: '1 could not be read',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Encrypted backup saved · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'The clipboard history on this device now matches the backup.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used of $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$used used of $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used used';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Over quota';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'Oldest clip $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Storage: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'New quota: $size. Unpinned history uses $used, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips',
+      one: '1 clip',
+    );
+    return '$_temp0';
+  }
 }

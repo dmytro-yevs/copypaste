@@ -43,6 +43,7 @@ mod file_payloads;
 mod file_transfers;
 mod fuzzy_search;
 mod history;
+mod history_counts;
 mod history_preview;
 mod identity;
 mod items;
@@ -83,7 +84,7 @@ pub use identity::DeviceIdentity;
 pub(crate) use merge_page::MergePageError;
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page, PreviewPage};
-pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
+pub use retention::{compute_content_hash, QuotaUsage, DEDUP_WINDOW_MS};
 pub use store::Store;
 pub use versions::{origin_or, IncomingItem, Version};
 

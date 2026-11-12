@@ -20,7 +20,9 @@ fn restoring_a_backup_keeps_deferred_files_copyable_and_servable() {
     .unwrap();
     let reference = store.file_reference(&row.id).unwrap().unwrap();
     let backup = dir.path().join("history.backup");
-    store.backup_to(&backup).unwrap();
+    store
+        .backup_to(&backup, &keys.db_key(), |_, _| true)
+        .unwrap();
     store.restore_from(&backup, &keys.db_key()).unwrap();
     assert_eq!(store.file_reference(&row.id).unwrap(), Some(reference));
     let mut source = file_reference::source(&store, &row.id).unwrap().unwrap();

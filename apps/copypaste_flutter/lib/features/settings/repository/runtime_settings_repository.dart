@@ -14,8 +14,16 @@ import '../models/sync_status.dart';
 import 'settings_repository.dart';
 
 class RuntimeSettingsRepository
-    implements SettingsRepository, CaptureEventsRepository {
+    implements
+        SettingsRepository,
+        CaptureEventsRepository,
+        HistoryChangesRepository {
   RuntimeSettingsRepository();
+
+  @override
+  Stream<void> historyChanges() => RuntimeEventService.instance.events
+      .where((event) => event.kind == 'items')
+      .map((_) {});
 
   @override
   Stream<SyncStatus> syncEvents() => RuntimeEventService.instance.events
@@ -103,7 +111,7 @@ class RuntimeSettingsRepository
 
   @override
   Future<RuntimeSettings> settings() async =>
-      _settings(await runtime.getRuntimeSettings());
+      mapSettings(await runtime.getRuntimeSettings());
 
   @override
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
@@ -127,23 +135,41 @@ class RuntimeSettingsRepository
         soundOnCopy: change.soundOnCopy,
       ),
     );
-    return _settings(updated);
+    return mapSettings(updated);
   }
 
   @override
-  Future<TextExportResult> exportTextHistory(String path) async {
-    final result = await runtime.exportTextHistory(filePath: path);
-    return TextExportResult(
-      exported: result.exported,
-      skippedNonText: result.skippedNonText,
-      skippedUndecryptable: result.skippedUndecryptable,
-    );
+  Future<TextExportResult> exportTextHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
+    await for (final update in runtime.exportTextHistory(filePath: path)) {
+      if (update.error case final error?) throw error;
+      onProgress?.call(update.processed.toInt(), update.total.toInt());
+      if (update.summary case final summary?) {
+        return TextExportResult(
+          exported: summary.exported,
+          skippedNonText: summary.skippedNonText,
+          skippedUndecryptable: summary.skippedUndecryptable,
+        );
+      }
+    }
+    throw StateError('The text export ended without a result.');
   }
 
   @override
-  Future<BackupResult> backupHistory(String path) async {
-    final result = await runtime.backupHistory(filePath: path);
-    return BackupResult(sizeBytes: result.sizeBytes.toInt());
+  Future<BackupResult> backupHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
+    await for (final update in runtime.backupHistory(filePath: path)) {
+      if (update.error case final error?) throw error;
+      onProgress?.call(update.processed.toInt(), update.total.toInt());
+      if (update.summary case final summary?) {
+        return BackupResult(sizeBytes: summary.sizeBytes.toInt());
+      }
+    }
+    throw StateError('The backup ended without a result.');
   }
 
   @override
@@ -246,8 +272,20 @@ class RuntimeSettingsRepository
     runtime.SyncPhase.failed => SyncPhase.failed,
   };
 
-  RuntimeSettings _settings(runtime.RuntimeSettingsData settings) =>
+  /// Maps one settings reply, pairing reported usage with its own quota.
+  static RuntimeSettings mapSettings(runtime.RuntimeSettingsData settings) =>
       RuntimeSettings(
+        storageUsage: switch (settings.storageUsage) {
+          final usage? => StorageUsage(
+            usedBytes: usage.usedBytes.toInt(),
+            quotaBytes: usage.quotaBytes.toInt(),
+            oldestUnpinnedAt: switch (usage.oldestUnpinnedAtMs) {
+              final at? => DateTime.fromMillisecondsSinceEpoch(at.toInt()),
+              null => null,
+            },
+          ),
+          null => null,
+        },
         maxFileSizeBytes: settings.maxFileSizeBytes.toInt(),
         retentionDays: settings.retentionDays,
         storageQuotaBytes: settings.storageQuotaBytes.toInt(),

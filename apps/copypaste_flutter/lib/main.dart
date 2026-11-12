@@ -398,6 +398,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         );
         _historyController = HistoryController(
           _historyRepository!,
+          includeGroupCounts: true,
           fileOperations: FileOperationsController(
             const RuntimeFileOperationsRepository(),
           ),
@@ -679,6 +680,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (!_onboardingReady) {
       return ShadcnApp(
         title: 'CopyPaste',
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,
@@ -704,6 +706,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (onboarding != null && !onboarding.complete) {
       return ShadcnApp(
         onGenerateTitle: (context) => context.l10n.onboardingTitle,
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: AppTheme.mode,

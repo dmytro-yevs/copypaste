@@ -57,6 +57,12 @@ class AppLocalizationsIt extends AppLocalizations {
   String get commonEnable => 'Attiva';
 
   @override
+  String get commonOn => 'Attivato';
+
+  @override
+  String get commonOff => 'Disattivato';
+
+  @override
   String get settingsLanguageTitle => 'Lingua';
 
   @override
@@ -122,8 +128,13 @@ class AppLocalizationsIt extends AppLocalizations {
       'Puoi escludere fino a 256 app.';
 
   @override
-  String get settingsRuntimeQuickPastePrepareFailed =>
-      'Impossibile preparare Quick Paste.';
+  String get settingsQuickPasteStartFailed =>
+      'Impossibile avviare Quick Paste, quindi la sua scorciatoia non funziona.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut è usata da un\'altra app. Scegli un\'altra scorciatoia.';
+  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -1112,20 +1123,6 @@ class AppLocalizationsIt extends AppLocalizations {
   String get settingsRestoreFailed => 'Impossibile ripristinare il backup.';
 
   @override
-  String get settingsExportIncompleteTitle =>
-      'Esportazione del testo incompleta';
-
-  @override
-  String settingsExportIncompleteMessage(String saved, String omissions) {
-    return '$saved; $omissions.';
-  }
-
-  @override
-  String settingsExportOmissionsJoin(String first, String second) {
-    return '$first e $second';
-  }
-
-  @override
   String get settingsSyncSwitchTitle => 'Sincronizzazione';
 
   @override
@@ -1486,57 +1483,6 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String settingsStorageQuotaGigabytes(String size) {
-    return '$size GB';
-  }
-
-  @override
-  String settingsFileSizeMebibytes(int size) {
-    return '$size MiB';
-  }
-
-  @override
-  String settingsFileSizeGibibytes(int size) {
-    return '$size GiB';
-  }
-
-  @override
-  String settingsExportSavedClips(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count elementi di testo sono stati salvati',
-      many: '$count elementi di testo sono stati salvati',
-      one: '$count elemento di testo è stato salvato',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedNonText(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count elementi non testuali sono stati esclusi',
-      many: '$count elementi non testuali sono stati esclusi',
-      one: '$count elemento non testuale è stato escluso',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String settingsExportSkippedUnreadable(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count elementi di testo non sono leggibili',
-      many: '$count elementi di testo non sono leggibili',
-      one: '$count elemento di testo non è leggibile',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get devicesLoading => 'Caricamento dei dispositivi…';
 
   @override
@@ -1553,6 +1499,13 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'Nessun dispositivo nelle vicinanze';
+
+  @override
+  String get devicesEmptyTitle => 'Nessun altro dispositivo abbinato';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Abbina un altro dispositivo per mantenere sincronizzata la cronologia degli appunti tra i due. Entrambi i dispositivi devono essere sulla stessa rete e ogni abbinamento viene confermato su entrambi.';
 
   @override
   String get devicesThisDevice => 'Questo dispositivo';
@@ -1904,6 +1857,9 @@ class AppLocalizationsIt extends AppLocalizations {
   String get pairingStateFailed => 'Abbinamento non riuscito';
 
   @override
+  String get pairingStateNotCompleted => 'Abbinamento non completato';
+
+  @override
   String get pairingHandshakingDescription =>
       'I dispositivi stanno stabilendo un canale sicuro.';
 
@@ -1925,6 +1881,48 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Avvia un tentativo di abbinamento per connettere un dispositivo.';
+
+  @override
+  String get pairingStepInvite => 'Invito';
+
+  @override
+  String get pairingStepScan => 'Scansione';
+
+  @override
+  String get pairingStepCode => 'Codice';
+
+  @override
+  String get pairingStepRequest => 'Richiesta';
+
+  @override
+  String get pairingStepConnect => 'Connessione';
+
+  @override
+  String get pairingStepConfirm => 'Conferma';
+
+  @override
+  String get pairingStepPaired => 'Abbinato';
+
+  @override
+  String get pairingOtherDevice => 'Altro dispositivo';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Non ancora confermato';
+
+  @override
+  String get pairingDecisionSending => 'Invio della decisione…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Confermato';
+
+  @override
+  String get pairingDecisionRejected => 'Rifiutato';
+
+  @override
+  String get pairingDecisionWaiting => 'In attesa di conferma';
+
+  @override
+  String get pairingDecisionUnknown => 'Risposta non nota';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2109,6 +2107,18 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Sincronizzazione: $status';
+  }
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dispositivi',
+      many: '$count dispositivi',
+      one: '$count dispositivo',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2517,6 +2527,18 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count righe',
+      many: '$count righe',
+      one: '$count riga',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get historyInspectorEmptyTitle => 'Seleziona un elemento';
 
   @override
@@ -2769,10 +2791,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'La configurazione della finestra richiede attenzione';
 
   @override
-  String get appCollapseNavigation => 'Comprimi navigazione';
-
-  @override
-  String get appExpandNavigation => 'Espandi navigazione';
+  String get appNavigationLabel => 'Navigazione principale';
 
   @override
   String get appOpenHistory => 'Apri Cronologia';
@@ -2863,13 +2882,13 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String sharedSizeKilobytes(String size) {
-    return '$size KB';
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
   }
 
   @override
-  String sharedSizeMegabytes(String size) {
-    return '$size MB';
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Passaggio $step di $count: $name';
   }
 
   @override
@@ -3340,11 +3359,19 @@ class AppLocalizationsIt extends AppLocalizations {
   String get modulesDownloadingModel => 'Download del modello linguistico…';
 
   @override
-  String get modulesInstalling => 'Installazione…';
+  String get modulesPhaseDownload => 'Download';
 
   @override
-  String modulesDownloadingProgress(int percent) {
-    return 'Download: $percent%';
+  String get modulesPhaseInstall => 'Installazione';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Installazione di $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Aggiornamento di $module';
   }
 
   @override
@@ -3630,4 +3657,156 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get historyTagsAction => 'Tag…';
+
+  @override
+  String get commonDismiss => 'Ignora';
+
+  @override
+  String get settingsRetentionConfirmTitle =>
+      'Rimuovere la cronologia meno recente?';
+
+  @override
+  String settingsRetentionConfirmMessage(String limit) {
+    return 'Nuovo limite: $limit. Gli elementi non fissati meno recenti vengono rimossi ora da questo dispositivo e non possono essere recuperati. Gli elementi fissati vengono conservati.';
+  }
+
+  @override
+  String get settingsStorageQuotaConfirmTitle =>
+      'Ridurre la quota di archiviazione?';
+
+  @override
+  String settingsStorageQuotaConfirmMessage(String size) {
+    return 'Nuova quota: $size. Se la cronologia non fissata occupa più spazio, gli elementi meno recenti vengono rimossi ora e non possono essere recuperati. Gli elementi fissati vengono conservati.';
+  }
+
+  @override
+  String get settingsLimitConfirmAction => 'Applica limite';
+
+  @override
+  String get settingsHideEverywhereTitle =>
+      'Nascondere completamente CopyPaste?';
+
+  @override
+  String get settingsHideEverywhereMessage =>
+      'Con entrambe le opzioni disattivate, CopyPaste non ha alcuna icona visibile. Per riaprirlo, avvia di nuovo CopyPaste.';
+
+  @override
+  String settingsHideEverywhereShortcutMessage(String shortcut) {
+    return 'Con entrambe le opzioni disattivate, CopyPaste non ha alcuna icona visibile. Per riaprirlo, premi $shortcut o avvia di nuovo CopyPaste.';
+  }
+
+  @override
+  String get settingsHideEverywhereAction => 'Nascondi';
+
+  @override
+  String get settingsExportDoneTitle => 'Cronologia dei testi esportata';
+
+  @override
+  String get settingsBackupDoneTitle => 'Backup creato';
+
+  @override
+  String get settingsRestoreDoneTitle => 'Cronologia ripristinata';
+
+  @override
+  String settingsExportedTextClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi di testo esportati',
+      many: '$count elementi di testo esportati',
+      one: '$count elemento di testo esportato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsExportUnreadableClips(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count non leggibili',
+      many: '$count non leggibili',
+      one: '$count non leggibile',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String settingsOutcomeDetail(String outcome, String detail) {
+    return '$outcome · $detail';
+  }
+
+  @override
+  String settingsBackupDoneMessage(String size) {
+    return 'Backup crittografato salvato · $size';
+  }
+
+  @override
+  String get settingsRestoreDoneMessage =>
+      'La cronologia degli appunti di questo dispositivo ora corrisponde al backup.';
+
+  @override
+  String sharedSizeKibibytes(String size) {
+    return '$size KiB';
+  }
+
+  @override
+  String sharedSizeMebibytes(String size) {
+    return '$size MiB';
+  }
+
+  @override
+  String sharedSizeGibibytes(String size) {
+    return '$size GiB';
+  }
+
+  @override
+  String storageUsageShort(String used, String quota) {
+    return '$used di $quota';
+  }
+
+  @override
+  String storageUsageOfQuota(String used, String quota) {
+    return '$used usati su $quota';
+  }
+
+  @override
+  String storageUsageNoQuota(String used) {
+    return '$used usati';
+  }
+
+  @override
+  String get storageUsageOverQuota => 'Quota superata';
+
+  @override
+  String storageUsageOldestClip(String date) {
+    return 'Elemento meno recente: $date';
+  }
+
+  @override
+  String storageUsageDetail(String usage, String detail) {
+    return '$usage · $detail';
+  }
+
+  @override
+  String storageHeaderSemanticsLabel(String usage) {
+    return 'Archiviazione: $usage';
+  }
+
+  @override
+  String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
+    return 'Nuova quota: $size. La cronologia non fissata occupa $used, quindi i suoi elementi meno recenti vengono rimossi ora finché non rientra. Non possono essere recuperati. Gli elementi fissati vengono conservati.';
+  }
+
+  @override
+  String historySectionClipCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementi',
+      many: '$count elementi',
+      one: '$count elemento',
+    );
+    return '$_temp0';
+  }
 }

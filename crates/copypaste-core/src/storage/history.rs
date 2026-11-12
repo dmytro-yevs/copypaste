@@ -215,6 +215,38 @@ fn push_class_clause(sql: &mut String, classes: &[&str]) {
     sql.push(')');
 }
 
+/// The filter combinations no history read accepts.
+pub(super) fn validate_filters(query: &HistoryQuery) -> Result<(), StoreError> {
+    if query
+        .captured_from_ms
+        .zip(query.captured_before_ms)
+        .is_some_and(|(from, before)| from >= before)
+        || query.tag_ids.len() > copypaste_ipc::MAX_HISTORY_TAGS
+        || (query.untagged_only && !query.tag_ids.is_empty())
+    {
+        return Err(StoreError::InvalidHistoryQuery);
+    }
+    Ok(())
+}
+
+/// Tag filters select pinned clips only. Shared by the list and its counts so
+/// both read the same assignments.
+pub(super) fn push_tag_filter(filters: &mut String, values: &mut Vec<Value>, query: &HistoryQuery) {
+    if query.untagged_only {
+        filters.push_str(" AND ci.pinned = 1 AND NOT EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0)");
+    } else if !query.tag_ids.is_empty() {
+        filters.push_str(" AND ci.pinned = 1 AND EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0 AND ct.tag_id IN (");
+        for (index, id) in query.tag_ids.iter().enumerate() {
+            if index > 0 {
+                filters.push(',');
+            }
+            values.push(Value::Text(id.clone()));
+            filters.push_str(&format!("?{}", values.len()));
+        }
+        filters.push_str("))");
+    }
+}
+
 fn cursor_of(
     item: &StoredItem,
     fingerprint: String,
@@ -520,15 +552,7 @@ impl Store {
         semantic: Option<&super::SemanticMatches>,
         preview_keys: Option<(&crate::ItemKey, &crate::crypto::PreviewKey)>,
     ) -> Result<QueryPage, StoreError> {
-        if query
-            .captured_from_ms
-            .zip(query.captured_before_ms)
-            .is_some_and(|(from, before)| from >= before)
-            || query.tag_ids.len() > copypaste_ipc::MAX_HISTORY_TAGS
-            || (query.untagged_only && !query.tag_ids.is_empty())
-        {
-            return Err(StoreError::InvalidHistoryQuery);
-        }
+        validate_filters(query)?;
         if limit == 0 {
             return Ok(QueryPage {
                 items: Vec::new(),
@@ -614,19 +638,7 @@ impl Store {
             values.push(Value::Integer(before));
             filters.push_str(&format!(" AND ci.created_at < ?{}", values.len()));
         }
-        if query.untagged_only {
-            filters.push_str(" AND ci.pinned = 1 AND NOT EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0)");
-        } else if !query.tag_ids.is_empty() {
-            filters.push_str(" AND ci.pinned = 1 AND EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0 AND ct.tag_id IN (");
-            for (index, id) in query.tag_ids.iter().enumerate() {
-                if index > 0 {
-                    filters.push(',');
-                }
-                values.push(Value::Text(id.clone()));
-                filters.push_str(&format!("?{}", values.len()));
-            }
-            filters.push_str("))");
-        }
+        push_tag_filter(&mut filters, &mut values, query);
         if query.pinned_only {
             filters.push_str(" AND ci.pinned = 1");
         }

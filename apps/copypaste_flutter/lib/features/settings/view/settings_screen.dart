@@ -7,13 +7,16 @@ import '../../modules/controller/modules_controller.dart';
 import '../../modules/view/modules_settings_view.dart';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/semantics.dart' show SemanticsRole;
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart' show NumberFormat;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/localization/app_language.dart';
 import '../../../app/navigation/app_page_route.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
@@ -22,15 +25,24 @@ import '../../../platform/desktop/desktop_visibility_controller.dart';
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/adaptive_breakpoints.dart';
 import '../../../l10n/l10n.dart';
+import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
+import '../../../shared/system_date_time.dart';
+import '../../transfers/file_operations_button_progress.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
 import '../controller/launch_at_login_controller.dart';
 import '../../../platform/startup/launch_at_login.dart';
 import '../controller/settings_navigation_state.dart';
+import '../models/desktop_presence.dart';
+import '../models/settings_limits.dart';
 import '../models/settings_models.dart';
+import '../models/settings_outcomes.dart';
+import '../models/storage_usage_text.dart';
 import '../../update/controller/app_update_controller.dart';
 import '../../update/models/app_update_models.dart';
+import 'confirmation_dialog.dart';
+import 'stop_scale.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -63,14 +75,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       widget.controller.blockScreenshotsSupported
       ? context.l10n.settingsBlockScreenshotsDescription
       : context.l10n.settingsBlockScreenshotsUnsupported;
-  static const _retentionOptions = <int>[0, 7, 30, 90, 365];
-  static const _quotaOptions = <int>[
-    1024 * 1024 * 1024,
-    5 * 1024 * 1024 * 1024,
-    10 * 1024 * 1024 * 1024,
-    25 * 1024 * 1024 * 1024,
-    50 * 1024 * 1024 * 1024,
-  ];
 
   final _generalSectionKey = GlobalKey();
   final _languageKey = GlobalKey();
@@ -197,7 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        padding: AppTheme.settingsSearchPadding,
                         child: _searchField(),
                       ),
                       Expanded(
@@ -205,14 +209,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           key: const ValueKey<String>(
                             'settings-navigation-sidebar',
                           ),
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.secondary,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.sm,
-                          ),
-                          spacing: AppSpacing.xs,
+                          // The pane paints the background; a sidebar fill
+                          // would cover the search field's focus ring.
+                          padding: AppTheme.settingsNavigationPadding,
+                          spacing: AppTheme.settingsNavigationSpacing,
                           labelSize: NavigationLabelSize.large,
                           selectedKey: _selectedNavigationKey(
                             targets,
@@ -227,6 +227,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 style: AppTheme.settingsNavigationButtonStyle,
                                 selectedStyle: AppTheme
                                     .settingsNavigationSelectedButtonStyle,
+                                // The default marquee keeps a ticker running
+                                // for as long as a label is too long.
+                                overflow: NavigationOverflow.ellipsis,
                                 label: _navigationTargetLabel(target),
                                 child: AppIconFrame(
                                   size: AppIconSize.sm,
@@ -253,12 +256,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+              padding: AppTheme.settingsSearchPadding,
               child: _searchField(),
             ),
             Expanded(
               child: noSearchResults
-                  ? content
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.lg),
+                      child: content,
+                    )
                   : _compactNavigationList(context, targets),
             ),
           ],
@@ -298,6 +304,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   title: Text(context.l10n.settingsAttentionTitle),
                   content: Text(message),
+                  trailing: Tooltip(
+                    showDuration: AppMotion.resolve(
+                      context,
+                      AppMotion.standard,
+                    ),
+                    tooltip: (context) => TooltipContainer(
+                      child: Text(context.l10n.commonDismiss),
+                    ),
+                    child: Semantics(
+                      label: context.l10n.commonDismiss,
+                      child: Button.ghost(
+                        key: const ValueKey<String>('settings-error-dismiss'),
+                        style: AppTheme.controlButtonStyle(
+                          const ButtonStyle.ghostIcon(),
+                        ),
+                        onPressed: controller.clearMessages,
+                        child: const AppIconFrame(child: Icon(LucideIcons.x)),
+                      ),
+                    ),
+                  ),
                 ),
                 const Gap(AppSpacing.xxxl),
               ],
@@ -365,6 +391,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       focusNode: _searchFocus,
       placeholder: Text(context.l10n.settingsSearchPlaceholder),
       onChanged: _updateSearch,
+      // The icon slots would otherwise be empty focus scopes that stop Tab.
+      skipInputFeatureFocusTraversal: true,
       features: const [
         InputFeature.leading(AppIconFrame(child: Icon(LucideIcons.search))),
         InputFeature.clear(),
@@ -380,14 +408,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       key: const ValueKey<String>('settings-category-list'),
       controller: PrimaryScrollController.maybeOf(context),
       primary: false,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.zero,
-        AppSpacing.lg,
-        AppSpacing.lg,
-      ).add(EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+      padding: AppTheme.settingsNavigationPadding.add(
+        EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+      ),
       itemCount: targets.length,
-      separatorBuilder: (context, index) => const Divider(),
+      separatorBuilder: (context, index) =>
+          const Divider(theme: AppTheme.settingsNavigationDividerTheme),
       itemBuilder: (context, index) {
         final target = targets[index];
         return Button.ghost(
@@ -901,14 +927,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: startup.openSystemSettings,
                     child: Text(context.l10n.commonOpenSettings),
                   ),
-                Switch(
-                  key: const ValueKey('settings-start-at-login'),
-                  value: startup.enabled,
-                  onChanged:
-                      startup.busy ||
-                          startup.status == LaunchAtLoginStatus.unavailable
-                      ? null
-                      : startup.setEnabled,
+                _SettingSwitch(
+                  label: _startupLabel,
+                  toggle: Switch(
+                    key: const ValueKey('settings-start-at-login'),
+                    value: startup.enabled,
+                    enabled: startup.status != LaunchAtLoginStatus.unavailable,
+                    onChanged:
+                        startup.busy ||
+                            startup.status == LaunchAtLoginStatus.unavailable
+                        ? null
+                        : startup.setEnabled,
+                  ),
                 ),
               ],
             ),
@@ -930,7 +960,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: preferences.showInTaskbar,
               onChanged: controller.busy
                   ? null
-                  : (value) => unawaited(controller.setTaskbarVisible(value)),
+                  : (value) => unawaited(
+                      _setEntryPointVisible(taskbar: true, visible: value),
+                    ),
             ),
           ),
           _SettingRow(
@@ -943,7 +975,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: preferences.showInTray,
               onChanged: controller.busy
                   ? null
-                  : (value) => unawaited(controller.setTrayVisible(value)),
+                  : (value) => unawaited(
+                      _setEntryPointVisible(taskbar: false, visible: value),
+                    ),
             ),
           ),
         ],
@@ -955,7 +989,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     RuntimeSettings settings, {
     required bool showHeading,
   }) {
-    final capture = widget.controller.capture;
+    final controller = widget.controller;
+    final capture = controller.capture;
+    final l10n = context.l10n;
     return _SettingsSection(
       showHeading: showHeading,
       key: _clipboardSectionKey,
@@ -972,9 +1008,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             description: context.l10n.settingsAndroidCaptureDescription,
             trailing: Button.secondary(
               style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
-              onPressed: widget.controller.busy
-                  ? null
-                  : widget.onOpenAndroidCaptureSetup,
+              onPressed: controller.canStart(SettingsOperation.capture)
+                  ? widget.onOpenAndroidCaptureSetup
+                  : null,
               leading: const AppIconFrame(child: Icon(LucideIcons.shieldCheck)),
               child: Text(context.l10n.settingsOpenSetup),
             ),
@@ -988,10 +1024,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             description: context.l10n.settingsSaveScreenshotsDescription,
             trailing: Switch(
               key: const ValueKey<String>('save-screenshots-switch'),
-              value: widget.controller.screenshotCapture.enabled,
-              onChanged: widget.controller.busy
-                  ? null
-                  : widget.controller.setScreenshotCaptureEnabled,
+              value: controller.screenshotCapture.enabled,
+              onChanged:
+                  controller.canStart(SettingsOperation.screenshotCapture)
+                  ? controller.setScreenshotCaptureEnabled
+                  : null,
             ),
           ),
           if (widget.controller.screenshotCapture.enabled &&
@@ -1004,9 +1041,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const ButtonStyle.secondary(),
                 ),
                 key: const ValueKey<String>('screenshot-capture-permission'),
-                onPressed: widget.controller.busy
-                    ? null
-                    : widget.controller.requestScreenshotCapturePermission,
+                onPressed:
+                    controller.canStart(SettingsOperation.screenshotCapture)
+                    ? controller.requestScreenshotCapturePermission
+                    : null,
                 child: Text(context.l10n.settingsAllowAccess),
               ),
             ),
@@ -1016,12 +1054,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             StateView.error(
               title: context.l10n.settingsScreenshotCaptureStoppedTitle,
               message: context.l10n.settingsScreenshotCaptureStoppedMessage,
-              actionLabel: widget.controller.busy
-                  ? null
-                  : context.l10n.settingsResumeCapture,
-              onAction: widget.controller.busy
-                  ? null
-                  : () => widget.controller.setScreenshotCaptureEnabled(true),
+              actionLabel:
+                  controller.canStart(SettingsOperation.screenshotCapture)
+                  ? context.l10n.settingsResumeCapture
+                  : null,
+              onAction: controller.canStart(SettingsOperation.screenshotCapture)
+                  ? () => controller.setScreenshotCaptureEnabled(true)
+                  : null,
             ),
         ],
         _SettingRow(
@@ -1030,11 +1069,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: context.l10n.settingsClipboardCaptureTitle,
           description:
               capture?.label ?? context.l10n.settingsCaptureStateUnavailable,
-          trailing: Switch(
-            value: !(capture?.paused ?? true),
-            onChanged: widget.controller.busy || capture == null
-                ? null
-                : (enabled) => widget.controller.setCapturePaused(!enabled),
+          trailing: _SettingSwitch(
+            label: context.l10n.settingsClipboardCaptureTitle,
+            showState: false,
+            toggle: Switch(
+              value: !(capture?.paused ?? true),
+              enabled: capture != null,
+              onChanged:
+                  capture == null ||
+                      !controller.canStart(SettingsOperation.capture)
+                  ? null
+                  : (enabled) => controller.setCapturePaused(!enabled),
+            ),
           ),
         ),
         if (capture != null && !capture.running && !capture.paused) ...[
@@ -1047,50 +1093,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingRow(
           key: _retentionKey,
           highlighted: _isHighlighted(_SettingsTargetId.retention),
-          title: context.l10n.settingsRetentionTitle,
-          description: context.l10n.settingsRetentionDescription,
-          trailing: _valueSelect<int>(
+          title: l10n.settingsRetentionTitle,
+          description: l10n.settingsRetentionDescription,
+          footer: StopScale(
+            key: const ValueKey<String>('settings-retention-scale'),
+            label: l10n.settingsRetentionTitle,
+            stops: SettingsLimits.retentionStops(settings.retentionDays),
             value: settings.retentionDays,
-            values: _retentionOptions,
-            label: (value) => value == 0
-                ? context.l10n.settingsRetentionForever
-                : context.l10n.settingsRetentionDays(value),
-            onChanged: widget.controller.setRetentionDays,
+            stopLabel: (days) => SettingsLimits.retentionLabel(l10n, days),
+            pending: controller.isPending(SettingsOperation.retention),
+            onCommit: _canChange(SettingsOperation.retention)
+                ? _changeRetention
+                : null,
           ),
         ),
         _SettingRow(
           key: _storageQuotaKey,
           highlighted: _isHighlighted(_SettingsTargetId.storageQuota),
-          title: context.l10n.settingsStorageQuotaTitle,
-          description: context.l10n.settingsStorageQuotaDescription,
-          trailing: _valueSelect<int>(
+          title: l10n.settingsStorageQuotaTitle,
+          description: l10n.settingsStorageQuotaDescription,
+          status: controller.presentationActive
+              ? ValueListenableBuilder<StorageUsage?>(
+                  valueListenable: controller.storageUsage,
+                  builder: (context, usage, _) => _storageUsage(usage),
+                )
+              : _storageUsage(controller.storageUsage.value),
+          footer: StopScale(
+            key: const ValueKey<String>('settings-storage-quota-scale'),
+            label: l10n.settingsStorageQuotaTitle,
+            stops: SettingsLimits.sizeStops(
+              SettingsLimits.storageQuotaPresets,
+              settings.storageQuotaBytes,
+            ),
             value: settings.storageQuotaBytes,
-            values: _quotaOptions,
-            label: _formatQuota,
-            onChanged: widget.controller.setStorageQuotaBytes,
+            stopLabel: (bytes) => SettingsLimits.limitLabel(l10n, bytes),
+            pending: controller.isPending(SettingsOperation.storageQuota),
+            onCommit: _canChange(SettingsOperation.storageQuota)
+                ? _changeStorageQuota
+                : null,
           ),
         ),
         _SettingRow(
           key: _maxFileSizeKey,
           highlighted: _isHighlighted(_SettingsTargetId.maxFileSize),
-          title: context.l10n.settingsMaxFileSizeTitle,
-          description: context.l10n.settingsMaxFileSizeDescription,
-          trailing: _valueSelect<int>(
+          title: l10n.settingsMaxFileSizeTitle,
+          description: l10n.settingsMaxFileSizeDescription,
+          footer: StopScale(
+            key: const ValueKey<String>('settings-max-file-size-scale'),
+            label: l10n.settingsMaxFileSizeTitle,
+            stops: SettingsLimits.sizeStops(
+              SettingsLimits.maxFileSizePresets,
+              settings.maxFileSizeBytes,
+            ),
             value: settings.maxFileSizeBytes,
-            values: const [
-              1048576,
-              4194304,
-              16777216,
-              67108864,
-              268435456,
-              1073741824,
-              4294967296,
-              21474836480,
-            ],
-            label: (bytes) => bytes >= 1073741824
-                ? context.l10n.settingsFileSizeGibibytes(bytes ~/ 1073741824)
-                : context.l10n.settingsFileSizeMebibytes(bytes ~/ 1048576),
-            onChanged: widget.controller.setMaxFileSizeBytes,
+            stopLabel: (bytes) => SettingsLimits.limitLabel(l10n, bytes),
+            pending: controller.isPending(SettingsOperation.maxFileSize),
+            onCommit: _canChange(SettingsOperation.maxFileSize)
+                ? (bytes) => controller.setMaxFileSizeBytes(bytes)
+                : null,
           ),
         ),
       ],
@@ -1112,15 +1172,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
               title: context.l10n.settingsExportTextTitle,
               description: context.l10n.settingsExportTextDescription,
-              trailing: Button.secondary(
-                style: AppTheme.actionButtonStyle(
-                  const ButtonStyle.secondary(),
-                ),
-                onPressed: widget.controller.busy ? null : _exportTextHistory,
-                leading: const AppIconFrame(
-                  child: Icon(LucideIcons.fileOutput),
-                ),
-                child: Text(context.l10n.settingsExportAction),
+              trailing: _transferAction(
+                operation: SettingsOperation.exportText,
+                kind: DataTransferKind.textExport,
+                icon: LucideIcons.fileOutput,
+                label: context.l10n.settingsExportAction,
+                name: context.l10n.settingsExportTextTitle,
+                onPressed: _exportTextHistory,
               ),
             ),
             const Divider(),
@@ -1128,15 +1186,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
               title: context.l10n.settingsBackupTitle,
               description: context.l10n.settingsBackupDescription,
-              trailing: Button.secondary(
-                style: AppTheme.actionButtonStyle(
-                  const ButtonStyle.secondary(),
-                ),
-                onPressed: widget.controller.busy
-                    ? null
-                    : widget.controller.createBackup,
-                leading: const AppIconFrame(child: Icon(LucideIcons.archive)),
-                child: Text(context.l10n.settingsCreateBackupAction),
+              trailing: _transferAction(
+                operation: SettingsOperation.backup,
+                kind: DataTransferKind.backup,
+                icon: LucideIcons.archive,
+                label: context.l10n.settingsCreateBackupAction,
+                name: context.l10n.settingsBackupTitle,
+                onPressed: _createBackup,
               ),
             ),
             const Divider(),
@@ -1148,9 +1204,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.destructive(),
                 ),
-                onPressed: widget.controller.busy ? null : _confirmRestore,
-                leading: const AppIconFrame(
-                  child: Icon(LucideIcons.clipboardList),
+                onPressed: widget.controller.canStart(SettingsOperation.restore)
+                    ? _confirmRestore
+                    : null,
+                leading: _actionIcon(
+                  SettingsOperation.restore,
+                  LucideIcons.clipboardList,
                 ),
                 child: Text(context.l10n.settingsRestoreAction),
               ),
@@ -1175,9 +1234,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           description: context.l10n.settingsSyncSwitchDescription,
           trailing: Switch(
             value: settings.syncEnabled,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setSyncEnabled,
+            onChanged: widget.controller.canStart(SettingsOperation.syncEnabled)
+                ? widget.controller.setSyncEnabled
+                : null,
           ),
         ),
         _SettingRow(
@@ -1188,9 +1247,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: Switch(
             key: const ValueKey('instant-clipboard-switch'),
             value: settings.instantClipboard,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setInstantClipboard,
+            onChanged:
+                widget.controller.canStart(SettingsOperation.instantClipboard)
+                ? widget.controller.setInstantClipboard
+                : null,
           ),
         ),
         _SettingRow(
@@ -1200,9 +1260,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           description: context.l10n.settingsLanVisibilityDescription,
           trailing: Switch(
             value: settings.lanVisibility,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setLanVisibility,
+            onChanged:
+                widget.controller.canStart(SettingsOperation.lanVisibility)
+                ? widget.controller.setLanVisibility
+                : null,
           ),
         ),
       ],
@@ -1255,9 +1316,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const Gap(AppSpacing.md),
                   Button.secondary(
-                    onPressed: widget.controller.busy
-                        ? null
-                        : _addExcludedApplication,
+                    onPressed:
+                        widget.controller.canStart(
+                          SettingsOperation.excludedApps,
+                        )
+                        ? _addExcludedApplication
+                        : null,
                     leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
                     child: Text(context.l10n.settingsExcludedAppsAdd),
                   ),
@@ -1303,11 +1367,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: AppTheme.controlButtonStyle(
                               const ButtonStyle.ghostIcon(),
                             ),
-                            onPressed: widget.controller.busy
-                                ? null
-                                : () => widget.controller.removeExcludedApp(
-                                    appId,
-                                  ),
+                            onPressed:
+                                widget.controller.canStart(
+                                  SettingsOperation.excludedApps,
+                                )
+                                ? () =>
+                                      widget.controller.removeExcludedApp(appId)
+                                : null,
                             child: const AppIconFrame(
                               child: Icon(LucideIcons.x),
                             ),
@@ -1328,10 +1394,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: Switch(
             key: const ValueKey('skip-secret-switch'),
             value: settings.skipSecret,
-            enabled: !widget.controller.busy,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setSkipSecret,
+            onChanged: widget.controller.canStart(SettingsOperation.skipSecret)
+                ? widget.controller.setSkipSecret
+                : null,
           ),
         ),
         _SettingRow(
@@ -1342,10 +1407,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: Switch(
             key: const ValueKey('skip-transient-switch'),
             value: settings.skipTransient,
-            enabled: !widget.controller.busy,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setSkipTransient,
+            onChanged:
+                widget.controller.canStart(SettingsOperation.skipTransient)
+                ? widget.controller.setSkipTransient
+                : null,
           ),
         ),
         _SettingRow(
@@ -1356,14 +1421,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: Switch(
             key: const ValueKey('block-screenshots-switch'),
             value: widget.controller.blockScreenshots,
-            enabled:
-                !widget.controller.busy &&
-                widget.controller.blockScreenshotsSupported,
+            enabled: widget.controller.blockScreenshotsSupported,
             onChanged:
-                widget.controller.busy ||
-                    !widget.controller.blockScreenshotsSupported
-                ? null
-                : widget.controller.setBlockScreenshots,
+                widget.controller.blockScreenshotsSupported &&
+                    widget.controller.canStart(
+                      SettingsOperation.blockScreenshots,
+                    )
+                ? widget.controller.setBlockScreenshots
+                : null,
           ),
         ),
       ],
@@ -1387,9 +1452,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           description: context.l10n.settingsNotifyOnCopyDescription,
           trailing: Switch(
             value: settings.notifyOnCopy,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setNotifyOnCopy,
+            onChanged:
+                widget.controller.canStart(SettingsOperation.notifyOnCopy)
+                ? widget.controller.setNotifyOnCopy
+                : null,
           ),
         ),
         _SettingRow(
@@ -1399,10 +1465,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           description: context.l10n.settingsNotificationPreviewDescription,
           trailing: Switch(
             value: settings.notificationPreview,
-            enabled: settings.notifyOnCopy && !widget.controller.busy,
-            onChanged: !settings.notifyOnCopy || widget.controller.busy
-                ? null
-                : widget.controller.setNotificationPreview,
+            enabled: settings.notifyOnCopy,
+            onChanged:
+                settings.notifyOnCopy &&
+                    widget.controller.canStart(
+                      SettingsOperation.notificationPreview,
+                    )
+                ? widget.controller.setNotificationPreview
+                : null,
           ),
         ),
         _SettingRow(
@@ -1412,9 +1482,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           description: context.l10n.settingsSoundOnCopyDescription,
           trailing: Switch(
             value: settings.soundOnCopy,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setSoundOnCopy,
+            onChanged: widget.controller.canStart(SettingsOperation.soundOnCopy)
+                ? widget.controller.setSoundOnCopy
+                : null,
           ),
         ),
       ],
@@ -1592,29 +1662,182 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Widget _valueSelect<T>({
-    required T value,
-    required List<T> values,
-    required String Function(T value) label,
-    required Future<bool> Function(T value) onChanged,
-  }) {
-    final options = <T>{value, ...values}.toList(growable: false);
-    return Select<T>(
-      value: value,
-      onChanged: widget.controller.busy
-          ? null
-          : (next) {
-              if (next != null) unawaited(onChanged(next));
-            },
-      popup: SelectPopup<T>(
-        items: SelectItemList(
-          children: [
-            for (final option in options)
-              SelectItemButton<T>(value: option, child: Text(label(option))),
-          ],
+  bool _canChange(SettingsOperation operation) =>
+      widget.controller.canStart(operation) ||
+      widget.controller.isPending(operation);
+
+  Future<void> _changeRetention(int days) async {
+    final l10n = context.l10n;
+    final current = widget.controller.settings?.retentionDays;
+    if (current == null) return;
+    if (SettingsLimits.retentionTightens(from: current, to: days) &&
+        !await showDestructiveConfirmation(
+          context,
+          icon: LucideIcons.trash2,
+          title: l10n.settingsRetentionConfirmTitle,
+          message: l10n.settingsRetentionConfirmMessage(
+            SettingsLimits.retentionLabel(l10n, days),
+          ),
+          confirmLabel: l10n.settingsLimitConfirmAction,
+        )) {
+      return;
+    }
+    if (mounted) await widget.controller.setRetentionDays(days);
+  }
+
+  Future<void> _changeStorageQuota(int bytes) async {
+    final l10n = context.l10n;
+    final current = widget.controller.settings?.storageQuotaBytes;
+    if (current == null) return;
+    if (SettingsLimits.storageQuotaTightens(from: current, to: bytes) &&
+        !await showDestructiveConfirmation(
+          context,
+          icon: LucideIcons.trash2,
+          title: l10n.settingsStorageQuotaConfirmTitle,
+          message: switch (widget.controller.storageUsage.value) {
+            final usage? when usage.usedBytes > bytes =>
+              l10n.settingsStorageQuotaConfirmRemovesMessage(
+                SettingsLimits.limitLabel(l10n, bytes),
+                formatBytes(usage.usedBytes),
+              ),
+            _ => l10n.settingsStorageQuotaConfirmMessage(
+              SettingsLimits.limitLabel(l10n, bytes),
+            ),
+          },
+          confirmLabel: l10n.settingsLimitConfirmAction,
+        )) {
+      return;
+    }
+    if (mounted) await widget.controller.setStorageQuotaBytes(bytes);
+  }
+
+  Future<void> _setEntryPointVisible({
+    required bool taskbar,
+    required bool visible,
+  }) async {
+    final controller = widget.desktopVisibility!;
+    final preferences = controller.preferences;
+    final otherVisible = taskbar
+        ? preferences.showInTray
+        : preferences.showInTaskbar;
+    if (DesktopPresence.hidesLastEntryPoint(
+      turningOn: visible,
+      otherVisible: otherVisible,
+    )) {
+      final l10n = context.l10n;
+      final quickPaste = widget.quickPaste;
+      final confirmed = await showDestructiveConfirmation(
+        context,
+        icon: LucideIcons.eyeOff,
+        title: l10n.settingsHideEverywhereTitle,
+        message: DesktopPresence.hiddenEverywhereMessage(
+          l10n,
+          registeredShortcut: quickPaste?.registeredShortcut,
+          registeredShortcutDescription:
+              quickPaste?.registeredShortcutDescription,
         ),
-      ).call,
-      itemBuilder: (context, selected) => Text(label(selected)),
+        confirmLabel: l10n.settingsHideEverywhereAction,
+      );
+      if (!confirmed || !mounted) return;
+    }
+    await (taskbar
+        ? controller.setTaskbarVisible(visible)
+        : controller.setTrayVisible(visible));
+  }
+
+  Widget _actionIcon(SettingsOperation operation, IconData icon) =>
+      widget.controller.isPending(operation)
+      ? const SizedBox.square(
+          dimension: AppIconSize.sm,
+          child: AppIconFrame(
+            size: AppIconSize.sm,
+            child: CircularProgressIndicator(),
+          ),
+        )
+      : AppIconFrame(child: Icon(icon));
+
+  Widget _storageUsage(StorageUsage? usage) => usage == null
+      ? const SizedBox.shrink()
+      : Text(
+          StorageUsageText.withOldest(
+            context.l10n,
+            usage,
+            switch (usage.oldestUnpinnedAt) {
+              final at? => formatSystemDate(context, at),
+              null => null,
+            },
+          ),
+          key: const ValueKey<String>('settings-storage-usage'),
+        ).textSmall();
+
+  /// A history file action that becomes its own progress indicator while it
+  /// runs: same place and size, the share done in place of its label, or the
+  /// label while the total is unknown.
+  Widget _transferAction({
+    required SettingsOperation operation,
+    required DataTransferKind kind,
+    required IconData icon,
+    required String label,
+    required String name,
+    required VoidCallback onPressed,
+  }) => ValueListenableBuilder<DataTransferProgress?>(
+    valueListenable: widget.controller.dataTransfer,
+    builder: (context, transfer, _) => _transferButton(
+      operation: operation,
+      fraction: transfer?.kind == kind ? transfer!.fraction : null,
+      icon: icon,
+      label: label,
+      name: name,
+      onPressed: onPressed,
+    ),
+  );
+
+  Widget _transferButton({
+    required SettingsOperation operation,
+    required double? fraction,
+    required IconData icon,
+    required String label,
+    required String name,
+    required VoidCallback onPressed,
+  }) {
+    final controller = widget.controller;
+    final percent = fraction == null
+        ? null
+        : NumberFormat.percentPattern(
+            context.l10n.localeName,
+          ).format((fraction * 100).floor() / 100);
+    final button = Button.secondary(
+      style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
+      onPressed: controller.canStart(operation) ? onPressed : null,
+      leading: _actionIcon(operation, icon),
+      child: percent == null
+          ? Text(label)
+          : Stack(
+              alignment: Alignment.center,
+              children: [
+                Visibility.maintain(visible: false, child: Text(label)),
+                Positioned.fill(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(percent, maxLines: 1),
+                  ),
+                ),
+              ],
+            ),
+    );
+    if (!controller.isPending(operation)) return button;
+    return Semantics(
+      container: true,
+      role: percent == null
+          ? SemanticsRole.loadingSpinner
+          : SemanticsRole.progressBar,
+      label: name,
+      value: percent,
+      minValue: percent == null ? null : '0',
+      maxValue: percent == null ? null : '100',
+      child: ExcludeSemantics(
+        child: FileOperationsButtonProgress(progress: fraction, child: button),
+      ),
     );
   }
 
@@ -1641,7 +1864,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         destructive: false,
         changes: input,
         canConfirm: () =>
-            input.text.trim().isNotEmpty && !widget.controller.busy,
+            input.text.trim().isNotEmpty &&
+            widget.controller.canStart(SettingsOperation.excludedApps),
         content: TextField(
           controller: input,
           autofocus: true,
@@ -1650,7 +1874,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         onConfirm: () => widget.controller.addExcludedApp(input.text),
         failureMessage: () =>
-            widget.controller.errorMessage ?? l10n.settingsExcludeFailed,
+            widget.controller.errorFor(SettingsOperation.excludedApps) ??
+            l10n.settingsExcludeFailed,
       );
     } finally {
       input.dispose();
@@ -1659,47 +1884,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _confirmRestore() async {
     final l10n = context.l10n;
-    await AppOverlays.showActionDialog(
+    final restored = await AppOverlays.showActionDialog(
       context,
       icon: LucideIcons.clipboardList,
       title: Text(l10n.settingsRestoreDialogTitle),
       content: Text(l10n.settingsRestoreDialogMessage),
       actionLabel: l10n.settingsRestoreAction,
       changes: widget.controller,
-      canConfirm: () => !widget.controller.busy,
+      canConfirm: () => widget.controller.canStart(SettingsOperation.restore),
       onConfirm: widget.controller.restoreBackup,
       failureMessage: () =>
-          widget.controller.errorMessage ?? l10n.settingsRestoreFailed,
+          widget.controller.errorFor(SettingsOperation.restore) ??
+          l10n.settingsRestoreFailed,
+    );
+    if (restored != true || !mounted) return;
+    AppToast.show(
+      context,
+      title: l10n.settingsRestoreDoneTitle,
+      message: l10n.settingsRestoreDoneMessage,
+      tone: AppToastTone.success,
     );
   }
 
   Future<void> _exportTextHistory() async {
     final result = await widget.controller.exportTextHistory();
     if (!mounted || result == null) return;
-    if (result.skippedUndecryptable == 0) {
-      return;
-    }
     final l10n = context.l10n;
-    final omissions = <String>[
-      if (result.skippedNonText > 0)
-        l10n.settingsExportSkippedNonText(result.skippedNonText),
-      if (result.skippedUndecryptable > 0)
-        l10n.settingsExportSkippedUnreadable(result.skippedUndecryptable),
-    ];
     AppToast.show(
       context,
-      title: l10n.settingsExportIncompleteTitle,
-      message: l10n.settingsExportIncompleteMessage(
-        l10n.settingsExportSavedClips(result.exported),
-        omissions.reduce(l10n.settingsExportOmissionsJoin),
-      ),
+      title: l10n.settingsExportDoneTitle,
+      message: SettingsOutcomes.exported(l10n, result),
+      tone: result.skippedUndecryptable == 0
+          ? AppToastTone.success
+          : AppToastTone.information,
     );
   }
 
-  String _formatQuota(int bytes) {
-    final gib = bytes / (1024 * 1024 * 1024);
-    return context.l10n.settingsStorageQuotaGigabytes(
-      gib.toStringAsFixed(gib == gib.roundToDouble() ? 0 : 1),
+  Future<void> _createBackup() async {
+    final result = await widget.controller.createBackup();
+    if (!mounted || result == null) return;
+    final l10n = context.l10n;
+    AppToast.show(
+      context,
+      title: l10n.settingsBackupDoneTitle,
+      message: SettingsOutcomes.backedUp(l10n, result),
+      tone: AppToastTone.success,
     );
   }
 }
@@ -1737,9 +1966,9 @@ class _SettingsSection extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (var i = 0; i < children.length; i++) ...[
-                  if (i > 0) const Divider(),
-                  children[i],
+                for (final (index, slot) in _slots().indexed) ...[
+                  if (index > 0) const Divider(),
+                  slot,
                 ],
               ],
             ),
@@ -1749,6 +1978,42 @@ class _SettingsSection extends StatelessWidget {
       ],
     );
   }
+
+  /// Rows divide the group; notices that follow each other share one slot,
+  /// inset like a row's content.
+  List<Widget> _slots() {
+    final slots = <Widget>[];
+    var notices = <Widget>[];
+    void closeNotices() {
+      if (notices.isEmpty) return;
+      slots.add(
+        Padding(
+          padding: AppTheme.settingsRowPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (index, notice) in notices.indexed) ...[
+                if (index > 0) const Gap(AppTheme.settingsBlockSpacing),
+                notice,
+              ],
+            ],
+          ),
+        ),
+      );
+      notices = [];
+    }
+
+    for (final child in children) {
+      if (child is Alert) {
+        notices.add(child);
+      } else {
+        closeNotices();
+        slots.add(child);
+      }
+    }
+    closeNotices();
+    return slots;
+  }
 }
 
 class _SettingRow extends StatelessWidget {
@@ -1756,13 +2021,21 @@ class _SettingRow extends StatelessWidget {
     super.key,
     required this.title,
     required this.description,
-    required this.trailing,
+    this.trailing,
+    this.footer,
+    this.status,
     this.highlighted = false,
   });
 
   final String title;
   final String description;
-  final Widget trailing;
+  final Widget? trailing;
+
+  /// The current state of what the row sets, under its description.
+  final Widget? status;
+
+  /// A full-width control under the copy, such as a scale.
+  final Widget? footer;
   final bool highlighted;
 
   @override
@@ -1773,6 +2046,7 @@ class _SettingRow extends StatelessWidget {
         Text(title).medium(),
         const Gap(AppSpacing.xs),
         Text(description).muted().textSmall(),
+        if (status case final status?) ...[const Gap(AppSpacing.xs), status],
       ],
     );
     return OutlinedContainer(
@@ -1782,30 +2056,146 @@ class _SettingRow extends StatelessWidget {
       clipBehavior: Clip.none,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final stack =
-              trailing is! Switch &&
-              (constraints.maxWidth <
-                      AppLayoutSize.settingsStackedControlWidth ||
-                  MediaQuery.textScalerOf(context).scale(1) > 1.3);
-          if (stack) {
+          final narrow =
+              constraints.maxWidth < AppLayoutSize.settingsStackedControlWidth;
+          final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.3;
+          final toggle = trailing;
+          final control = toggle is Switch
+              ? _SettingSwitch(
+                  label: title,
+                  toggle: toggle,
+                  stacked: narrow && !largeText,
+                )
+              : toggle;
+          // A switch stays beside its copy in a narrow row, with the state
+          // word under it; only enlarged text moves it below the copy.
+          final stack = largeText || (control is! _SettingSwitch && narrow);
+          final Widget header = control == null
+              ? copy
+              : stack
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    copy,
+                    const Gap(AppTheme.settingsBlockSpacing),
+                    Align(alignment: Alignment.centerRight, child: control),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: copy),
+                    const Gap(AppSpacing.lg),
+                    control,
+                  ],
+                );
+          if (footer case final footer?) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                copy,
-                const Gap(AppSpacing.md),
-                Align(alignment: Alignment.centerRight, child: trailing),
+                header,
+                const Gap(AppTheme.settingsBlockSpacing),
+                footer,
               ],
             );
           }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: copy),
-              const Gap(AppSpacing.lg),
-              trailing,
-            ],
-          );
+          return header;
         },
+      ),
+    );
+  }
+}
+
+/// A row switch named by its row; [AppSwitchFrame] reports and draws its
+/// state. A switch without `onChanged` (its change is pending, or another
+/// change excludes it) is disabled. Disabling drops keyboard focus, so focus
+/// returns to the switch when it can be used again, unless it moved meanwhile.
+class _SettingSwitch extends StatefulWidget {
+  const _SettingSwitch({
+    required this.label,
+    required this.toggle,
+    this.showState = true,
+    this.stacked = false,
+  });
+
+  final String label;
+  final Switch toggle;
+  final bool showState;
+  final bool stacked;
+
+  @override
+  State<_SettingSwitch> createState() => _SettingSwitchState();
+}
+
+class _SettingSwitchState extends State<_SettingSwitch> {
+  final _focus = FocusNode(
+    debugLabel: 'setting-switch',
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
+  bool _restoreFocus = false;
+  FocusNode? _focusedWhileDisabled;
+
+  bool _enabled(Switch toggle) =>
+      toggle.enabled != false && toggle.onChanged != null;
+
+  @override
+  void didUpdateWidget(_SettingSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final was = _enabled(oldWidget.toggle);
+    final now = _enabled(widget.toggle);
+    if (was && !now && _focus.hasFocus) {
+      _restoreFocus = true;
+      _focusedWhileDisabled = null;
+      // The focus manager applies the loss in a microtask after this frame.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => scheduleMicrotask(() {
+          final primary = FocusManager.instance.primaryFocus;
+          if (_restoreFocus && primary != null && !_focus.hasFocus) {
+            _focusedWhileDisabled = primary;
+          }
+        }),
+      );
+    } else if (!was && now && _restoreFocus) {
+      final moved = _focusedWhileDisabled;
+      _restoreFocus = false;
+      _focusedWhileDisabled = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final primary = FocusManager.instance.primaryFocus;
+        if (!mounted || (moved != null && primary != moved)) return;
+        for (final node in _focus.descendants) {
+          if (node.canRequestFocus) return node.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final toggle = widget.toggle;
+    return MergeSemantics(
+      child: Semantics(
+        label: widget.label,
+        child: Focus(
+          focusNode: _focus,
+          includeSemantics: false,
+          child: AppSwitchFrame(
+            showState: widget.showState,
+            stacked: widget.stacked,
+            child: Switch(
+              key: toggle.key,
+              value: toggle.value,
+              onChanged: toggle.onChanged,
+              enabled: _enabled(toggle),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1896,7 +2286,7 @@ class _QuickPasteSection extends StatelessWidget {
                 ),
             if (!controller.initialized && controller.busy)
               StateView.loading(message: context.l10n.settingsQuickPasteLoading)
-            else if (!controller.supported)
+            else if (!controller.supported && !controller.startFailed)
               Alert(
                 leading: const AppIconFrame(
                   child: Icon(LucideIcons.circleAlert),
@@ -1907,67 +2297,143 @@ class _QuickPasteSection extends StatelessWidget {
                 ),
               )
             else ...[
-              _SettingRow(
-                key: shortcutKey,
-                highlighted: shortcutHighlighted,
-                title: context.l10n.settingsQuickPasteShortcutTitle,
-                description: switch (controller.registeredShortcutDescription) {
-                  final shortcut? =>
-                    context.l10n.settingsQuickPasteRegisteredShortcut(shortcut),
-                  null => context.l10n.settingsQuickPasteShortcutDescription,
-                },
-                trailing: _ShortcutRecorder(controller: controller),
-              ),
-              _SettingRow(
-                key: autoPasteKey,
-                highlighted: autoPasteHighlighted,
-                title: context.l10n.settingsAutoPasteTitle,
-                description: context.l10n.settingsAutoPasteDescription,
-                trailing: Switch(
-                  value: controller.autoPaste,
-                  onChanged: controller.busy ? null : controller.setAutoPaste,
-                ),
-              ),
-              if (Platform.isMacOS &&
-                  controller.autoPaste &&
-                  !controller.accessibilityGranted) ...[
-                Alert(
-                  leading: const AppIconFrame(
-                    child: Icon(LucideIcons.accessibility),
-                  ),
-                  title: Text(context.l10n.settingsAccessibilityRequiredTitle),
-                  content: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(context.l10n.settingsAccessibilityRequiredMessage),
-                      const Gap(AppSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Button.secondary(
-                          onPressed: controller.busy
-                              ? null
-                              : controller.requestAccessibility,
-                          child: Text(context.l10n.commonEnable),
-                        ),
+              if (controller.supported) ...[
+                _SettingRow(
+                  key: shortcutKey,
+                  highlighted: shortcutHighlighted,
+                  title: context.l10n.settingsQuickPasteShortcutTitle,
+                  description: switch (controller
+                      .registeredShortcutDescription) {
+                    final shortcut? =>
+                      context.l10n.settingsQuickPasteRegisteredShortcut(
+                        shortcut,
                       ),
-                    ],
+                    null => context.l10n.settingsQuickPasteShortcutDescription,
+                  },
+                  status: switch (controller.shortcutRefusal) {
+                    final refusal? => _SettingWarning(
+                      key: const ValueKey<String>(
+                        'quick-paste-shortcut-refused',
+                      ),
+                      message: _refusalMessage(context, refusal),
+                    ),
+                    null => null,
+                  },
+                  trailing: _ShortcutRecorder(controller: controller),
+                ),
+                _SettingRow(
+                  key: autoPasteKey,
+                  highlighted: autoPasteHighlighted,
+                  title: context.l10n.settingsAutoPasteTitle,
+                  description: context.l10n.settingsAutoPasteDescription,
+                  trailing: Switch(
+                    value: controller.autoPaste,
+                    onChanged: controller.busy ? null : controller.setAutoPaste,
                   ),
                 ),
+                // A failed start never read the permission.
+                if (Platform.isMacOS &&
+                    controller.autoPaste &&
+                    !controller.accessibilityGranted &&
+                    !controller.startFailed)
+                  Alert(
+                    leading: const AppIconFrame(
+                      child: Icon(LucideIcons.accessibility),
+                    ),
+                    title: Text(
+                      context.l10n.settingsAccessibilityRequiredTitle,
+                    ),
+                    content: _messageWithAction(
+                      context.l10n.settingsAccessibilityRequiredMessage,
+                      Button.secondary(
+                        onPressed: controller.busy
+                            ? null
+                            : controller.requestAccessibility,
+                        child: Text(context.l10n.commonEnable),
+                      ),
+                    ),
+                  ),
               ],
-              if (controller.errorMessage case final message?) ...[
+              if (controller.errorMessage case final message?)
                 Alert.destructive(
+                  key: const ValueKey<String>('quick-paste-error'),
                   leading: const AppIconFrame(
                     child: Icon(LucideIcons.circleAlert),
                   ),
                   title: Text(context.l10n.settingsQuickPasteAttentionTitle),
-                  content: Text(message),
+                  content: controller.startFailed
+                      ? _messageWithAction(
+                          message,
+                          Button.secondary(
+                            key: const ValueKey<String>('quick-paste-retry'),
+                            onPressed: controller.busy
+                                ? null
+                                : controller.retry,
+                            child: Text(context.l10n.commonTryAgain),
+                          ),
+                        )
+                      : Text(message),
                 ),
-              ],
             ],
           ],
         );
       },
     );
+  }
+
+  static Widget _messageWithAction(String message, Widget action) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(message),
+      const Gap(AppSpacing.sm),
+      Align(alignment: Alignment.centerRight, child: action),
+    ],
+  );
+
+  static String _refusalMessage(
+    BuildContext context,
+    DesktopShortcutRefusal refusal,
+  ) => switch (refusal.reason) {
+    DesktopShortcutRefusalReason.inUse =>
+      context.l10n.settingsQuickPasteShortcutInUse(
+        DesktopPresence.shortcutText(refusal.shortcut.displayKeys),
+      ),
+    DesktopShortcutRefusalReason.rejected =>
+      context.l10n.settingsRuntimeShortcutRegisterFailed,
+  };
+}
+
+/// A warning about a row's own setting, under its description.
+class _SettingWarning extends StatelessWidget {
+  const _SettingWarning({super.key, required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = AppTheme.statusColor(context, AppStatusTone.warning);
+    return Text.rich(
+      TextSpan(
+        children: [
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(end: AppSpacing.xs),
+              child: AppIconFrame(
+                size: AppIconSize.sm,
+                child: Icon(
+                  LucideIcons.triangleAlert,
+                  size: AppIconSize.sm,
+                  color: color,
+                ),
+              ),
+            ),
+          ),
+          TextSpan(text: message),
+        ],
+      ),
+      style: TextStyle(color: color),
+    ).textSmall();
   }
 }
 

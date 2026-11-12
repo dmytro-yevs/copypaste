@@ -49,14 +49,16 @@ pub use payload::{
     CloudSyncData, DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
     DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
     DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters, DiscoveredData,
-    DiscoveredDevice, ExportData, ExportItem, ExternalNetworkObservation, FileDetails,
-    HistoryDeviceFacet, HistoryFacets, HistoryQuery, HistorySort, HistorySourceAppFacet,
-    ImageDetails, ImagePreview, ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData,
-    PairingProgressData, PairingRole, PairingState, PeerInfo, PlatformCapability, PrivateModeData,
-    StatusData, SyncResult,
+    DiscoveredDevice, ExportChunk, ExportData, ExportItem, ExternalNetworkObservation, FileDetails,
+    HistoryCountRange, HistoryDeviceFacet, HistoryFacets, HistoryGroupCounts, HistoryQuery,
+    HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview, ImagePreviewBounds, ImportData,
+    Item, ItemPage, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    PlatformCapability, PrivateModeData, StatusData, SyncResult, TransferProgress,
+    MAX_HISTORY_COUNT_RANGES,
 };
 pub use response::{
     ConfigApplied, EventData, EventKind, FileProgress, Response, ResponseData, RuntimeEventData,
+    StorageUsage,
 };
 
 use serde::{Deserialize, Serialize};
@@ -155,6 +157,16 @@ pub enum Method {
     },
     /// Filter labels available across the complete retained history.
     HistoryFacets,
+    /// Exact sizes of the groups a History list shows for `query`: its pinned
+    /// clips, and its unpinned clips in each of `ranges`.
+    ///
+    /// Answered from indexes without reading a payload. A query whose filter
+    /// no index can answer (text search, content class, semantic kind) gets
+    /// `None` rather than an estimate. `query.sort` does not affect a count.
+    HistoryCounts {
+        query: HistoryQuery,
+        ranges: Vec<HistoryCountRange>,
+    },
     HistoryTags {
         clip_ids: Vec<String>,
     },
@@ -346,12 +358,21 @@ pub enum Method {
         #[serde(default)]
         limit: u32,
     },
+    /// The whole text history as [`ResponseData::ExportChunk`] frames of
+    /// bounded size, then one [`ResponseData::Export`] summary whose `items`
+    /// is empty. An error frame ends the stream early.
+    ExportStream,
     /// Put items back through the normal ingest path.
     Import {
         items: Vec<ExportItem>,
     },
     /// Copy the encrypted database to `dest_path`, which must not exist.
     Backup {
+        dest_path: String,
+    },
+    /// [`Method::Backup`], preceded by throttled [`ResponseData::Progress`]
+    /// frames.
+    BackupStream {
         dest_path: String,
     },
     /// Replace history with the contents of the backup at `src_path`.
@@ -475,7 +496,9 @@ impl Method {
                     | ModuleOperation::SetEnabled { .. }
                     | ModuleOperation::SetPreferences { .. }
             } | Self::Import { .. }
+                | Self::ExportStream
                 | Self::Backup { .. }
+                | Self::BackupStream { .. }
                 | Self::Restore { .. }
                 | Self::SaveFile { .. }
                 | Self::SyncNow { .. }
@@ -486,6 +509,13 @@ impl Method {
                 | Self::PairNearby { .. }
                 | Self::PairConfirm { .. }
         )
+    }
+
+    /// Whether the reply is a sequence of interim frames ending in one final
+    /// reply or error, all carrying the request id.
+    #[must_use]
+    pub fn streams_progress(&self) -> bool {
+        matches!(self, Self::ExportStream | Self::BackupStream { .. })
     }
 }
 

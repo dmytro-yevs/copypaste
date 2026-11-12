@@ -20,7 +20,7 @@
 mod export;
 mod import;
 
-pub use export::{export, ExportError};
+pub use export::{export, export_chunks, ExportError, EXPORT_CHUNK_BYTES, PROGRESS_INTERVAL};
 pub use import::{
     import, import_with_current_retention, import_with_current_retention_outcome, ImportError,
     ImportOutcome, MAX_IMPORT_ITEMS,

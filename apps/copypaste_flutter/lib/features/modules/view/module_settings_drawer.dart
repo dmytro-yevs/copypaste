@@ -98,6 +98,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
     },
     child: Focus(
       autofocus: true,
+      skipTraversal: true,
       child: AnimatedBuilder(
         animation: Listenable.merge([controller, _draft]),
         builder: (context, _) {

@@ -180,6 +180,32 @@ mod tests {
     }
 
     #[test]
+    fn get_reports_the_storage_used_against_the_quota() {
+        let (state, _dir) = test_state("usage");
+        assert_eq!(
+            applied(call(&state, Method::GetConfig)).storage_usage,
+            Some(copypaste_ipc::StorageUsage {
+                used_bytes: 0,
+                oldest_unpinned_at: None,
+            })
+        );
+        assert!(
+            call(
+                &state,
+                Method::Add {
+                    content: "weighed".into()
+                }
+            )
+            .ok
+        );
+        let usage = applied(call(&state, Method::GetConfig))
+            .storage_usage
+            .unwrap();
+        assert!(usage.used_bytes > 0);
+        assert!(usage.oldest_unpinned_at.is_some());
+    }
+
+    #[test]
     fn a_change_takes_effect_and_reports_no_restart() {
         let (state, _dir) = test_state("alpha");
         let result = applied(call(

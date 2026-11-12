@@ -135,6 +135,9 @@ pub(crate) fn from_payload(
         source_app_icon_id: row.source_icon_id.clone(),
         too_large_to_sync,
         truncated,
+        // Counted from the whole body, never the preview; a secret's line
+        // structure is as private as its text.
+        line_count: payload.text_line_count().filter(|_| !privacy.secret),
     }
 }
 
@@ -148,6 +151,7 @@ pub struct StaticHistoryPreview {
     file_details: Option<StaticFileDetails>,
     too_large_to_sync: bool,
     truncated: bool,
+    line_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -180,6 +184,7 @@ impl StaticHistoryPreview {
             }),
             too_large_to_sync: item.too_large_to_sync,
             truncated: item.truncated,
+            line_count: item.line_count,
         }
     }
 
@@ -197,8 +202,9 @@ impl StaticHistoryPreview {
             size_bytes: details.size_bytes,
             file_count: details.file_count,
         });
+        let privacy = row.clipboard_privacy();
         Item {
-            privacy: row.clipboard_privacy(),
+            privacy,
             id: row.id.clone(),
             content: self.content,
             content_type: row.content_type.clone(),
@@ -218,6 +224,7 @@ impl StaticHistoryPreview {
             source_app_icon_id: row.source_icon_id.clone(),
             too_large_to_sync: self.too_large_to_sync,
             truncated: self.truncated,
+            line_count: self.line_count.filter(|_| !privacy.secret),
         }
     }
 }

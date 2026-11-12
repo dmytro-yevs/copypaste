@@ -89,6 +89,12 @@ class AppUpdateController extends ChangeNotifier {
     _message = null;
     try {
       final installed = Version.parse(await _platform.currentVersion());
+      if (_disposed) return;
+      // The installed version is local; it stays known when the lookup fails.
+      if (installed != _currentVersion) {
+        _currentVersion = installed;
+        notifyListeners();
+      }
       final target = _platform.target;
       AppUpdateAvailability? availability;
       final AppRelease? release;
@@ -102,7 +108,6 @@ class AppUpdateController extends ChangeNotifier {
             target: target,
           );
           if (_disposed) return;
-          _currentVersion = installed;
           _release = fallbackRelease;
           _downloaded = null;
           _downloadProgress = 0;
@@ -129,7 +134,6 @@ class AppUpdateController extends ChangeNotifier {
         );
       }
       if (_disposed) return;
-      _currentVersion = installed;
       _release = release;
       _downloaded = null;
       _downloadProgress = 0;

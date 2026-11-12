@@ -22,6 +22,7 @@ import 'history_file_importer.dart';
 class RuntimeHistoryRepository
     implements
         HistoryRepository,
+        HistoryGroupCountsRepository,
         HistoryTagsRepository,
         HistorySpoilerRepository,
         HistoryFileDownloadCancellation,
@@ -79,27 +80,7 @@ class RuntimeHistoryRepository
   }) async {
     _ensureActive();
     final page = await runtime.queryClips(
-      query: runtime.ClipQuery(
-        search: query.hasSearch ? query.search.trim() : null,
-        contentClasses: _toRuntimeContentClasses(query.kind),
-        semanticKinds: _toRuntimeSemanticKinds(query.kind),
-        pinnedOnly: query.pinnedOnly,
-        originDeviceId: query.origin,
-        sourceAppBundleId: query.sourceApp,
-        sort: _toRuntimeSort(query.sort),
-        capturedFromMs: query.capturedFrom == null
-            ? null
-            : PlatformInt64Util.from(
-                query.capturedFrom!.millisecondsSinceEpoch,
-              ),
-        capturedBeforeMs: query.capturedBefore == null
-            ? null
-            : PlatformInt64Util.from(
-                query.capturedBefore!.millisecondsSinceEpoch,
-              ),
-        tagIds: query.tagIds,
-        untaggedOnly: query.untaggedOnly,
-      ),
+      query: mapQuery(query),
       limit: limit,
       cursor: cursor,
     );
@@ -107,6 +88,70 @@ class RuntimeHistoryRepository
       items: page.clips.map(_fromRuntimeListClip).toList(growable: false),
       nextCursor: page.nextCursor,
       skippedUndecryptable: page.skippedUndecryptable,
+    );
+  }
+
+  /// The one translation of a list query, shared by pages and their counts.
+  static runtime.ClipQuery mapQuery(HistoryQuery query) => runtime.ClipQuery(
+    search: query.hasSearch ? query.search.trim() : null,
+    contentClasses: _toRuntimeContentClasses(query.kind),
+    semanticKinds: _toRuntimeSemanticKinds(query.kind),
+    pinnedOnly: query.pinnedOnly,
+    originDeviceId: query.origin,
+    sourceAppBundleId: query.sourceApp,
+    sort: _toRuntimeSort(query.sort),
+    capturedFromMs: query.capturedFrom == null
+        ? null
+        : PlatformInt64Util.from(query.capturedFrom!.millisecondsSinceEpoch),
+    capturedBeforeMs: query.capturedBefore == null
+        ? null
+        : PlatformInt64Util.from(query.capturedBefore!.millisecondsSinceEpoch),
+    tagIds: query.tagIds,
+    untaggedOnly: query.untaggedOnly,
+  );
+
+  @override
+  Future<HistoryGroupCounts?> groupCounts({
+    required HistoryQuery query,
+    required List<DateTime> days,
+  }) async {
+    _ensureActive();
+    final counts = await runtime.countClipGroups(
+      query: mapQuery(query),
+      ranges: mapDayRanges(days),
+    );
+    return counts == null ? null : mapGroupCounts(days, counts);
+  }
+
+  /// Each local calendar day as the instants that bound it. Built from local
+  /// midnights, so a day shortened or lengthened by a clock change keeps its
+  /// real 23 or 25 hours.
+  static List<runtime.ClipCountRange> mapDayRanges(List<DateTime> days) => [
+    for (final day in days)
+      runtime.ClipCountRange(
+        fromMs: PlatformInt64Util.from(
+          DateTime(day.year, day.month, day.day).millisecondsSinceEpoch,
+        ),
+        beforeMs: PlatformInt64Util.from(
+          DateTime(day.year, day.month, day.day + 1).millisecondsSinceEpoch,
+        ),
+      ),
+  ];
+
+  static HistoryGroupCounts mapGroupCounts(
+    List<DateTime> days,
+    runtime.ClipGroupCounts counts,
+  ) {
+    if (counts.ranges.length != days.length) {
+      throw StateError('History group counts do not match the request');
+    }
+    return HistoryGroupCounts(
+      pinned: counts.pinned.toInt(),
+      days: {
+        for (var i = 0; i < days.length; i++)
+          DateTime(days[i].year, days[i].month, days[i].day): counts.ranges[i]
+              .toInt(),
+      },
     );
   }
 
@@ -464,6 +509,7 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
     sourceApp: clip.sourceAppName,
     sourceAppIconId: clip.sourceAppIconId,
     truncated: clip.truncated,
+    lineCount: clip.lineCount,
     colorRgba: clip.colorRgba,
     tooLargeToSync: clip.tooLargeToSync,
     file: details == null

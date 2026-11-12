@@ -1,5 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/setup_setting_row.dart';
@@ -29,11 +30,14 @@ class WindowsSetupStep extends StatelessWidget {
           action: Semantics(
             label: context.l10n.onboardingStartAtLoginSemantics,
             toggled: setup.launchAtLogin,
-            child: Switch(
-              value: setup.launchAtLogin,
-              onChanged: setup.busy || !setup.launchAtLoginAvailable
-                  ? null
-                  : setup.setLaunchAtLogin,
+            child: AppSwitchFrame(
+              child: Switch(
+                value: setup.launchAtLogin,
+                enabled: !setup.busy && setup.launchAtLoginAvailable,
+                onChanged: setup.busy || !setup.launchAtLoginAvailable
+                    ? null
+                    : setup.setLaunchAtLogin,
+              ),
             ),
           ),
         ),

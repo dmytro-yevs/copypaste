@@ -203,7 +203,9 @@ mod tests {
         let a = import(&store, &key, &path, "a.pdf");
         let b = import(&store, &key, &path, "b.pdf");
         let backup = dir.path().join("backup.db");
-        store.backup_to(&backup).unwrap();
+        store
+            .backup_to(&backup, &key.db_key(), |_, _| true)
+            .unwrap();
         store.delete_all().unwrap();
         assert_eq!(blob_count(&store), 0);
         store.restore_from(&backup, &key.db_key()).unwrap();

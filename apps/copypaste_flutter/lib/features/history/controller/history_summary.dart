@@ -57,6 +57,7 @@ bool historySummaryEquals(HistoryClip a, HistoryClip b) {
       a.sourceApp == b.sourceApp &&
       a.sourceAppIconId == b.sourceAppIconId &&
       a.truncated == b.truncated &&
+      a.lineCount == b.lineCount &&
       a.body == b.body &&
       a.colorRgba == b.colorRgba &&
       a.tooLargeToSync == b.tooLargeToSync &&

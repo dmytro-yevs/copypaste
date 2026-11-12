@@ -11,8 +11,31 @@ import 'package:pub_semver/pub_semver.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 
 import 'modules_test_support.dart';
+import '../../support/focus_traversal.dart';
 
 void main() {
+  testWidgets('Tab moves on from the module search field', (tester) async {
+    final controller = ModulesController(
+      repository: MemoryModulesRepository(),
+      marketplace: MemoryModuleMarketplace(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: SingleChildScrollView(
+            child: ModulesSettingsView(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await expectTabLeaves(tester, find.byType(TextField));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   for (final (platform, width) in [
     (TargetPlatform.android, 320.0),
     (TargetPlatform.macOS, 1000.0),

@@ -28,6 +28,7 @@ import 'package:copypaste_flutter/features/history/presentation/history_code_hig
 import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/shared/adaptive_breakpoints.dart';
+import 'package:copypaste_flutter/shared/locale_case.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -301,31 +302,50 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: list,
       );
     }
-    return ResizablePanel.horizontal(
-      dividerBuilder: (context) => null,
-      draggerThickness: 12,
-      children: [
-        ResizablePane.flex(
-          minSize: 440,
-          initialFlex: 1.45,
-          child: Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.lg),
-            child: SizedBox.expand(
-              key: const ValueKey<String>('history-clip-list'),
-              child: list,
+    // Resizable panes clip their content, so the panel reaches past this
+    // page by the focus-ring inset and each pane pads it back: the toolbar
+    // and inspector rings stay whole and nothing moves.
+    const inset = AppTheme.focusRingInset;
+    return AppOverlays.focusRingOverflow(
+      child: ResizablePanel.horizontal(
+        dividerBuilder: (context) => null,
+        draggerThickness: 12,
+        children: [
+          ResizablePane.flex(
+            minSize: 440 + inset,
+            initialFlex: 1.45,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(
+                inset,
+                inset,
+                AppSpacing.lg,
+                inset,
+              ),
+              child: SizedBox.expand(
+                key: const ValueKey<String>('history-clip-list'),
+                child: list,
+              ),
             ),
           ),
-        ),
-        ResizablePane(
-          initialSize: 360,
-          minSize: 300,
-          maxSize: 560,
-          child: HistoryInspector(
-            controller: widget.controller,
-            inDrawer: false,
+          ResizablePane(
+            initialSize: 360 + inset,
+            minSize: 300 + inset,
+            maxSize: 560 + inset,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(
+                0,
+                inset,
+                inset,
+                inset,
+              ),
+              child: HistoryInspector(
+                controller: widget.controller,
+                inDrawer: false,
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -586,64 +606,76 @@ class _HistoryListState extends State<_HistoryList> {
           const Gap(AppSpacing.md),
           _SkippedRowsWarning(count: controller.window.skippedUndecryptable),
         ],
-        const Gap(AppSpacing.md),
+        // The list's own top inset completes the toolbar gap.
+        const Gap(AppSpacing.md - AppTheme.focusRingInset),
         Expanded(
-          child: SortableLayer(
-            clipBehavior: Clip.hardEdge,
-            dropDuration: AppMotion.resolve(context, AppMotion.standard),
-            dropCurve: AppMotion.standardCurve,
-            child: ScrollableSortableLayer(
-              controller: scrollController,
-              scrollThreshold: AppControlSize.touch,
-              child: HistoryWindowScroll(
+          // The list reaches past the column by the focus-ring inset and its
+          // rows are inset by the same amount, so a focused card's ring fits
+          // the viewport while cards stay aligned with the toolbar.
+          child: AppOverlays.focusRingOverflow(
+            axis: Axis.horizontal,
+            child: SortableLayer(
+              clipBehavior: Clip.hardEdge,
+              dropDuration: AppMotion.resolve(context, AppMotion.standard),
+              dropCurve: AppMotion.standardCurve,
+              child: ScrollableSortableLayer(
                 controller: scrollController,
-                viewportKey: _viewportKey,
-                bottomPadding: bottomPadding,
-                pages: [
-                  for (var pageIndex = 0; pageIndex < pages.length; pageIndex++)
-                    HistoryWindowPageView(
-                      id: pageIndex,
-                      extent: pages[pageIndex].extent,
-                      rows: pageRows[pageIndex]?.length ?? 0,
-                      rowBuilder: pageRows[pageIndex] == null
-                          ? null
-                          : (context, index) =>
-                                _buildRow(pageRows[pageIndex]![index]),
-                      onMeasured: (extent) => unawaited(
-                        controller.window.reportPageExtent(pageIndex, extent),
-                      ),
-                      onPlaceholderVisible: () => unawaited(
-                        controller.window.materializePage(pageIndex),
-                      ),
-                    ),
-                ],
-                trailing: hasLoadMore || hasError
-                    ? Padding(
-                        padding: const EdgeInsets.all(AppSpacing.lg),
-                        child: Center(
-                          child: hasError
-                              ? Alert.destructive(
-                                  leading: const AppIconFrame(
-                                    child: Icon(LucideIcons.circleAlert),
-                                  ),
-                                  title: Text(
-                                    context.l10n.historyAttentionTitle,
-                                  ),
-                                  content: Text(controller.errors.message!),
-                                )
-                              : controller.window.isLoadingMore
-                              ? const AppIconFrame(
-                                  size: AppIconSize.sm,
-                                  child: CircularProgressIndicator(),
-                                )
-                              : Button.ghost(
-                                  onPressed: () =>
-                                      unawaited(controller.window.loadMore()),
-                                  child: Text(context.l10n.historyLoadMore),
-                                ),
+                scrollThreshold: AppControlSize.touch,
+                child: HistoryWindowScroll(
+                  controller: scrollController,
+                  viewportKey: _viewportKey,
+                  topPadding: AppTheme.focusRingInset,
+                  bottomPadding: bottomPadding,
+                  pages: [
+                    for (
+                      var pageIndex = 0;
+                      pageIndex < pages.length;
+                      pageIndex++
+                    )
+                      HistoryWindowPageView(
+                        id: pageIndex,
+                        extent: pages[pageIndex].extent,
+                        rows: pageRows[pageIndex]?.length ?? 0,
+                        rowBuilder: pageRows[pageIndex] == null
+                            ? null
+                            : (context, index) =>
+                                  _buildRow(pageRows[pageIndex]![index]),
+                        onMeasured: (extent) => unawaited(
+                          controller.window.reportPageExtent(pageIndex, extent),
                         ),
-                      )
-                    : null,
+                        onPlaceholderVisible: () => unawaited(
+                          controller.window.materializePage(pageIndex),
+                        ),
+                      ),
+                  ],
+                  trailing: hasLoadMore || hasError
+                      ? Padding(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          child: Center(
+                            child: hasError
+                                ? Alert.destructive(
+                                    leading: const AppIconFrame(
+                                      child: Icon(LucideIcons.circleAlert),
+                                    ),
+                                    title: Text(
+                                      context.l10n.historyAttentionTitle,
+                                    ),
+                                    content: Text(controller.errors.message!),
+                                  )
+                                : controller.window.isLoadingMore
+                                ? const AppIconFrame(
+                                    size: AppIconSize.sm,
+                                    child: CircularProgressIndicator(),
+                                  )
+                                : Button.ghost(
+                                    onPressed: () =>
+                                        unawaited(controller.window.loadMore()),
+                                    child: Text(context.l10n.historyLoadMore),
+                                  ),
+                          ),
+                        )
+                      : null,
+                ),
               ),
             ),
           ),
@@ -660,9 +692,10 @@ class _HistoryListState extends State<_HistoryList> {
   };
 
   Widget _buildRow(_HistoryListRow row) => switch (row) {
-    _HistorySectionRow(:final section) => _HistorySectionDivider(
+    _HistorySectionRow(:final section) => _HistorySectionHeader(
       key: _rowKey(row),
       section: section,
+      count: section.count(controller.window.groupCounts),
       collapsed: controller.window.isSectionCollapsed(section.key),
       onToggle: () => controller.window.toggleSection(section.key),
     ),
@@ -682,7 +715,7 @@ class _HistoryListState extends State<_HistoryList> {
 
   Widget _clipRow(HistoryClip clip) {
     final child = Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: _historyRowPadding,
       child: _HistoryClipCard(
         clip: clip,
         controller: controller,
@@ -736,7 +769,7 @@ class _HistoryListState extends State<_HistoryList> {
         onDragEnd: controller.pinnedOrder.endPinnedDrag,
         onDragCancel: controller.pinnedOrder.endPinnedDrag,
         placeholder: Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          padding: _historyRowPadding,
           child: DecoratedBox(
             key: const ValueKey<String>('history-pin-drop-placeholder'),
             decoration: AppTheme.historyPinnedDropDecoration(context),
@@ -763,6 +796,14 @@ class _HistoryListState extends State<_HistoryList> {
     );
   }
 }
+
+/// Rows sit inside the list's focus-ring inset with the shared row gap below.
+const _historyRowPadding = EdgeInsets.fromLTRB(
+  AppTheme.focusRingInset,
+  0,
+  AppTheme.focusRingInset,
+  AppSpacing.sm,
+);
 
 sealed class _HistoryListRow {
   const _HistoryListRow();
@@ -802,37 +843,101 @@ class _HistorySection {
     _HistorySectionKind.yesterday => context.l10n.historySectionYesterday,
     _HistorySectionKind.date => formatSystemDate(context, date!),
   };
+
+  /// The exact number of clips in the group; null while it is not known.
+  int? count(HistoryGroupCounts? counts) => switch (kind) {
+    _HistorySectionKind.pinned => counts?.pinned,
+    _ => date == null ? null : counts?.day(date!),
+  };
+
+  /// The calendar date behind a relative day label.
+  String? detail(BuildContext context) => switch (kind) {
+    _HistorySectionKind.today ||
+    _HistorySectionKind.yesterday => formatSystemWeekdayDate(context, date!),
+    _HistorySectionKind.pinned || _HistorySectionKind.date => null,
+  };
 }
 
-class _HistorySectionDivider extends StatelessWidget {
-  const _HistorySectionDivider({
+/// The band that opens a History group and collapses it.
+class _HistorySectionHeader extends StatelessWidget {
+  const _HistorySectionHeader({
     super.key,
     required this.section,
     required this.collapsed,
     required this.onToggle,
+    this.count,
   });
 
   final _HistorySection section;
+  final int? count;
   final bool collapsed;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
+    final locale =
+        Localizations.maybeLocaleOf(context) ?? AppLocalization.fallback;
+    final label = section.label(context);
+    final detail = section.detail(context);
+    final count = switch (this.count) {
+      final count? => context.l10n.historySectionClipCount(count),
+      null => null,
+    };
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      padding: _historyRowPadding,
       child: Semantics(
         header: true,
         button: true,
         expanded: !collapsed,
+        label: [label, ?detail, ?count].join(', '),
         child: Button.ghost(
           key: ValueKey<String>('history-section-${section.key}'),
           style: AppTheme.historySectionButtonStyle,
           onPressed: onToggle,
-          child: Divider(
+          child: ExcludeSemantics(
             child: Row(
-              mainAxisSize: MainAxisSize.min,
-              spacing: AppSpacing.xs,
+              spacing: AppSpacing.sm,
               children: [
+                if (section.kind == _HistorySectionKind.pinned)
+                  const AppIconFrame(
+                    size: AppIconSize.sm,
+                    child: Icon(LucideIcons.pin, size: AppIconSize.sm),
+                  ),
+                Expanded(
+                  // The count, then the date, drops below the label before
+                  // any of them wraps.
+                  child: Wrap(
+                    spacing: AppSpacing.sm,
+                    children: [
+                      Text(
+                        toLocaleUpperCase(label, locale),
+                        style: AppTheme.historySectionTextStyle(
+                          context,
+                          emphasized: true,
+                        ),
+                      ),
+                      if (detail != null)
+                        Text(
+                          toLocaleUpperCase(detail, locale),
+                          style: AppTheme.historySectionTextStyle(
+                            context,
+                            emphasized: false,
+                          ),
+                        ),
+                      if (count != null)
+                        Text(
+                          toLocaleUpperCase(count, locale),
+                          key: ValueKey<String>(
+                            'history-section-count-${section.key}',
+                          ),
+                          style: AppTheme.historySectionTextStyle(
+                            context,
+                            emphasized: false,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
                 AppIconFrame(
                   size: AppIconSize.sm,
                   child: Icon(
@@ -842,7 +947,6 @@ class _HistorySectionDivider extends StatelessWidget {
                     size: AppIconSize.sm,
                   ),
                 ),
-                Text(section.label(context)),
               ],
             ),
           ),
@@ -918,8 +1022,8 @@ String _historyDateSectionKey(DateTime value, DateTime now) {
 
 _HistorySection _dateSection(DateTime date, {required DateTime today}) {
   return switch (_historyDateSectionKey(date, today)) {
-    'today' => const _HistorySection(_HistorySectionKind.today),
-    'yesterday' => const _HistorySection(_HistorySectionKind.yesterday),
+    'today' => _HistorySection(_HistorySectionKind.today, date: date),
+    'yesterday' => _HistorySection(_HistorySectionKind.yesterday, date: date),
     _ => _HistorySection(_HistorySectionKind.date, date: date),
   };
 }
@@ -1190,7 +1294,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   );
 
   Widget _searchField({required bool compact}) {
-    return TextField(
+    final field = TextField(
       padding: AppTheme.controlFieldPadding(
         context,
         minimum: AppControlSize.large,
@@ -1200,6 +1304,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       autofocus: compact,
       placeholder: Text(context.l10n.historySearch),
       onChanged: widget.controller.window.updateSearch,
+      skipInputFeatureFocusTraversal: true,
       features: compact
           ? [
               const InputFeature.leading(
@@ -1225,6 +1330,14 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                 icon: AppIconFrame(child: Icon(LucideIcons.x)),
               ),
             ],
+    );
+    if (!compact) return field;
+    // The close button is out of Tab order, so Escape closes the search.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _closeCompactSearch,
+      },
+      child: field,
     );
   }
 
@@ -1658,12 +1771,15 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
         anchorAlignment: position == null
             ? AlignmentDirectional.bottomEnd
             : null,
-        builder: (_) => DropdownMenu(
-          children: historyClipMenuItems(
-            context,
-            controller: widget.controller,
-            clip: widget.clip,
-            includeCopy: position != null,
+        builder: (popupContext) => AppTheme.popupSurface(
+          popupContext,
+          child: DropdownMenu(
+            children: historyClipMenuItems(
+              context,
+              controller: widget.controller,
+              clip: widget.clip,
+              includeCopy: position != null,
+            ),
           ),
         ),
       ).future;
@@ -1980,19 +2096,28 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
       ),
     );
     final menu = !touch && _actionsEnabled;
-    return ContextMenu(
-      enabled: menu,
-      items: menu
-          ? historyClipMenuItems(
-              context,
-              controller: controller,
-              clip: clip,
-              includeCopy: true,
-            )
-          : const [],
-      child: Listener(
-        onPointerDown: (event) => _pointerDown = event,
-        child: card,
+    // The context menu popup inherits the theme around it; the row keeps the
+    // app theme.
+    final rowTheme = Theme.of(context);
+    return Theme(
+      data: AppTheme.popupTheme(context),
+      child: ContextMenu(
+        enabled: menu,
+        items: menu
+            ? historyClipMenuItems(
+                context,
+                controller: controller,
+                clip: clip,
+                includeCopy: true,
+              )
+            : const [],
+        child: Theme(
+          data: rowTheme,
+          child: Listener(
+            onPointerDown: (event) => _pointerDown = event,
+            child: card,
+          ),
+        ),
       ),
     );
   }
@@ -2068,7 +2193,7 @@ class _ClipContentState extends State<_ClipContent> {
             child: Text(
               clip.preview,
               style: Theme.of(context).typography.mono,
-              maxLines: 4,
+              maxLines: HistoryClipPresentation.previewMaxLines,
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -2083,7 +2208,7 @@ class _ClipContentState extends State<_ClipContent> {
       );
       return Text.rich(
         highlighted.span,
-        maxLines: 4,
+        maxLines: HistoryClipPresentation.previewMaxLines,
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -2093,7 +2218,7 @@ class _ClipContentState extends State<_ClipContent> {
         style: kind == HistoryClipKind.path
             ? Theme.of(context).typography.mono
             : null,
-        maxLines: 4,
+        maxLines: HistoryClipPresentation.previewMaxLines,
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -2192,6 +2317,7 @@ class _ClipMeta extends StatelessWidget {
     );
     final kindIcon = icon(HistoryClipPresentation.icon(clip.contentKind));
     final tags = controller.tags.names(clip.tagIds);
+    final cutLines = HistoryClipPresentation.cutLineCount(clip);
     return Text.rich(
       TextSpan(
         children: [
@@ -2245,6 +2371,12 @@ class _ClipMeta extends StatelessWidget {
             ),
             TextSpan(text: ' ${tags.join(', ')}'),
           ],
+          if (cutLines != null)
+            // Last, so it yields first; the preview is already read in full.
+            TextSpan(
+              text: ' • ${context.l10n.historyClipLineCount(cutLines)}',
+              semanticsLabel: '',
+            ),
         ],
       ),
       key: ValueKey<String>('history-clip-meta-${clip.id}'),

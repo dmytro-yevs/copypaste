@@ -21,6 +21,28 @@ abstract final class AppOverlays {
   static ValueListenable<bool> drawerVisibilityOf(BuildContext context) =>
       _AppDrawerConfiguration.sessionFor(context);
 
+  /// Asks the window's open drawer to close the way its Escape does, so its
+  /// close guards apply; false when there is none.
+  static bool dismissDrawer(BuildContext context) {
+    final session = _AppDrawerConfiguration.sessionFor(context);
+    final active = session.active;
+    if (active == null || active.isCompleted) return false;
+    final dismiss = session.scope?.currentState?.onDismiss;
+    if (dismiss != null) {
+      dismiss();
+    } else {
+      active.remove();
+    }
+    return true;
+  }
+
+  /// Binds Escape in drawer content to [onDismiss], which owns the drawer's
+  /// close guards; the window's back actions take the same path.
+  static Widget drawerDismissal({
+    required VoidCallback onDismiss,
+    required Widget child,
+  }) => _DrawerDismissal(onDismiss: onDismiss, child: child);
+
   static DrawerConfiguration drawerConfiguration(BuildContext context) {
     final registry = OverlayAnchorRegistry.of(context);
     final side =
@@ -301,36 +323,40 @@ abstract final class AppOverlays {
   }) {
     return AlertDialog(
       title: Flexible(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  AppIconFrame(
-                    size: AppIconSize.sm,
-                    child: Icon(icon, size: AppIconSize.sm),
-                  ).iconMutedForeground(),
-                  const Gap(AppSpacing.lg),
-                  Flexible(child: title),
-                ],
-              ),
-              if (content != null) ...[
-                const Gap(AppSpacing.sm),
-                Builder(
-                  builder: (context) {
-                    final theme = Theme.of(context);
-                    return DefaultTextStyle.merge(
-                      style: theme.typography.small
-                          .merge(theme.typography.normal)
-                          .copyWith(color: theme.colorScheme.mutedForeground),
-                      child: content,
-                    );
-                  },
+        child: ClipRect(
+          clipper: const _FocusRingClipper(),
+          child: SingleChildScrollView(
+            clipBehavior: Clip.none,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    AppIconFrame(
+                      size: AppIconSize.sm,
+                      child: Icon(icon, size: AppIconSize.sm),
+                    ).iconMutedForeground(),
+                    const Gap(AppSpacing.lg),
+                    Flexible(child: title),
+                  ],
                 ),
+                if (content != null) ...[
+                  const Gap(AppSpacing.sm),
+                  Builder(
+                    builder: (context) {
+                      final theme = Theme.of(context);
+                      return DefaultTextStyle.merge(
+                        style: theme.typography.small
+                            .merge(theme.typography.normal)
+                            .copyWith(color: theme.colorScheme.mutedForeground),
+                        child: content,
+                      );
+                    },
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -385,12 +411,58 @@ abstract final class AppOverlays {
     ),
   );
 
+  /// Clips a scroll view while leaving room for the focus ring of a control
+  /// at its edge. The scroll view itself must use [Clip.none].
+  static Widget focusRingClip({required Widget child}) =>
+      ClipRect(clipper: const _FocusRingClipper(), child: child);
+
+  /// Lets a child that clips its content, such as a library panel, reach
+  /// [AppTheme.focusRingInset] past its slot so it can pad that room back for
+  /// focus rings without moving anything. [axis] limits the reach.
+  static Widget focusRingOverflow({required Widget child, Axis? axis}) =>
+      LayoutBuilder(
+        builder: (context, constraints) {
+          const reach = AppTheme.focusRingInset * 2;
+          final width = axis == Axis.vertical || !constraints.hasBoundedWidth
+              ? null
+              : constraints.maxWidth + reach;
+          final height =
+              axis == Axis.horizontal || !constraints.hasBoundedHeight
+              ? null
+              : constraints.maxHeight + reach;
+          return OverflowBox(
+            minWidth: width,
+            maxWidth: width,
+            minHeight: height,
+            maxHeight: height,
+            child: child,
+          );
+        },
+      );
+
   static BoxDecoration dialogFieldDecoration(BuildContext context) {
     return BoxDecoration(
       color: Theme.of(context).colorScheme.accent,
       borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
     );
   }
+}
+
+/// Keeps vertical scroll clipping while leaving room for the focus ring that
+/// the library paints just outside a control touching the body's edge.
+class _FocusRingClipper extends CustomClipper<Rect> {
+  const _FocusRingClipper();
+
+  @override
+  Rect getClip(Size size) =>
+      (Offset.zero & size).inflate(AppTheme.focusRingInset);
+
+  // Visibility checks (semantics, show-on-screen) must see the same rect.
+  @override
+  Rect getApproximateClipRect(Size size) => getClip(size);
+
+  @override
+  bool shouldReclip(_FocusRingClipper oldClipper) => false;
 }
 
 /// Applies the shared popup surface to stock shadcn select and menu content.
@@ -450,25 +522,130 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
     return _sessions[window] ??= _DrawerSession();
   }
 
+  /// The library scopes focus around the drawer and the backdrop together and
+  /// drops focus on open, so the drawer content gets its own scope (Tab stays
+  /// inside) and focus returns to the opener when the drawer closes.
   @override
   OverlayCompleter<T?> show<T>(BuildContext context, WidgetBuilder builder) {
     final session = sessionFor(context);
     final previous = session.active;
+    // Only keyboard focus returns: on touch, refocusing a text field would
+    // raise the soft keyboard again.
+    final focused =
+        FocusManager.instance.highlightMode == FocusHighlightMode.traditional
+        ? FocusManager.instance.primaryFocus
+        : null;
+    // A drawer replacing an open one returns focus to the first opener.
+    final opener = previous != null && !previous.isCompleted
+        ? session.opener
+        : focused;
     if (previous != null && !previous.isCompleted) previous.remove();
-    final drawer = super.show<T>(context, builder);
+    final scope = GlobalKey<_DrawerFocusScopeState>();
+    final drawer = super.show<T>(
+      context,
+      (context) => _DrawerFocusScope(key: scope, child: builder(context)),
+    );
     session.active = drawer;
+    session.scope = scope;
+    session.opener = opener;
     session.value = true;
     drawer.future.whenComplete(() {
-      if (identical(session.active, drawer)) {
-        session.active = null;
-        session.value = false;
+      if (!identical(session.active, drawer)) return;
+      session.active = null;
+      session.scope = null;
+      session.opener = null;
+      session.value = false;
+      // Focus the user already moved elsewhere stays where it is.
+      final focusInDrawer =
+          FocusManager.instance.primaryFocus == null ||
+          (scope.currentState?.hasFocus ?? false);
+      if (focusInDrawer &&
+          opener != null &&
+          opener.context != null &&
+          opener.canRequestFocus) {
+        opener.requestFocus();
       }
     });
     return drawer;
   }
 }
 
+/// Gives drawer content its own focus scope and moves focus into it once the
+/// drawer is mounted; the library's shared scope remembers the opener instead.
+class _DrawerFocusScope extends StatefulWidget {
+  const _DrawerFocusScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_DrawerFocusScope> createState() => _DrawerFocusScopeState();
+}
+
+class _DrawerFocusScopeState extends State<_DrawerFocusScope> {
+  final _scope = FocusScopeNode(debugLabel: 'AppDrawer');
+
+  /// Set by [_DrawerDismissal] in the content.
+  VoidCallback? onDismiss;
+
+  bool get hasFocus => _scope.hasFocus;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_scope.hasFocus) _scope.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scope.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FocusScope(node: _scope, child: widget.child);
+}
+
+class _DrawerDismissal extends StatefulWidget {
+  const _DrawerDismissal({required this.onDismiss, required this.child});
+
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  State<_DrawerDismissal> createState() => _DrawerDismissalState();
+}
+
+class _DrawerDismissalState extends State<_DrawerDismissal> {
+  _DrawerFocusScopeState? _drawer;
+
+  void _dismiss() => widget.onDismiss();
+
+  @override
+  void initState() {
+    super.initState();
+    _drawer = context.findAncestorStateOfType<_DrawerFocusScopeState>()
+      ?..onDismiss = _dismiss;
+  }
+
+  @override
+  void dispose() {
+    if (_drawer?.onDismiss == _dismiss) _drawer!.onDismiss = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {const SingleActivator(LogicalKeyboardKey.escape): _dismiss},
+    child: widget.child,
+  );
+}
+
 class _DrawerSession extends ValueNotifier<bool> {
   _DrawerSession() : super(false);
   OverlayCompleter? active;
+  GlobalKey<_DrawerFocusScopeState>? scope;
+  FocusNode? opener;
 }

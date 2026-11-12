@@ -4,21 +4,14 @@ import 'package:window_manager/window_manager.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 
-/// Places app navigation in the macOS native title bar without covering traffic
-/// lights or making controls part of the draggable region.
+/// Places a title in the macOS native title bar without covering the traffic
+/// lights; the title area drags the window.
 class MacosWindowHeader extends StatelessWidget {
-  const MacosWindowHeader({
-    super.key,
-    required this.title,
-    this.leading,
-    this.actions = const [],
-  });
+  const MacosWindowHeader({super.key, required this.title});
 
   static const nativeControlsWidth = AppControlSize.touch + AppSpacing.xxxl;
 
   final Widget title;
-  final Widget? leading;
-  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -39,10 +32,6 @@ class MacosWindowHeader extends StatelessWidget {
               key: ValueKey<String>('macos-native-controls-reserve'),
               width: nativeControlsWidth,
             ),
-            if (leading case final leading?) ...[
-              leading,
-              const Gap(AppSpacing.sm),
-            ],
             Expanded(
               child: DragToMoveArea(
                 key: const ValueKey<String>('macos-window-drag-region'),
@@ -55,14 +44,6 @@ class MacosWindowHeader extends StatelessWidget {
                 ),
               ),
             ),
-            if (actions.isNotEmpty) ...[
-              const Gap(AppSpacing.sm),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: actions,
-              ).gap(AppSpacing.sm),
-              const Gap(AppSpacing.lg),
-            ],
           ],
         ),
       ),

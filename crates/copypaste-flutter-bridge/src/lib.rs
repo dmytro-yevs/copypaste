@@ -5,6 +5,7 @@
 
 mod api;
 mod client;
+mod export_file;
 #[cfg(target_os = "android")]
 mod inference_android;
 mod native_pairing_abi;
@@ -12,6 +13,7 @@ mod protected;
 mod runtime;
 #[cfg(target_os = "android")]
 mod runtime_android;
+mod update_throttle;
 
 pub use api::*;
 

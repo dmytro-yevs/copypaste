@@ -6,6 +6,8 @@ import 'dart:async';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter/services.dart';
 
+import '../../../app/shell/header_action_content.dart';
+import '../../../app/shell/header_fit.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
@@ -50,31 +52,47 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([widget.controller, ?widget.devices]),
-    builder: (context, _) {
-      return Tooltip(
-        showDuration: AppMotion.resolve(context, AppMotion.standard),
-        tooltip: (context) => TooltipContainer(child: Text(_status.label)),
-        child: Button.secondary(
-          key: const ValueKey<String>('sync-header-open'),
-          style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
-          onPressed: widget.devices?.pairingInspectorOpen == true
-              ? null
-              : _open,
-          child: Semantics(
-            label: context.l10n.syncHeaderSemanticsLabel(_status.label),
-            child: AppIconFrame(
-              child: Icon(
-                LucideIcons.network,
-                color: _toneColor(context, _status.tone),
+  Widget build(BuildContext context) {
+    final worded = HeaderFit.stageOf(context).showsStatusText;
+    return AnimatedBuilder(
+      animation: Listenable.merge([widget.controller, ?widget.devices]),
+      builder: (context, _) {
+        final status = _status;
+        final onPressed = widget.devices?.pairingInspectorOpen == true
+            ? null
+            : _open;
+        final content = Semantics(
+          label: context.l10n.syncHeaderSemanticsLabel(status.label),
+          child: ExcludeSemantics(
+            child: HeaderActionContent(
+              icon: AppIconFrame(
+                child: Icon(
+                  LucideIcons.network,
+                  color: _toneColor(context, status.tone),
+                ),
               ),
+              label: status.label,
+              detail: status.peers.isEmpty
+                  ? null
+                  : ' · ${context.l10n.syncHeaderDeviceCount(status.peers.length)}',
             ),
           ),
-        ),
-      );
-    },
-  );
+        );
+        return Tooltip(
+          showDuration: AppMotion.resolve(context, AppMotion.standard),
+          tooltip: (context) => TooltipContainer(
+            child: Text(worded ? context.l10n.syncDetailsTitle : status.label),
+          ),
+          child: Button.ghost(
+            key: const ValueKey<String>('sync-header-open'),
+            style: AppTheme.headerStatusCellStyle,
+            onPressed: onPressed,
+            child: content,
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _open() async {
     if (_opening) return;
@@ -96,6 +114,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
             child: Focus(
               focusNode: _drawerFocus,
               autofocus: true,
+              skipTraversal: true,
               child: AnimatedBuilder(
                 animation: Listenable.merge([
                   widget.controller,

@@ -16,15 +16,178 @@ import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/controller/history_window_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
+import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
+import '../../support/focus_traversal.dart';
 
 void main() {
+  testWidgets('focus rings fit the list and cards align with the toolbar', (
+    tester,
+  ) async {
+    final repository = _ScreenRepository()
+      ..page = HistoryClipPage(
+        items: [
+          HistoryClip(
+            id: 'ring',
+            contentType: 'text',
+            preview: 'Ring clip',
+            createdAt: DateTime.now(),
+            pinned: false,
+          ),
+        ],
+      );
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await controller.initialize();
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final viewport = tester.getRect(find.byType(CustomScrollView));
+    final band = tester.getRect(
+      find.byKey(const ValueKey<String>('history-section-today')),
+    );
+    final card = tester.getRect(
+      find.byKey(const ValueKey<String>('history-clip-ring')),
+    );
+    // FocusOutline paints its ring 3 px outside the focused control.
+    for (final ring in [band.inflate(3), card.inflate(3)]) {
+      expect(ring.left, greaterThanOrEqualTo(viewport.left));
+      expect(ring.top, greaterThanOrEqualTo(viewport.top));
+      expect(ring.right, lessThanOrEqualTo(viewport.right));
+    }
+    // Cards and bands keep the page column that the toolbar stretches across.
+    final screen = tester.getRect(find.byType(HistoryScreen));
+    expect(card.left, screen.left + AppSpacing.lg);
+    expect(card.right, screen.right - AppSpacing.lg);
+    expect(band.left, card.left);
+    expect(band.right, card.right);
+  });
+
+  testWidgets('group bands name their exact size and never guess it', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final repository = _CountingScreenRepository()
+      ..page = HistoryClipPage(
+        items: [
+          HistoryClip(
+            id: 'pinned',
+            contentType: 'text',
+            preview: 'Pinned clip',
+            createdAt: now,
+            pinned: true,
+          ),
+          HistoryClip(
+            id: 'today',
+            contentType: 'text',
+            preview: 'Today clip',
+            createdAt: now,
+            pinned: false,
+          ),
+        ],
+      )
+      ..counts = HistoryGroupCounts(pinned: 2, days: {today: 14});
+    final controller = HistoryController(
+      repository,
+      includeFacets: false,
+      includeGroupCounts: true,
+    );
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await controller.initialize();
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        localizationsDelegates: AppLocalization.delegates,
+        supportedLocales: AppLocalization.supportedLocales,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final l10n = AppStrings.current;
+    Finder count(String key) =>
+        find.byKey(ValueKey<String>('history-section-count-$key'));
+    expect(find.text(l10n.historySectionClipCount(14).toUpperCase()), findsOne);
+    expect(find.text(l10n.historySectionClipCount(2).toUpperCase()), findsOne);
+    // The count shares the band's line and is read with its name.
+    expect(
+      tester.getCenter(count('today')).dy,
+      closeTo(
+        tester.getCenter(find.text(l10n.historySectionToday.toUpperCase())).dy,
+        1,
+      ),
+    );
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          '^${l10n.historySectionPinned}, ${l10n.historySectionClipCount(2)}\$',
+        ),
+      ),
+      findsOne,
+    );
+
+    // A search cannot be counted exactly, so no number is shown.
+    repository.counts = null;
+    controller.window.updateSearch('clip');
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(count('today'), findsNothing);
+    expect(count('pinned'), findsNothing);
+  });
+
+  testWidgets('Tab moves on from search and Escape closes compact search', (
+    tester,
+  ) async {
+    final controller = HistoryController(_TagScreenRepository());
+    addTearDown(controller.dispose);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    Future<void> pump(double width) async {
+      await tester.binding.setSurfaceSize(Size(width, 800));
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await pump(1200);
+    await expectTabLeaves(tester, find.byType(TextField));
+
+    await pump(420);
+    final toggle = find.byKey(const ValueKey<String>('history-search-toggle'));
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(toggle, findsOneWidget);
+    // Clearing the query schedules the debounced search reload.
+    await tester.pump(const Duration(seconds: 1));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   testWidgets('icon filter actions show their tooltips on hover', (
     tester,
   ) async {
@@ -899,6 +1062,16 @@ void main() {
       expect(copy, findsOneWidget);
       expect(delete, findsOneWidget);
       expect(tester.getCenter(copy).dy, lessThan(tester.getCenter(delete).dy));
+      for (final item in [copy, delete]) {
+        final icon = tester.getRect(
+          find.descendant(of: item, matching: find.byType(Icon)),
+        );
+        final label = tester.getRect(
+          find.descendant(of: item, matching: find.byType(Text)),
+        );
+        expect(icon.width, AppIconSize.sm);
+        expect(label.left, greaterThanOrEqualTo(icon.right));
+      }
       await tester.tap(copy, kind: PointerDeviceKind.mouse);
       await _pumpHoverActions(tester);
       expect(repository.copiedIds, ['menu']);
@@ -1378,7 +1551,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: metadata, matching: find.text('2.0 KB')),
+        find.descendant(of: metadata, matching: find.text('2.0 KiB')),
         findsOneWidget,
       );
       expect(
@@ -1486,7 +1659,7 @@ void main() {
       'Clip type': 'Image',
       'Type': 'image/png',
       'Resolution': '1920 × 1080',
-      'Size': '4.0 MB',
+      'Size': '4.0 MiB',
       'Sync': 'Too large to sync',
     }.entries) {
       expect(
@@ -2396,6 +2569,149 @@ void main() {
     );
   });
 
+  testWidgets('notes the line count only on rows that certainly hide lines', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(799, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final semantics = tester.ensureSemantics();
+    HistoryClip clip(
+      String id,
+      String preview, {
+      bool truncated = false,
+      int? lineCount,
+    }) => HistoryClip(
+      id: id,
+      contentType: 'text',
+      preview: preview,
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      kind: id == 'code' ? HistoryClipKind.code : HistoryClipKind.text,
+      truncated: truncated,
+      lineCount: lineCount,
+    );
+    final repository = _ScreenRepository()
+      ..page = HistoryClipPage(
+        items: [
+          clip('cut', 'one\ntwo\nthree\nfour\nfive'),
+          clip('code', 'a();\r\nb();\r\nc();\r\nd();\r\ne();\r\nf();'),
+          clip('fits', 'one\ntwo\nthree\nfour'),
+          // One logical line wraps past the row limit: there is no line count
+          // to report.
+          clip('wrapped', 'word ' * 150),
+          // A cut preview is never counted; only the runtime's count is used.
+          clip('long', 'one\ntwo\nthree\nfour\nfive\nsix', truncated: true),
+          clip(
+            'counted',
+            'one\ntwo\nthree\nfour\nfive',
+            truncated: true,
+            lineCount: 120,
+          ),
+        ],
+      );
+    final controller = HistoryController(repository);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        home: Scaffold(child: HistoryScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    String meta(String id) => tester
+        .widget<Text>(find.byKey(ValueKey<String>('history-clip-meta-$id')))
+        .textSpan!
+        .toPlainText(includeSemanticsLabels: false);
+    expect(meta('cut'), endsWith(' • 5 lines'));
+    expect(meta('code'), endsWith(' • 6 lines'));
+    expect(meta('counted'), endsWith(' • 120 lines'));
+    for (final id in ['fits', 'wrapped', 'long']) {
+      expect(meta(id), isNot(contains('lines')));
+    }
+    // The note is visual only: the preview is read to assistive technology
+    // in full, so the count is not announced.
+    expect(find.bySemanticsLabel(RegExp('5 lines')), findsNothing);
+
+    // The note yields inside the single metadata line on a phone at 2x text.
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.binding.setSurfaceSize(const Size(360, 900));
+    await tester.pumpAndSettle();
+    expect(meta('cut'), endsWith(' • 5 lines'));
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey<String>('history-clip-meta-cut')))
+          .height,
+      32,
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  test('counts clip lines only where the count is complete and public', () {
+    HistoryClip clip(
+      String preview, {
+      HistoryClipKind kind = HistoryClipKind.text,
+      bool secret = false,
+      bool truncated = false,
+      int? lineCount,
+    }) => HistoryClip(
+      id: 'lines',
+      contentType: 'text',
+      preview: preview,
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      kind: kind,
+      secret: secret,
+      truncated: truncated,
+      lineCount: lineCount,
+    );
+    const five = 'a\nb\n\nd\ne';
+    expect(HistoryClipPresentation.cutLineCount(clip(five)), 5);
+    expect(
+      HistoryClipPresentation.cutLineCount(clip(five, secret: true)),
+      null,
+    );
+    expect(
+      HistoryClipPresentation.cutLineCount(
+        clip(five, kind: HistoryClipKind.file),
+      ),
+      null,
+    );
+    // A lone carriage return is not a guaranteed displayed line break.
+    expect(HistoryClipPresentation.cutLineCount(clip('a\rb\rc\rd\re')), null);
+    // The runtime counts the whole text, so a cut preview still has a count.
+    expect(
+      HistoryClipPresentation.cutLineCount(
+        clip('a', truncated: true, lineCount: 9),
+      ),
+      9,
+    );
+    expect(
+      HistoryClipPresentation.cutLineCount(clip(five, truncated: true)),
+      null,
+    );
+    expect(
+      HistoryClipPresentation.cutLineCount(clip(five, lineCount: 4)),
+      null,
+    );
+    expect(
+      HistoryClipPresentation.cutLineCount(
+        clip(five, secret: true, lineCount: 9),
+      ),
+      null,
+    );
+
+    final uk = lookupAppLocalizations(const Locale('uk'));
+    expect(uk.historyClipLineCount(5), '5 рядків');
+    expect(uk.historyClipLineCount(21), '21 рядок');
+    expect(uk.historyClipLineCount(22), '22 рядки');
+    final en = lookupAppLocalizations(const Locale('en'));
+    expect(en.historyClipLineCount(5), '5 lines');
+  });
+
   testWidgets('shows the standardized kind icon and label at the wide size', (
     tester,
   ) async {
@@ -2946,6 +3262,17 @@ class _ScreenFileDownloader implements HistoryFileDownloader {
     presented.add(path);
     await presentPending;
   }
+}
+
+class _CountingScreenRepository extends _ScreenRepository
+    implements HistoryGroupCountsRepository {
+  HistoryGroupCounts? counts;
+
+  @override
+  Future<HistoryGroupCounts?> groupCounts({
+    required HistoryQuery query,
+    required List<DateTime> days,
+  }) async => counts;
 }
 
 class _TagScreenRepository extends _ScreenRepository

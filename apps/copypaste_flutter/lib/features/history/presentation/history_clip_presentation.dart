@@ -18,4 +18,30 @@ abstract final class HistoryClipPresentation {
     HistoryClipKind.file => LucideIcons.file,
     HistoryClipKind.other => LucideIcons.box,
   };
+
+  /// The most displayed lines a History row gives to a text preview.
+  static const previewMaxLines = 4;
+
+  /// The clip's line count when its row certainly shows fewer lines, else null.
+  ///
+  /// Lines are the line-feed separated lines of the complete text: the
+  /// runtime's count, else the preview's only when it is the whole text. Each
+  /// takes at least one displayed line, so a count above [previewMaxLines]
+  /// always means a cut row; wrapped long lines and hidden clips stay
+  /// unreported.
+  static int? cutLineCount(HistoryClip clip) {
+    if (clip.secret || !clip.contentKind.isTextual) return null;
+    final lines = clip.lineCount ?? _previewLineCount(clip);
+    return lines != null && lines > previewMaxLines ? lines : null;
+  }
+
+  static int? _previewLineCount(HistoryClip clip) {
+    if (clip.truncated) return null;
+    final text = clip.preview;
+    var lines = 1;
+    for (var i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) == 0x0A) lines++;
+    }
+    return lines;
+  }
 }

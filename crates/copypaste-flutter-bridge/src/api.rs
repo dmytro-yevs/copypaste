@@ -4,8 +4,6 @@
 //! credentials and SAS values remain in protected platform adapters. The sole
 //! secret input is a user-entered join code submitted from protected UI.
 
-use std::io::Write;
-
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{Method, ResponseData};
 
@@ -213,6 +211,8 @@ pub struct Clip {
     pub source_app_name: Option<String>,
     pub source_app_icon_id: Option<String>,
     pub truncated: bool,
+    /// Lines of the whole text when the runtime counted them.
+    pub line_count: Option<u32>,
     pub too_large_to_sync: bool,
     pub file_details: Option<ClipFileDetails>,
     pub image_details: Option<ClipImageDetails>,
@@ -367,6 +367,22 @@ pub struct ClipQuery {
     pub captured_before_ms: Option<i64>,
     pub tag_ids: Vec<String>,
     pub untagged_only: bool,
+}
+
+/// One displayed group of unpinned clips: `[from_ms, before_ms)` in Unix
+/// milliseconds, computed by the caller from its own calendar and time zone.
+#[derive(Debug, Clone)]
+pub struct ClipCountRange {
+    pub from_ms: i64,
+    pub before_ms: i64,
+}
+
+/// Exact sizes of the groups a History list shows; `ranges` follows the
+/// order of the request.
+#[derive(Debug, Clone)]
+pub struct ClipGroupCounts {
+    pub pinned: u64,
+    pub ranges: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -746,6 +762,17 @@ pub struct RuntimeSettingsData {
     pub notify_on_copy: bool,
     pub notification_preview: bool,
     pub sound_on_copy: bool,
+    /// Absent when the runtime did not report it; never an estimate.
+    pub storage_usage: Option<RuntimeStorageUsage>,
+}
+
+/// History weighed against the storage quota, from one settings reply.
+/// Pinned clips are outside the quota and outside these values.
+#[derive(Debug, Clone)]
+pub struct RuntimeStorageUsage {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+    pub oldest_unpinned_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -797,6 +824,26 @@ pub struct TextExportSummary {
 #[derive(Debug, Clone)]
 pub struct BackupSummary {
     pub size_bytes: u64,
+}
+
+/// One update of a running text export: rows read of `total`. The last update
+/// carries the summary or the error, and the stream then ends.
+#[derive(Debug, Clone)]
+pub struct TextExportUpdate {
+    pub processed: u64,
+    pub total: u64,
+    pub summary: Option<TextExportSummary>,
+    pub error: Option<RuntimeError>,
+}
+
+/// One update of a running backup: database pages copied of `total`. The last
+/// update carries the summary or the error, and the stream then ends.
+#[derive(Debug, Clone)]
+pub struct BackupUpdate {
+    pub processed: u64,
+    pub total: u64,
+    pub summary: Option<BackupSummary>,
+    pub error: Option<RuntimeError>,
 }
 
 /// Starts an app-owned desktop daemon in an explicit application data directory.
@@ -893,7 +940,7 @@ pub async fn set_capture_paused(paused: bool) -> Result<CaptureState, RuntimeErr
 pub async fn get_runtime_settings() -> Result<RuntimeSettingsData, RuntimeError> {
     let response = client::request(Method::GetConfig).await?;
     match response.data {
-        Some(ResponseData::Config(applied)) => Ok(runtime_settings(applied.config)),
+        Some(ResponseData::Config(applied)) => Ok(runtime_settings(applied)),
         _ => Err(RuntimeError::internal()),
     }
 }
@@ -920,7 +967,7 @@ pub async fn update_runtime_settings(
     })
     .await?;
     match response.data {
-        Some(ResponseData::Config(applied)) => Ok(runtime_settings(applied.config)),
+        Some(ResponseData::Config(applied)) => Ok(runtime_settings(applied)),
         _ => Err(RuntimeError::internal()),
     }
 }
@@ -976,35 +1023,110 @@ pub async fn cloud_sync_now() -> Result<CloudSyncSummary, RuntimeError> {
     }
 }
 
-pub async fn export_text_history(file_path: String) -> Result<TextExportSummary, RuntimeError> {
-    let response = client::request(Method::Export { limit: 0 }).await?;
-    let Some(ResponseData::Export(export)) = response.data else {
+/// Writes the text history to `file_path`, which must not exist, in this
+/// process, reporting progress at most every 250 ms.
+pub async fn export_text_history(
+    file_path: String,
+    sink: crate::frb_generated::StreamSink<TextExportUpdate>,
+) {
+    let mut progress = crate::update_throttle::UpdateThrottle::default();
+    let result = export_text(&file_path, |processed, total| {
+        if progress.observe(processed, total) {
+            let _ = sink.add(TextExportUpdate {
+                processed,
+                total,
+                summary: None,
+                error: None,
+            });
+        }
+    })
+    .await;
+    let (processed, total) = progress.last;
+    let (summary, error) = match result {
+        Ok(summary) => (Some(summary), None),
+        Err(error) => (None, Some(error)),
+    };
+    let _ = sink.add(TextExportUpdate {
+        processed,
+        total,
+        summary,
+        error,
+    });
+}
+
+async fn export_text(
+    file_path: &str,
+    mut on_progress: impl FnMut(u64, u64),
+) -> Result<TextExportSummary, RuntimeError> {
+    let mut file = crate::export_file::ExportFile::create(std::path::Path::new(file_path))
+        .map_err(|_| RuntimeError::export_write_failed())?;
+    let response = client::stream(Method::ExportStream, |frame| {
+        let ResponseData::ExportChunk(chunk) = frame else {
+            return Err(RuntimeError::internal());
+        };
+        file.write_items(&chunk.items)
+            .map_err(|_| RuntimeError::export_write_failed())?;
+        on_progress(chunk.progress.processed, chunk.progress.total);
+        Ok(())
+    })
+    .await?;
+    let Some(ResponseData::Export(summary)) = response.data else {
         return Err(RuntimeError::internal());
     };
-    let encoded = serde_json::to_vec_pretty(&export).map_err(|_| RuntimeError::internal())?;
-    let mut file = copypaste_fs::create_private(std::path::Path::new(&file_path))
-        .map_err(|_| RuntimeError::export_write_failed())?;
-    file.write_all(&encoded)
-        .and_then(|()| file.write_all(b"\n"))
+    let exported = file
+        .finish(&summary)
         .map_err(|_| RuntimeError::export_write_failed())?;
     Ok(TextExportSummary {
-        exported: u32::try_from(export.items.len()).unwrap_or(u32::MAX),
-        skipped_non_text: export.skipped_non_text,
-        skipped_undecryptable: export.skipped_undecryptable,
+        exported: u32::try_from(exported).unwrap_or(u32::MAX),
+        skipped_non_text: summary.skipped_non_text,
+        skipped_undecryptable: summary.skipped_undecryptable,
     })
 }
 
-pub async fn backup_history(file_path: String) -> Result<BackupSummary, RuntimeError> {
-    let response = client::request(Method::Backup {
-        dest_path: file_path,
-    })
-    .await?;
-    match response.data {
-        Some(ResponseData::Backup(summary)) => Ok(BackupSummary {
-            size_bytes: summary.size_bytes,
-        }),
-        _ => Err(RuntimeError::internal()),
-    }
+/// Writes an encrypted backup to `file_path`, which must not exist, reporting
+/// progress at most every 250 ms.
+pub async fn backup_history(
+    file_path: String,
+    sink: crate::frb_generated::StreamSink<BackupUpdate>,
+) {
+    let mut progress = crate::update_throttle::UpdateThrottle::default();
+    let response = client::stream(
+        Method::BackupStream {
+            dest_path: file_path,
+        },
+        |frame| {
+            let ResponseData::Progress(copied) = frame else {
+                return Err(RuntimeError::internal());
+            };
+            if progress.observe(copied.processed, copied.total) {
+                let _ = sink.add(BackupUpdate {
+                    processed: copied.processed,
+                    total: copied.total,
+                    summary: None,
+                    error: None,
+                });
+            }
+            Ok(())
+        },
+    )
+    .await;
+    let (processed, total) = progress.last;
+    let (summary, error) = match response.map(|response| response.data) {
+        Ok(Some(ResponseData::Backup(summary))) => (
+            Some(BackupSummary {
+                size_bytes: summary.size_bytes,
+            }),
+            None,
+        ),
+        Ok(_) => (None, Some(RuntimeError::internal())),
+        Err(error) => (None, Some(error)),
+    };
+    let _ = sink.add(BackupUpdate {
+        processed,
+        total,
+        summary,
+        error,
+    });
 }
 
 pub async fn restore_history(file_path: String) -> Result<(), RuntimeError> {
@@ -1061,6 +1183,34 @@ pub async fn query_clips(
         _ => Err(RuntimeError::internal()),
     }
 }
+
+/// Counts the pinned clips `query` lists and its unpinned clips in each
+/// range, from indexes only. `None` means the query has a filter that cannot
+/// be counted exactly (text search or a kind filter); it is never an estimate.
+pub async fn count_clip_groups(
+    query: ClipQuery,
+    ranges: Vec<ClipCountRange>,
+) -> Result<Option<ClipGroupCounts>, RuntimeError> {
+    let response = client::request(Method::HistoryCounts {
+        query: history_query(query),
+        ranges: ranges
+            .into_iter()
+            .map(|range| copypaste_ipc::HistoryCountRange {
+                from_ms: range.from_ms,
+                before_ms: range.before_ms,
+            })
+            .collect(),
+    })
+    .await?;
+    match response.data {
+        Some(ResponseData::HistoryCounts(counts)) => Ok(counts.map(|counts| ClipGroupCounts {
+            pinned: counts.pinned,
+            ranges: counts.ranges,
+        })),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
 pub async fn history_facets() -> Result<HistoryFacets, RuntimeError> {
     let response = client::request(Method::HistoryFacets).await?;
     let Some(ResponseData::HistoryFacets(facets)) = response.data else {
@@ -1467,8 +1617,14 @@ async fn cloud_status_response(method: Method) -> Result<CloudAccountStatus, Run
     }
 }
 
-fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
+fn runtime_settings(applied: copypaste_ipc::ConfigApplied) -> RuntimeSettingsData {
+    let config = applied.config;
     RuntimeSettingsData {
+        storage_usage: applied.storage_usage.map(|usage| RuntimeStorageUsage {
+            used_bytes: usage.used_bytes,
+            quota_bytes: config.storage_quota_bytes,
+            oldest_unpinned_at_ms: usage.oldest_unpinned_at,
+        }),
         max_file_size_bytes: config.max_file_size_bytes,
         skip_secret: config.skip_secret,
         skip_transient: config.skip_transient,
@@ -1629,6 +1785,7 @@ fn clip(item: copypaste_ipc::Item) -> Clip {
         source_app_name: item.source_app_name,
         source_app_icon_id: item.source_app_icon_id,
         truncated: item.truncated,
+        line_count: item.line_count,
         too_large_to_sync: item.too_large_to_sync,
         file_details: item.file_details.map(|details| ClipFileDetails {
             filename: details.filename,
@@ -1770,6 +1927,28 @@ mod tests {
             source_app_icon_response(None).unwrap_err().code,
             "runtime_internal"
         );
+    }
+
+    #[test]
+    fn settings_pair_reported_usage_with_the_quota_of_the_same_reply() {
+        let mut applied = copypaste_ipc::ConfigApplied {
+            config: copypaste_ipc::ConfigData {
+                storage_quota_bytes: 5 * 1024 * 1024 * 1024,
+                ..Default::default()
+            },
+            restart_required: Vec::new(),
+            storage_usage: Some(copypaste_ipc::StorageUsage {
+                used_bytes: 2_048,
+                oldest_unpinned_at: Some(1_700_000_000_000),
+            }),
+        };
+        let usage = runtime_settings(applied.clone()).storage_usage.unwrap();
+        assert_eq!(usage.used_bytes, 2_048);
+        assert_eq!(usage.quota_bytes, 5 * 1024 * 1024 * 1024);
+        assert_eq!(usage.oldest_unpinned_at_ms, Some(1_700_000_000_000));
+
+        applied.storage_usage = None;
+        assert!(runtime_settings(applied).storage_usage.is_none());
     }
 
     #[test]
@@ -1932,6 +2111,7 @@ mod tests {
             source_app_icon_id: None,
             too_large_to_sync: true,
             truncated: false,
+            line_count: None,
         });
 
         let metadata = mapped.image_details.expect("image metadata");

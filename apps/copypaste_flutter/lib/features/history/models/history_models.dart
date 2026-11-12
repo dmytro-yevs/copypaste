@@ -1,7 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
+import 'package:flutter/foundation.dart';
 
 /// The mutually exclusive filter and presentation kinds exposed by Rust.
 enum HistoryClipKind {
@@ -220,6 +219,7 @@ class HistoryClip {
     this.sourceApp,
     this.sourceAppIconId,
     this.truncated = false,
+    this.lineCount,
     this.body,
     this.file,
     this.image,
@@ -243,6 +243,9 @@ class HistoryClip {
   final String? sourceApp;
   final String? sourceAppIconId;
   final bool truncated;
+
+  /// Lines of the whole text, counted by the runtime for public text clips.
+  final int? lineCount;
 
   /// Present only after an explicit get operation for the selected item.
   final String? body;
@@ -277,6 +280,7 @@ class HistoryClip {
     sourceApp: sourceApp,
     sourceAppIconId: sourceAppIconId,
     truncated: truncated ?? this.truncated,
+    lineCount: lineCount,
     body: clearBody ? null : body,
     file: file,
     image: image,
@@ -295,6 +299,39 @@ class HistoryClipPage {
   final List<HistoryClip> items;
   final String? nextCursor;
   final int skippedUndecryptable;
+}
+
+/// Exact sizes of the groups the History list shows for one query, counted by
+/// the runtime rather than from loaded pages.
+@immutable
+class HistoryGroupCounts {
+  HistoryGroupCounts({required this.pinned, required Map<DateTime, int> days})
+    : _days = Map.unmodifiable(days);
+
+  /// Pinned clips matching the query.
+  final int pinned;
+  final Map<DateTime, int> _days;
+
+  /// Unpinned clips captured on the local calendar day of [date]; null when
+  /// that day was not counted, which is not the same as zero.
+  int? day(DateTime date) {
+    final local = date.toLocal();
+    return _days[DateTime(local.year, local.month, local.day)];
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is HistoryGroupCounts &&
+      other.pinned == pinned &&
+      mapEquals(other._days, _days);
+
+  @override
+  int get hashCode => Object.hash(
+    pinned,
+    Object.hashAllUnordered(
+      _days.entries.map((entry) => Object.hash(entry.key, entry.value)),
+    ),
+  );
 }
 
 /// Physical-pixel limits for an aspect-preserving preview of the stored image.

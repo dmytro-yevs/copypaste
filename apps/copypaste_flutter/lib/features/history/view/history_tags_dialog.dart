@@ -322,6 +322,7 @@ class _TagsEditorState extends State<_TagsEditor> {
                   placeholder: Text(strings.historyTagNamePlaceholder),
                   decoration: AppOverlays.dialogFieldDecoration(context),
                   onSubmitted: (_) => _save(),
+                  skipInputFeatureFocusTraversal: true,
                   features: [
                     InputFeature.trailing(
                       Semantics(

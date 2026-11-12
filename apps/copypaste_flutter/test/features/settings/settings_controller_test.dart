@@ -8,9 +8,12 @@ import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
+import 'package:copypaste_flutter/features/settings/controller/settings_navigation_state.dart';
+import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
 import 'package:copypaste_flutter/platform/android/screenshot_capture.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/settings/view/capture_header_action.dart';
+import 'package:copypaste_flutter/features/transfers/file_operations_button_progress.dart';
 import 'package:copypaste_flutter/platform/capture/capture_control_state.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/capture/capture_service_control.dart';
@@ -403,7 +406,11 @@ void main() {
       await tester.pump(AppMotion.emphasized);
       expect(repository.restoreCalls, 1);
       expect(find.text('Replace local history?'), findsNothing);
+      expect(find.text('History restored'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      // Let the toast close on its own.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 1));
     },
     variant: TargetPlatformVariant({
       TargetPlatform.android,
@@ -549,6 +556,55 @@ void main() {
     }),
   );
 
+  test('export and backup publish their progress while busy', () async {
+    final repository = FakeSettingsRepository()
+      ..transferSteps = const [(1, 4), (2, 4), (3, 4), (4, 4)];
+    final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final seen = <(DataTransferKind?, double?, bool)>[];
+    controller.dataTransfer.addListener(() {
+      final transfer = controller.dataTransfer.value;
+      seen.add((transfer?.kind, transfer?.fraction, controller.busy));
+    });
+    // Progress ticks reach only the progress; the controller notifies when
+    // the operation starts and ends.
+    var notified = 0;
+    controller.addListener(() => notified++);
+
+    expect((await controller.exportTextHistory())?.exported, 4);
+    expect(notified, 2);
+    final exported = seen.where((entry) => entry.$1 != null).toList();
+    expect(exported, [
+      (DataTransferKind.textExport, null, true),
+      (DataTransferKind.textExport, 0.25, true),
+      (DataTransferKind.textExport, 0.5, true),
+      (DataTransferKind.textExport, 0.75, true),
+      (DataTransferKind.textExport, 1.0, true),
+    ]);
+    expect(controller.dataTransfer.value, isNull);
+    expect(controller.busy, isFalse);
+
+    seen.clear();
+    repository.transferSteps = const [(0, 0)];
+    expect((await controller.createBackup())?.sizeBytes, 2048);
+    expect(seen.where((entry) => entry.$1 != null).map((entry) => entry.$2), [
+      null,
+      1.0,
+    ]);
+    expect(
+      seen.every((entry) => entry.$1 != DataTransferKind.textExport),
+      isTrue,
+    );
+    expect(controller.dataTransfer.value, isNull);
+  });
+
   test('loads and applies the selected backend settings', () async {
     final repository = FakeSettingsRepository();
     final picker = FakeSettingsFilePicker();
@@ -578,7 +634,7 @@ void main() {
     final export = await controller.exportTextHistory();
     expect(export?.exported, 4);
     expect(export?.skippedNonText, 1);
-    expect(await controller.createBackup(), isTrue);
+    expect((await controller.createBackup())?.sizeBytes, 2048);
     expect(await controller.restoreBackup(), isTrue);
     expect(repository.exportCalls, 1);
     expect(repository.backupCalls, 1);
@@ -933,6 +989,20 @@ void main() {
       expect(find.byKey(ValueKey<String>(section)), findsOneWidget);
     }
     expect(find.text('Clipboard capture'), findsOneWidget);
+    // The capture row already names its state, so it shows no generic word.
+    final captureRow = find.byKey(
+      const ValueKey<String>('settings-row-Clipboard capture'),
+    );
+    expect(
+      find.descendant(of: captureRow, matching: find.byType(Switch)),
+      findsOneWidget,
+    );
+    for (final word in ['On', 'Off']) {
+      expect(
+        find.descendant(of: captureRow, matching: find.text(word)),
+        findsNothing,
+      );
+    }
     expect(find.text('Storage quota'), findsOneWidget);
     expect(find.text('Excluded applications'), findsNothing);
     expect(find.byType(Card), findsOneWidget);
@@ -959,18 +1029,18 @@ void main() {
       matching: find.byType(Switch),
     );
     expect(tester.widget<Switch>(previewSwitch).enabled, isFalse);
+    final notifyRow = find.byKey(
+      const ValueKey<String>('settings-row-Notification on copy'),
+    );
+    Finder notifyState(String word) =>
+        find.descendant(of: notifyRow, matching: find.text(word)).hitTestable();
+    expect(notifyState('Off'), findsOneWidget);
     await tester.tap(
-      find.descendant(
-        of: find.ancestor(
-          of: find.text('Notification on copy'),
-          matching: find.byKey(
-            const ValueKey<String>('settings-row-Notification on copy'),
-          ),
-        ),
-        matching: find.byType(Switch),
-      ),
+      find.descendant(of: notifyRow, matching: find.byType(Switch)),
     );
     await tester.pump();
+    expect(notifyState('On'), findsOneWidget);
+    expect(notifyState('Off'), findsNothing);
     expect(tester.widget<Switch>(previewSwitch).enabled, isTrue);
     await tester.tap(previewSwitch);
     await tester.pump();
@@ -1284,6 +1354,72 @@ void main() {
   );
 
   testWidgets(
+    'a running export is its own progress indicator and excludes backup',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final repository = _SteppedExportRepository();
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+      controller.showSection(SettingsSectionId.data);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: SettingsScreen(controller: controller),
+        ),
+      );
+      // Button insets ease in on the first frames.
+      await tester.pumpAndSettle();
+      final export = find.widgetWithText(Button, 'Export');
+      final idle = tester.getRect(export);
+      Button button(String label) => tester.widget<Button>(
+        find.ancestor(of: find.text(label), matching: find.byType(Button)),
+      );
+
+      await tester.tap(export);
+      await tester.pump();
+      // No total yet: the label stays and the control reads as busy.
+      expect(button('Export').onPressed, isNull);
+      expect(button('Create backup').onPressed, isNull);
+      final indicator = find.byType(FileOperationsButtonProgress);
+      expect(
+        tester.getSemantics(indicator),
+        isSemantics(label: 'Export text history', value: ''),
+      );
+
+      repository.progress!(1, 4);
+      await tester.pump();
+      expect(find.text('25%'), findsOneWidget);
+      final running = find.ancestor(
+        of: find.text('25%'),
+        matching: find.byType(Button),
+      );
+      expect(tester.getRect(running), idle);
+      expect(
+        tester.getSemantics(indicator),
+        isSemantics(label: 'Export text history', value: '25%'),
+      );
+
+      repository.finish.complete();
+      await tester.pump();
+      expect(find.text('25%'), findsNothing);
+      expect(indicator, findsNothing);
+      expect(button('Export').onPressed, isNotNull);
+      expect(find.text('Exported 4 text clips'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 1));
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
     'Data actions keep export, backup, and confirmed restore behavior',
     (tester) async {
       final repository = FakeSettingsRepository();
@@ -1322,10 +1458,15 @@ void main() {
       await tester.tap(find.text('Export'));
       await tester.pump();
       expect(repository.exportCalls, 1);
-      expect(find.text('Text export is incomplete'), findsNothing);
+      // Skipped non-text clips are expected and not mentioned.
+      expect(find.text('Exported 4 text clips'), findsOneWidget);
       await tester.tap(find.text('Create backup'));
       await tester.pump();
       expect(repository.backupCalls, 1);
+      expect(find.text('Encrypted backup saved · 2.0 KiB'), findsOneWidget);
+      // The toasts close on their own before Restore is used.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 1));
       final restore = find.text('Restore');
       await tester.ensureVisible(restore);
       await tester.tap(restore);
@@ -1348,10 +1489,12 @@ void main() {
       await tester.pump();
       expect(repository.restoreCalls, 1);
       expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 1));
     },
   );
 
-  testWidgets('warns when unreadable text clips are omitted from an export', (
+  testWidgets('names unreadable text clips in the export toast', (
     tester,
   ) async {
     final repository = FakeSettingsRepository()..exportSkippedUndecryptable = 2;
@@ -1378,21 +1521,16 @@ void main() {
     await tester.tap(find.text('Export'));
     await tester.pump();
 
-    expect(find.text('Text export is incomplete'), findsOneWidget);
+    expect(find.text('Text history exported'), findsOneWidget);
     expect(
-      find.text(
-        '4 text clips were saved; 1 non-text clip was excluded and 2 text clips could not be read.',
-      ),
+      find.text('Exported 4 text clips · 2 could not be read'),
       findsOneWidget,
     );
     await tester.pump(kDefaultDuration);
     await tester.pump();
-    expect(
-      find.text('Text export is incomplete').hitTestable(),
-      findsOneWidget,
-    );
+    expect(find.text('Text history exported').hitTestable(), findsOneWidget);
     await tester.drag(
-      find.text('Text export is incomplete'),
+      find.text('Text history exported'),
       Offset(-tester.getSize(find.byType(ToastEntryLayout)).width, 0),
     );
     await tester.pump();
@@ -1582,6 +1720,21 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(seconds: 1));
   });
+}
+
+class _SteppedExportRepository extends FakeSettingsRepository {
+  final finish = Completer<void>();
+  DataTransferProgressCallback? progress;
+
+  @override
+  Future<TextExportResult> exportTextHistory(
+    String path, {
+    DataTransferProgressCallback? onProgress,
+  }) async {
+    progress = onProgress;
+    await finish.future;
+    return super.exportTextHistory(path);
+  }
 }
 
 class _DialogRestoreRepository extends FakeSettingsRepository {

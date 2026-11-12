@@ -49,6 +49,21 @@ const BYTE_CAP_TOTAL_SQL: &str = "SELECT COALESCE(SUM(content_bytes), 0) \
     FROM clipboard_items INDEXED BY idx_items_unpinned_bytes \
     WHERE deleted = 0 AND pinned = 0";
 
+/// What the byte quota weighs, and the first row it would evict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaUsage {
+    /// Bytes [`Store::evict_over_byte_cap`] compares with the quota.
+    pub unpinned_bytes: u64,
+    /// `created_at` of the oldest unpinned live row, when one exists.
+    pub oldest_unpinned_at: Option<i64>,
+}
+
+const OLDEST_UNPINNED_SQL: &str = concat!(
+    "SELECT created_at FROM ",
+    "clipboard_items INDEXED BY idx_items_evictable",
+    " WHERE deleted = 0 AND pinned = 0 ORDER BY created_at ASC, id ASC LIMIT 1"
+);
+
 // `INDEXED BY idx_items_evictable` throughout: nothing writes `sqlite_stat1`
 // (`connection::OptimizeOnRelease`), so the planner guesses `idx_items_history`
 // and sorts — 1.147 ms against 0.003 ms forced at 10 000 rows.
@@ -125,6 +140,18 @@ const AGE_VICTIMS_SQL: &str = concat!(
 );
 
 impl Store {
+    /// The quota gate's own total plus one seek for the oldest evictable row.
+    /// Both are answered from partial indexes; no payload is read.
+    pub fn quota_usage(&self) -> Result<QuotaUsage, StoreError> {
+        let conn = self.conn()?;
+        Ok(QuotaUsage {
+            unpinned_bytes: unpinned_bytes(&conn)?,
+            oldest_unpinned_at: conn
+                .query_row(OLDEST_UNPINNED_SQL, [], |r| r.get(0))
+                .optional()?,
+        })
+    }
+
     /// Most recent live item with this content hash at or after `since_ms`.
     ///
     /// A bounded probe, for callers that want "was this copied *recently*".
@@ -856,6 +883,66 @@ mod tests {
         assert_eq!(s.evict_over_byte_cap(1).unwrap(), 0);
         assert!(s.get(&pinned.id).unwrap().is_some());
         assert!(s.get(&newest.id).unwrap().is_some());
+    }
+
+    /// "Used" is the number the byte sweep compares with the quota: pins are
+    /// outside it, and it follows deletes and evictions without a recount.
+    #[test]
+    fn quota_usage_weighs_what_the_byte_sweep_weighs() {
+        let s = store();
+        assert_eq!(
+            s.quota_usage().unwrap(),
+            QuotaUsage {
+                unpinned_bytes: 0,
+                oldest_unpinned_at: None,
+            }
+        );
+
+        let pinned = s.insert(item(&"a".repeat(10), T0)).unwrap();
+        let old = s.insert(item(&"b".repeat(20), T0 + 60_000)).unwrap();
+        let newest = s.insert(item(&"c".repeat(30), T0 + 120_000)).unwrap();
+        let weigh = |id: &str| bytes_of(&s, id) as u64;
+        let usage = s.quota_usage().unwrap();
+        assert_eq!(
+            usage.unpinned_bytes,
+            weigh(&pinned.id) + weigh(&old.id) + weigh(&newest.id)
+        );
+        assert_eq!(usage.oldest_unpinned_at, Some(T0));
+
+        assert!(s.set_pinned(&pinned.id, true).unwrap());
+        let usage = s.quota_usage().unwrap();
+        assert_eq!(usage.unpinned_bytes, weigh(&old.id) + weigh(&newest.id));
+        assert_eq!(usage.oldest_unpinned_at, Some(T0 + 60_000));
+
+        let quota = weigh(&newest.id);
+        assert_eq!(s.evict_over_byte_cap(quota).unwrap(), 1);
+        let usage = s.quota_usage().unwrap();
+        assert_eq!(usage.unpinned_bytes, quota);
+        assert_eq!(usage.oldest_unpinned_at, Some(T0 + 120_000));
+
+        assert!(s.delete(&newest.id).unwrap());
+        assert_eq!(
+            s.quota_usage().unwrap(),
+            QuotaUsage {
+                unpinned_bytes: 0,
+                oldest_unpinned_at: None,
+            }
+        );
+    }
+
+    #[test]
+    fn quota_usage_finds_the_oldest_row_by_an_index_seek() {
+        let s = store();
+        let plan = plan_of(&s, OLDEST_UNPINNED_SQL);
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_items_evictable")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|detail| detail.contains("TEMP B-TREE")),
+            "the oldest row must come out of index order, got {plan:?}"
+        );
     }
 
     #[test]

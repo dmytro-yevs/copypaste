@@ -360,6 +360,102 @@ void main() {
     },
   );
 
+  test(
+    'pairing progress follows an invitation to a rejection it does not attribute',
+    () async {
+      expect(controller.pairingProgress, isNull);
+      await controller.openInvitation();
+      var progress = controller.pairingProgress!;
+      expect(progress.steps.first, PairingStep.invite);
+      expect(progress.statusOf(0), PairingStepStatus.current);
+
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.statusOf(2), PairingStepStatus.current);
+      expect(progress.localDecision, PairingLocalDecision.undecided);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+
+      // A confirmation that never left this device must not count as sent.
+      gateway.session.confirmError = StateError('offline');
+      await controller.confirmPairing(accept: true);
+      expect(
+        controller.pairingProgress!.localDecision,
+        PairingLocalDecision.undecided,
+      );
+
+      gateway.session.confirmError = null;
+      await controller.confirmPairing(accept: true);
+      progress = controller.pairingProgress!;
+      expect(progress.localDecision, PairingLocalDecision.confirmed);
+      expect(progress.peerDecision, PairingPeerDecision.waiting);
+
+      gateway.session.emit(const PairingCeremony(state: PairingState.rejected));
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.outcome, PairingState.rejected);
+      expect(progress.statusOf(2), PairingStepStatus.failed);
+      expect(progress.statusOf(3), PairingStepStatus.upcoming);
+      expect(progress.localDecision, PairingLocalDecision.confirmed);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+      expect(progress.endedUnattributed, isTrue);
+
+      await controller.closePairing();
+      expect(controller.pairingProgress, isNull);
+    },
+  );
+
+  test(
+    'pairing progress places a failure and a local rejection where they happened',
+    () async {
+      await controller.connectNearby(
+        DiscoveredDevice(
+          id: 'remote',
+          name: 'Remote',
+          address: '192.0.2.8:1234',
+          paired: false,
+          lastSeen: DateTime.utc(2026),
+        ),
+      );
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.handshaking),
+      );
+      await Future<void>.delayed(Duration.zero);
+      gateway.session.emit(const PairingCeremony(state: PairingState.failed));
+      await Future<void>.delayed(Duration.zero);
+      var progress = controller.pairingProgress!;
+      expect(progress.steps.first, PairingStep.request);
+      expect(progress.statusOf(0), PairingStepStatus.completed);
+      expect(progress.statusOf(1), PairingStepStatus.failed);
+      expect(progress.localDecision, isNull);
+
+      // A new attempt starts from its own observations.
+      await controller.openCodeEntry();
+      expect(
+        controller.pairingProgress!.statusOf(0),
+        PairingStepStatus.current,
+      );
+      gateway.session._ceremony = const PairingCeremony(
+        state: PairingState.awaitingConfirmation,
+      );
+      await controller.joinFromProtectedInput(
+        code: 'A1B2C3D4',
+        address: '192.0.2.1:47654',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await controller.confirmPairing(accept: false);
+      gateway.session.emit(const PairingCeremony(state: PairingState.rejected));
+      await Future<void>.delayed(Duration.zero);
+      progress = controller.pairingProgress!;
+      expect(progress.statusOf(2), PairingStepStatus.failed);
+      expect(progress.localDecision, PairingLocalDecision.rejected);
+      expect(progress.peerDecision, PairingPeerDecision.unknown);
+      expect(progress.endedUnattributed, isFalse);
+    },
+  );
+
   test('discards an automatic SAS result after confirmation expires', () async {
     await controller.openInvitation();
     final code = Completer<String>();
@@ -993,8 +1089,11 @@ class _FakePairingSession implements DevicesPairingSession {
 
   @override
   Future<void> confirm({required bool accept}) async {
+    if (confirmError case final error?) throw error;
     confirmations.add(accept);
   }
+
+  Object? confirmError;
 
   @override
   Future<void> dispose() async {
