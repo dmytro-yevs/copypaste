@@ -109,43 +109,7 @@
             android:divider="@null"
             android:scrollbarStyle="outsideOverlay" />
 
-        <LinearLayout
-            android:id="@+id/ime_state"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="@dimen/app_spacing_lg"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/ime_state_icon"
-                android:layout_width="@dimen/app_icon_size_lg"
-                android:layout_height="@dimen/app_icon_size_lg"
-                android:importantForAccessibility="no" />
-
-            <TextView
-                android:id="@+id/ime_state_title"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/app_spacing_sm"
-                android:gravity="center"
-                android:textColor="@color/app_color_muted_foreground"
-                android:textSize="@dimen/app_text_size_small" />
-
-            <TextView
-                android:id="@+id/ime_state_action"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/app_spacing_sm"
-                android:gravity="center"
-                android:minHeight="@dimen/app_control_size_large"
-                android:paddingStart="@dimen/app_spacing_lg"
-                android:paddingEnd="@dimen/app_spacing_lg"
-                android:textColor="@color/app_color_foreground"
-                android:textSize="@dimen/app_text_size_small"
-                android:visibility="gone" />
-        </LinearLayout>
+        <include layout="@layout/ime_state" />
 
         <LinearLayout
             android:id="@+id/ime_actions"

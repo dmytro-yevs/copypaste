@@ -286,6 +286,7 @@ internal class PanelView(private val context: Context, private val events: Panel
             PanelTab.PINNED -> R.string.ime_tab_pinned
             PanelTab.SNIPPETS -> R.string.ime_tab_snippets
             PanelTab.QUEUE -> R.string.ime_tab_queue
+            PanelTab.TRANSFORMS -> R.string.ime_tab_transforms
         }
     }
 }

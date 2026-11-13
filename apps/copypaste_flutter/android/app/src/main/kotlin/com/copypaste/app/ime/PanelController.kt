@@ -35,6 +35,42 @@ internal interface PanelHost {
     fun setSecureWindow(secure: Boolean)
 }
 
+/** Panel keypad keys routed to a feature tab's own field instead of the search. */
+internal class KeypadTarget(
+    val onText: (String) -> Unit,
+    val onBackspace: () -> Unit,
+    val onClosed: () -> Unit,
+)
+
+/** What a feature tab (snippets, queue, transforms) may ask of the panel. */
+internal interface PanelTabHost {
+    val field: FieldPolicy
+    val insert: PanelInsert
+    fun inputConnection(): InputConnection?
+    fun clipboardText(): String?
+    fun showActions(title: String, actions: List<PanelAction>)
+    fun showNotice(text: String, actionLabel: String? = null, action: (() -> Unit)? = null)
+    fun announce(text: String)
+    fun unlockSecrets(action: () -> Unit)
+    /** Announces, offers [pasteViaClipboard] after a refused commit, and auto-returns. */
+    fun afterInsert(outcome: InsertOutcome, pasteViaClipboard: () -> Unit)
+    fun openKeypad(target: KeypadTarget)
+    fun closeKeypad()
+    fun selectTab(tab: PanelTab)
+    fun queueChanged()
+    fun startActivity(intent: Intent)
+    /** Inserts a history item as it is, bypassing the default transform. */
+    fun insertOriginal(item: PanelItem)
+}
+
+/** The default transform applied to history text inserts (per app, or global). */
+internal interface InsertDefault {
+    /** Resolves the default for [field]; [onResolved] gets its chip label, or null when none applies. */
+    fun resolve(field: FieldPolicy, onResolved: (String?) -> Unit)
+    /** Runs the resolved default on [item]; [then] gets the result, or null to insert the original. */
+    fun apply(item: PanelItem, then: (String?) -> Unit)
+}
+
 /**
  * Decides what the keyboard panel shows and does. Runtime calls go through
  * the blocking facade on its worker thread; replies arrive on the main thread.
@@ -52,16 +88,20 @@ internal class PanelController(
     },
     private val screenshotsBlocked: () -> Boolean = { ScreenshotProtection.blocked },
     clock: () -> Long = System::currentTimeMillis,
-) : PanelViewEvents {
+) : PanelViewEvents, PanelTabHost {
     private val main = Handler(Looper.getMainLooper())
-    val insert = PanelInsert(host::inputConnection)
+    override val insert = PanelInsert(host::inputConnection)
     val history = PanelHistoryList(context, worker, ::onListState, clock)
     private val capture = PanelCapture(clipboard, whenRuntimeReady = ::whenRuntimeReady, onSaved = ::onCaptured)
     private val tabContents = linkedMapOf<PanelTab, PanelTabContent>()
     private val itemActions = mutableListOf<(PanelItem) -> PanelAction?>()
+    private var insertDefault: InsertDefault? = null
+    private var defaultLabel: String? = null
     private var view: PanelView? = null
     private var keypad: PanelKeypad? = null
-    private var field = FieldPolicy.NONE
+    private var keypadTarget: KeypadTarget? = null
+    override var field = FieldPolicy.NONE
+        private set
     private var shown = false
     private var runtimeReady = false
     private var tab = PanelTab.HISTORY
@@ -87,6 +127,8 @@ internal class PanelController(
 
     /** An extra item action from another package (transform, add to queue). */
     fun registerItemAction(action: (PanelItem) -> PanelAction?) { itemActions += action }
+
+    fun registerInsertDefault(default: InsertDefault) { insertDefault = default }
 
     fun onCreate() = capture.refreshListening()
 
@@ -131,6 +173,10 @@ internal class PanelController(
         view.setQueueCount(queueCount)
         showFieldNotice()
         showTab()
+        insertDefault?.resolve(field) { label ->
+            defaultLabel = label
+            if (shown && !locked()) showFieldNotice()
+        }
         refreshQueue {
             if (!shown) return@refreshQueue
             capture.catchUp()
@@ -158,6 +204,7 @@ internal class PanelController(
         }
         closeKeypad()
         autoReturnSuspended = false
+        defaultLabel = null
         query = ""
         insert.forget()
         applySecureWindow()
@@ -213,33 +260,44 @@ internal class PanelController(
     }
 
     override fun onSearchTapped() {
-        val view = view ?: return
-        if (keypad != null) {
-            closeKeypad()
-            return
-        }
-        val pad = PanelKeypad(
-            context,
-            KeypadLayout.available(KeypadLayout.deviceLocales()),
-            preferences.keypadLayout,
-            onText = { text ->
-                query += text
-                onQueryEdited()
-            },
-            onBackspace = {
-                if (query.isNotEmpty()) query = query.substring(0, query.offsetByCodePoints(query.length, -1))
-                onQueryEdited()
-            },
-            onDone = ::closeKeypad,
-            onLayoutChanged = { preferences.keypadLayout = it.key },
-        )
-        keypad = pad
-        view.showKeypad(pad)
-        view.setTabsVisible(false)
-        view.setQuery(query, editing = true)
+        if (keypad != null && keypadTarget == null) return closeKeypad()
+        showKeypad(null)
     }
 
     override fun onSwitchBack() = host.switchBack()
+
+    override fun inputConnection(): InputConnection? = host.inputConnection()
+
+    override fun clipboardText(): String? = clipboard.currentText()
+
+    override fun showActions(title: String, actions: List<PanelAction>) {
+        autoReturnSuspended = true
+        view?.showActions(title, actions)
+    }
+
+    override fun showNotice(text: String, actionLabel: String?, action: (() -> Unit)?) {
+        if (!shown) return
+        view?.setNotice(text, actionLabel) {
+            showFieldNotice()
+            action?.invoke()
+        }
+    }
+
+    override fun announce(text: String) {
+        view?.announce(text)
+    }
+
+    override fun unlockSecrets(action: () -> Unit) = authenticate(action)
+
+    override fun openKeypad(target: KeypadTarget) = showKeypad(target)
+
+    override fun selectTab(tab: PanelTab) = if (tab == this.tab) showTab() else onTabSelected(tab)
+
+    override fun queueChanged() = refreshQueue()
+
+    override fun startActivity(intent: Intent) = host.startActivity(intent)
+
+    override fun insertOriginal(item: PanelItem) = withSecret(item) { insertText(item, plain = false, original = true) }
 
     override fun onTabSelected(tab: PanelTab) {
         if (tab == this.tab) return
@@ -356,9 +414,47 @@ internal class PanelController(
         if (content != null) content.onQueryChanged(query) else history.load(query, tab == PanelTab.PINNED)
     }
 
-    private fun closeKeypad() {
+    /** A keypad for the search, or for [target]'s field. */
+    private fun showKeypad(target: KeypadTarget?) {
+        val view = view ?: return
+        closeKeypad()
+        keypadTarget = target
+        val pad = PanelKeypad(
+            context,
+            KeypadLayout.available(KeypadLayout.deviceLocales()),
+            preferences.keypadLayout,
+            onText = { text ->
+                if (target != null) {
+                    target.onText(text)
+                } else {
+                    query += text
+                    onQueryEdited()
+                }
+            },
+            onBackspace = {
+                if (target != null) {
+                    target.onBackspace()
+                } else {
+                    if (query.isNotEmpty()) query = query.substring(0, query.offsetByCodePoints(query.length, -1))
+                    onQueryEdited()
+                }
+            },
+            onDone = ::closeKeypad,
+            onLayoutChanged = { preferences.keypadLayout = it.key },
+        )
+        keypad = pad
+        view.showKeypad(pad)
+        view.setTabsVisible(false)
+        if (target == null) view.setQuery(query, editing = true)
+    }
+
+    override fun closeKeypad() {
         keypad?.release()
         keypad = null
+        keypadTarget?.let {
+            keypadTarget = null
+            it.onClosed()
+        }
         view?.let {
             it.showKeypad(null)
             it.setTabsVisible(true)
@@ -366,7 +462,14 @@ internal class PanelController(
         }
     }
 
-    private fun insertText(item: PanelItem, plain: Boolean) {
+    private fun insertText(item: PanelItem, plain: Boolean, original: Boolean = false) {
+        val default = insertDefault?.takeIf { !plain && !original && defaultLabel != null }
+        if (default != null) {
+            default.apply(item) { text ->
+                if (text != null) onInserted(insert.insertText(text, field), item) else insertText(item, plain, original = true)
+            }
+            return
+        }
         worker.request("get", JSONObject().put("id", item.id)) { reply ->
             val content = itemContent(reply, item) ?: return@request
             val text: CharSequence = if (item.isHtml) {
@@ -406,6 +509,14 @@ internal class PanelController(
     }
 
     private fun onInserted(outcome: InsertOutcome, item: PanelItem) {
+        if (outcome == InsertOutcome.UNSUPPORTED) {
+            showNotice(R.string.ime_image_not_accepted, R.string.ime_action_copy) { copy(item, paste = false) }
+        } else {
+            afterInsert(outcome) { copy(item, paste = true) }
+        }
+    }
+
+    override fun afterInsert(outcome: InsertOutcome, pasteViaClipboard: () -> Unit) {
         when (outcome) {
             InsertOutcome.INSERTED -> {
                 view?.announce(context.getString(R.string.ime_inserted))
@@ -415,11 +526,10 @@ internal class PanelController(
                 }
             }
             InsertOutcome.REJECTED ->
-                showNotice(R.string.ime_insert_failed, R.string.ime_paste_via_clipboard) { copy(item, paste = true) }
+                showNotice(R.string.ime_insert_failed, R.string.ime_paste_via_clipboard, pasteViaClipboard)
             InsertOutcome.TOO_LARGE ->
-                showNotice(R.string.ime_insert_too_large, R.string.ime_paste_via_clipboard) { copy(item, paste = true) }
-            InsertOutcome.UNSUPPORTED ->
-                showNotice(R.string.ime_image_not_accepted, R.string.ime_action_copy) { copy(item, paste = false) }
+                showNotice(R.string.ime_insert_too_large, R.string.ime_paste_via_clipboard, pasteViaClipboard)
+            InsertOutcome.UNSUPPORTED -> showNotice(R.string.ime_image_not_accepted)
         }
     }
 
@@ -529,16 +639,11 @@ internal class PanelController(
             field.incognito -> R.string.ime_private_field
             else -> null
         }
-        view?.setNotice(text?.let(context::getString))
+        view?.setNotice(listOfNotNull(text?.let(context::getString), defaultLabel).joinToString(" · ").ifEmpty { null })
     }
 
-    private fun showNotice(text: Int, action: Int? = null, run: (() -> Unit)? = null) {
-        if (!shown) return
-        view?.setNotice(context.getString(text), action?.let(context::getString)) {
-            showFieldNotice()
-            run?.invoke()
-        }
-    }
+    private fun showNotice(text: Int, action: Int? = null, run: (() -> Unit)? = null) =
+        showNotice(context.getString(text), action?.let(context::getString), run)
 
     private fun applySecureWindow() {
         host.setSecureWindow(screenshotsBlocked() || field.maskedMode || unlock.unlocked || history.secretsRevealed)

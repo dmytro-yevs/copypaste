@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Snippets tab body: ranked snippet list, its state, and the template form
+     that replaces the list while a template is filled in. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ListView
+        android:id="@+id/ime_snippets_list"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:divider="@null"
+        android:scrollbarStyle="outsideOverlay" />
+
+    <include layout="@layout/ime_state" />
+
+    <FrameLayout
+        android:id="@+id/ime_snippets_form_slot"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/app_color_background"
+        android:visibility="gone" />
+</FrameLayout>
