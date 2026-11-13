@@ -309,7 +309,7 @@ fn order_digit(byte: u8) -> usize {
 
 /// A key strictly between `low` and `high` (fractional indexing over base-62
 /// digits), so a move rewrites one record. `None` is the open end.
-fn order_key_between(low: Option<&str>, high: Option<&str>) -> String {
+pub(crate) fn order_key_between(low: Option<&str>, high: Option<&str>) -> String {
     fn midpoint(low: &[usize], high: Option<&[usize]>, out: &mut Vec<usize>) {
         if let Some(high) = high {
             let shared = high

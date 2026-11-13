@@ -111,6 +111,7 @@ impl BuiltinRule {
             schema_version: super::model::SCHEMA_VERSION,
             effective_from,
             deleted_at: None,
+            base_stamp: None,
         }
     }
 

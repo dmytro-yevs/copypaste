@@ -637,6 +637,7 @@ fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
             schema_version: 1,
             effective_from: 50,
             deleted_at: None,
+            base_stamp: None,
         }),
         Record::ContentRulePlacement(RulePlacementRecord {
             id: "builtin.credentials".into(),

@@ -25,6 +25,7 @@ fn rule(id: &str, order: &str, definition: &str) -> RuleInput {
             schema_version: 1,
             effective_from: T0,
             deleted_at: None,
+            base_stamp: None,
         },
         enabled: true,
         order_key: order.into(),

@@ -68,6 +68,7 @@ impl Device {
             schema_version: 1,
             effective_from,
             deleted_at: None,
+            base_stamp: None,
         }));
         self.write(Record::ContentRulePlacement(RulePlacementRecord {
             id: id.into(),

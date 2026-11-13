@@ -606,6 +606,7 @@ pub fn load_inputs(conn: &Connection) -> Result<Vec<RuleInput>, StoreError> {
                 schema_version: schema,
                 effective_from: from,
                 deleted_at: None,
+                base_stamp: None,
             },
         });
     }
