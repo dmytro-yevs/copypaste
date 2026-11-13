@@ -5845,4 +5845,328 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => 'Textbaustein konnte nicht verwendet werden';
+
+  @override
+  String get aiToolsEnableTitle =>
+      'KI-Tools den Zugriff auf CopyPaste auf diesem Computer erlauben';
+
+  @override
+  String get aiToolsEnableDescription =>
+      'Verbundene KI-Tools können die Zwischenablage-Einträge lesen, die du unten erlaubst. Was du mit einem KI-Tool teilst, wird an dessen Anbieter gesendet.';
+
+  @override
+  String aiToolsStatusOn(int count) {
+    return 'Ein · Geräte, die Verlauf teilen: $count';
+  }
+
+  @override
+  String get aiToolsStatusOff =>
+      'Aus · verbundene Tools erreichen CopyPaste auf diesem Computer nicht';
+
+  @override
+  String get aiToolsThreatModelTitle => 'Wovor diese Grenzen schützen';
+
+  @override
+  String get aiToolsThreatModel =>
+      'Berechtigungen, Freigaben und Schwärzung begrenzen, was ein KI-Tool über seine CopyPaste-Verbindung sieht. Sie schützen nicht vor anderen Programmen unter deinem Benutzerkonto, die deine Zwischenablage und deinen Verlauf ohnehin lesen können.';
+
+  @override
+  String get aiToolsGrantsTitle => 'Verbundene Tools';
+
+  @override
+  String get aiToolsGrantsDescription =>
+      'KI-Tools, die auf einem deiner Computer verbunden sind. Eine Änderung gilt auf dem Computer, dem die Verbindung gehört, sobald er synchronisiert.';
+
+  @override
+  String aiToolsServedThrough(String desktops) {
+    return 'Bereitgestellt über: $desktops';
+  }
+
+  @override
+  String get aiToolsConnect => 'KI-Tool verbinden';
+
+  @override
+  String get aiToolsEmptyTitle => 'Noch keine KI-Tools verbunden';
+
+  @override
+  String get aiToolsEmptyMessage =>
+      'Verbinde ein KI-Tool, damit es die erlaubten Zwischenablage-Einträge durchsuchen kann.';
+
+  @override
+  String get aiToolsEmptyServedTitle =>
+      'KI-Tools verbinden sich über deinen Computer';
+
+  @override
+  String get aiToolsEmptyServedMessage =>
+      'Aktiviere KI-Tools in CopyPaste auf einem Mac-, Windows- oder Linux-Computer, dann ist der Verlauf deines Telefons dort verfügbar.';
+
+  @override
+  String get aiToolsUnknownDevice => 'ein anderer Computer';
+
+  @override
+  String aiToolsGrantOwner(String device) {
+    return 'Auf $device';
+  }
+
+  @override
+  String get aiToolsGrantWaiting => 'Wartet auf erste Verbindung';
+
+  @override
+  String aiToolsGrantUsed(String date) {
+    return 'Verbunden · zuletzt genutzt $date';
+  }
+
+  @override
+  String get aiToolsGrantRevoked => 'Widerrufen';
+
+  @override
+  String aiToolsGrantRevokedRemote(String device) {
+    return 'Widerrufen · wirkt, sobald $device synchronisiert';
+  }
+
+  @override
+  String get aiToolsGrantReissue =>
+      'Nach einer Wiederherstellung ist eine neue Verbindung nötig';
+
+  @override
+  String get aiToolsGrantPaused =>
+      'Pausiert: KI-Tools sind auf diesem Computer aus';
+
+  @override
+  String get aiToolsEdit => 'Bearbeiten';
+
+  @override
+  String get aiToolsActivity => 'Aktivität anzeigen';
+
+  @override
+  String get aiToolsRevoke => 'Widerrufen';
+
+  @override
+  String aiToolsRevokeTitle(String name) {
+    return '$name widerrufen?';
+  }
+
+  @override
+  String get aiToolsRevokeMessage =>
+      'Das Tool verliert bei seiner nächsten Anfrage den Zugriff. Um es wieder zu verbinden, erstelle eine neue Verbindung.';
+
+  @override
+  String aiToolsDeleteTitle(String name) {
+    return '$name löschen?';
+  }
+
+  @override
+  String get aiToolsDeleteMessage =>
+      'Die Verbindung wird widerrufen und von allen deinen Geräten entfernt.';
+
+  @override
+  String get aiToolsChangeFailed =>
+      'Die Änderung konnte nicht gespeichert werden.';
+
+  @override
+  String get aiToolsLoadFailed =>
+      'Einstellungen für KI-Tools konnten nicht geladen werden';
+
+  @override
+  String get aiToolsEditTitle => 'Verbindung bearbeiten';
+
+  @override
+  String get aiToolsNameLabel => 'Name';
+
+  @override
+  String get aiToolsScopesLabel => 'Zugriff';
+
+  @override
+  String get aiToolsScopeReadHistory => 'Verlauf lesen';
+
+  @override
+  String get aiToolsScopeReadSnippets => 'Textbausteine lesen';
+
+  @override
+  String get aiToolsScopeWriteClipboard => 'In die Zwischenablage schreiben';
+
+  @override
+  String get aiToolsScopeOrganize =>
+      'Organisieren (anheften, Textbausteine speichern)';
+
+  @override
+  String get aiToolsLookbackLabel => 'Verlaufszeitraum';
+
+  @override
+  String get aiToolsLookbackDay => 'Letzte 24 Stunden';
+
+  @override
+  String get aiToolsLookbackWeek => 'Letzte 7 Tage';
+
+  @override
+  String get aiToolsLookbackMonth => 'Letzte 30 Tage';
+
+  @override
+  String get aiToolsLookbackAll => 'Gesamter Verlauf';
+
+  @override
+  String aiToolsActivityTitle(String name) {
+    return 'Aktivität von $name';
+  }
+
+  @override
+  String get aiToolsActivityEmpty => 'Noch keine Aktivität';
+
+  @override
+  String get aiToolsActivityFailed => 'Aktivität konnte nicht geladen werden';
+
+  @override
+  String aiToolsActivityEntry(String tool, int count) {
+    return '$tool · Ergebnisse: $count';
+  }
+
+  @override
+  String get aiToolsClientLabel => 'KI-Tool';
+
+  @override
+  String get aiToolsClientOther => 'Andere';
+
+  @override
+  String get aiToolsCreate => 'Verbindung erstellen';
+
+  @override
+  String aiToolsConfigHint(String client) {
+    return 'Füge diese Konfiguration zu $client hinzu. Ihr Zugriffsschlüssel wird nur einmal angezeigt.';
+  }
+
+  @override
+  String get aiToolsConfigHintOther =>
+      'Füge diese Konfiguration zu den MCP-Einstellungen deines KI-Tools hinzu. Ihr Zugriffsschlüssel wird nur einmal angezeigt.';
+
+  @override
+  String aiToolsRestartNote(String client) {
+    return 'Als Nächstes: $client neu starten oder eine neue Sitzung öffnen.';
+  }
+
+  @override
+  String get aiToolsRestartNoteOther =>
+      'Als Nächstes: dein KI-Tool neu starten oder eine neue Sitzung öffnen.';
+
+  @override
+  String get aiToolsCopied => 'Kopiert';
+
+  @override
+  String get aiToolsCopiedMessage =>
+      'Es wird nicht im Verlauf gespeichert, und die Zwischenablage wird in 60 Sekunden geleert.';
+
+  @override
+  String get aiToolsCopyFailed =>
+      'Die Konfiguration konnte nicht kopiert werden.';
+
+  @override
+  String get aiToolsPolicyTitle => 'Was KI-Tools sehen können';
+
+  @override
+  String get aiToolsPolicyNote =>
+      'Vertrauliche Einträge und erkannte Zugangsdaten werden nie geteilt, egal was du hier erlaubst.';
+
+  @override
+  String get aiToolsOtherDevicesTitle =>
+      'Einträge von anderen Geräten einbeziehen';
+
+  @override
+  String get aiToolsOtherDevicesDescription =>
+      'Verlauf, der von deinen anderen Geräten synchronisiert wird. Schalte ein Gerät aus, um seine Einträge auszuschließen.';
+
+  @override
+  String get aiToolsKindsTitle => 'Inhaltsarten';
+
+  @override
+  String get aiToolsKindsDescription =>
+      'Arten von Zwischenablage-Einträgen, die KI-Tools lesen dürfen.';
+
+  @override
+  String get aiToolsKindText => 'Text';
+
+  @override
+  String get aiToolsKindLink => 'Links';
+
+  @override
+  String get aiToolsKindRichText => 'Formatierter Text';
+
+  @override
+  String get aiToolsKindImage => 'Bilder';
+
+  @override
+  String get aiToolsKindFileMetadata => 'Dateinamen und -größen';
+
+  @override
+  String get aiToolsExcludedAppsTitle => 'Ausgeschlossene Apps';
+
+  @override
+  String get aiToolsExcludedAppsDescription =>
+      'Aus diesen Apps kopierte Einträge werden nie geteilt.';
+
+  @override
+  String get aiToolsAddApp => 'App hinzufügen';
+
+  @override
+  String get aiToolsRemove => 'Entfernen';
+
+  @override
+  String get aiToolsDefaultLookbackTitle =>
+      'Verlaufszeitraum für neue Verbindungen';
+
+  @override
+  String get aiToolsDefaultLookbackDescription =>
+      'Ältere, nicht angeheftete Einträge bleiben für eine Verbindung unsichtbar. Angeheftete Einträge und Textbausteine sind nicht begrenzt.';
+
+  @override
+  String get aiToolsKeywords =>
+      'ki ai mcp assistent claude codex cursor modell agent';
+
+  @override
+  String aiToolsApprovalTitle(String client) {
+    return '$client möchte auf CopyPaste zugreifen';
+  }
+
+  @override
+  String aiToolsReportedName(String name) {
+    return 'Von der App gemeldeter Name: $name';
+  }
+
+  @override
+  String aiToolsReportedExecutable(String path) {
+    return 'Programm: $path';
+  }
+
+  @override
+  String get aiToolsApprovalNote =>
+      'Erlaube nur Tools, die du selbst gestartet hast. Ohne Antwort wird die Anfrage nach 2 Minuten abgelehnt.';
+
+  @override
+  String get aiToolsDeny => 'Ablehnen';
+
+  @override
+  String get aiToolsAllow => 'Erlauben';
+
+  @override
+  String get aiToolsVolumeTitle => 'Weiteres Lesen erlauben?';
+
+  @override
+  String aiToolsVolumeMessage(String client) {
+    return '$client hat in dieser Sitzung viel Zwischenablage-Verlauf gelesen. Mehr erlauben?';
+  }
+
+  @override
+  String get aiToolsNotificationBody =>
+      'Öffne CopyPaste, um zu erlauben oder abzulehnen.';
+
+  @override
+  String get aiToolsDecisionFailed =>
+      'Die Antwort konnte nicht gesendet werden. Die Anfrage wird erneut angezeigt.';
+
+  @override
+  String get aiToolsHide => 'Vor KI-Tools verbergen';
+
+  @override
+  String get aiToolsShow => 'Für KI-Tools sichtbar machen';
+
+  @override
+  String get aiToolsHiddenState => 'Vor KI-Tools verborgen';
 }

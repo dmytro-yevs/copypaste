@@ -5721,4 +5721,320 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => 'Couldn\'t use the snippet';
+
+  @override
+  String get aiToolsEnableTitle =>
+      'Allow AI tools to access CopyPaste on this computer';
+
+  @override
+  String get aiToolsEnableDescription =>
+      'AI tools you connect can read the clipboard items you allow below. Content you share with an AI tool is sent to that tool\'s provider.';
+
+  @override
+  String aiToolsStatusOn(int count) {
+    return 'On · devices sharing history: $count';
+  }
+
+  @override
+  String get aiToolsStatusOff =>
+      'Off · connected tools can\'t reach CopyPaste on this computer';
+
+  @override
+  String get aiToolsThreatModelTitle => 'What these limits protect';
+
+  @override
+  String get aiToolsThreatModel =>
+      'Scopes, approvals and redaction limit what an AI tool can see through its CopyPaste connection. They don\'t protect against other programs running under your account, which can already read your clipboard and history.';
+
+  @override
+  String get aiToolsGrantsTitle => 'Connected tools';
+
+  @override
+  String get aiToolsGrantsDescription =>
+      'AI tools connected on any of your computers. A change applies on the computer that owns the connection once it syncs.';
+
+  @override
+  String aiToolsServedThrough(String desktops) {
+    return 'Served through: $desktops';
+  }
+
+  @override
+  String get aiToolsConnect => 'Connect AI tool';
+
+  @override
+  String get aiToolsEmptyTitle => 'No AI tools connected yet';
+
+  @override
+  String get aiToolsEmptyMessage =>
+      'Connect an AI tool to let it search the clipboard items you allow.';
+
+  @override
+  String get aiToolsEmptyServedTitle =>
+      'AI tools connect through your computer';
+
+  @override
+  String get aiToolsEmptyServedMessage =>
+      'Turn on AI tools in CopyPaste on a Mac, Windows or Linux computer, and your phone\'s history will be available there.';
+
+  @override
+  String get aiToolsUnknownDevice => 'another computer';
+
+  @override
+  String aiToolsGrantOwner(String device) {
+    return 'On $device';
+  }
+
+  @override
+  String get aiToolsGrantWaiting => 'Waiting for first connection';
+
+  @override
+  String aiToolsGrantUsed(String date) {
+    return 'Connected · last used $date';
+  }
+
+  @override
+  String get aiToolsGrantRevoked => 'Revoked';
+
+  @override
+  String aiToolsGrantRevokedRemote(String device) {
+    return 'Revoked · takes effect when $device syncs';
+  }
+
+  @override
+  String get aiToolsGrantReissue => 'Needs a new connection after a restore';
+
+  @override
+  String get aiToolsGrantPaused => 'Paused: AI tools are off on this computer';
+
+  @override
+  String get aiToolsEdit => 'Edit';
+
+  @override
+  String get aiToolsActivity => 'View activity';
+
+  @override
+  String get aiToolsRevoke => 'Revoke';
+
+  @override
+  String aiToolsRevokeTitle(String name) {
+    return 'Revoke $name?';
+  }
+
+  @override
+  String get aiToolsRevokeMessage =>
+      'The tool loses access on its next request. To connect it again, create a new connection.';
+
+  @override
+  String aiToolsDeleteTitle(String name) {
+    return 'Delete $name?';
+  }
+
+  @override
+  String get aiToolsDeleteMessage =>
+      'The connection is revoked and removed from all your devices.';
+
+  @override
+  String get aiToolsChangeFailed => 'The change could not be saved.';
+
+  @override
+  String get aiToolsLoadFailed => 'AI tools settings could not be loaded';
+
+  @override
+  String get aiToolsEditTitle => 'Edit connection';
+
+  @override
+  String get aiToolsNameLabel => 'Name';
+
+  @override
+  String get aiToolsScopesLabel => 'Access';
+
+  @override
+  String get aiToolsScopeReadHistory => 'Read history';
+
+  @override
+  String get aiToolsScopeReadSnippets => 'Read snippets';
+
+  @override
+  String get aiToolsScopeWriteClipboard => 'Write clipboard';
+
+  @override
+  String get aiToolsScopeOrganize => 'Organize (pin, save snippets)';
+
+  @override
+  String get aiToolsLookbackLabel => 'History window';
+
+  @override
+  String get aiToolsLookbackDay => 'Last 24 hours';
+
+  @override
+  String get aiToolsLookbackWeek => 'Last 7 days';
+
+  @override
+  String get aiToolsLookbackMonth => 'Last 30 days';
+
+  @override
+  String get aiToolsLookbackAll => 'All history';
+
+  @override
+  String aiToolsActivityTitle(String name) {
+    return 'Activity of $name';
+  }
+
+  @override
+  String get aiToolsActivityEmpty => 'No activity yet';
+
+  @override
+  String get aiToolsActivityFailed => 'Activity could not be loaded';
+
+  @override
+  String aiToolsActivityEntry(String tool, int count) {
+    return '$tool · results: $count';
+  }
+
+  @override
+  String get aiToolsClientLabel => 'AI tool';
+
+  @override
+  String get aiToolsClientOther => 'Other';
+
+  @override
+  String get aiToolsCreate => 'Create connection';
+
+  @override
+  String aiToolsConfigHint(String client) {
+    return 'Add this configuration to $client. Its access key is shown only once.';
+  }
+
+  @override
+  String get aiToolsConfigHintOther =>
+      'Add this configuration to your AI tool\'s MCP settings. Its access key is shown only once.';
+
+  @override
+  String aiToolsRestartNote(String client) {
+    return 'Next: restart $client or open a new session.';
+  }
+
+  @override
+  String get aiToolsRestartNoteOther =>
+      'Next: restart your AI tool or open a new session.';
+
+  @override
+  String get aiToolsCopied => 'Copied';
+
+  @override
+  String get aiToolsCopiedMessage =>
+      'It isn\'t saved to history, and the clipboard clears in 60 seconds.';
+
+  @override
+  String get aiToolsCopyFailed => 'The configuration could not be copied.';
+
+  @override
+  String get aiToolsPolicyTitle => 'What AI tools can see';
+
+  @override
+  String get aiToolsPolicyNote =>
+      'Sensitive items and detected credentials are never shared, whatever you allow here.';
+
+  @override
+  String get aiToolsOtherDevicesTitle => 'Include items from other devices';
+
+  @override
+  String get aiToolsOtherDevicesDescription =>
+      'History synced from your other devices. Turn off a device to keep its items out.';
+
+  @override
+  String get aiToolsKindsTitle => 'Content kinds';
+
+  @override
+  String get aiToolsKindsDescription =>
+      'Kinds of clipboard items AI tools can read.';
+
+  @override
+  String get aiToolsKindText => 'Text';
+
+  @override
+  String get aiToolsKindLink => 'Links';
+
+  @override
+  String get aiToolsKindRichText => 'Rich text';
+
+  @override
+  String get aiToolsKindImage => 'Images';
+
+  @override
+  String get aiToolsKindFileMetadata => 'File names and sizes';
+
+  @override
+  String get aiToolsExcludedAppsTitle => 'Excluded apps';
+
+  @override
+  String get aiToolsExcludedAppsDescription =>
+      'Items copied from these apps are never shared.';
+
+  @override
+  String get aiToolsAddApp => 'Add app';
+
+  @override
+  String get aiToolsRemove => 'Remove';
+
+  @override
+  String get aiToolsDefaultLookbackTitle =>
+      'History window for new connections';
+
+  @override
+  String get aiToolsDefaultLookbackDescription =>
+      'Older unpinned items stay invisible to a connection. Pinned items and snippets are not limited.';
+
+  @override
+  String get aiToolsKeywords =>
+      'ai mcp assistant claude codex cursor model agent';
+
+  @override
+  String aiToolsApprovalTitle(String client) {
+    return '$client wants to access CopyPaste';
+  }
+
+  @override
+  String aiToolsReportedName(String name) {
+    return 'Name reported by the app: $name';
+  }
+
+  @override
+  String aiToolsReportedExecutable(String path) {
+    return 'Program: $path';
+  }
+
+  @override
+  String get aiToolsApprovalNote =>
+      'Allow only tools you started yourself. Without an answer, the request is denied in 2 minutes.';
+
+  @override
+  String get aiToolsDeny => 'Deny';
+
+  @override
+  String get aiToolsAllow => 'Allow';
+
+  @override
+  String get aiToolsVolumeTitle => 'Allow more reading?';
+
+  @override
+  String aiToolsVolumeMessage(String client) {
+    return '$client has read a lot of clipboard history in this session. Allow more?';
+  }
+
+  @override
+  String get aiToolsNotificationBody => 'Open CopyPaste to allow or deny.';
+
+  @override
+  String get aiToolsDecisionFailed =>
+      'The answer could not be sent. The request is shown again.';
+
+  @override
+  String get aiToolsHide => 'Hide from AI tools';
+
+  @override
+  String get aiToolsShow => 'Show to AI tools';
+
+  @override
+  String get aiToolsHiddenState => 'Hidden from AI tools';
 }
