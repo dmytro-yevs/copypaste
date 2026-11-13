@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "No se pudo enviar la respuesta. La solicitud se mostrará de nuevo.",
   "aiToolsHide": "Ocultar a las herramientas de IA",
   "aiToolsShow": "Mostrar a las herramientas de IA",
-  "aiToolsHiddenState": "Oculto a las herramientas de IA"
+  "aiToolsHiddenState": "Oculto a las herramientas de IA",
+  "quickPasteTabQueue": "Cola",
+  "quickPasteMaskedMode": "Campo de contraseña: las vistas previas están ocultas",
+  "quickPasteMaskedItem": "Oculto: {kind}",
+  "quickPasteUnlockSecrets": "Desbloquear elementos secretos",
+  "quickPastePastingWith": "Pegando con: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} pega el original",
+  "quickPasteDefaultSkipped": "Transformación predeterminada omitida",
+  "quickPasteDefaultSkippedMessage": "Se usó el original en su lugar.",
+  "quickPastePasteManually": "El contenido está en el portapapeles. Pégalo manualmente.",
+  "quickPastePaste": "Pegar",
+  "quickPasteSnippetsUnavailable": "Los fragmentos no están disponibles"
 }

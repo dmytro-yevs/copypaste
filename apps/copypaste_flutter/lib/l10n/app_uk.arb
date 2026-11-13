@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "Не вдалося надіслати відповідь. Запит буде показано знову.",
   "aiToolsHide": "Приховати від інструментів ШІ",
   "aiToolsShow": "Показувати інструментам ШІ",
-  "aiToolsHiddenState": "Приховано від інструментів ШІ"
+  "aiToolsHiddenState": "Приховано від інструментів ШІ",
+  "quickPasteTabQueue": "Черга",
+  "quickPasteMaskedMode": "Поле пароля: попередній перегляд приховано",
+  "quickPasteMaskedItem": "Приховано: {kind}",
+  "quickPasteUnlockSecrets": "Розблокувати секретні елементи",
+  "quickPastePastingWith": "Вставлення з: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} вставляє оригінал",
+  "quickPasteDefaultSkipped": "Типове перетворення пропущено",
+  "quickPasteDefaultSkippedMessage": "Натомість використано оригінал.",
+  "quickPastePasteManually": "Вміст у буфері обміну. Вставте його вручну.",
+  "quickPastePaste": "Вставити",
+  "quickPasteSnippetsUnavailable": "Фрагменти недоступні"
 }

@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "応答を送信できませんでした。リクエストはもう一度表示されます。",
   "aiToolsHide": "AI ツールから隠す",
   "aiToolsShow": "AI ツールに表示",
-  "aiToolsHiddenState": "AI ツールから非表示"
+  "aiToolsHiddenState": "AI ツールから非表示",
+  "quickPasteTabQueue": "キュー",
+  "quickPasteMaskedMode": "パスワード欄: プレビューは非表示です",
+  "quickPasteMaskedItem": "非表示: {kind}",
+  "quickPasteUnlockSecrets": "シークレット項目のロックを解除",
+  "quickPastePastingWith": "貼り付けに使用: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} で元のまま貼り付け",
+  "quickPasteDefaultSkipped": "既定の変換をスキップしました",
+  "quickPasteDefaultSkippedMessage": "代わりに元の内容を使用しました。",
+  "quickPastePasteManually": "内容はクリップボードにあります。手動で貼り付けてください。",
+  "quickPastePaste": "貼り付け",
+  "quickPasteSnippetsUnavailable": "スニペットを利用できません"
 }

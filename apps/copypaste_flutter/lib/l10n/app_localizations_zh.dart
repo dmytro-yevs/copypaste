@@ -5628,4 +5628,43 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => '已对 AI 工具隐藏';
+
+  @override
+  String get quickPasteTabQueue => '队列';
+
+  @override
+  String get quickPasteMaskedMode => '密码字段：预览已隐藏';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return '已隐藏：$kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => '解锁机密项目';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return '粘贴时使用：$name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut 粘贴原始内容';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => '已跳过默认转换';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => '已改用原始内容。';
+
+  @override
+  String get quickPastePasteManually => '内容已在剪贴板中，请手动粘贴。';
+
+  @override
+  String get quickPastePaste => '粘贴';
+
+  @override
+  String get quickPasteSnippetsUnavailable => '片段不可用';
 }

@@ -5777,4 +5777,43 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'AI ツールから非表示';
+
+  @override
+  String get quickPasteTabQueue => 'キュー';
+
+  @override
+  String get quickPasteMaskedMode => 'パスワード欄: プレビューは非表示です';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return '非表示: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'シークレット項目のロックを解除';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return '貼り付けに使用: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut で元のまま貼り付け';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => '既定の変換をスキップしました';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => '代わりに元の内容を使用しました。';
+
+  @override
+  String get quickPastePasteManually => '内容はクリップボードにあります。手動で貼り付けてください。';
+
+  @override
+  String get quickPastePaste => '貼り付け';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'スニペットを利用できません';
 }

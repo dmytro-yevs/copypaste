@@ -6178,4 +6178,46 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Приховано від інструментів ШІ';
+
+  @override
+  String get quickPasteTabQueue => 'Черга';
+
+  @override
+  String get quickPasteMaskedMode =>
+      'Поле пароля: попередній перегляд приховано';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Приховано: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Розблокувати секретні елементи';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Вставлення з: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut вставляє оригінал';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Типове перетворення пропущено';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'Натомість використано оригінал.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Вміст у буфері обміну. Вставте його вручну.';
+
+  @override
+  String get quickPastePaste => 'Вставити';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Фрагменти недоступні';
 }

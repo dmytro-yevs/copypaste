@@ -46,8 +46,16 @@ import 'features/history/repository/temporary_history_image_input.dart';
 import 'features/onboarding/controller/onboarding_controller.dart';
 import 'features/onboarding/controller/platform_onboarding_setup.dart';
 import 'features/onboarding/view/onboarding_screen.dart';
+import 'features/paste_queue/controller/paste_queue_controller.dart';
+import 'features/paste_queue/repository/paste_queue_shortcuts_store.dart';
+import 'features/paste_queue/repository/runtime_paste_queue_repository.dart';
 import 'features/quick_paste/quick_paste_app.dart';
 import 'features/quick_paste/quick_paste_controller.dart';
+import 'features/quick_paste/repository/runtime_quick_paste_delivery_repository.dart';
+import 'features/snippets/repository/runtime_snippet_repository.dart';
+import 'features/transforms/repository/runtime_transform_repository.dart';
+import 'features/transforms/repository/transform_recents_store.dart';
+import 'platform/security/device_authenticator.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
 import 'features/settings/controller/settings_controller.dart';
 import 'features/settings/controller/launch_at_login_controller.dart';
@@ -139,6 +147,26 @@ Future<void> quickPasteMain() async {
         imageInput: TemporaryHistoryImageInput(repository: repository),
       ),
       initializeInspector: modules.initialize,
+      snippets: RuntimeSnippetRepository(),
+      transforms: RuntimeTransformRepository(),
+      transformRecents: SharedPreferencesTransformRecentsStore(),
+      delivery: const RuntimeQuickPasteDeliveryRepository(),
+      authenticator: MethodChannelDeviceAuthenticator(),
+      createQueue: (hideWindow) {
+        final queue = PasteQueueController(
+          repository: RuntimePasteQueueRepository(),
+          pasteHost: host,
+          requestAccessibility: host.requestAccessibility,
+          hideWindow: hideWindow,
+        );
+        unawaited(
+          SharedPreferencesPasteQueueShortcutsStore().read().then(
+            (preferences) => queue.pasteNextStyle = preferences.pasteNextStyle,
+            onError: (Object _) {},
+          ),
+        );
+        return queue;
+      },
     );
   }
 

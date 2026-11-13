@@ -6191,4 +6191,45 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Nascosto agli strumenti IA';
+
+  @override
+  String get quickPasteTabQueue => 'Coda';
+
+  @override
+  String get quickPasteMaskedMode => 'Campo password: anteprime nascoste';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Nascosto: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Sblocca gli elementi segreti';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Incolla con: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut incolla l\'originale';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Trasformazione predefinita saltata';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => 'È stato usato l\'originale.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Il contenuto è negli appunti. Incollalo manualmente.';
+
+  @override
+  String get quickPastePaste => 'Incolla';
+
+  @override
+  String get quickPasteSnippetsUnavailable =>
+      'I frammenti non sono disponibili';
 }

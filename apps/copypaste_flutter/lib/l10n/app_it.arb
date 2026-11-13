@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "Impossibile inviare la risposta. La richiesta verrà mostrata di nuovo.",
   "aiToolsHide": "Nascondi agli strumenti IA",
   "aiToolsShow": "Mostra agli strumenti IA",
-  "aiToolsHiddenState": "Nascosto agli strumenti IA"
+  "aiToolsHiddenState": "Nascosto agli strumenti IA",
+  "quickPasteTabQueue": "Coda",
+  "quickPasteMaskedMode": "Campo password: anteprime nascoste",
+  "quickPasteMaskedItem": "Nascosto: {kind}",
+  "quickPasteUnlockSecrets": "Sblocca gli elementi segreti",
+  "quickPastePastingWith": "Incolla con: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} incolla l'originale",
+  "quickPasteDefaultSkipped": "Trasformazione predefinita saltata",
+  "quickPasteDefaultSkippedMessage": "È stato usato l'originale.",
+  "quickPastePasteManually": "Il contenuto è negli appunti. Incollalo manualmente.",
+  "quickPastePaste": "Incolla",
+  "quickPasteSnippetsUnavailable": "I frammenti non sono disponibili"
 }

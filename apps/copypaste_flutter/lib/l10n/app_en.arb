@@ -7572,5 +7572,67 @@
   "aiToolsHiddenState": "Hidden from AI tools",
   "@aiToolsHiddenState": {
     "description": "Accessibility state of an item hidden from AI tools."
+  },
+  "quickPasteTabQueue": "Queue",
+  "@quickPasteTabQueue": {
+    "description": "Quick Paste tab that shows the paste queue."
+  },
+  "quickPasteMaskedMode": "Password field: previews are hidden",
+  "@quickPasteMaskedMode": {
+    "description": "Notice in Quick Paste while the paste target is a password field, so every preview is masked."
+  },
+  "quickPasteMaskedItem": "Hidden: {kind}",
+  "@quickPasteMaskedItem": {
+    "description": "Masked row label in Quick Paste; the content is hidden and only its kind is named.",
+    "placeholders": {
+      "kind": {
+        "type": "String",
+        "example": "Text"
+      }
+    }
+  },
+  "quickPasteUnlockSecrets": "Unlock secret items",
+  "@quickPasteUnlockSecrets": {
+    "description": "Button label in Quick Paste that verifies the device owner to show and paste secret items."
+  },
+  "quickPastePastingWith": "Pasting with: {name}",
+  "@quickPastePastingWith": {
+    "description": "Chip in Quick Paste naming the transform pipeline that Enter pastes text through.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Remove tracking"
+      }
+    }
+  },
+  "quickPastePasteOriginalHint": "{shortcut} pastes the original",
+  "@quickPastePasteOriginalHint": {
+    "description": "Hint next to the default transform chip naming the shortcut that pastes the original instead.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "⌘⇧↩"
+      }
+    }
+  },
+  "quickPasteDefaultSkipped": "Default transform skipped",
+  "@quickPasteDefaultSkipped": {
+    "description": "Toast title when the default paste transform failed on an item."
+  },
+  "quickPasteDefaultSkippedMessage": "The original was used instead.",
+  "@quickPasteDefaultSkippedMessage": {
+    "description": "Toast message when the default paste transform failed and the original item was used."
+  },
+  "quickPastePasteManually": "The content is on the clipboard. Paste it manually.",
+  "@quickPastePasteManually": {
+    "description": "Toast message when Quick Paste put content on the clipboard but could not paste it."
+  },
+  "quickPastePaste": "Paste",
+  "@quickPastePaste": {
+    "description": "Primary button of the template fill-in form inside Quick Paste."
+  },
+  "quickPasteSnippetsUnavailable": "Snippets are unavailable",
+  "@quickPasteSnippetsUnavailable": {
+    "description": "Error state of the Quick Paste snippet results."
   }
 }

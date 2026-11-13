@@ -6198,4 +6198,46 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Masqué aux outils d’IA';
+
+  @override
+  String get quickPasteTabQueue => 'File';
+
+  @override
+  String get quickPasteMaskedMode => 'Champ de mot de passe : aperçus masqués';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Masqué : $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Déverrouiller les éléments secrets';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Collage avec : $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut colle l\'original';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Transformation par défaut ignorée';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'L\'original a été utilisé à la place.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Le contenu est dans le presse-papiers. Collez-le manuellement.';
+
+  @override
+  String get quickPastePaste => 'Coller';
+
+  @override
+  String get quickPasteSnippetsUnavailable =>
+      'Les extraits ne sont pas disponibles';
 }

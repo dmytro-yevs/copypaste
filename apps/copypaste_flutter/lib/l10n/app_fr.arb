@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "La réponse n’a pas pu être envoyée. La demande s’affichera de nouveau.",
   "aiToolsHide": "Masquer aux outils d’IA",
   "aiToolsShow": "Afficher aux outils d’IA",
-  "aiToolsHiddenState": "Masqué aux outils d’IA"
+  "aiToolsHiddenState": "Masqué aux outils d’IA",
+  "quickPasteTabQueue": "File",
+  "quickPasteMaskedMode": "Champ de mot de passe : aperçus masqués",
+  "quickPasteMaskedItem": "Masqué : {kind}",
+  "quickPasteUnlockSecrets": "Déverrouiller les éléments secrets",
+  "quickPastePastingWith": "Collage avec : {name}",
+  "quickPastePasteOriginalHint": "{shortcut} colle l'original",
+  "quickPasteDefaultSkipped": "Transformation par défaut ignorée",
+  "quickPasteDefaultSkippedMessage": "L'original a été utilisé à la place.",
+  "quickPastePasteManually": "Le contenu est dans le presse-papiers. Collez-le manuellement.",
+  "quickPastePaste": "Coller",
+  "quickPasteSnippetsUnavailable": "Les extraits ne sont pas disponibles"
 }

@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "Nie udało się wysłać odpowiedzi. Żądanie zostanie wyświetlone ponownie.",
   "aiToolsHide": "Ukryj przed narzędziami AI",
   "aiToolsShow": "Pokazuj narzędziom AI",
-  "aiToolsHiddenState": "Ukryte przed narzędziami AI"
+  "aiToolsHiddenState": "Ukryte przed narzędziami AI",
+  "quickPasteTabQueue": "Kolejka",
+  "quickPasteMaskedMode": "Pole hasła: podglądy są ukryte",
+  "quickPasteMaskedItem": "Ukryte: {kind}",
+  "quickPasteUnlockSecrets": "Odblokuj tajne elementy",
+  "quickPastePastingWith": "Wklejanie z: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} wkleja oryginał",
+  "quickPasteDefaultSkipped": "Pominięto domyślne przekształcenie",
+  "quickPasteDefaultSkippedMessage": "Zamiast tego użyto oryginału.",
+  "quickPastePasteManually": "Zawartość jest w schowku. Wklej ją ręcznie.",
+  "quickPastePaste": "Wklej",
+  "quickPasteSnippetsUnavailable": "Fragmenty są niedostępne"
 }

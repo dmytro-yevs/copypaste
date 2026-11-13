@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "Yanıt gönderilemedi. İstek yeniden gösterilecek.",
   "aiToolsHide": "Yapay zekâ araçlarından gizle",
   "aiToolsShow": "Yapay zekâ araçlarına göster",
-  "aiToolsHiddenState": "Yapay zekâ araçlarından gizli"
+  "aiToolsHiddenState": "Yapay zekâ araçlarından gizli",
+  "quickPasteTabQueue": "Kuyruk",
+  "quickPasteMaskedMode": "Parola alanı: önizlemeler gizlendi",
+  "quickPasteMaskedItem": "Gizli: {kind}",
+  "quickPasteUnlockSecrets": "Gizli öğelerin kilidini aç",
+  "quickPastePastingWith": "Şununla yapıştırılıyor: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} orijinali yapıştırır",
+  "quickPasteDefaultSkipped": "Varsayılan dönüşüm atlandı",
+  "quickPasteDefaultSkippedMessage": "Bunun yerine orijinal kullanıldı.",
+  "quickPastePasteManually": "İçerik panoda. Elle yapıştırın.",
+  "quickPastePaste": "Yapıştır",
+  "quickPasteSnippetsUnavailable": "Parçacıklar kullanılamıyor"
 }

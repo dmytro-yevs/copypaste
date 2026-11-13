@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "无法发送回应。请求将再次显示。",
   "aiToolsHide": "对 AI 工具隐藏",
   "aiToolsShow": "对 AI 工具显示",
-  "aiToolsHiddenState": "已对 AI 工具隐藏"
+  "aiToolsHiddenState": "已对 AI 工具隐藏",
+  "quickPasteTabQueue": "队列",
+  "quickPasteMaskedMode": "密码字段：预览已隐藏",
+  "quickPasteMaskedItem": "已隐藏：{kind}",
+  "quickPasteUnlockSecrets": "解锁机密项目",
+  "quickPastePastingWith": "粘贴时使用：{name}",
+  "quickPastePasteOriginalHint": "{shortcut} 粘贴原始内容",
+  "quickPasteDefaultSkipped": "已跳过默认转换",
+  "quickPasteDefaultSkippedMessage": "已改用原始内容。",
+  "quickPastePasteManually": "内容已在剪贴板中，请手动粘贴。",
+  "quickPastePaste": "粘贴",
+  "quickPasteSnippetsUnavailable": "片段不可用"
 }

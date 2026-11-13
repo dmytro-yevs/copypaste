@@ -6053,4 +6053,44 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Yapay zekâ araçlarından gizli';
+
+  @override
+  String get quickPasteTabQueue => 'Kuyruk';
+
+  @override
+  String get quickPasteMaskedMode => 'Parola alanı: önizlemeler gizlendi';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Gizli: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Gizli öğelerin kilidini aç';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Şununla yapıştırılıyor: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut orijinali yapıştırır';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Varsayılan dönüşüm atlandı';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'Bunun yerine orijinal kullanıldı.';
+
+  @override
+  String get quickPastePasteManually => 'İçerik panoda. Elle yapıştırın.';
+
+  @override
+  String get quickPastePaste => 'Yapıştır';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Parçacıklar kullanılamıyor';
 }

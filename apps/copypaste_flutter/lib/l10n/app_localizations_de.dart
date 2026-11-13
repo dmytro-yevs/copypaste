@@ -6169,4 +6169,47 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Vor KI-Tools verborgen';
+
+  @override
+  String get quickPasteTabQueue => 'Warteschlange';
+
+  @override
+  String get quickPasteMaskedMode =>
+      'Passwortfeld: Vorschauen sind ausgeblendet';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Verborgen: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Geheime Einträge entsperren';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Einfügen mit: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut fügt das Original ein';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Standardumwandlung übersprungen';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'Stattdessen wurde das Original verwendet.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Der Inhalt ist in der Zwischenablage. Fügen Sie ihn manuell ein.';
+
+  @override
+  String get quickPastePaste => 'Einfügen';
+
+  @override
+  String get quickPasteSnippetsUnavailable =>
+      'Textbausteine sind nicht verfügbar';
 }

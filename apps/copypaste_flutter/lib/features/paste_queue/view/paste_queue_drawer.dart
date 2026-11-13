@@ -28,6 +28,7 @@ class PasteQueueDrawer extends StatefulWidget {
     required this.controller,
     this.shortcuts,
     this.onOpenSettings,
+    this.onClose,
   });
 
   final PasteQueueController controller;
@@ -35,6 +36,10 @@ class PasteQueueDrawer extends StatefulWidget {
 
   /// Opens the queue settings, where shortcuts are set.
   final VoidCallback? onOpenSettings;
+
+  /// Set when the queue is embedded in another surface instead of a drawer:
+  /// it then fills its parent, and Close calls this.
+  final VoidCallback? onClose;
 
   @override
   State<PasteQueueDrawer> createState() => _PasteQueueDrawerState();
@@ -66,7 +71,11 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
     super.dispose();
   }
 
-  void _close() => unawaited(closeDrawer(context));
+  void _close() {
+    final onClose = widget.onClose;
+    if (onClose != null) return onClose();
+    unawaited(closeDrawer(context));
+  }
 
   void _report(PasteQueueFeedback feedback) {
     if (!mounted) return;
@@ -246,7 +255,9 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
         listenable: Listenable.merge([_controller, ?widget.shortcuts]),
         builder: (context, _) => ConstrainedBox(
           key: const ValueKey('paste-queue-drawer'),
-          constraints: AppOverlays.drawerContentConstraints(context),
+          constraints: widget.onClose == null
+              ? AppOverlays.drawerContentConstraints(context)
+              : const BoxConstraints(),
           child: Scaffold(
             headers: [_header(context), const Divider()],
             footers: [const Divider(), _footer(context)],

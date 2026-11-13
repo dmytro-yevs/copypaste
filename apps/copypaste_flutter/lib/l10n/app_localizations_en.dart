@@ -6037,4 +6037,45 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiToolsHiddenState => 'Hidden from AI tools';
+
+  @override
+  String get quickPasteTabQueue => 'Queue';
+
+  @override
+  String get quickPasteMaskedMode => 'Password field: previews are hidden';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Hidden: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Unlock secret items';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Pasting with: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut pastes the original';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Default transform skipped';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'The original was used instead.';
+
+  @override
+  String get quickPastePasteManually =>
+      'The content is on the clipboard. Paste it manually.';
+
+  @override
+  String get quickPastePaste => 'Paste';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Snippets are unavailable';
 }

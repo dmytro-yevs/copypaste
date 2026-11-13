@@ -1622,5 +1622,16 @@
   "aiToolsDecisionFailed": "Die Antwort konnte nicht gesendet werden. Die Anfrage wird erneut angezeigt.",
   "aiToolsHide": "Vor KI-Tools verbergen",
   "aiToolsShow": "Für KI-Tools sichtbar machen",
-  "aiToolsHiddenState": "Vor KI-Tools verborgen"
+  "aiToolsHiddenState": "Vor KI-Tools verborgen",
+  "quickPasteTabQueue": "Warteschlange",
+  "quickPasteMaskedMode": "Passwortfeld: Vorschauen sind ausgeblendet",
+  "quickPasteMaskedItem": "Verborgen: {kind}",
+  "quickPasteUnlockSecrets": "Geheime Einträge entsperren",
+  "quickPastePastingWith": "Einfügen mit: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} fügt das Original ein",
+  "quickPasteDefaultSkipped": "Standardumwandlung übersprungen",
+  "quickPasteDefaultSkippedMessage": "Stattdessen wurde das Original verwendet.",
+  "quickPastePasteManually": "Der Inhalt ist in der Zwischenablage. Fügen Sie ihn manuell ein.",
+  "quickPastePaste": "Einfügen",
+  "quickPasteSnippetsUnavailable": "Textbausteine sind nicht verfügbar"
 }
