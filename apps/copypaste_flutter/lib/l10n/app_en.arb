@@ -7142,5 +7142,916 @@
   "snippetsUseFailed": "Couldn't use the snippet",
   "@snippetsUseFailed": {
     "description": "Error title of the fill-in form."
+  },
+  "rulesLoadFailed": "Content rules could not be loaded.",
+  "@rulesLoadFailed": {
+    "description": "Error title when the content rules cannot be read."
+  },
+  "rulesNewRule": "New rule",
+  "@rulesNewRule": {
+    "description": "Button and editor title that creates a content rule."
+  },
+  "rulesEditRule": "Edit rule",
+  "@rulesEditRule": {
+    "description": "Title of the rule editor for an existing rule."
+  },
+  "rulesUntitled": "Untitled rule",
+  "@rulesUntitled": {
+    "description": "Shown for a rule without a name."
+  },
+  "rulesPrivacyDefaultsTitle": "Privacy defaults",
+  "@rulesPrivacyDefaultsTitle": {
+    "description": "Heading of the device Privacy settings that guard capture before any content rule."
+  },
+  "rulesPrivacyDefaultsDescription": "These Privacy settings guard every copy on this device before any rule runs. The built-in rules below sync to your devices.",
+  "@rulesPrivacyDefaultsDescription": {
+    "description": "Description of the Privacy defaults row. The built-in rules are listed below it."
+  },
+  "rulesPrivacyDefaultsKeywords": "privacy concealed temporary excluded apps built-in credentials passwords payment cards",
+  "@rulesPrivacyDefaultsKeywords": {
+    "description": "Search keywords for the Privacy defaults row of Content rules."
+  },
+  "rulesPrivacyState": "{setting}: {state}",
+  "@rulesPrivacyState": {
+    "description": "One line of the Privacy defaults status: a Privacy setting name and its current value.",
+    "placeholders": {
+      "setting": {
+        "type": "String"
+      },
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesExcludedApps": "{count, plural, =0{none} =1{1 app} other{{count} apps}}",
+  "@rulesExcludedApps": {
+    "description": "Number of excluded applications in the Privacy defaults status.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesOpenPrivacy": "Open Privacy",
+  "@rulesOpenPrivacy": {
+    "description": "Button that opens the Privacy settings section."
+  },
+  "rulesMyRulesTitle": "My rules",
+  "@rulesMyRulesTitle": {
+    "description": "Heading of the list of rules the user created."
+  },
+  "rulesMyRulesDescription": "They run from top to bottom on new copies, after the built-in rules, and sync to your devices.",
+  "@rulesMyRulesDescription": {
+    "description": "Description of the user rules list."
+  },
+  "rulesMyRulesKeywords": "content rules automation tag skip secret expire delete pattern regex",
+  "@rulesMyRulesKeywords": {
+    "description": "Search keywords for the user rules list."
+  },
+  "rulesEmptyTitle": "No rules yet",
+  "@rulesEmptyTitle": {
+    "description": "Empty state title when the user has no rules."
+  },
+  "rulesEmptyMessage": "A rule can tag, protect, expire or skip new copies automatically.",
+  "@rulesEmptyMessage": {
+    "description": "Empty state message when the user has no rules."
+  },
+  "rulesDeletedTitle": "Recently deleted",
+  "@rulesDeletedTitle": {
+    "description": "Heading of the rules deleted within 30 days."
+  },
+  "rulesDeletedDescription": "Deleted rules can be restored for 30 days.",
+  "@rulesDeletedDescription": {
+    "description": "Description of the recently deleted rules."
+  },
+  "rulesDeletedAt": "Deleted {time}",
+  "@rulesDeletedAt": {
+    "description": "When a recently deleted rule was deleted.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesRestore": "Restore",
+  "@rulesRestore": {
+    "description": "Button that restores a deleted rule."
+  },
+  "rulesDeletedToast": "Rule deleted",
+  "@rulesDeletedToast": {
+    "description": "Toast title after a rule was deleted."
+  },
+  "rulesDeletedToastMessage": "You can restore it for 30 days.",
+  "@rulesDeletedToastMessage": {
+    "description": "Toast message after a rule was deleted."
+  },
+  "rulesUndo": "Undo",
+  "@rulesUndo": {
+    "description": "Toast action that undoes deleting a rule."
+  },
+  "rulesConflictMessage": "A concurrent edit of “{rule}” from {device} was replaced by a newer one.",
+  "@rulesConflictMessage": {
+    "description": "Notice that a concurrent edit of a rule from another device lost and can be restored.",
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      },
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesAnotherDevice": "another device",
+  "@rulesAnotherDevice": {
+    "description": "Used in rulesConflictMessage when the device name is unknown."
+  },
+  "rulesRestoreConflict": "Use that version",
+  "@rulesRestoreConflict": {
+    "description": "Button that restores the version of a rule that lost a concurrent edit."
+  },
+  "rulesSkipLogTitle": "Recently skipped",
+  "@rulesSkipLogTitle": {
+    "description": "Title of the list of copies content rules did not save."
+  },
+  "rulesSkipLogDescription": "Copies your rules did not save on this device since CopyPaste started. Only the time, app and rule are kept.",
+  "@rulesSkipLogDescription": {
+    "description": "Description of the skip log row."
+  },
+  "rulesSkipLogKeywords": "skipped ignored not saved log",
+  "@rulesSkipLogKeywords": {
+    "description": "Search keywords for the skip log row."
+  },
+  "rulesSkipLogShow": "Show",
+  "@rulesSkipLogShow": {
+    "description": "Button that shows the skip log."
+  },
+  "rulesSkipLogEmpty": "No copies were skipped.",
+  "@rulesSkipLogEmpty": {
+    "description": "Skip log text when no copy was skipped."
+  },
+  "rulesUnknownApp": "Unknown app",
+  "@rulesUnknownApp": {
+    "description": "Skip log entry when the source app is not known."
+  },
+  "rulesMatchesEverything": "any copy",
+  "@rulesMatchesEverything": {
+    "description": "Condition part of a rule summary when the rule has no conditions."
+  },
+  "rulesSummary": "When {conditions} → {actions}",
+  "@rulesSummary": {
+    "description": "One-line rule summary: its conditions, an arrow, its actions.",
+    "placeholders": {
+      "conditions": {
+        "type": "String"
+      },
+      "actions": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSummaryStop": "{summary}, then stop",
+  "@rulesSummaryStop": {
+    "description": "A rule summary for a rule that stops later rules.",
+    "placeholders": {
+      "summary": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesConditionJoin": "{mode, select, any{ or } other{ and }}",
+  "@rulesConditionJoin": {
+    "description": "Separator between conditions in a rule summary, by match mode (any or all). Keep the spaces.",
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesConditionSummary": "{attribute} {operator} {value}",
+  "@rulesConditionSummary": {
+    "description": "One condition in a rule summary, such as \"Source app is Terminal\".",
+    "placeholders": {
+      "attribute": {
+        "type": "String"
+      },
+      "operator": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesActionSummary": "{action} {value}",
+  "@rulesActionSummary": {
+    "description": "One action with its value in a rule summary, such as \"Delete after 15 minutes\".",
+    "placeholders": {
+      "action": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesRunsOn": "Runs on {devices}",
+  "@rulesRunsOn": {
+    "description": "The devices a rule runs on.",
+    "placeholders": {
+      "devices": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesRunsOnAll": "Runs on all devices",
+  "@rulesRunsOnAll": {
+    "description": "A rule runs on every device."
+  },
+  "rulesMatchCount": "{count, plural, =1{Matched once here} other{Matched {count} times here}}",
+  "@rulesMatchCount": {
+    "description": "How often a rule matched on this device.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesLastMatched": "last {time}",
+  "@rulesLastMatched": {
+    "description": "When a rule last matched on this device.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNewFromDevice": "New from {device}",
+  "@rulesNewFromDevice": {
+    "description": "Badge on a rule another device added or changed in the last 7 days.",
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNeedsUpdateBadge": "Needs update",
+  "@rulesNeedsUpdateBadge": {
+    "description": "Badge on a rule written by a newer CopyPaste."
+  },
+  "rulesUpdateRequired": "Update CopyPaste to run this rule.",
+  "@rulesUpdateRequired": {
+    "description": "Shown for a rule this version cannot run."
+  },
+  "rulesErrorBadge": "Error",
+  "@rulesErrorBadge": {
+    "description": "Badge on a rule that cannot run on this device."
+  },
+  "rulesErrorHint": "{problem} Until it is fixed, copies this rule could match are saved as secret and hidden from AI tools.",
+  "@rulesErrorHint": {
+    "description": "Explains the error badge. problem is the reason, a full sentence.",
+    "placeholders": {
+      "problem": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesReorder": "Drag to reorder",
+  "@rulesReorder": {
+    "description": "Drag handle of a rule row."
+  },
+  "rulesMoreActions": "More actions",
+  "@rulesMoreActions": {
+    "description": "Menu button of a rule row."
+  },
+  "rulesEdit": "Edit",
+  "@rulesEdit": {
+    "description": "Menu item that opens the rule editor."
+  },
+  "rulesMove": "{direction, select, up{Move up} down{Move down} top{Move to top} other{Move to bottom}}",
+  "@rulesMove": {
+    "description": "Menu item and screen reader action that moves a rule in the list.",
+    "placeholders": {
+      "direction": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesApplyToItems": "Apply to existing items…",
+  "@rulesApplyToItems": {
+    "description": "Menu item that previews a rule against history and applies it to existing items."
+  },
+  "rulesResetBuiltin": "Reset to default",
+  "@rulesResetBuiltin": {
+    "description": "Menu item that resets a built-in rule to its shipped definition."
+  },
+  "rulesNameLabel": "Name",
+  "@rulesNameLabel": {
+    "description": "Label of the rule name field."
+  },
+  "rulesNamePlaceholder": "For example, Work links",
+  "@rulesNamePlaceholder": {
+    "description": "Placeholder of the rule name field."
+  },
+  "rulesWhenTitle": "When",
+  "@rulesWhenTitle": {
+    "description": "Editor section with the rule conditions."
+  },
+  "rulesMatchMode": "{mode, select, any{Any condition matches} other{All conditions match}}",
+  "@rulesMatchMode": {
+    "description": "Choice of how conditions combine.",
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNoConditions": "No conditions: this rule applies to every copy.",
+  "@rulesNoConditions": {
+    "description": "Editor label of a rule without conditions, which applies to every copy."
+  },
+  "rulesAddCondition": "Add condition",
+  "@rulesAddCondition": {
+    "description": "Button that adds a condition."
+  },
+  "rulesRemoveCondition": "Remove condition",
+  "@rulesRemoveCondition": {
+    "description": "Button that removes a condition."
+  },
+  "rulesConditionType": "{type, select, content_text{Text} content_type{Content type} detected_kind{Detected kind} source_app{Source app} size{Size} privacy_marker{Privacy marker} capture_origin{Origin} other{Unknown condition}}",
+  "@rulesConditionType": {
+    "description": "Name of a condition attribute.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTextOperator": "{op, select, contains{contains} equals{is} starts_with{starts with} ends_with{ends with} matches_regex{matches the pattern} other{matches}}",
+  "@rulesTextOperator": {
+    "description": "Operator of a text condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTextOperatorNegated": "{op, select, contains{does not contain} equals{is not} starts_with{does not start with} ends_with{does not end with} matches_regex{does not match the pattern} other{does not match}}",
+  "@rulesTextOperatorNegated": {
+    "description": "Negated operator of a text condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesListOperator": "{negate, select, true{is not} other{is}}",
+  "@rulesListOperator": {
+    "description": "Operator of a choice condition: is or is not one of the chosen values.",
+    "placeholders": {
+      "negate": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeOperator": "{op, select, less_than{is less than} other{is more than}}",
+  "@rulesSizeOperator": {
+    "description": "Operator of a size condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeOperatorNegated": "{op, select, less_than{is not less than} other{is not more than}}",
+  "@rulesSizeOperatorNegated": {
+    "description": "Negated operator of a size condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeUnit": "{unit, select, lines{lines} bytes{bytes} other{characters}}",
+  "@rulesSizeUnit": {
+    "description": "Unit of a size condition.",
+    "placeholders": {
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeValue": "{count} {unit, select, lines{lines} bytes{bytes} other{characters}}",
+  "@rulesSizeValue": {
+    "description": "A size with its unit in a rule summary.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesContentKind": "{kind, select, plain_text{Plain text} rich_text{Rich text} image{Image} files{Files} color{Color} link{Link} other{Other}}",
+  "@rulesContentKind": {
+    "description": "A content type a condition can match.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesDetectedKind": "{kind, select, credential{Password or secret} url{Web address} email{Email address} phone{Phone number} code{Code} color{Color value} json{JSON} file_path{File path} number{Number} one_time_code{One-time code} payment_card{Payment card number} other{Other}}",
+  "@rulesDetectedKind": {
+    "description": "A kind of content the built-in detector finds.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesPrivacyMarker": "{marker, select, concealed{Concealed} transient{Temporary} auto_generated{Auto-generated} excluded_from_history{Excluded from history} other{Other}}",
+  "@rulesPrivacyMarker": {
+    "description": "A privacy marker the copying app or system sets.",
+    "placeholders": {
+      "marker": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesCaptureOrigin": "{origin, select, local_copy{Copied on this device} received{Received from another device} created_in_app{Created in CopyPaste} other{Other}}",
+  "@rulesCaptureOrigin": {
+    "description": "Where a copy came from.",
+    "placeholders": {
+      "origin": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesValuePlaceholder": "Text to look for",
+  "@rulesValuePlaceholder": {
+    "description": "Placeholder of the text value of a condition."
+  },
+  "rulesPatternPlaceholder": "Pattern, for example ^ticket-[0-9]+",
+  "@rulesPatternPlaceholder": {
+    "description": "Placeholder of a pattern (regular expression) value. Keep the example pattern unchanged."
+  },
+  "rulesPatternHint": "Patterns check the first 1 MiB of text. Look-ahead, look-behind and backreferences are not supported.",
+  "@rulesPatternHint": {
+    "description": "Hint under a pattern value."
+  },
+  "rulesCaseSensitive": "Match case",
+  "@rulesCaseSensitive": {
+    "description": "Switch that makes a text condition case-sensitive."
+  },
+  "rulesChooseValues": "Choose",
+  "@rulesChooseValues": {
+    "description": "Placeholder of a multi-choice field."
+  },
+  "rulesUnknownConditionNotice": "This condition comes from a newer version of CopyPaste.",
+  "@rulesUnknownConditionNotice": {
+    "description": "Shown on a condition from a newer version, which this version keeps unchanged."
+  },
+  "rulesSourceAppNotice": "Android knows the source app only for copies made with the CopyPaste keyboard. Other copies on Android never match this condition.",
+  "@rulesSourceAppNotice": {
+    "description": "Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard."
+  },
+  "rulesPrivacyMarkerNotice": "Each system reports different markers. A marker the system does not report never matches.",
+  "@rulesPrivacyMarkerNotice": {
+    "description": "Inline notice on a privacy marker condition."
+  },
+  "rulesThenTitle": "Then",
+  "@rulesThenTitle": {
+    "description": "Editor section with the rule actions."
+  },
+  "rulesNoActions": "Add at least one action.",
+  "@rulesNoActions": {
+    "description": "Shown when a rule has no actions yet."
+  },
+  "rulesAddAction": "Add action",
+  "@rulesAddAction": {
+    "description": "Button that adds an action."
+  },
+  "rulesRemoveAction": "Remove action",
+  "@rulesRemoveAction": {
+    "description": "Button that removes an action."
+  },
+  "rulesActionType": "{type, select, dont_save{Don't save} mark_secret{Mark as secret} hide_from_ai{Hide from AI tools} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}",
+  "@rulesActionType": {
+    "description": "Name of a rule action.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesActionBlock": "{reason, select, dont_save_alone{“Don't save” can't be combined with other actions.} present{This rule already has this action.} other{A rule can have up to 8 actions.}}",
+  "@rulesActionBlock": {
+    "description": "Why an action cannot be added to the rule.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesUnknownActionNotice": "This action comes from a newer version of CopyPaste.",
+  "@rulesUnknownActionNotice": {
+    "description": "Shown on an action from a newer version."
+  },
+  "rulesDontSaveWarning": "Matching copies are never stored, indexed or synced.",
+  "@rulesDontSaveWarning": {
+    "description": "Shown under the Don't save action."
+  },
+  "rulesMinutes": "{count, plural, =1{1 minute} other{{count} minutes}}",
+  "@rulesMinutes": {
+    "description": "A duration in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesHours": "{count, plural, =1{1 hour} other{{count} hours}}",
+  "@rulesHours": {
+    "description": "A duration in hours.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesDays": "{count, plural, =1{1 day} other{{count} days}}",
+  "@rulesDays": {
+    "description": "A duration in days.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesClearClipboardAtExpiry": "Also clear the clipboard at that time if it still holds this copy. On Android this happens the next time CopyPaste runs.",
+  "@rulesClearClipboardAtExpiry": {
+    "description": "Option of the Delete after action."
+  },
+  "rulesNoTags": "Create tags in History to use them here.",
+  "@rulesNoTags": {
+    "description": "Shown in the Add tags action when no tags exist."
+  },
+  "rulesNoTransforms": "No transforms are available.",
+  "@rulesNoTransforms": {
+    "description": "Shown in the Transform action when no transform is available."
+  },
+  "rulesReplaceClipboard": "Also replace the clipboard with the result",
+  "@rulesReplaceClipboard": {
+    "description": "Option of the Transform action."
+  },
+  "rulesOptionsTitle": "Options",
+  "@rulesOptionsTitle": {
+    "description": "Editor section with rule options."
+  },
+  "rulesEnabledSwitch": "Enabled",
+  "@rulesEnabledSwitch": {
+    "description": "Switch that turns a rule on."
+  },
+  "rulesStopProcessing": "Stop processing later rules when this one matches",
+  "@rulesStopProcessing": {
+    "description": "Switch that stops later rules when this rule matches."
+  },
+  "rulesRunsOnLabel": "Runs on",
+  "@rulesRunsOnLabel": {
+    "description": "Label of the device scope field."
+  },
+  "rulesAllDevices": "All devices",
+  "@rulesAllDevices": {
+    "description": "Device scope choice: all devices."
+  },
+  "rulesChosenDevices": "Chosen devices",
+  "@rulesChosenDevices": {
+    "description": "Device scope choice: chosen devices."
+  },
+  "rulesTestTitle": "Test",
+  "@rulesTestTitle": {
+    "description": "Editor section that tests the rule on a sample."
+  },
+  "rulesTestDescription": "Try the rule on sample text. The sample is never saved or synced.",
+  "@rulesTestDescription": {
+    "description": "Description of the rule test."
+  },
+  "rulesSamplePlaceholder": "Paste or type sample text",
+  "@rulesSamplePlaceholder": {
+    "description": "Placeholder of the test sample field."
+  },
+  "rulesTestFullSet": "Test together with all rules",
+  "@rulesTestFullSet": {
+    "description": "Switch that tests the rule together with every other rule."
+  },
+  "rulesRunTest": "Run test",
+  "@rulesRunTest": {
+    "description": "Button that runs the rule test."
+  },
+  "rulesTestFailed": "The test could not run.",
+  "@rulesTestFailed": {
+    "description": "Shown when the rule test fails."
+  },
+  "rulesPreviewHistory": "Preview against history",
+  "@rulesPreviewHistory": {
+    "description": "Button that previews the rule against recent history."
+  },
+  "rulesSaveBlock": "{reason, select, read_only{Update CopyPaste to edit this rule.} name_missing{Give the rule a name.} name_too_long{Use a name of up to 128 characters.} no_actions{Add at least one action.} other{Fix the marked fields.}}",
+  "@rulesSaveBlock": {
+    "description": "Why the rule cannot be saved yet.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSaveFailed": "The rule could not be saved.",
+  "@rulesSaveFailed": {
+    "description": "Alert title when saving a rule fails."
+  },
+  "rulesReadOnlyNotice": "A newer version of CopyPaste wrote this rule. Update CopyPaste to edit or run it.",
+  "@rulesReadOnlyNotice": {
+    "description": "Editor notice for a rule a newer version wrote."
+  },
+  "rulesProblem": "{code, select, invalid_definition{The rule could not be read.} unsupported_schema{This rule needs a newer version of CopyPaste.} unknown_condition_type{This condition needs a newer version of CopyPaste.} unknown_action_type{This action needs a newer version of CopyPaste.} too_many_conditions{A rule can have up to 20 conditions.} too_many_actions{A rule can have up to 8 actions.} too_many_rules{Only the first 200 rules run.} no_actions{Add at least one action.} conflicting_actions{“Don't save” can't be combined with other actions.} duplicate_action{Each action can be used only once.} empty_value{Enter a value.} empty_list{Choose at least one value.} too_many_values{Choose up to 64 values.} invalid_value{This value is not valid.} pattern_too_long{Patterns can be up to 2,000 characters.} unsupported_look_around{Look-ahead and look-behind are not supported. Use two conditions with “All conditions match” instead.} unsupported_backreference{Backreferences are not supported.} pattern_too_large{This pattern is too complex. Simplify its repetitions.} invalid_pattern{This pattern is not valid.} invalid_duration{Choose a duration from 1 minute to 90 days.} invalid_tags{Choose at least one tag.} invalid_transform{Choose a transform.} other{This rule has a problem.}}",
+  "@rulesProblem": {
+    "description": "A problem the runtime found in a rule, by error code.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceLine": "{label}: {result}",
+  "@rulesTraceLine": {
+    "description": "One line of a rule trace: a rule or condition and its result.",
+    "placeholders": {
+      "label": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceResult": "{result, select, matched{matched} not_matched{not matched} unknown{unknown} skipped{not run} other{error}}",
+  "@rulesTraceResult": {
+    "description": "Result of a rule or condition in a trace.",
+    "placeholders": {
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceCondition": "Condition {number}",
+  "@rulesTraceCondition": {
+    "description": "A condition in a trace, by its number.",
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesTraceNoRules": "No rule was evaluated.",
+  "@rulesTraceNoRules": {
+    "description": "Trace when no rule was evaluated."
+  },
+  "rulesTraceStopped": "Later rules did not run.",
+  "@rulesTraceStopped": {
+    "description": "Trace note under a rule that stopped later rules."
+  },
+  "rulesTraceUnknownReason": "Not known for this copy, so the condition does not match either way.",
+  "@rulesTraceUnknownReason": {
+    "description": "Trace note under a condition whose attribute is unknown for the copy."
+  },
+  "rulesTraceRuleError": "This rule could not run here, so matching copies are protected instead.",
+  "@rulesTraceRuleError": {
+    "description": "Trace note under a rule that could not run on this device."
+  },
+  "rulesTraceOutcomeTitle": "Result",
+  "@rulesTraceOutcomeTitle": {
+    "description": "Heading of the combined result in a trace."
+  },
+  "rulesTraceNoEffect": "No rule changes this copy.",
+  "@rulesTraceNoEffect": {
+    "description": "Trace result when no rule changes the copy."
+  },
+  "rulesTraceSkipped": "Not saved",
+  "@rulesTraceSkipped": {
+    "description": "Trace result: the copy is not saved."
+  },
+  "rulesTraceSecret": "Saved as secret",
+  "@rulesTraceSecret": {
+    "description": "Trace result: the copy is saved as secret."
+  },
+  "rulesTraceHidden": "Hidden from AI tools",
+  "@rulesTraceHidden": {
+    "description": "Trace result: the copy is hidden from AI tools."
+  },
+  "rulesTraceExpires": "Deleted after {duration}",
+  "@rulesTraceExpires": {
+    "description": "Trace result: the copy is deleted after a duration.",
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceTags": "Tagged {tags}",
+  "@rulesTraceTags": {
+    "description": "Trace result: the copy gets tags.",
+    "placeholders": {
+      "tags": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceTransforms": "Transformed with {names}",
+  "@rulesTraceTransforms": {
+    "description": "Trace result: the copy is transformed.",
+    "placeholders": {
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceOutput": "Transformed text",
+  "@rulesTraceOutput": {
+    "description": "Heading of the sample text after the rules' transforms."
+  },
+  "rulesPreviewTitle": "Apply to existing items",
+  "@rulesPreviewTitle": {
+    "description": "Title of the dialog that previews and applies a rule to existing items."
+  },
+  "rulesPreviewRunning": "Checking the latest {count} clips…",
+  "@rulesPreviewRunning": {
+    "description": "Shown while the preview checks recent clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewNone": "No recent clip matches this rule.",
+  "@rulesPreviewNone": {
+    "description": "Preview result when no recent clip matches."
+  },
+  "rulesPreviewMatched": "{count, plural, =1{1 clip matches} other{{count} clips match}}",
+  "@rulesPreviewMatched": {
+    "description": "Number of recent clips the rule matches.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewDeleted": "{count, plural, =1{1 would be deleted} other{{count} would be deleted}}",
+  "@rulesPreviewDeleted": {
+    "description": "Preview effect: clips that applying would delete.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewSecret": "{count, plural, =1{1 would be marked secret} other{{count} would be marked secret}}",
+  "@rulesPreviewSecret": {
+    "description": "Preview effect: clips that applying would mark secret.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewHidden": "{count, plural, =1{1 would be hidden from AI tools} other{{count} would be hidden from AI tools}}",
+  "@rulesPreviewHidden": {
+    "description": "Preview effect: clips that applying would hide from AI tools.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewExpiring": "{count, plural, =1{1 would get a deletion time} other{{count} would get a deletion time}}",
+  "@rulesPreviewExpiring": {
+    "description": "Preview effect: clips that applying would give a deletion time.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewTagged": "{count, plural, =1{1 would be tagged} other{{count} would be tagged}}",
+  "@rulesPreviewTagged": {
+    "description": "Preview effect: clips that applying would tag.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewTruncated": "Only the latest {count} clips were checked.",
+  "@rulesPreviewTruncated": {
+    "description": "Preview note: older clips past the limit were not checked.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewMore": "and {count} more",
+  "@rulesPreviewMore": {
+    "description": "Preview list note: more matching clips than the list shows.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewNote": "Nothing changes until you apply. Changes sync to your other devices as ordinary edits.",
+  "@rulesPreviewNote": {
+    "description": "Preview note about when changes happen."
+  },
+  "rulesSecretItem": "Secret item",
+  "@rulesSecretItem": {
+    "description": "A secret clip in the preview list; its content is never shown."
+  },
+  "rulesSecretItemFrom": "Secret item from {app}",
+  "@rulesSecretItemFrom": {
+    "description": "A secret clip from an app in the preview list.",
+    "placeholders": {
+      "app": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesPreviewCancelled": "The preview was stopped. Nothing changed.",
+  "@rulesPreviewCancelled": {
+    "description": "Shown after a preview was stopped."
+  },
+  "rulesPreviewFailed": "The preview could not run.",
+  "@rulesPreviewFailed": {
+    "description": "Shown when the preview cannot run."
+  },
+  "rulesApplyDeleteTitle": "{count, plural, =1{Delete 1 clip?} other{Delete {count} clips?}}",
+  "@rulesApplyDeleteTitle": {
+    "description": "Confirmation title before applying a rule that deletes clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyDeleteMessage": "Applying “Don't save” to existing items deletes the matching clips from History on all your devices. This can't be undone.",
+  "@rulesApplyDeleteMessage": {
+    "description": "Explains that applying a Don't save rule deletes matching clips everywhere."
+  },
+  "rulesApplyDeleteConfirm": "Delete and apply",
+  "@rulesApplyDeleteConfirm": {
+    "description": "Confirmation button that deletes clips and applies the rule."
+  },
+  "rulesApplyProgress": "Applying: {done} of {total}",
+  "@rulesApplyProgress": {
+    "description": "Progress while a rule is applied to existing items.",
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyChanged": "{count, plural, =1{1 clip changed} other{{count} clips changed}}",
+  "@rulesApplyChanged": {
+    "description": "Apply report: clips changed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyDeleted": "{count, plural, =1{1 clip deleted} other{{count} clips deleted}}",
+  "@rulesApplyDeleted": {
+    "description": "Apply report: clips deleted.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyFailed": "{count, plural, =1{1 clip could not be changed} other{{count} clips could not be changed}}",
+  "@rulesApplyFailed": {
+    "description": "Apply report: clips that could not be changed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyCancelled": "Stopped. Clips changed before you stopped stay changed.",
+  "@rulesApplyCancelled": {
+    "description": "Shown after applying was stopped."
   }
 }

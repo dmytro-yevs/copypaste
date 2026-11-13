@@ -9344,6 +9344,912 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Couldn\'t use the snippet'**
   String get snippetsUseFailed;
+
+  /// Error title when the content rules cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Content rules could not be loaded.'**
+  String get rulesLoadFailed;
+
+  /// Button and editor title that creates a content rule.
+  ///
+  /// In en, this message translates to:
+  /// **'New rule'**
+  String get rulesNewRule;
+
+  /// Title of the rule editor for an existing rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit rule'**
+  String get rulesEditRule;
+
+  /// Shown for a rule without a name.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled rule'**
+  String get rulesUntitled;
+
+  /// Heading of the device Privacy settings that guard capture before any content rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy defaults'**
+  String get rulesPrivacyDefaultsTitle;
+
+  /// Description of the Privacy defaults row. The built-in rules are listed below it.
+  ///
+  /// In en, this message translates to:
+  /// **'These Privacy settings guard every copy on this device before any rule runs. The built-in rules below sync to your devices.'**
+  String get rulesPrivacyDefaultsDescription;
+
+  /// Search keywords for the Privacy defaults row of Content rules.
+  ///
+  /// In en, this message translates to:
+  /// **'privacy concealed temporary excluded apps built-in credentials passwords payment cards'**
+  String get rulesPrivacyDefaultsKeywords;
+
+  /// One line of the Privacy defaults status: a Privacy setting name and its current value.
+  ///
+  /// In en, this message translates to:
+  /// **'{setting}: {state}'**
+  String rulesPrivacyState(String setting, String state);
+
+  /// Number of excluded applications in the Privacy defaults status.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{none} =1{1 app} other{{count} apps}}'**
+  String rulesExcludedApps(int count);
+
+  /// Button that opens the Privacy settings section.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Privacy'**
+  String get rulesOpenPrivacy;
+
+  /// Heading of the list of rules the user created.
+  ///
+  /// In en, this message translates to:
+  /// **'My rules'**
+  String get rulesMyRulesTitle;
+
+  /// Description of the user rules list.
+  ///
+  /// In en, this message translates to:
+  /// **'They run from top to bottom on new copies, after the built-in rules, and sync to your devices.'**
+  String get rulesMyRulesDescription;
+
+  /// Search keywords for the user rules list.
+  ///
+  /// In en, this message translates to:
+  /// **'content rules automation tag skip secret expire delete pattern regex'**
+  String get rulesMyRulesKeywords;
+
+  /// Empty state title when the user has no rules.
+  ///
+  /// In en, this message translates to:
+  /// **'No rules yet'**
+  String get rulesEmptyTitle;
+
+  /// Empty state message when the user has no rules.
+  ///
+  /// In en, this message translates to:
+  /// **'A rule can tag, protect, expire or skip new copies automatically.'**
+  String get rulesEmptyMessage;
+
+  /// Heading of the rules deleted within 30 days.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently deleted'**
+  String get rulesDeletedTitle;
+
+  /// Description of the recently deleted rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted rules can be restored for 30 days.'**
+  String get rulesDeletedDescription;
+
+  /// When a recently deleted rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {time}'**
+  String rulesDeletedAt(String time);
+
+  /// Button that restores a deleted rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get rulesRestore;
+
+  /// Toast title after a rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Rule deleted'**
+  String get rulesDeletedToast;
+
+  /// Toast message after a rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'You can restore it for 30 days.'**
+  String get rulesDeletedToastMessage;
+
+  /// Toast action that undoes deleting a rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get rulesUndo;
+
+  /// Notice that a concurrent edit of a rule from another device lost and can be restored.
+  ///
+  /// In en, this message translates to:
+  /// **'A concurrent edit of “{rule}” from {device} was replaced by a newer one.'**
+  String rulesConflictMessage(String rule, String device);
+
+  /// Used in rulesConflictMessage when the device name is unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'another device'**
+  String get rulesAnotherDevice;
+
+  /// Button that restores the version of a rule that lost a concurrent edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Use that version'**
+  String get rulesRestoreConflict;
+
+  /// Title of the list of copies content rules did not save.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently skipped'**
+  String get rulesSkipLogTitle;
+
+  /// Description of the skip log row.
+  ///
+  /// In en, this message translates to:
+  /// **'Copies your rules did not save on this device since CopyPaste started. Only the time, app and rule are kept.'**
+  String get rulesSkipLogDescription;
+
+  /// Search keywords for the skip log row.
+  ///
+  /// In en, this message translates to:
+  /// **'skipped ignored not saved log'**
+  String get rulesSkipLogKeywords;
+
+  /// Button that shows the skip log.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get rulesSkipLogShow;
+
+  /// Skip log text when no copy was skipped.
+  ///
+  /// In en, this message translates to:
+  /// **'No copies were skipped.'**
+  String get rulesSkipLogEmpty;
+
+  /// Skip log entry when the source app is not known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown app'**
+  String get rulesUnknownApp;
+
+  /// Condition part of a rule summary when the rule has no conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'any copy'**
+  String get rulesMatchesEverything;
+
+  /// One-line rule summary: its conditions, an arrow, its actions.
+  ///
+  /// In en, this message translates to:
+  /// **'When {conditions} → {actions}'**
+  String rulesSummary(String conditions, String actions);
+
+  /// A rule summary for a rule that stops later rules.
+  ///
+  /// In en, this message translates to:
+  /// **'{summary}, then stop'**
+  String rulesSummaryStop(String summary);
+
+  /// Separator between conditions in a rule summary, by match mode (any or all). Keep the spaces.
+  ///
+  /// In en, this message translates to:
+  /// **'{mode, select, any{ or } other{ and }}'**
+  String rulesConditionJoin(String mode);
+
+  /// One condition in a rule summary, such as "Source app is Terminal".
+  ///
+  /// In en, this message translates to:
+  /// **'{attribute} {operator} {value}'**
+  String rulesConditionSummary(String attribute, String operator, String value);
+
+  /// One action with its value in a rule summary, such as "Delete after 15 minutes".
+  ///
+  /// In en, this message translates to:
+  /// **'{action} {value}'**
+  String rulesActionSummary(String action, String value);
+
+  /// The devices a rule runs on.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs on {devices}'**
+  String rulesRunsOn(String devices);
+
+  /// A rule runs on every device.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs on all devices'**
+  String get rulesRunsOnAll;
+
+  /// How often a rule matched on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Matched once here} other{Matched {count} times here}}'**
+  String rulesMatchCount(int count);
+
+  /// When a rule last matched on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'last {time}'**
+  String rulesLastMatched(String time);
+
+  /// Badge on a rule another device added or changed in the last 7 days.
+  ///
+  /// In en, this message translates to:
+  /// **'New from {device}'**
+  String rulesNewFromDevice(String device);
+
+  /// Badge on a rule written by a newer CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs update'**
+  String get rulesNeedsUpdateBadge;
+
+  /// Shown for a rule this version cannot run.
+  ///
+  /// In en, this message translates to:
+  /// **'Update CopyPaste to run this rule.'**
+  String get rulesUpdateRequired;
+
+  /// Badge on a rule that cannot run on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get rulesErrorBadge;
+
+  /// Explains the error badge. problem is the reason, a full sentence.
+  ///
+  /// In en, this message translates to:
+  /// **'{problem} Until it is fixed, copies this rule could match are saved as secret and hidden from AI tools.'**
+  String rulesErrorHint(String problem);
+
+  /// Drag handle of a rule row.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag to reorder'**
+  String get rulesReorder;
+
+  /// Menu button of a rule row.
+  ///
+  /// In en, this message translates to:
+  /// **'More actions'**
+  String get rulesMoreActions;
+
+  /// Menu item that opens the rule editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get rulesEdit;
+
+  /// Menu item and screen reader action that moves a rule in the list.
+  ///
+  /// In en, this message translates to:
+  /// **'{direction, select, up{Move up} down{Move down} top{Move to top} other{Move to bottom}}'**
+  String rulesMove(String direction);
+
+  /// Menu item that previews a rule against history and applies it to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to existing items…'**
+  String get rulesApplyToItems;
+
+  /// Menu item that resets a built-in rule to its shipped definition.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to default'**
+  String get rulesResetBuiltin;
+
+  /// Label of the rule name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get rulesNameLabel;
+
+  /// Placeholder of the rule name field.
+  ///
+  /// In en, this message translates to:
+  /// **'For example, Work links'**
+  String get rulesNamePlaceholder;
+
+  /// Editor section with the rule conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'When'**
+  String get rulesWhenTitle;
+
+  /// Choice of how conditions combine.
+  ///
+  /// In en, this message translates to:
+  /// **'{mode, select, any{Any condition matches} other{All conditions match}}'**
+  String rulesMatchMode(String mode);
+
+  /// Editor label of a rule without conditions, which applies to every copy.
+  ///
+  /// In en, this message translates to:
+  /// **'No conditions: this rule applies to every copy.'**
+  String get rulesNoConditions;
+
+  /// Button that adds a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Add condition'**
+  String get rulesAddCondition;
+
+  /// Button that removes a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove condition'**
+  String get rulesRemoveCondition;
+
+  /// Name of a condition attribute.
+  ///
+  /// In en, this message translates to:
+  /// **'{type, select, content_text{Text} content_type{Content type} detected_kind{Detected kind} source_app{Source app} size{Size} privacy_marker{Privacy marker} capture_origin{Origin} other{Unknown condition}}'**
+  String rulesConditionType(String type);
+
+  /// Operator of a text condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, contains{contains} equals{is} starts_with{starts with} ends_with{ends with} matches_regex{matches the pattern} other{matches}}'**
+  String rulesTextOperator(String op);
+
+  /// Negated operator of a text condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, contains{does not contain} equals{is not} starts_with{does not start with} ends_with{does not end with} matches_regex{does not match the pattern} other{does not match}}'**
+  String rulesTextOperatorNegated(String op);
+
+  /// Operator of a choice condition: is or is not one of the chosen values.
+  ///
+  /// In en, this message translates to:
+  /// **'{negate, select, true{is not} other{is}}'**
+  String rulesListOperator(String negate);
+
+  /// Operator of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, less_than{is less than} other{is more than}}'**
+  String rulesSizeOperator(String op);
+
+  /// Negated operator of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, less_than{is not less than} other{is not more than}}'**
+  String rulesSizeOperatorNegated(String op);
+
+  /// Unit of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{unit, select, lines{lines} bytes{bytes} other{characters}}'**
+  String rulesSizeUnit(String unit);
+
+  /// A size with its unit in a rule summary.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} {unit, select, lines{lines} bytes{bytes} other{characters}}'**
+  String rulesSizeValue(int count, String unit);
+
+  /// A content type a condition can match.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, plain_text{Plain text} rich_text{Rich text} image{Image} files{Files} color{Color} link{Link} other{Other}}'**
+  String rulesContentKind(String kind);
+
+  /// A kind of content the built-in detector finds.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, credential{Password or secret} url{Web address} email{Email address} phone{Phone number} code{Code} color{Color value} json{JSON} file_path{File path} number{Number} one_time_code{One-time code} payment_card{Payment card number} other{Other}}'**
+  String rulesDetectedKind(String kind);
+
+  /// A privacy marker the copying app or system sets.
+  ///
+  /// In en, this message translates to:
+  /// **'{marker, select, concealed{Concealed} transient{Temporary} auto_generated{Auto-generated} excluded_from_history{Excluded from history} other{Other}}'**
+  String rulesPrivacyMarker(String marker);
+
+  /// Where a copy came from.
+  ///
+  /// In en, this message translates to:
+  /// **'{origin, select, local_copy{Copied on this device} received{Received from another device} created_in_app{Created in CopyPaste} other{Other}}'**
+  String rulesCaptureOrigin(String origin);
+
+  /// Placeholder of the text value of a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Text to look for'**
+  String get rulesValuePlaceholder;
+
+  /// Placeholder of a pattern (regular expression) value. Keep the example pattern unchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Pattern, for example ^ticket-[0-9]+'**
+  String get rulesPatternPlaceholder;
+
+  /// Hint under a pattern value.
+  ///
+  /// In en, this message translates to:
+  /// **'Patterns check the first 1 MiB of text. Look-ahead, look-behind and backreferences are not supported.'**
+  String get rulesPatternHint;
+
+  /// Switch that makes a text condition case-sensitive.
+  ///
+  /// In en, this message translates to:
+  /// **'Match case'**
+  String get rulesCaseSensitive;
+
+  /// Placeholder of a multi-choice field.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose'**
+  String get rulesChooseValues;
+
+  /// Shown on a condition from a newer version, which this version keeps unchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'This condition comes from a newer version of CopyPaste.'**
+  String get rulesUnknownConditionNotice;
+
+  /// Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Android knows the source app only for copies made with the CopyPaste keyboard. Other copies on Android never match this condition.'**
+  String get rulesSourceAppNotice;
+
+  /// Inline notice on a privacy marker condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Each system reports different markers. A marker the system does not report never matches.'**
+  String get rulesPrivacyMarkerNotice;
+
+  /// Editor section with the rule actions.
+  ///
+  /// In en, this message translates to:
+  /// **'Then'**
+  String get rulesThenTitle;
+
+  /// Shown when a rule has no actions yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one action.'**
+  String get rulesNoActions;
+
+  /// Button that adds an action.
+  ///
+  /// In en, this message translates to:
+  /// **'Add action'**
+  String get rulesAddAction;
+
+  /// Button that removes an action.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove action'**
+  String get rulesRemoveAction;
+
+  /// Name of a rule action.
+  ///
+  /// In en, this message translates to:
+  /// **'{type, select, dont_save{Don\'t save} mark_secret{Mark as secret} hide_from_ai{Hide from AI tools} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}'**
+  String rulesActionType(String type);
+
+  /// Why an action cannot be added to the rule.
+  ///
+  /// In en, this message translates to:
+  /// **'{reason, select, dont_save_alone{“Don\'t save” can\'t be combined with other actions.} present{This rule already has this action.} other{A rule can have up to 8 actions.}}'**
+  String rulesActionBlock(String reason);
+
+  /// Shown on an action from a newer version.
+  ///
+  /// In en, this message translates to:
+  /// **'This action comes from a newer version of CopyPaste.'**
+  String get rulesUnknownActionNotice;
+
+  /// Shown under the Don't save action.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching copies are never stored, indexed or synced.'**
+  String get rulesDontSaveWarning;
+
+  /// A duration in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 minute} other{{count} minutes}}'**
+  String rulesMinutes(int count);
+
+  /// A duration in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 hour} other{{count} hours}}'**
+  String rulesHours(int count);
+
+  /// A duration in days.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 day} other{{count} days}}'**
+  String rulesDays(int count);
+
+  /// Option of the Delete after action.
+  ///
+  /// In en, this message translates to:
+  /// **'Also clear the clipboard at that time if it still holds this copy. On Android this happens the next time CopyPaste runs.'**
+  String get rulesClearClipboardAtExpiry;
+
+  /// Shown in the Add tags action when no tags exist.
+  ///
+  /// In en, this message translates to:
+  /// **'Create tags in History to use them here.'**
+  String get rulesNoTags;
+
+  /// Shown in the Transform action when no transform is available.
+  ///
+  /// In en, this message translates to:
+  /// **'No transforms are available.'**
+  String get rulesNoTransforms;
+
+  /// Option of the Transform action.
+  ///
+  /// In en, this message translates to:
+  /// **'Also replace the clipboard with the result'**
+  String get rulesReplaceClipboard;
+
+  /// Editor section with rule options.
+  ///
+  /// In en, this message translates to:
+  /// **'Options'**
+  String get rulesOptionsTitle;
+
+  /// Switch that turns a rule on.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get rulesEnabledSwitch;
+
+  /// Switch that stops later rules when this rule matches.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop processing later rules when this one matches'**
+  String get rulesStopProcessing;
+
+  /// Label of the device scope field.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs on'**
+  String get rulesRunsOnLabel;
+
+  /// Device scope choice: all devices.
+  ///
+  /// In en, this message translates to:
+  /// **'All devices'**
+  String get rulesAllDevices;
+
+  /// Device scope choice: chosen devices.
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen devices'**
+  String get rulesChosenDevices;
+
+  /// Editor section that tests the rule on a sample.
+  ///
+  /// In en, this message translates to:
+  /// **'Test'**
+  String get rulesTestTitle;
+
+  /// Description of the rule test.
+  ///
+  /// In en, this message translates to:
+  /// **'Try the rule on sample text. The sample is never saved or synced.'**
+  String get rulesTestDescription;
+
+  /// Placeholder of the test sample field.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste or type sample text'**
+  String get rulesSamplePlaceholder;
+
+  /// Switch that tests the rule together with every other rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Test together with all rules'**
+  String get rulesTestFullSet;
+
+  /// Button that runs the rule test.
+  ///
+  /// In en, this message translates to:
+  /// **'Run test'**
+  String get rulesRunTest;
+
+  /// Shown when the rule test fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The test could not run.'**
+  String get rulesTestFailed;
+
+  /// Button that previews the rule against recent history.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview against history'**
+  String get rulesPreviewHistory;
+
+  /// Why the rule cannot be saved yet.
+  ///
+  /// In en, this message translates to:
+  /// **'{reason, select, read_only{Update CopyPaste to edit this rule.} name_missing{Give the rule a name.} name_too_long{Use a name of up to 128 characters.} no_actions{Add at least one action.} other{Fix the marked fields.}}'**
+  String rulesSaveBlock(String reason);
+
+  /// Alert title when saving a rule fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The rule could not be saved.'**
+  String get rulesSaveFailed;
+
+  /// Editor notice for a rule a newer version wrote.
+  ///
+  /// In en, this message translates to:
+  /// **'A newer version of CopyPaste wrote this rule. Update CopyPaste to edit or run it.'**
+  String get rulesReadOnlyNotice;
+
+  /// A problem the runtime found in a rule, by error code.
+  ///
+  /// In en, this message translates to:
+  /// **'{code, select, invalid_definition{The rule could not be read.} unsupported_schema{This rule needs a newer version of CopyPaste.} unknown_condition_type{This condition needs a newer version of CopyPaste.} unknown_action_type{This action needs a newer version of CopyPaste.} too_many_conditions{A rule can have up to 20 conditions.} too_many_actions{A rule can have up to 8 actions.} too_many_rules{Only the first 200 rules run.} no_actions{Add at least one action.} conflicting_actions{“Don\'t save” can\'t be combined with other actions.} duplicate_action{Each action can be used only once.} empty_value{Enter a value.} empty_list{Choose at least one value.} too_many_values{Choose up to 64 values.} invalid_value{This value is not valid.} pattern_too_long{Patterns can be up to 2,000 characters.} unsupported_look_around{Look-ahead and look-behind are not supported. Use two conditions with “All conditions match” instead.} unsupported_backreference{Backreferences are not supported.} pattern_too_large{This pattern is too complex. Simplify its repetitions.} invalid_pattern{This pattern is not valid.} invalid_duration{Choose a duration from 1 minute to 90 days.} invalid_tags{Choose at least one tag.} invalid_transform{Choose a transform.} other{This rule has a problem.}}'**
+  String rulesProblem(String code);
+
+  /// One line of a rule trace: a rule or condition and its result.
+  ///
+  /// In en, this message translates to:
+  /// **'{label}: {result}'**
+  String rulesTraceLine(String label, String result);
+
+  /// Result of a rule or condition in a trace.
+  ///
+  /// In en, this message translates to:
+  /// **'{result, select, matched{matched} not_matched{not matched} unknown{unknown} skipped{not run} other{error}}'**
+  String rulesTraceResult(String result);
+
+  /// A condition in a trace, by its number.
+  ///
+  /// In en, this message translates to:
+  /// **'Condition {number}'**
+  String rulesTraceCondition(int number);
+
+  /// Trace when no rule was evaluated.
+  ///
+  /// In en, this message translates to:
+  /// **'No rule was evaluated.'**
+  String get rulesTraceNoRules;
+
+  /// Trace note under a rule that stopped later rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Later rules did not run.'**
+  String get rulesTraceStopped;
+
+  /// Trace note under a condition whose attribute is unknown for the copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Not known for this copy, so the condition does not match either way.'**
+  String get rulesTraceUnknownReason;
+
+  /// Trace note under a rule that could not run on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'This rule could not run here, so matching copies are protected instead.'**
+  String get rulesTraceRuleError;
+
+  /// Heading of the combined result in a trace.
+  ///
+  /// In en, this message translates to:
+  /// **'Result'**
+  String get rulesTraceOutcomeTitle;
+
+  /// Trace result when no rule changes the copy.
+  ///
+  /// In en, this message translates to:
+  /// **'No rule changes this copy.'**
+  String get rulesTraceNoEffect;
+
+  /// Trace result: the copy is not saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Not saved'**
+  String get rulesTraceSkipped;
+
+  /// Trace result: the copy is saved as secret.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved as secret'**
+  String get rulesTraceSecret;
+
+  /// Trace result: the copy is hidden from AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden from AI tools'**
+  String get rulesTraceHidden;
+
+  /// Trace result: the copy is deleted after a duration.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted after {duration}'**
+  String rulesTraceExpires(String duration);
+
+  /// Trace result: the copy gets tags.
+  ///
+  /// In en, this message translates to:
+  /// **'Tagged {tags}'**
+  String rulesTraceTags(String tags);
+
+  /// Trace result: the copy is transformed.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed with {names}'**
+  String rulesTraceTransforms(String names);
+
+  /// Heading of the sample text after the rules' transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed text'**
+  String get rulesTraceOutput;
+
+  /// Title of the dialog that previews and applies a rule to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to existing items'**
+  String get rulesPreviewTitle;
+
+  /// Shown while the preview checks recent clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking the latest {count} clips…'**
+  String rulesPreviewRunning(int count);
+
+  /// Preview result when no recent clip matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent clip matches this rule.'**
+  String get rulesPreviewNone;
+
+  /// Number of recent clips the rule matches.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip matches} other{{count} clips match}}'**
+  String rulesPreviewMatched(int count);
+
+  /// Preview effect: clips that applying would delete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be deleted} other{{count} would be deleted}}'**
+  String rulesPreviewDeleted(int count);
+
+  /// Preview effect: clips that applying would mark secret.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be marked secret} other{{count} would be marked secret}}'**
+  String rulesPreviewSecret(int count);
+
+  /// Preview effect: clips that applying would hide from AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be hidden from AI tools} other{{count} would be hidden from AI tools}}'**
+  String rulesPreviewHidden(int count);
+
+  /// Preview effect: clips that applying would give a deletion time.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would get a deletion time} other{{count} would get a deletion time}}'**
+  String rulesPreviewExpiring(int count);
+
+  /// Preview effect: clips that applying would tag.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be tagged} other{{count} would be tagged}}'**
+  String rulesPreviewTagged(int count);
+
+  /// Preview note: older clips past the limit were not checked.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the latest {count} clips were checked.'**
+  String rulesPreviewTruncated(int count);
+
+  /// Preview list note: more matching clips than the list shows.
+  ///
+  /// In en, this message translates to:
+  /// **'and {count} more'**
+  String rulesPreviewMore(int count);
+
+  /// Preview note about when changes happen.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changes until you apply. Changes sync to your other devices as ordinary edits.'**
+  String get rulesPreviewNote;
+
+  /// A secret clip in the preview list; its content is never shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret item'**
+  String get rulesSecretItem;
+
+  /// A secret clip from an app in the preview list.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret item from {app}'**
+  String rulesSecretItemFrom(String app);
+
+  /// Shown after a preview was stopped.
+  ///
+  /// In en, this message translates to:
+  /// **'The preview was stopped. Nothing changed.'**
+  String get rulesPreviewCancelled;
+
+  /// Shown when the preview cannot run.
+  ///
+  /// In en, this message translates to:
+  /// **'The preview could not run.'**
+  String get rulesPreviewFailed;
+
+  /// Confirmation title before applying a rule that deletes clips.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Delete 1 clip?} other{Delete {count} clips?}}'**
+  String rulesApplyDeleteTitle(int count);
+
+  /// Explains that applying a Don't save rule deletes matching clips everywhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying “Don\'t save” to existing items deletes the matching clips from History on all your devices. This can\'t be undone.'**
+  String get rulesApplyDeleteMessage;
+
+  /// Confirmation button that deletes clips and applies the rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete and apply'**
+  String get rulesApplyDeleteConfirm;
+
+  /// Progress while a rule is applied to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying: {done} of {total}'**
+  String rulesApplyProgress(int done, int total);
+
+  /// Apply report: clips changed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip changed} other{{count} clips changed}}'**
+  String rulesApplyChanged(int count);
+
+  /// Apply report: clips deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip deleted} other{{count} clips deleted}}'**
+  String rulesApplyDeleted(int count);
+
+  /// Apply report: clips that could not be changed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip could not be changed} other{{count} clips could not be changed}}'**
+  String rulesApplyFailed(int count);
+
+  /// Shown after applying was stopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped. Clips changed before you stopped stay changed.'**
+  String get rulesApplyCancelled;
 }
 
 class _AppLocalizationsDelegate

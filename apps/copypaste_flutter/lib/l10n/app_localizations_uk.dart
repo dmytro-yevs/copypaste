@@ -5857,4 +5857,877 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => 'Не вдалося використати фрагмент';
+
+  @override
+  String get rulesLoadFailed => 'Не вдалося завантажити правила вмісту.';
+
+  @override
+  String get rulesNewRule => 'Нове правило';
+
+  @override
+  String get rulesEditRule => 'Редагувати правило';
+
+  @override
+  String get rulesUntitled => 'Правило без назви';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Типові налаштування приватності';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Ці налаштування приватності захищають кожну копію на цьому пристрої ще до запуску будь-якого правила. Вбудовані правила нижче синхронізуються між вашими пристроями.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'приватність прихований тимчасовий виключені програми вбудовані облікові дані паролі картки';
+
+  @override
+  String rulesPrivacyState(String setting, String state) {
+    return '$setting: $state';
+  }
+
+  @override
+  String rulesExcludedApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count програми',
+      many: '$count програм',
+      few: '$count програми',
+      one: '$count програма',
+      zero: 'немає',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesOpenPrivacy => 'Відкрити Приватність';
+
+  @override
+  String get rulesMyRulesTitle => 'Мої правила';
+
+  @override
+  String get rulesMyRulesDescription =>
+      'Вони виконуються згори донизу для нових копій після вбудованих правил і синхронізуються між вашими пристроями.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'правила автоматизація тег пропустити секрет термін видалити шаблон регулярний вираз';
+
+  @override
+  String get rulesEmptyTitle => 'Ще немає правил';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Правило може автоматично додавати теги, захищати, обмежувати строк або пропускати нові копії.';
+
+  @override
+  String get rulesDeletedTitle => 'Нещодавно видалені';
+
+  @override
+  String get rulesDeletedDescription =>
+      'Видалені правила можна відновити протягом 30 днів.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Видалено: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Відновити';
+
+  @override
+  String get rulesDeletedToast => 'Правило видалено';
+
+  @override
+  String get rulesDeletedToastMessage =>
+      'Його можна відновити протягом 30 днів.';
+
+  @override
+  String get rulesUndo => 'Скасувати';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return 'Одночасну зміну правила «$rule» з пристрою $device замінено новішою.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'іншого пристрою';
+
+  @override
+  String get rulesRestoreConflict => 'Використати ту версію';
+
+  @override
+  String get rulesSkipLogTitle => 'Нещодавно пропущені';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Копії, які ваші правила не зберегли на цьому пристрої після запуску CopyPaste. Зберігаються лише час, програма та правило.';
+
+  @override
+  String get rulesSkipLogKeywords =>
+      'пропущені проігноровані не збережені журнал';
+
+  @override
+  String get rulesSkipLogShow => 'Показати';
+
+  @override
+  String get rulesSkipLogEmpty => 'Жодну копію не пропущено.';
+
+  @override
+  String get rulesUnknownApp => 'Невідома програма';
+
+  @override
+  String get rulesMatchesEverything => 'будь-яка копія';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return 'Якщо $conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, далі зупинити';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' або ',
+      'other': ' і ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Працює на: $devices';
+  }
+
+  @override
+  String get rulesRunsOnAll => 'Працює на всіх пристроях';
+
+  @override
+  String rulesMatchCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Тут спрацювало $count разу',
+      many: 'Тут спрацювало $count разів',
+      few: 'Тут спрацювало $count рази',
+      one: 'Тут спрацювало $count раз',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesLastMatched(String time) {
+    return 'востаннє $time';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return 'Нове з $device';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Потрібне оновлення';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Оновіть CopyPaste, щоб виконувати це правило.';
+
+  @override
+  String get rulesErrorBadge => 'Помилка';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Доки це не виправлено, копії, яких може стосуватися це правило, зберігаються як секретні та приховуються від інструментів ШІ.';
+  }
+
+  @override
+  String get rulesReorder => 'Перетягніть, щоб змінити порядок';
+
+  @override
+  String get rulesMoreActions => 'Інші дії';
+
+  @override
+  String get rulesEdit => 'Редагувати';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Перемістити вгору',
+      'down': 'Перемістити вниз',
+      'top': 'На початок',
+      'other': 'У кінець',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Застосувати до наявних записів…';
+
+  @override
+  String get rulesResetBuiltin => 'Скинути до типових';
+
+  @override
+  String get rulesNameLabel => 'Назва';
+
+  @override
+  String get rulesNamePlaceholder => 'Наприклад, Робочі посилання';
+
+  @override
+  String get rulesWhenTitle => 'Коли';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Виконується будь-яка умова',
+      'other': 'Виконуються всі умови',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions =>
+      'Без умов: це правило застосовується до кожної копії.';
+
+  @override
+  String get rulesAddCondition => 'Додати умову';
+
+  @override
+  String get rulesRemoveCondition => 'Видалити умову';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Текст',
+      'content_type': 'Тип вмісту',
+      'detected_kind': 'Виявлений тип',
+      'source_app': 'Програма-джерело',
+      'size': 'Розмір',
+      'privacy_marker': 'Позначка приватності',
+      'capture_origin': 'Походження',
+      'other': 'Невідома умова',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'містить',
+      'equals': 'дорівнює',
+      'starts_with': 'починається з',
+      'ends_with': 'закінчується на',
+      'matches_regex': 'відповідає шаблону',
+      'other': 'відповідає',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'не містить',
+      'equals': 'не дорівнює',
+      'starts_with': 'не починається з',
+      'ends_with': 'не закінчується на',
+      'matches_regex': 'не відповідає шаблону',
+      'other': 'не відповідає',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'не є',
+      'other': 'є',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'менший за',
+      'other': 'більший за',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'не менший за',
+      'other': 'не більший за',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'рядки',
+      'bytes': 'байти',
+      'other': 'символи',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'рядків',
+      'bytes': 'байтів',
+      'other': 'символів',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Звичайний текст',
+      'rich_text': 'Форматований текст',
+      'image': 'Зображення',
+      'files': 'Файли',
+      'color': 'Колір',
+      'link': 'Посилання',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Пароль або секрет',
+      'url': 'Вебадреса',
+      'email': 'Адреса електронної пошти',
+      'phone': 'Номер телефону',
+      'code': 'Код',
+      'color': 'Значення кольору',
+      'json': 'JSON',
+      'file_path': 'Шлях до файлу',
+      'number': 'Число',
+      'one_time_code': 'Одноразовий код',
+      'payment_card': 'Номер картки',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Прихований',
+      'transient': 'Тимчасовий',
+      'auto_generated': 'Створений автоматично',
+      'excluded_from_history': 'Виключений з історії',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Скопійовано на цьому пристрої',
+      'received': 'Отримано з іншого пристрою',
+      'created_in_app': 'Створено в CopyPaste',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Текст для пошуку';
+
+  @override
+  String get rulesPatternPlaceholder => 'Шаблон, наприклад ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Шаблони перевіряють перший 1 МіБ тексту. Перегляд уперед, назад і зворотні посилання не підтримуються.';
+
+  @override
+  String get rulesCaseSensitive => 'Враховувати регістр';
+
+  @override
+  String get rulesChooseValues => 'Вибрати';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Ця умова походить із новішої версії CopyPaste.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Android знає програму-джерело лише для копій, зроблених клавіатурою CopyPaste. Інші копії на Android ніколи не відповідають цій умові.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Кожна система повідомляє різні позначки. Позначка, про яку система не повідомляє, ніколи не збігається.';
+
+  @override
+  String get rulesThenTitle => 'Тоді';
+
+  @override
+  String get rulesNoActions => 'Додайте принаймні одну дію.';
+
+  @override
+  String get rulesAddAction => 'Додати дію';
+
+  @override
+  String get rulesRemoveAction => 'Видалити дію';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Не зберігати',
+      'mark_secret': 'Позначити як секрет',
+      'hide_from_ai': 'Приховати від інструментів ШІ',
+      'delete_after': 'Видалити через',
+      'add_tags': 'Додати теги',
+      'transform': 'Перетворити',
+      'other': 'Невідома дія',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '«Не зберігати» не можна поєднувати з іншими діями.',
+      'present': 'Це правило вже має цю дію.',
+      'other': 'Правило може мати до 8 дій.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Ця дія походить із новішої версії CopyPaste.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Відповідні копії ніколи не зберігаються, не індексуються й не синхронізуються.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count хвилини',
+      many: '$count хвилин',
+      few: '$count хвилини',
+      one: '$count хвилина',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count години',
+      many: '$count годин',
+      few: '$count години',
+      one: '$count година',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count дня',
+      many: '$count днів',
+      few: '$count дні',
+      one: '$count день',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Також очистити буфер обміну в цей час, якщо в ньому досі ця копія. На Android це станеться під час наступного запуску CopyPaste.';
+
+  @override
+  String get rulesNoTags =>
+      'Створіть теги в Історії, щоб використовувати їх тут.';
+
+  @override
+  String get rulesNoTransforms => 'Немає доступних перетворень.';
+
+  @override
+  String get rulesReplaceClipboard =>
+      'Також замінити вміст буфера обміну результатом';
+
+  @override
+  String get rulesOptionsTitle => 'Параметри';
+
+  @override
+  String get rulesEnabledSwitch => 'Увімкнено';
+
+  @override
+  String get rulesStopProcessing =>
+      'Не обробляти наступні правила, якщо це спрацювало';
+
+  @override
+  String get rulesRunsOnLabel => 'Працює на';
+
+  @override
+  String get rulesAllDevices => 'Усі пристрої';
+
+  @override
+  String get rulesChosenDevices => 'Вибрані пристрої';
+
+  @override
+  String get rulesTestTitle => 'Перевірка';
+
+  @override
+  String get rulesTestDescription =>
+      'Спробуйте правило на прикладі тексту. Приклад ніколи не зберігається й не синхронізується.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Вставте або введіть приклад тексту';
+
+  @override
+  String get rulesTestFullSet => 'Перевіряти разом з усіма правилами';
+
+  @override
+  String get rulesRunTest => 'Перевірити';
+
+  @override
+  String get rulesTestFailed => 'Не вдалося виконати перевірку.';
+
+  @override
+  String get rulesPreviewHistory => 'Переглянути на історії';
+
+  @override
+  String rulesSaveBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'read_only': 'Оновіть CopyPaste, щоб редагувати це правило.',
+      'name_missing': 'Дайте правилу назву.',
+      'name_too_long': 'Використайте назву до 128 символів.',
+      'no_actions': 'Додайте принаймні одну дію.',
+      'other': 'Виправте позначені поля.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesSaveFailed => 'Не вдалося зберегти правило.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Це правило створила новіша версія CopyPaste. Оновіть CopyPaste, щоб редагувати або виконувати його.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'Не вдалося прочитати правило.',
+      'unsupported_schema': 'Це правило потребує новішої версії CopyPaste.',
+      'unknown_condition_type': 'Ця умова потребує новішої версії CopyPaste.',
+      'unknown_action_type': 'Ця дія потребує новішої версії CopyPaste.',
+      'too_many_conditions': 'Правило може мати до 20 умов.',
+      'too_many_actions': 'Правило може мати до 8 дій.',
+      'too_many_rules': 'Виконуються лише перші 200 правил.',
+      'no_actions': 'Додайте принаймні одну дію.',
+      'conflicting_actions':
+          '«Не зберігати» не можна поєднувати з іншими діями.',
+      'duplicate_action': 'Кожну дію можна використати лише один раз.',
+      'empty_value': 'Введіть значення.',
+      'empty_list': 'Виберіть принаймні одне значення.',
+      'too_many_values': 'Виберіть до 64 значень.',
+      'invalid_value': 'Це значення недійсне.',
+      'pattern_too_long': 'Шаблони можуть мати до 2000 символів.',
+      'unsupported_look_around':
+          'Перегляд уперед і назад не підтримується. Натомість використайте дві умови з «Виконуються всі умови».',
+      'unsupported_backreference': 'Зворотні посилання не підтримуються.',
+      'pattern_too_large':
+          'Цей шаблон надто складний. Спростіть його повторення.',
+      'invalid_pattern': 'Цей шаблон недійсний.',
+      'invalid_duration': 'Виберіть тривалість від 1 хвилини до 90 днів.',
+      'invalid_tags': 'Виберіть принаймні один тег.',
+      'invalid_transform': 'Виберіть перетворення.',
+      'other': 'У цьому правилі є проблема.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'збігається',
+      'not_matched': 'не збігається',
+      'unknown': 'невідомо',
+      'skipped': 'не виконувалося',
+      'other': 'помилка',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Умова $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'Жодне правило не перевірялося.';
+
+  @override
+  String get rulesTraceStopped => 'Наступні правила не виконувалися.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Для цієї копії невідомо, тож умова не збігається в жодному разі.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Це правило не вдалося виконати тут, тому відповідні копії натомість захищаються.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Результат';
+
+  @override
+  String get rulesTraceNoEffect => 'Жодне правило не змінює цю копію.';
+
+  @override
+  String get rulesTraceSkipped => 'Не зберігається';
+
+  @override
+  String get rulesTraceSecret => 'Зберігається як секрет';
+
+  @override
+  String get rulesTraceHidden => 'Прихована від інструментів ШІ';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return 'Видаляється через $duration';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Теги: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Перетворено: $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Перетворений текст';
+
+  @override
+  String get rulesPreviewTitle => 'Застосувати до наявних записів';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Перевірка останніх $count записів…';
+  }
+
+  @override
+  String get rulesPreviewNone =>
+      'Жоден нещодавній запис не відповідає цьому правилу.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Відповідають $count запису',
+      many: 'Відповідають $count записів',
+      few: 'Відповідають $count записи',
+      one: 'Відповідає $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count буде видалено',
+      many: '$count буде видалено',
+      few: '$count буде видалено',
+      one: '$count буде видалено',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count буде позначено як секрет',
+      many: '$count буде позначено як секрет',
+      few: '$count буде позначено як секрет',
+      one: '$count буде позначено як секрет',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count буде приховано від ШІ',
+      many: '$count буде приховано від ШІ',
+      few: '$count буде приховано від ШІ',
+      one: '$count буде приховано від ШІ',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count отримають час видалення',
+      many: '$count отримають час видалення',
+      few: '$count отримають час видалення',
+      one: '$count отримає час видалення',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count отримають теги',
+      many: '$count отримають теги',
+      few: '$count отримають теги',
+      one: '$count отримає теги',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Перевірено лише останні $count записів.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 'і ще $count';
+  }
+
+  @override
+  String get rulesPreviewNote =>
+      'Нічого не зміниться, доки ви не застосуєте. Зміни синхронізуються з іншими пристроями як звичайні редагування.';
+
+  @override
+  String get rulesSecretItem => 'Секретний запис';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return 'Секретний запис із $app';
+  }
+
+  @override
+  String get rulesPreviewCancelled => 'Перегляд зупинено. Нічого не змінено.';
+
+  @override
+  String get rulesPreviewFailed => 'Не вдалося виконати перегляд.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалити $count запису?',
+      many: 'Видалити $count записів?',
+      few: 'Видалити $count записи?',
+      one: 'Видалити $count запис?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'Застосування «Не зберігати» до наявних записів видаляє відповідні записи з Історії на всіх ваших пристроях. Цю дію не можна скасувати.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Видалити й застосувати';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Застосування: $done з $total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Змінено $count запису',
+      many: 'Змінено $count записів',
+      few: 'Змінено $count записи',
+      one: 'Змінено $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалено $count запису',
+      many: 'Видалено $count записів',
+      few: 'Видалено $count записи',
+      one: 'Видалено $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Не вдалося змінити $count запису',
+      many: 'Не вдалося змінити $count записів',
+      few: 'Не вдалося змінити $count записи',
+      one: 'Не вдалося змінити $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled =>
+      'Зупинено. Записи, змінені до зупинки, залишаються зміненими.';
 }

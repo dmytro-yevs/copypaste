@@ -5330,4 +5330,800 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => '无法使用片段';
+
+  @override
+  String get rulesLoadFailed => '无法加载内容规则。';
+
+  @override
+  String get rulesNewRule => '新建规则';
+
+  @override
+  String get rulesEditRule => '编辑规则';
+
+  @override
+  String get rulesUntitled => '未命名规则';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => '隐私默认设置';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      '这些隐私设置会在任何规则运行之前保护此设备上的每次复制。下方的内置规则会同步到你的设备。';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords => '隐私 隐藏 临时 排除的应用 内置 凭据 密码 银行卡';
+
+  @override
+  String rulesPrivacyState(String setting, String state) {
+    return '$setting：$state';
+  }
+
+  @override
+  String rulesExcludedApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个应用',
+      zero: '无',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesOpenPrivacy => '打开隐私';
+
+  @override
+  String get rulesMyRulesTitle => '我的规则';
+
+  @override
+  String get rulesMyRulesDescription => '它们在内置规则之后按从上到下的顺序作用于新的复制内容，并同步到你的设备。';
+
+  @override
+  String get rulesMyRulesKeywords => '规则 自动化 标签 跳过 机密 过期 删除 模式 正则';
+
+  @override
+  String get rulesEmptyTitle => '还没有规则';
+
+  @override
+  String get rulesEmptyMessage => '规则可以自动为新复制的内容添加标签、加以保护、设置过期或跳过。';
+
+  @override
+  String get rulesDeletedTitle => '最近删除';
+
+  @override
+  String get rulesDeletedDescription => '已删除的规则可在 30 天内恢复。';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return '删除于 $time';
+  }
+
+  @override
+  String get rulesRestore => '恢复';
+
+  @override
+  String get rulesDeletedToast => '规则已删除';
+
+  @override
+  String get rulesDeletedToastMessage => '你可以在 30 天内恢复它。';
+
+  @override
+  String get rulesUndo => '撤销';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return '来自 $device 的“$rule”的同时编辑已被更新的编辑替换。';
+  }
+
+  @override
+  String get rulesAnotherDevice => '另一台设备';
+
+  @override
+  String get rulesRestoreConflict => '使用该版本';
+
+  @override
+  String get rulesSkipLogTitle => '最近跳过';
+
+  @override
+  String get rulesSkipLogDescription =>
+      '自 CopyPaste 启动以来，你的规则在此设备上未保存的复制内容。只保留时间、应用和规则。';
+
+  @override
+  String get rulesSkipLogKeywords => '跳过 忽略 未保存 日志';
+
+  @override
+  String get rulesSkipLogShow => '显示';
+
+  @override
+  String get rulesSkipLogEmpty => '没有跳过任何复制内容。';
+
+  @override
+  String get rulesUnknownApp => '未知应用';
+
+  @override
+  String get rulesMatchesEverything => '任何复制内容';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '当 $conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary，然后停止';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {'any': ' 或 ', 'other': ' 且 '});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action：$value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return '运行于 $devices';
+  }
+
+  @override
+  String get rulesRunsOnAll => '在所有设备上运行';
+
+  @override
+  String rulesMatchCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '在此设备上匹配 $count 次',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesLastMatched(String time) {
+    return '最近 $time';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return '来自 $device 的新规则';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => '需要更新';
+
+  @override
+  String get rulesUpdateRequired => '更新 CopyPaste 以运行此规则。';
+
+  @override
+  String get rulesErrorBadge => '错误';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem 在修复之前，此规则可能匹配的复制内容会保存为机密并对 AI 工具隐藏。';
+  }
+
+  @override
+  String get rulesReorder => '拖动以重新排序';
+
+  @override
+  String get rulesMoreActions => '更多操作';
+
+  @override
+  String get rulesEdit => '编辑';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': '上移',
+      'down': '下移',
+      'top': '移到顶部',
+      'other': '移到底部',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => '应用到现有项目…';
+
+  @override
+  String get rulesResetBuiltin => '恢复默认';
+
+  @override
+  String get rulesNameLabel => '名称';
+
+  @override
+  String get rulesNamePlaceholder => '例如：工作链接';
+
+  @override
+  String get rulesWhenTitle => '条件';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': '满足任一条件',
+      'other': '满足所有条件',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions => '无条件：此规则适用于所有复制内容。';
+
+  @override
+  String get rulesAddCondition => '添加条件';
+
+  @override
+  String get rulesRemoveCondition => '移除条件';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': '文本',
+      'content_type': '内容类型',
+      'detected_kind': '检测到的类型',
+      'source_app': '来源应用',
+      'size': '大小',
+      'privacy_marker': '隐私标记',
+      'capture_origin': '来源',
+      'other': '未知条件',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '包含',
+      'equals': '等于',
+      'starts_with': '开头是',
+      'ends_with': '结尾是',
+      'matches_regex': '匹配模式',
+      'other': '匹配',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '不包含',
+      'equals': '不等于',
+      'starts_with': '开头不是',
+      'ends_with': '结尾不是',
+      'matches_regex': '不匹配模式',
+      'other': '不匹配',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {'true': '不是', 'other': '是'});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '小于',
+      'other': '大于',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '不小于',
+      'other': '不大于',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '行',
+      'bytes': '字节',
+      'other': '字符',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '行',
+      'bytes': '字节',
+      'other': '个字符',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': '纯文本',
+      'rich_text': '富文本',
+      'image': '图片',
+      'files': '文件',
+      'color': '颜色',
+      'link': '链接',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': '密码或机密',
+      'url': '网址',
+      'email': '电子邮件地址',
+      'phone': '电话号码',
+      'code': '代码',
+      'color': '颜色值',
+      'json': 'JSON',
+      'file_path': '文件路径',
+      'number': '数字',
+      'one_time_code': '一次性验证码',
+      'payment_card': '银行卡号',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': '隐藏',
+      'transient': '临时',
+      'auto_generated': '自动生成',
+      'excluded_from_history': '不计入历史记录',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': '在此设备上复制',
+      'received': '从其他设备接收',
+      'created_in_app': '在 CopyPaste 中创建',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => '要查找的文本';
+
+  @override
+  String get rulesPatternPlaceholder => '模式，例如 ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint => '模式会检查文本的前 1 MiB。不支持前瞻、后顾和反向引用。';
+
+  @override
+  String get rulesCaseSensitive => '区分大小写';
+
+  @override
+  String get rulesChooseValues => '选择';
+
+  @override
+  String get rulesUnknownConditionNotice => '此条件来自较新版本的 CopyPaste。';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Android 仅能识别通过 CopyPaste 键盘复制内容的来源应用。Android 上的其他复制内容永远不会匹配此条件。';
+
+  @override
+  String get rulesPrivacyMarkerNotice => '每个系统报告的标记不同。系统不报告的标记永远不会匹配。';
+
+  @override
+  String get rulesThenTitle => '操作';
+
+  @override
+  String get rulesNoActions => '请至少添加一个操作。';
+
+  @override
+  String get rulesAddAction => '添加操作';
+
+  @override
+  String get rulesRemoveAction => '移除操作';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': '不保存',
+      'mark_secret': '标记为机密',
+      'hide_from_ai': '对 AI 工具隐藏',
+      'delete_after': '在此时间后删除',
+      'add_tags': '添加标签',
+      'transform': '转换',
+      'other': '未知操作',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“不保存”不能与其他操作组合。',
+      'present': '此规则已包含此操作。',
+      'other': '一条规则最多可有 8 个操作。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice => '此操作来自较新版本的 CopyPaste。';
+
+  @override
+  String get rulesDontSaveWarning => '匹配的复制内容永远不会被存储、索引或同步。';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 分钟',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 小时',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 天',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      '届时如果剪贴板仍包含此复制内容，也清空剪贴板。在 Android 上，这会在 CopyPaste 下次运行时进行。';
+
+  @override
+  String get rulesNoTags => '在历史记录中创建标签后即可在此使用。';
+
+  @override
+  String get rulesNoTransforms => '没有可用的转换。';
+
+  @override
+  String get rulesReplaceClipboard => '同时用结果替换剪贴板';
+
+  @override
+  String get rulesOptionsTitle => '选项';
+
+  @override
+  String get rulesEnabledSwitch => '已启用';
+
+  @override
+  String get rulesStopProcessing => '此规则匹配时停止处理后续规则';
+
+  @override
+  String get rulesRunsOnLabel => '运行于';
+
+  @override
+  String get rulesAllDevices => '所有设备';
+
+  @override
+  String get rulesChosenDevices => '所选设备';
+
+  @override
+  String get rulesTestTitle => '测试';
+
+  @override
+  String get rulesTestDescription => '用示例文本试用此规则。示例不会被保存或同步。';
+
+  @override
+  String get rulesSamplePlaceholder => '粘贴或输入示例文本';
+
+  @override
+  String get rulesTestFullSet => '与所有规则一起测试';
+
+  @override
+  String get rulesRunTest => '运行测试';
+
+  @override
+  String get rulesTestFailed => '无法运行测试。';
+
+  @override
+  String get rulesPreviewHistory => '在历史记录上预览';
+
+  @override
+  String rulesSaveBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'read_only': '更新 CopyPaste 以编辑此规则。',
+      'name_missing': '请为规则命名。',
+      'name_too_long': '名称最多 128 个字符。',
+      'no_actions': '请至少添加一个操作。',
+      'other': '请修正标记的字段。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesSaveFailed => '无法保存规则。';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      '此规则由较新版本的 CopyPaste 写入。更新 CopyPaste 以编辑或运行它。';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': '无法读取此规则。',
+      'unsupported_schema': '此规则需要较新版本的 CopyPaste。',
+      'unknown_condition_type': '此条件需要较新版本的 CopyPaste。',
+      'unknown_action_type': '此操作需要较新版本的 CopyPaste。',
+      'too_many_conditions': '一条规则最多可有 20 个条件。',
+      'too_many_actions': '一条规则最多可有 8 个操作。',
+      'too_many_rules': '只会运行前 200 条规则。',
+      'no_actions': '请至少添加一个操作。',
+      'conflicting_actions': '“不保存”不能与其他操作组合。',
+      'duplicate_action': '每个操作只能使用一次。',
+      'empty_value': '请输入一个值。',
+      'empty_list': '请至少选择一个值。',
+      'too_many_values': '最多选择 64 个值。',
+      'invalid_value': '此值无效。',
+      'pattern_too_long': '模式最多 2,000 个字符。',
+      'unsupported_look_around': '不支持前瞻和后顾。请改用“满足所有条件”搭配两个条件。',
+      'unsupported_backreference': '不支持反向引用。',
+      'pattern_too_large': '此模式过于复杂。请简化其重复部分。',
+      'invalid_pattern': '此模式无效。',
+      'invalid_duration': '请选择 1 分钟到 90 天之间的时长。',
+      'invalid_tags': '请至少选择一个标签。',
+      'invalid_transform': '请选择一个转换。',
+      'other': '此规则有问题。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label：$result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': '匹配',
+      'not_matched': '不匹配',
+      'unknown': '未知',
+      'skipped': '未运行',
+      'other': '错误',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return '条件 $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => '未评估任何规则。';
+
+  @override
+  String get rulesTraceStopped => '后续规则未运行。';
+
+  @override
+  String get rulesTraceUnknownReason => '此复制内容的该属性未知，因此条件在任何情况下都不匹配。';
+
+  @override
+  String get rulesTraceRuleError => '此规则无法在此运行，因此匹配的复制内容会改为受到保护。';
+
+  @override
+  String get rulesTraceOutcomeTitle => '结果';
+
+  @override
+  String get rulesTraceNoEffect => '没有规则会更改此复制内容。';
+
+  @override
+  String get rulesTraceSkipped => '不保存';
+
+  @override
+  String get rulesTraceSecret => '保存为机密';
+
+  @override
+  String get rulesTraceHidden => '对 AI 工具隐藏';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return '$duration后删除';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return '标签：$tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return '转换：$names';
+  }
+
+  @override
+  String get rulesTraceOutput => '转换后的文本';
+
+  @override
+  String get rulesPreviewTitle => '应用到现有项目';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return '正在检查最近的 $count 个剪贴项…';
+  }
+
+  @override
+  String get rulesPreviewNone => '没有最近的剪贴项匹配此规则。';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个剪贴项匹配',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将删除 $count 个',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个标记为机密',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个对 AI 工具隐藏',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个设置删除时间',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个添加标签',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return '仅检查了最近的 $count 个剪贴项。';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return '以及另外 $count 个';
+  }
+
+  @override
+  String get rulesPreviewNote => '在你应用之前不会有任何更改。更改会像普通编辑一样同步到你的其他设备。';
+
+  @override
+  String get rulesSecretItem => '机密项目';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return '来自 $app 的机密项目';
+  }
+
+  @override
+  String get rulesPreviewCancelled => '预览已停止。未做任何更改。';
+
+  @override
+  String get rulesPreviewFailed => '无法运行预览。';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '删除 $count 个剪贴项？',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      '将“不保存”应用到现有项目会从你所有设备的历史记录中删除匹配的剪贴项。此操作无法撤销。';
+
+  @override
+  String get rulesApplyDeleteConfirm => '删除并应用';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return '正在应用：$done/$total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已更改 $count 个剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已删除 $count 个剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '有 $count 个剪贴项无法更改',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled => '已停止。停止前已更改的剪贴项将保持更改。';
 }
