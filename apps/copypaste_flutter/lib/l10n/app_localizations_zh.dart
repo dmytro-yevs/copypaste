@@ -6463,4 +6463,121 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get rulesApplyCancelled => '已停止。停止前已更改的剪贴项将保持更改。';
+
+  @override
+  String get historyActionEdit => '编辑';
+
+  @override
+  String get historyActionSaveAsSnippet => '存为片段';
+
+  @override
+  String get historyActionAddToQueue => '添加到 Paste Queue';
+
+  @override
+  String get historyActionTransform => '转换…';
+
+  @override
+  String get historyActionExplain => '为什么会在这里？';
+
+  @override
+  String get historyActionKeep => '保留';
+
+  @override
+  String get historyNewClip => '新建剪贴项';
+
+  @override
+  String get historySavedTitle => '已保存';
+
+  @override
+  String get historyEditSaved => '编辑后的文本已作为新剪贴项放在历史记录顶部。';
+
+  @override
+  String get historyNewClipSaved => '你的文本已保存。';
+
+  @override
+  String get historySnippetSaved => '剪贴项的文本现在是一个片段。';
+
+  @override
+  String get historySnippetSaveFailed => '无法将此剪贴项存为片段。';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已按你选择的顺序将 $count 个剪贴项加入队列。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed => '无法添加到 Paste Queue。请确认它已开启。';
+
+  @override
+  String get historyHideFromAiFailed => '无法更改此剪贴项的 AI 工具设置。';
+
+  @override
+  String get historyKeepFailed => '无法保留此剪贴项。';
+
+  @override
+  String get historyExplainFailed => '无法加载说明。';
+
+  @override
+  String get historyDeletesSoon => '不到一分钟后删除';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 分钟后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 小时后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 天后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => '手动';
+
+  @override
+  String get historyProvenanceEdited => '已编辑';
+
+  @override
+  String get historyProvenanceTransformed => '已转换';
+
+  @override
+  String get historyProvenanceAiTool => 'AI 工具';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name（自动）';
+  }
+
+  @override
+  String get historyMetadataExpiry => '删除';
+
+  @override
+  String get historyMetadataRuleTags => '自动标签';
+
+  @override
+  String get historyMetadataAiTools => 'AI 工具';
 }

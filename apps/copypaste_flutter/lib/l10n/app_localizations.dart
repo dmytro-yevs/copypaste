@@ -10844,6 +10844,180 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stopped. Clips changed before you stopped stay changed.'**
   String get rulesApplyCancelled;
+
+  /// History clip action that opens the text editor; saving creates a new clip.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get historyActionEdit;
+
+  /// History clip action that saves the clip text as a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as snippet'**
+  String get historyActionSaveAsSnippet;
+
+  /// History action that adds the clip, or the selected clips, to the paste queue. Paste Queue is the feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to Paste Queue'**
+  String get historyActionAddToQueue;
+
+  /// History clip action that opens the text transform palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Transform…'**
+  String get historyActionTransform;
+
+  /// History clip action that explains which content rules made the clip stored, secret or expiring.
+  ///
+  /// In en, this message translates to:
+  /// **'Why is this here?'**
+  String get historyActionExplain;
+
+  /// History clip action that cancels the automatic deletion of an expiring clip.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep'**
+  String get historyActionKeep;
+
+  /// Button and tooltip that opens the editor for a new clip the user types.
+  ///
+  /// In en, this message translates to:
+  /// **'New clip'**
+  String get historyNewClip;
+
+  /// Toast title after an edited clip, a new clip or a snippet was saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get historySavedTitle;
+
+  /// Toast message after saving an edited clip, which creates a new clip.
+  ///
+  /// In en, this message translates to:
+  /// **'The edited text is a new clip at the top of History.'**
+  String get historyEditSaved;
+
+  /// Toast message after saving text typed in the new clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Your text was saved.'**
+  String get historyNewClipSaved;
+
+  /// Toast message after a clip was saved as a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'The clip\'s text is now a snippet.'**
+  String get historySnippetSaved;
+
+  /// Error toast when a clip could not be saved as a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'This clip could not be saved as a snippet.'**
+  String get historySnippetSaveFailed;
+
+  /// Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue in the order you selected them.}}'**
+  String historyQueueAddedInOrder(int count);
+
+  /// Error toast when clips could not be added to the paste queue. Paste Queue is the feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t add to Paste Queue. Check that it is turned on.'**
+  String get historyQueueAddFailed;
+
+  /// Error toast when hiding a clip from AI tools, or showing it again, failed.
+  ///
+  /// In en, this message translates to:
+  /// **'The clip\'s AI tools setting could not be changed.'**
+  String get historyHideFromAiFailed;
+
+  /// Error toast when an expiring clip could not be kept.
+  ///
+  /// In en, this message translates to:
+  /// **'This clip could not be kept.'**
+  String get historyKeepFailed;
+
+  /// Error shown when the content-rule explanation of a clip could not be loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'The explanation could not be loaded.'**
+  String get historyExplainFailed;
+
+  /// Countdown of an expiring clip with less than one minute left.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletes in less than a minute'**
+  String get historyDeletesSoon;
+
+  /// Countdown of an expiring clip, in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 min} other{Deletes in {count} min}}'**
+  String historyDeletesInMinutes(int count);
+
+  /// Countdown of an expiring clip, in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 h} other{Deletes in {count} h}}'**
+  String historyDeletesInHours(int count);
+
+  /// Countdown of an expiring clip, in days.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 day} other{Deletes in {count} days}}'**
+  String historyDeletesInDays(int count);
+
+  /// Marker next to the source app of a clip the user typed in CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get historyProvenanceManual;
+
+  /// Marker next to the source app of a clip saved from the clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited'**
+  String get historyProvenanceEdited;
+
+  /// Marker next to the source app of a clip created by a text transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed'**
+  String get historyProvenanceTransformed;
+
+  /// Marker next to the source app of a clip an AI tool copied through CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tool'**
+  String get historyProvenanceAiTool;
+
+  /// A tag that a content rule assigned automatically.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} (auto)'**
+  String historyRuleTag(String name);
+
+  /// Clip details label for when an expiring clip is deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletion'**
+  String get historyMetadataExpiry;
+
+  /// Clip details label for tags assigned by content rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic tags'**
+  String get historyMetadataRuleTags;
+
+  /// Clip details label for whether AI tools can see the clip.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools'**
+  String get historyMetadataAiTools;
 }
 
 class _AppLocalizationsDelegate

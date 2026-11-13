@@ -7093,4 +7093,137 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get rulesApplyCancelled =>
       'Зупинено. Записи, змінені до зупинки, залишаються зміненими.';
+
+  @override
+  String get historyActionEdit => 'Редагувати';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Зберегти як фрагмент';
+
+  @override
+  String get historyActionAddToQueue => 'Додати до Paste Queue';
+
+  @override
+  String get historyActionTransform => 'Перетворити…';
+
+  @override
+  String get historyActionExplain => 'Чому це тут?';
+
+  @override
+  String get historyActionKeep => 'Залишити';
+
+  @override
+  String get historyNewClip => 'Новий кліп';
+
+  @override
+  String get historySavedTitle => 'Збережено';
+
+  @override
+  String get historyEditSaved =>
+      'Змінений текст став новим кліпом угорі історії.';
+
+  @override
+  String get historyNewClipSaved => 'Ваш текст збережено.';
+
+  @override
+  String get historySnippetSaved => 'Текст кліпу тепер є фрагментом.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Не вдалося зберегти цей кліп як фрагмент.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count кліпу додано до черги в порядку вибору.',
+      many: '$count кліпів додано до черги в порядку вибору.',
+      few: '$count кліпи додано до черги в порядку вибору.',
+      one: '$count кліп додано до черги.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Не вдалося додати до Paste Queue. Перевірте, чи її ввімкнено.';
+
+  @override
+  String get historyHideFromAiFailed =>
+      'Не вдалося змінити налаштування інструментів ШІ для цього кліпу.';
+
+  @override
+  String get historyKeepFailed => 'Не вдалося залишити цей кліп.';
+
+  @override
+  String get historyExplainFailed => 'Не вдалося завантажити пояснення.';
+
+  @override
+  String get historyDeletesSoon => 'Видалиться менш ніж за хвилину';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count хв',
+      many: 'Видалиться через $count хв',
+      few: 'Видалиться через $count хв',
+      one: 'Видалиться через $count хв',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count год',
+      many: 'Видалиться через $count год',
+      few: 'Видалиться через $count год',
+      one: 'Видалиться через $count год',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count дня',
+      many: 'Видалиться через $count днів',
+      few: 'Видалиться через $count дні',
+      one: 'Видалиться через $count день',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Вручну';
+
+  @override
+  String get historyProvenanceEdited => 'Змінено';
+
+  @override
+  String get historyProvenanceTransformed => 'Перетворено';
+
+  @override
+  String get historyProvenanceAiTool => 'Інструмент ШІ';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (авто)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Видалення';
+
+  @override
+  String get historyMetadataRuleTags => 'Автоматичні теги';
+
+  @override
+  String get historyMetadataAiTools => 'Інструменти ШІ';
 }

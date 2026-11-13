@@ -6918,4 +6918,129 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get rulesApplyCancelled =>
       'Durduruldu. Durdurmadan önce değiştirilen öğeler değişmiş olarak kalır.';
+
+  @override
+  String get historyActionEdit => 'Düzenle';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Parçacık olarak kaydet';
+
+  @override
+  String get historyActionAddToQueue => 'Paste Queue\'ya ekle';
+
+  @override
+  String get historyActionTransform => 'Dönüştür…';
+
+  @override
+  String get historyActionExplain => 'Bu neden burada?';
+
+  @override
+  String get historyActionKeep => 'Sakla';
+
+  @override
+  String get historyNewClip => 'Yeni öğe';
+
+  @override
+  String get historySavedTitle => 'Kaydedildi';
+
+  @override
+  String get historyEditSaved =>
+      'Düzenlenen metin, geçmişin en üstünde yeni bir öğe oldu.';
+
+  @override
+  String get historyNewClipSaved => 'Metniniz kaydedildi.';
+
+  @override
+  String get historySnippetSaved => 'Öğenin metni artık bir parçacık.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Bu öğe parçacık olarak kaydedilemedi.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe seçtiğiniz sırayla kuyruğa eklendi.',
+      one: '1 öğe kuyruğa eklendi.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Paste Queue\'ya eklenemedi. Açık olduğunu kontrol edin.';
+
+  @override
+  String get historyHideFromAiFailed =>
+      'Bu öğenin yapay zekâ araçları ayarı değiştirilemedi.';
+
+  @override
+  String get historyKeepFailed => 'Bu öğe saklanamadı.';
+
+  @override
+  String get historyExplainFailed => 'Açıklama yüklenemedi.';
+
+  @override
+  String get historyDeletesSoon => 'Bir dakikadan kısa sürede silinecek';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dk sonra silinecek',
+      one: '1 dk sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count sa sonra silinecek',
+      one: '1 sa sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gün sonra silinecek',
+      one: '1 gün sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Elle';
+
+  @override
+  String get historyProvenanceEdited => 'Düzenlendi';
+
+  @override
+  String get historyProvenanceTransformed => 'Dönüştürüldü';
+
+  @override
+  String get historyProvenanceAiTool => 'Yapay zekâ aracı';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (otomatik)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Silinme';
+
+  @override
+  String get historyMetadataRuleTags => 'Otomatik etiketler';
+
+  @override
+  String get historyMetadataAiTools => 'Yapay zekâ araçları';
 }

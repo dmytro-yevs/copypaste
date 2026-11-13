@@ -9,6 +9,7 @@ import '../repository/history_file_importer.dart';
 import '../repository/history_file_transfer.dart';
 import '../repository/history_repository.dart';
 import 'history_bulk_controller.dart';
+import 'history_capabilities.dart';
 import 'history_errors.dart';
 import 'history_group_counts_controller.dart';
 import 'history_media_cache.dart';
@@ -104,6 +105,12 @@ class HistoryController extends ChangeNotifier {
         refresh: refresh,
       );
   late final HistoryTransferController transfers;
+
+  /// Editing, queue, transform and annotation actions the repository offers.
+  late final HistoryCapabilities capabilities = HistoryCapabilities(
+    _scope,
+    this,
+  );
   late final HistoryRefreshCoordinator refresh = HistoryRefreshCoordinator(
     _scope,
     refresh: () => window.refreshVisible(),
@@ -157,6 +164,7 @@ class HistoryController extends ChangeNotifier {
       !pinnedOrder.isInteracting &&
       !mutations.isDeletingAll &&
       !mutations.hasPending &&
+      !capabilities.hasPending &&
       !transfers.hasPendingDownloads &&
       !(ocr?.busy ?? false);
 
