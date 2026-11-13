@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4999,4 +4998,740 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => 'ana ekran widget başlatıcı son';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Kısaltma $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Kısaltma';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'İsteğe bağlı, örneğin imza';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Zaten “$title” tarafından kullanılıyor';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'En fazla $max karakter kullanın.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Kısaltma boşluk veya denetim karakteri içeremez.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eşitlemeden sonra $count parçacığın incelenmesi gerekiyor',
+      zero: 'İncelenecek parçacık yok',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Metin';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Parçacık metnini yazın';
+
+  @override
+  String get snippetsClearSelection => 'Seçimi temizle';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Düzenlemek için çok büyük. Bu öğe salt okunur açılır.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Nötr',
+      'blue': 'Mavi',
+      'green': 'Yeşil',
+      'amber': 'Kehribar',
+      'red': 'Kırmızı',
+      'other': 'Nötr',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Vurgu rengi';
+
+  @override
+  String get snippetsCollectionIcon => 'Simge';
+
+  @override
+  String get snippetsCollectionLabel => 'Koleksiyon';
+
+  @override
+  String get snippetsCollectionName => 'Ad';
+
+  @override
+  String get snippetsCollectionNameTaken => 'Bu adda bir koleksiyon zaten var.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'En fazla $max karakter kullanın.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Bu parçacık gizli.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Devam et';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Bu cihazda sizi doğrulayacak parola, PIN veya biyometri yok. Yalnızca cihaz sizinse devam edin.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Siz olduğunuzu onaylayın';
+
+  @override
+  String get snippetsConcealedPreview => 'Gizli parçacık';
+
+  @override
+  String get snippetsConcealedSwitch => 'Gizli';
+
+  @override
+  String get snippetsConcealedTitle => 'Gizli parçacık';
+
+  @override
+  String get snippetsConflictBadge => 'Çakışma kopyası';
+
+  @override
+  String get snippetsCopied => 'Kopyalandı';
+
+  @override
+  String get snippetsCreate => 'Parçacık oluştur';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '“$query” parçacığını oluştur';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Koleksiyonu sil';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Parçacıklarını Koleksiyonsuz bölümüne taşı';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '“$name” silinsin mi?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Parçacıklarını da sil';
+
+  @override
+  String get snippetsDeletedMessage => 'Son silinenler bölümüne taşındı.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık silindi',
+      one: 'Parçacık silindi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Kaydedilecek yer';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Geçmiş öğesi',
+      'snippet': 'Parçacık',
+      'other': 'Geçmiş öğesi',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Vazgeç';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Başka bir parçacık eşitleme sırasında aynı kısaltmayı aldı. Birini değiştirin.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Yinelenen kısaltma';
+
+  @override
+  String get snippetsEditClip => 'Öğeyi düzenle';
+
+  @override
+  String get snippetsEditCollection => 'Koleksiyonu düzenle';
+
+  @override
+  String get snippetsEditSnippet => 'Parçacığı düzenle';
+
+  @override
+  String get snippetsEditTab => 'Düzenle';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Bir parçacığa kısaltma verin, sonra bunu Quick Paste\'te yazın.';
+
+  @override
+  String get snippetsEmptyTitle => 'Henüz parçacık yok';
+
+  @override
+  String get snippetsEnableTemplate => 'Aç';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Yer tutucular yalnızca şablonlarda çalışır. Zaten yer tutucuya benzeyen metin de doldurulur.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Şablon açılsın mı?';
+
+  @override
+  String get snippetsExport => 'Dışa aktar';
+
+  @override
+  String get snippetsExportCollection => 'Koleksiyonu dışa aktar';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Gizli parçacıkları okunabilir dosyaya ekle';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık yazıldı',
+      zero: 'Hiç parçacık yazılmadı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Parçacıklar dışa aktarıldı';
+
+  @override
+  String get snippetsExportEncrypt => 'Parola ifadesiyle şifrele';
+
+  @override
+  String get snippetsExportFailed => 'Dışa aktarma başarısız';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Dosyaya sahip olan herkesin onu okuyabileceğini anlıyorum';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Tüm parçacıklar',
+      'collections': 'Bu koleksiyon',
+      'snippets': 'Seçili parçacıklar ($count)',
+      'other': 'Tüm parçacıklar',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Parçacıkları dışa aktar';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Alan ekle';
+
+  @override
+  String get snippetsFieldDefault => 'Varsayılan değer';
+
+  @override
+  String get snippetsFieldName => 'Ad';
+
+  @override
+  String get snippetsFieldOptions => 'Virgülle ayrılmış seçenekler';
+
+  @override
+  String get snippetsFieldRequired => 'Bu alanı doldurun.';
+
+  @override
+  String get snippetsFieldType => 'Tür';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Tek satır',
+      'multiline': 'Birden çok satır',
+      'choice': 'Seçim',
+      'other': 'Tek satır',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Kaydettiğinizde biçimlendirme kaldırılır.';
+
+  @override
+  String get snippetsGoToSnippet => 'Parçacığa git';
+
+  @override
+  String get snippetsImport => 'İçe aktar';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Kısaltma zaten kullanılıyor';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Kısaltmasız içe aktar',
+      'renameWithSuffix': 'Kısaltmaya sayı ekle',
+      'skip': 'Atla',
+      'other': 'Kısaltmasız içe aktar',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Aynı adlı koleksiyon';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Mevcut olana ekle',
+      'createNew': 'Yeni bir tane oluştur',
+      'other': 'Mevcut olana ekle',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Bilinen yer tutucuları dönüştür';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Yeni: $added. Aynı, atlandı: $identical. Değişmiş: $updated. Kısaltma çakışmaları: $conflicts. Geçersiz: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Parçacıklar içe aktarıldı';
+
+  @override
+  String get snippetsImportFailed => 'İçe aktarma başarısız';
+
+  @override
+  String get snippetsImportFileType => 'Parçacık dosyaları';
+
+  @override
+  String get snippetsImportFormat => 'Biçim';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste paketi',
+      'json': 'JSON listesi',
+      'csv': 'CSV',
+      'other': 'CopyPaste paketi',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Satır $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'İçe aktarılmayacak satırlar';
+
+  @override
+  String get snippetsImportPassphraseHint => 'Dosya şifreliyse parola ifadesi';
+
+  @override
+  String get snippetsImportPreview => 'Önizle';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Eklenen: $inserted. Güncellenen: $updated. Atlanan: $skipped. İncelenecek kısaltmalar: $flagged. Tanınmayan yer tutucular: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Aynı parçacık, farklı içerik';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'İkisini de tut',
+      'replace': 'Mevcut olanı değiştir',
+      'skip': 'Atla',
+      'other': 'İkisini de tut',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Parçacıkları içe aktar';
+
+  @override
+  String get snippetsInsert => 'Ekle';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Yer tutucu ekle';
+
+  @override
+  String get snippetsKeepReferences => 'Olduğu gibi bırak';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Parçacıklara ve koleksiyonlara göz atın, bunları düzenleyin.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'parçacıklar şablonlar kısaltmalar koleksiyonlar metin snippet';
+
+  @override
+  String get snippetsLibraryTitle => 'Parçacık kitaplığı';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Bu yer tutucu hiç kapatılmıyor.',
+      'malformed': 'Bu yer tutucu okunamıyor.',
+      'unknownPlaceholder':
+          'Bilinmeyen yer tutucu “$detail”. Yazıldığı gibi yapıştırılır.',
+      'unknownParameter': 'Bilinmeyen seçenek “$detail”.',
+      'duplicateParameter': '“$detail” seçeneği iki kez ayarlanmış.',
+      'missingParameter': '“$detail” seçeneği eksik.',
+      'invalidValue': '“$detail” seçeneğinin değeri geçersiz.',
+      'conflictingParameters': 'Bu seçenekler birlikte kullanılamaz.',
+      'unknownLocale': 'Bilinmeyen dil.',
+      'unknownTimeZone': 'Bilinmeyen saat dilimi.',
+      'invalidPattern': 'Geçersiz tarih kalıbı.',
+      'dateOutOfRange': 'Tarih aralık dışında.',
+      'unknownModifier': 'Bilinmeyen değiştirici “$detail”.',
+      'modifierFailed': '“$detail” değiştiricisi uygulanamadı.',
+      'emptyClipboard': '$detail. pano öğesi boş.',
+      'extraCursor': 'Yalnızca ilk imleç yer tutucusu kullanılır.',
+      'nestedCursor': 'Eklenen bir parçacıktaki imleç yok sayılır.',
+      'tooManyFields': '“$detail” alanı 10 alan sınırını aşıyor.',
+      'conflictingField':
+          '“$detail” alanı farklı ayarlarla iki kez tanımlanmış.',
+      'choiceDefaultNotOption':
+          '“$detail” alanının varsayılan değeri seçeneklerinden biri değil.',
+      'cycle': 'Parçacıklar birbirini döngü içinde ekliyor: $detail.',
+      'depthExceeded': 'Parçacıklar 3 düzeyden daha derine ekleniyor.',
+      'nestingLimit': 'Çok fazla eklenmiş parçacık var.',
+      'unknownSnippet': 'Hiçbir parçacıkta bu kısaltma yok.',
+      'containsPlaceholders':
+          'Metin yer tutucular içeriyor. Doldurmak için Şablon\'u açın.',
+      'other': 'Bu yer tutucuda bir sorun var.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Parçacıklar yüklenemedi';
+
+  @override
+  String get snippetsLoadMore => 'Daha fazla yükle';
+
+  @override
+  String get snippetsMerge => 'Birleştir';
+
+  @override
+  String get snippetsMergeCollection => 'Başka bir koleksiyonla birleştir';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '“$name” koleksiyonunu şununla birleştir';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Şuraya taşı';
+
+  @override
+  String get snippetsNewCollection => 'Yeni koleksiyon';
+
+  @override
+  String get snippetsNewSnippet => 'Yeni parçacık';
+
+  @override
+  String get snippetsNewText => 'Yeni metin';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '“$query” ile eşleşen parçacık yok';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Parola ifadesini tekrarlayın';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Parola ifadesi, en az $min karakter';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Parola ifadesi';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Unutulan parola ifadesi kurtarılamaz.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Çok kısa',
+      'weak': 'Zayıf',
+      'fair': 'Orta',
+      'good': 'İyi',
+      'other': 'Güçlü',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Sabitlendi';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Yer tutucular';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Tarih',
+      'dateShort': 'Tarih, kısa',
+      'dateLong': 'Tarih, uzun',
+      'dateIso': 'Tarih, ISO 8601',
+      'dateNextWeek': 'Bir hafta sonraki tarih',
+      'now': 'Saat',
+      'dateTime': 'Tarih ve saat',
+      'clipboard': 'Pano',
+      'clipboardPrevious': 'Önceki pano öğesi',
+      'field': 'Doldurulacak alan…',
+      'cursor': 'İmleç konumu',
+      'uuid': 'UUID',
+      'random': 'Rastgele sayı',
+      'upper': 'Değiştirici: büyük harf',
+      'lower': 'Değiştirici: küçük harf',
+      'trim': 'Değiştirici: boşlukları kırp',
+      'other': 'Yer tutucu',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Başka bir parçacık ekle';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Eşleşen yer tutucu yok';
+
+  @override
+  String get snippetsPreviewEmpty => 'Önizlenecek bir şey yok';
+
+  @override
+  String get snippetsPreviewTab => 'Önizleme';
+
+  @override
+  String get snippetsPurge => 'Kalıcı olarak sil';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Tüm cihazlarınızdan silinecekler. Bu işlem geri alınamaz.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık kalıcı olarak silinsin mi?',
+      one: 'Parçacık kalıcı olarak silinsin mi?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => 'Son silinenler boş';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Yapıştırılan parçacık metnini Geçmiş\'e ekler. Gizli parçacıklar asla kaydedilmez.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'geçmiş kaydet yapıştırılan parçacıklar';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Yapıştırılan parçacıkları Geçmiş\'e kaydet';
+
+  @override
+  String get snippetsReplaceOriginal => 'Orijinali değiştir';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Kaydettikten sonra orijinal öğeyi tüm cihazlardan siler. Kapalıyken ikisi de kalır.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Gizli bir parçacık kullanılmadan veya gösterilmeden önce siz olduğunuzu doğrulayın. Her cihaz ayrı sorar.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'gizli parola biyometri parmak izi yüz kilit doğrula';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Gizli parçacıkları kullanmadan önce doğrula';
+
+  @override
+  String get snippetsRestore => 'Geri yükle';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Kaydetmek için metin ekleyin.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'Başlık $max karakterden uzun.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'Metin 64 KB\'tan büyük.';
+
+  @override
+  String get snippetsSaveFailed => 'Kaydedilemedi';
+
+  @override
+  String get snippetsScopeAll => 'Tümü';
+
+  @override
+  String get snippetsScopeEmpty => 'Burada parçacık yok';
+
+  @override
+  String get snippetsScopePinned => 'Sabitlenenler';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Son silinenler';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Parçacıklarda ara';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count seçildi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Göster';
+
+  @override
+  String get snippetsShowAll => 'Tümünü göster';
+
+  @override
+  String get snippetsShowAttention => 'İncele';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '$count parçacığınız var. En fazla 20.000 parçacığa izin verilir.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Şablon';
+
+  @override
+  String get snippetsTemplateSwitch => 'Şablon';
+
+  @override
+  String get snippetsTitleLabel => 'Başlık';
+
+  @override
+  String get snippetsTitlePlaceholder => 'İsteğe bağlı';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Parçacıkları uygulamalar arasında taşıyın veya yedek tutun. Dışa aktarmalar varsayılan olarak şifrelenir.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'içe aktar dışa aktar yedek paket json csv parola';
+
+  @override
+  String get snippetsTransferTitle => 'İçe ve dışa aktar';
+
+  @override
+  String get snippetsUndo => 'Geri al';
+
+  @override
+  String get snippetsUnfiled => 'Koleksiyonsuz';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count yer tutucu yazıldığı gibi yapıştırılır',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Sabitlemeyi kaldır';
+
+  @override
+  String get snippetsUnsavedMessage =>
+      'Kapatmadan önce değişiklikler kaydedilsin mi?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Kaydedilmemiş değişiklikler';
+
+  @override
+  String get snippetsUntitled => 'Başlıksız parçacık';
+
+  @override
+  String get snippetsUpdateReferences => 'Güncelle';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Diğer şablonlar “$from” ekliyor olabilir. “$to” kullanacak şekilde güncellensinler mi?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Başvurular güncellensin mi?';
+
+  @override
+  String get snippetsUseFailed => 'Parçacık kullanılamadı';
 }

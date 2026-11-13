@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4622,4 +4621,713 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => '主屏幕 小组件 启动器 最近';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return '缩写 $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => '缩写';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => '可选，例如 sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return '已被“$title”使用';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return '最多使用 $max 个字符。';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace => '缩写不能包含空格或控制字符。';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '同步后有 $count 个片段需要检查',
+      zero: '没有需要检查的片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => '文本';
+
+  @override
+  String get snippetsBodyPlaceholder => '输入片段文本';
+
+  @override
+  String get snippetsClearSelection => '清除选择';
+
+  @override
+  String get snippetsClipTooLarge => '内容过大，无法编辑。此剪贴项以只读方式打开。';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': '中性',
+      'blue': '蓝色',
+      'green': '绿色',
+      'amber': '琥珀色',
+      'red': '红色',
+      'other': '中性',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => '强调色';
+
+  @override
+  String get snippetsCollectionIcon => '图标';
+
+  @override
+  String get snippetsCollectionLabel => '收藏夹';
+
+  @override
+  String get snippetsCollectionName => '名称';
+
+  @override
+  String get snippetsCollectionNameTaken => '已存在同名收藏夹。';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return '最多使用 $max 个字符。';
+  }
+
+  @override
+  String get snippetsConcealedBody => '此片段已隐藏。';
+
+  @override
+  String get snippetsConcealedConfirmAction => '继续';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      '此设备没有可用于验证身份的密码、PIN 或生物识别。仅当这是你的设备时才继续。';
+
+  @override
+  String get snippetsConcealedConfirmTitle => '确认是你本人';
+
+  @override
+  String get snippetsConcealedPreview => '隐藏的片段';
+
+  @override
+  String get snippetsConcealedSwitch => '隐藏';
+
+  @override
+  String get snippetsConcealedTitle => '隐藏的片段';
+
+  @override
+  String get snippetsConflictBadge => '冲突副本';
+
+  @override
+  String get snippetsCopied => '已复制';
+
+  @override
+  String get snippetsCreate => '创建片段';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '创建片段“$query”';
+  }
+
+  @override
+  String get snippetsDeleteCollection => '删除收藏夹';
+
+  @override
+  String get snippetsDeleteCollectionMove => '将其中的片段移到“未分类”';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '删除“$name”？';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => '同时删除其中的片段';
+
+  @override
+  String get snippetsDeletedMessage => '已移到“最近删除”。';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已删除 $count 个片段',
+      one: '已删除片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => '保存到';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': '历史记录中的剪贴项',
+      'snippet': '片段',
+      'other': '历史记录中的剪贴项',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => '放弃';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation => '同步后另一个片段使用了相同的缩写。请修改其中一个。';
+
+  @override
+  String get snippetsDuplicateBadge => '缩写重复';
+
+  @override
+  String get snippetsEditClip => '编辑剪贴项';
+
+  @override
+  String get snippetsEditCollection => '编辑收藏夹';
+
+  @override
+  String get snippetsEditSnippet => '编辑片段';
+
+  @override
+  String get snippetsEditTab => '编辑';
+
+  @override
+  String get snippetsEmptyMessage => '为片段设置缩写，然后在 Quick Paste 中输入它。';
+
+  @override
+  String get snippetsEmptyTitle => '还没有片段';
+
+  @override
+  String get snippetsEnableTemplate => '开启';
+
+  @override
+  String get snippetsEnableTemplateMessage => '占位符仅在模板中有效。已经像占位符的文本也会被填充。';
+
+  @override
+  String get snippetsEnableTemplateTitle => '开启“模板”？';
+
+  @override
+  String get snippetsExport => '导出';
+
+  @override
+  String get snippetsExportCollection => '导出收藏夹';
+
+  @override
+  String get snippetsExportConcealedConfirm => '在可读文件中包含隐藏的片段';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已写入 $count 个片段',
+      zero: '未写入任何片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => '已导出片段';
+
+  @override
+  String get snippetsExportEncrypt => '使用密码短语加密';
+
+  @override
+  String get snippetsExportFailed => '导出失败';
+
+  @override
+  String get snippetsExportPlainConfirm => '我了解任何拿到该文件的人都能读取它';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': '所有片段',
+      'collections': '此收藏夹',
+      'snippets': '所选片段 ($count)',
+      'other': '所有片段',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => '导出片段';
+
+  @override
+  String get snippetsFieldBuilderTitle => '插入字段';
+
+  @override
+  String get snippetsFieldDefault => '默认值';
+
+  @override
+  String get snippetsFieldName => '名称';
+
+  @override
+  String get snippetsFieldOptions => '选项，用逗号分隔';
+
+  @override
+  String get snippetsFieldRequired => '请填写此字段。';
+
+  @override
+  String get snippetsFieldType => '类型';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': '单行',
+      'multiline': '多行',
+      'choice': '选择',
+      'other': '单行',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => '保存时将移除格式。';
+
+  @override
+  String get snippetsGoToSnippet => '转到片段';
+
+  @override
+  String get snippetsImport => '导入';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => '缩写已被使用';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': '不带缩写导入',
+      'renameWithSuffix': '在缩写后添加数字',
+      'skip': '跳过',
+      'other': '不带缩写导入',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => '同名收藏夹';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': '添加到现有收藏夹',
+      'createNew': '新建一个',
+      'other': '添加到现有收藏夹',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => '转换已知占位符';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return '新增：$added。相同，已跳过：$identical。已更改：$updated。缩写冲突：$conflicts。无效：$invalid。';
+  }
+
+  @override
+  String get snippetsImportDone => '已导入片段';
+
+  @override
+  String get snippetsImportFailed => '导入失败';
+
+  @override
+  String get snippetsImportFileType => '片段文件';
+
+  @override
+  String get snippetsImportFormat => '格式';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste 包',
+      'json': 'JSON 列表',
+      'csv': 'CSV',
+      'other': 'CopyPaste 包',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return '第 $row 行：$reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => '不会导入的行';
+
+  @override
+  String get snippetsImportPassphraseHint => '密码短语（如果文件已加密）';
+
+  @override
+  String get snippetsImportPreview => '预览';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return '已添加：$inserted。已更新：$updated。已跳过：$skipped。待检查的缩写：$flagged。无法识别的占位符：$unrecognized。';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => '同一片段，内容不同';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': '保留两者',
+      'replace': '替换现有片段',
+      'skip': '跳过',
+      'other': '保留两者',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => '导入片段';
+
+  @override
+  String get snippetsInsert => '插入';
+
+  @override
+  String get snippetsInsertPlaceholder => '插入占位符';
+
+  @override
+  String get snippetsKeepReferences => '保持不变';
+
+  @override
+  String get snippetsLibraryDescription => '浏览、整理和编辑片段与收藏夹。';
+
+  @override
+  String get snippetsLibraryKeywords => '片段 模板 缩写 收藏夹 文本 snippets';
+
+  @override
+  String get snippetsLibraryTitle => '片段库';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': '此占位符没有闭合。',
+      'malformed': '无法读取此占位符。',
+      'unknownPlaceholder': '未知占位符“$detail”。将按原样粘贴。',
+      'unknownParameter': '未知选项“$detail”。',
+      'duplicateParameter': '选项“$detail”设置了两次。',
+      'missingParameter': '缺少选项“$detail”。',
+      'invalidValue': '选项“$detail”的值无效。',
+      'conflictingParameters': '这些选项不能同时使用。',
+      'unknownLocale': '未知语言。',
+      'unknownTimeZone': '未知时区。',
+      'invalidPattern': '日期格式无效。',
+      'dateOutOfRange': '日期超出范围。',
+      'unknownModifier': '未知修饰符“$detail”。',
+      'modifierFailed': '无法应用修饰符“$detail”。',
+      'emptyClipboard': '剪贴板项目 $detail 为空。',
+      'extraCursor': '仅使用第一个光标占位符。',
+      'nestedCursor': '插入片段中的光标将被忽略。',
+      'tooManyFields': '字段“$detail”超出 10 个字段的限制。',
+      'conflictingField': '字段“$detail”以不同设置定义了两次。',
+      'choiceDefaultNotOption': '“$detail”的默认值不在其选项中。',
+      'cycle': '片段相互循环插入：$detail。',
+      'depthExceeded': '片段插入层级超过 3 层。',
+      'nestingLimit': '插入的片段过多。',
+      'unknownSnippet': '没有片段使用此缩写。',
+      'containsPlaceholders': '文本包含占位符。开启“模板”即可填充。',
+      'other': '此占位符有问题。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => '无法加载片段';
+
+  @override
+  String get snippetsLoadMore => '加载更多';
+
+  @override
+  String get snippetsMerge => '合并';
+
+  @override
+  String get snippetsMergeCollection => '合并到另一个收藏夹';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '将“$name”合并到';
+  }
+
+  @override
+  String get snippetsMoveTo => '移到';
+
+  @override
+  String get snippetsNewCollection => '新建收藏夹';
+
+  @override
+  String get snippetsNewSnippet => '新建片段';
+
+  @override
+  String get snippetsNewText => '新建文本';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '没有与“$query”匹配的片段';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => '再次输入密码短语';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return '密码短语，至少 $min 个字符';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => '密码短语';
+
+  @override
+  String get snippetsPassphraseNoRecovery => '忘记的密码短语无法恢复。';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': '太短',
+      'weak': '弱',
+      'fair': '一般',
+      'good': '良好',
+      'other': '强',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => '置顶';
+
+  @override
+  String get snippetsPlaceholderGroup => '占位符';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': '日期',
+      'dateShort': '日期（短格式）',
+      'dateLong': '日期（长格式）',
+      'dateIso': '日期（ISO 8601）',
+      'dateNextWeek': '一周后的日期',
+      'now': '时间',
+      'dateTime': '日期和时间',
+      'clipboard': '剪贴板',
+      'clipboardPrevious': '上一个剪贴板项目',
+      'field': '填写字段…',
+      'cursor': '光标位置',
+      'uuid': 'UUID',
+      'random': '随机数',
+      'upper': '修饰符：大写',
+      'lower': '修饰符：小写',
+      'trim': '修饰符：去除空格',
+      'other': '占位符',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => '插入另一个片段';
+
+  @override
+  String get snippetsPlaceholderNoMatch => '没有匹配的占位符';
+
+  @override
+  String get snippetsPreviewEmpty => '没有可预览的内容';
+
+  @override
+  String get snippetsPreviewTab => '预览';
+
+  @override
+  String get snippetsPurge => '永久删除';
+
+  @override
+  String get snippetsPurgeMessage => '它们将从你的所有设备上清除。此操作无法撤销。';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '永久删除 $count 个片段？',
+      one: '永久删除片段？',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '“最近删除”为空';
+
+  @override
+  String get snippetsRecordPastedDescription => '将粘贴的片段文本添加到历史记录。隐藏的片段永远不会被记录。';
+
+  @override
+  String get snippetsRecordPastedKeywords => '历史记录 记录 粘贴 片段';
+
+  @override
+  String get snippetsRecordPastedTitle => '在历史记录中记录粘贴的片段';
+
+  @override
+  String get snippetsReplaceOriginal => '替换原剪贴项';
+
+  @override
+  String get snippetsReplaceOriginalHint => '保存后在所有设备上删除原剪贴项。关闭时两者都保留。';
+
+  @override
+  String get snippetsRequireAuthDescription => '在使用或显示隐藏的片段前验证身份。每台设备分别验证。';
+
+  @override
+  String get snippetsRequireAuthKeywords => '隐藏 密码 生物识别 指纹 面容 锁定 验证';
+
+  @override
+  String get snippetsRequireAuthTitle => '使用隐藏的片段前验证身份';
+
+  @override
+  String get snippetsRestore => '恢复';
+
+  @override
+  String get snippetsSaveBlockEmpty => '添加文本后才能保存。';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return '标题超过 $max 个字符。';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => '文本超过 64 KB。';
+
+  @override
+  String get snippetsSaveFailed => '无法保存';
+
+  @override
+  String get snippetsScopeAll => '全部';
+
+  @override
+  String get snippetsScopeEmpty => '这里没有片段';
+
+  @override
+  String get snippetsScopePinned => '置顶';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => '最近删除';
+
+  @override
+  String get snippetsSearchPlaceholder => '搜索片段';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已选择 $count 个',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => '显示';
+
+  @override
+  String get snippetsShowAll => '全部显示';
+
+  @override
+  String get snippetsShowAttention => '检查';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '你有 $count 个片段。最多允许 20,000 个。';
+  }
+
+  @override
+  String get snippetsTemplateBadge => '模板';
+
+  @override
+  String get snippetsTemplateSwitch => '模板';
+
+  @override
+  String get snippetsTitleLabel => '标题';
+
+  @override
+  String get snippetsTitlePlaceholder => '可选';
+
+  @override
+  String get snippetsTransferDescription => '在应用之间迁移片段或保留备份。导出内容默认加密。';
+
+  @override
+  String get snippetsTransferKeywords => '导入 导出 备份 包 json csv 密码短语';
+
+  @override
+  String get snippetsTransferTitle => '导入和导出';
+
+  @override
+  String get snippetsUndo => '撤销';
+
+  @override
+  String get snippetsUnfiled => '未分类';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个占位符将按原样粘贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => '取消置顶';
+
+  @override
+  String get snippetsUnsavedMessage => '关闭前保存更改吗？';
+
+  @override
+  String get snippetsUnsavedTitle => '未保存的更改';
+
+  @override
+  String get snippetsUntitled => '无标题片段';
+
+  @override
+  String get snippetsUpdateReferences => '更新';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return '其他模板可能会插入“$from”。要更新它们以使用“$to”吗？';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '更新引用？';
+
+  @override
+  String get snippetsUseFailed => '无法使用片段';
 }

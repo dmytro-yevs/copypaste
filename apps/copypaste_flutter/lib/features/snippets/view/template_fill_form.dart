@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -32,11 +33,8 @@ class TemplateFillForm extends StatelessWidget {
     final last = controller.snippet.fields.lastOrNull?.name;
     return CallbackShortcuts(
       bindings: {
-        SingleActivator(
-          LogicalKeyboardKey.enter,
-          meta: mod,
-          control: !mod,
-        ): onSubmit,
+        SingleActivator(LogicalKeyboardKey.enter, meta: mod, control: !mod):
+            onSubmit,
       },
       child: ListenableBuilder(
         listenable: controller,

@@ -66,13 +66,13 @@ String quotePlaceholderValue(String value) =>
     '"${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
 enum _PlaceholderKind {
-  date,
+  today,
   dateShort,
   dateLong,
   dateIso,
   dateNextWeek,
-  time,
-  datetime,
+  now,
+  dateTime,
   clipboard,
   clipboardPrevious,
   field,
@@ -104,13 +104,13 @@ class _PlaceholderPalette extends StatelessWidget {
       l10n.snippetsPlaceholderKind(kind.name);
 
   static String? _text(_PlaceholderKind kind) => switch (kind) {
-    _PlaceholderKind.date => '{{date}}',
+    _PlaceholderKind.today => '{{date}}',
     _PlaceholderKind.dateShort => '{{date style=short}}',
     _PlaceholderKind.dateLong => '{{date style=long}}',
     _PlaceholderKind.dateIso => '{{date style=iso}}',
     _PlaceholderKind.dateNextWeek => '{{date offset=+1w}}',
-    _PlaceholderKind.time => '{{time}}',
-    _PlaceholderKind.datetime => '{{datetime}}',
+    _PlaceholderKind.now => '{{time}}',
+    _PlaceholderKind.dateTime => '{{datetime}}',
     _PlaceholderKind.clipboard => '{{clipboard}}',
     _PlaceholderKind.clipboardPrevious => '{{clipboard index=1}}',
     _PlaceholderKind.field => null,

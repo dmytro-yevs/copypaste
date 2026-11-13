@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -188,11 +189,7 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
   Future<void> _import() async {
     final path = await widget.files.chooseImport(context.l10n);
     if (path == null || !mounted) return;
-    await showSnippetImportDialog(
-      context,
-      controller: _controller,
-      path: path,
-    );
+    await showSnippetImportDialog(context, controller: _controller, path: path);
   }
 
   void _activate(SnippetSummary snippet) {
@@ -213,7 +210,11 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
     final mod = defaultTargetPlatform == TargetPlatform.macOS;
     return CallbackShortcuts(
       bindings: {
-        SingleActivator(LogicalKeyboardKey.keyN, meta: mod, control: !mod): () =>
+        SingleActivator(
+          LogicalKeyboardKey.keyN,
+          meta: mod,
+          control: !mod,
+        ): () =>
             unawaited(_newSnippet()),
       },
       child: ListenableBuilder(
@@ -489,8 +490,7 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
   Widget _selectionBar(BuildContext context) {
     final l10n = context.l10n;
     final ids = _controller.selection.toList();
-    final deletedScope =
-        _controller.scope == SnippetListScope.recentlyDeleted;
+    final deletedScope = _controller.scope == SnippetListScope.recentlyDeleted;
     return Card(
       key: const ValueKey('snippets-selection'),
       theme: AppTheme.settingsGroupCardTheme,
@@ -669,7 +669,8 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
           ? () => _controller.toggleSelection(snippet.id)
           : null,
       onCopy: () => unawaited(_copy(snippet)),
-      onPin: () => _run(() => _controller.setPinned(snippet.id, !snippet.pinned)),
+      onPin: () =>
+          _run(() => _controller.setPinned(snippet.id, !snippet.pinned)),
       onDelete: () => unawaited(_delete([snippet.id])),
       onRestore: () => _run(() => _controller.restore([snippet.id])),
       onPurge: () => unawaited(_purge([snippet.id])),
@@ -710,7 +711,9 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
     final l10n = context.l10n;
     return SettingRow(
       key: widget.targets.transfer,
-      highlighted: widget.scope.isHighlighted(SnippetsSettingsTargets.transferId),
+      highlighted: widget.scope.isHighlighted(
+        SnippetsSettingsTargets.transferId,
+      ),
       title: l10n.snippetsTransferTitle,
       description: l10n.snippetsTransferDescription,
       trailing: Wrap(
@@ -775,14 +778,16 @@ class _SnippetsSettingsViewState extends State<SnippetsSettingsView> {
       value: _controller.preferences.requireAuth,
       onChanged: _controller.busy
           ? null
-          : (value) => _run(
-              () => _controller.setPreference(
-                SnippetPreference.requireAuth,
-                value,
-              ),
-            ),
+          : (value) => unawaited(_setRequireAuth(value)),
     ),
   );
+
+  /// Turning the protection off needs the device owner, like using a
+  /// concealed snippet does.
+  Future<void> _setRequireAuth(bool value) async {
+    if (!value && !await ensureOwnerAccess(context, _controller)) return;
+    await _controller.setPreference(SnippetPreference.requireAuth, value);
+  }
 }
 
 class _SnippetRow extends StatelessWidget {
@@ -847,7 +852,8 @@ class _SnippetRow extends StatelessWidget {
             child: Text(abbreviation),
           ),
         ),
-      if (snippet.template) OutlineBadge(child: Text(l10n.snippetsTemplateBadge)),
+      if (snippet.template)
+        OutlineBadge(child: Text(l10n.snippetsTemplateBadge)),
       if (snippet.duplicateAbbreviation)
         DestructiveBadge(child: Text(l10n.snippetsDuplicateBadge)),
       if (snippet.conflictCopy)

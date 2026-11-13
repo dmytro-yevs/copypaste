@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -149,7 +150,11 @@ class _SnippetEditorDrawerState extends State<SnippetEditorDrawer> {
   Future<void> _reveal() async {
     final snippet = widget.snippet;
     if (snippet == null) return;
-    if (await ensureSnippetAccess(context, widget.controller, snippet.summary)) {
+    if (await ensureSnippetAccess(
+      context,
+      widget.controller,
+      snippet.summary,
+    )) {
       if (mounted) setState(() => _revealed = true);
     }
   }

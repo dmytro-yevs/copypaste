@@ -2,6 +2,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
 import '../controller/snippets_controller.dart';
@@ -93,9 +94,8 @@ class _CollectionEditorState extends State<_CollectionEditor> {
             onChanged: (value) {
               if (value != null) setState(() => _icon = value);
             },
-            itemBuilder: (context, icon) => AppIconFrame(
-              child: Icon(SnippetCollectionStyle.icon(icon)),
-            ),
+            itemBuilder: (context, icon) =>
+                AppIconFrame(child: Icon(SnippetCollectionStyle.icon(icon))),
             popup: SelectPopup<SnippetCollectionIcon>(
               items: SelectItemList(
                 children: [
@@ -135,12 +135,14 @@ class _CollectionEditorState extends State<_CollectionEditor> {
       actions: [
         Button.ghost(
           alignment: Alignment.center,
+          style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),
           onPressed: () => Navigator.pop(context),
           child: Text(l10n.commonCancel),
         ),
         Button.primary(
           key: const ValueKey('snippet-collection-save'),
           alignment: Alignment.center,
+          style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
           onPressed: !valid || widget.controller.busy
               ? null
               : () async {
@@ -224,11 +226,10 @@ Future<void> showDeleteSnippetCollectionDialog(
     ),
     actionLabel: context.l10n.commonDelete,
     failureMessage: () => controller.errorMessage ?? '',
-    onConfirm: () =>
-        controller.deleteCollection(
-          collection.id,
-          deleteSnippets: deleteSnippets,
-        ),
+    onConfirm: () => controller.deleteCollection(
+      collection.id,
+      deleteSnippets: deleteSnippets,
+    ),
   );
 }
 
@@ -257,9 +258,8 @@ Future<void> showMergeSnippetCollectionDialog(
         onChanged: (value) {
           if (value != null) setState(() => into = value);
         },
-        itemBuilder: (context, id) => Text(
-          targets.firstWhere((target) => target.id == id).displayName,
-        ),
+        itemBuilder: (context, id) =>
+            Text(targets.firstWhere((target) => target.id == id).displayName),
         popup: SelectPopup<String>(
           items: SelectItemList(
             children: [

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -5115,4 +5114,748 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get quickAccessWidgetKeywords =>
       'tela inicial widget launcher recentes';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Abreviação $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Abreviação';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Opcional, por exemplo ass';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Já usada por “$title”';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Use no máximo $max caracteres.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Uma abreviação não pode conter espaços nem caracteres de controle.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trechos precisam de revisão após uma sincronização',
+      one: '1 trecho precisa de revisão após uma sincronização',
+      zero: 'Nenhum trecho precisa de revisão',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Texto';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Digite o texto do trecho';
+
+  @override
+  String get snippetsClearSelection => 'Limpar seleção';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Grande demais para editar. Este clipe abre somente para leitura.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Neutro',
+      'blue': 'Azul',
+      'green': 'Verde',
+      'amber': 'Âmbar',
+      'red': 'Vermelho',
+      'other': 'Neutro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Cor de destaque';
+
+  @override
+  String get snippetsCollectionIcon => 'Ícone';
+
+  @override
+  String get snippetsCollectionLabel => 'Coleção';
+
+  @override
+  String get snippetsCollectionName => 'Nome';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'Já existe uma coleção com este nome.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Use no máximo $max caracteres.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Este trecho está oculto.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Continuar';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Este dispositivo não tem senha, PIN nem biometria para verificar você. Continue apenas se o dispositivo for seu.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Confirme que é você';
+
+  @override
+  String get snippetsConcealedPreview => 'Trecho oculto';
+
+  @override
+  String get snippetsConcealedSwitch => 'Oculto';
+
+  @override
+  String get snippetsConcealedTitle => 'Trecho oculto';
+
+  @override
+  String get snippetsConflictBadge => 'Cópia em conflito';
+
+  @override
+  String get snippetsCopied => 'Copiado';
+
+  @override
+  String get snippetsCreate => 'Criar trecho';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Criar o trecho “$query”';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Excluir coleção';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Mover os trechos para Sem coleção';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return 'Excluir “$name”?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets =>
+      'Excluir os trechos também';
+
+  @override
+  String get snippetsDeletedMessage => 'Movido para Excluídos recentemente.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trechos excluídos',
+      one: 'Trecho excluído',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Salvar em';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Clipe do histórico',
+      'snippet': 'Trecho',
+      'other': 'Clipe do histórico',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Descartar';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trechos',
+      one: '1 trecho',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Outro trecho recebeu a mesma abreviação em uma sincronização. Altere uma delas.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Abreviação duplicada';
+
+  @override
+  String get snippetsEditClip => 'Editar clipe';
+
+  @override
+  String get snippetsEditCollection => 'Editar coleção';
+
+  @override
+  String get snippetsEditSnippet => 'Editar trecho';
+
+  @override
+  String get snippetsEditTab => 'Editar';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Dê uma abreviação a um trecho e digite-a no Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'Ainda não há trechos';
+
+  @override
+  String get snippetsEnableTemplate => 'Ativar';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Os marcadores só funcionam em modelos. O texto que já parece um marcador também será preenchido.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Ativar Modelo?';
+
+  @override
+  String get snippetsExport => 'Exportar';
+
+  @override
+  String get snippetsExportCollection => 'Exportar coleção';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Incluir trechos ocultos no arquivo legível';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trechos gravados',
+      one: '1 trecho gravado',
+      zero: 'Nenhum trecho gravado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Trechos exportados';
+
+  @override
+  String get snippetsExportEncrypt => 'Criptografar com frase secreta';
+
+  @override
+  String get snippetsExportFailed => 'Falha na exportação';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Entendo que qualquer pessoa com o arquivo pode lê-lo';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Todos os trechos',
+      'collections': 'Esta coleção',
+      'snippets': 'Trechos selecionados ($count)',
+      'other': 'Todos os trechos',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Exportar trechos';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Inserir campo';
+
+  @override
+  String get snippetsFieldDefault => 'Valor padrão';
+
+  @override
+  String get snippetsFieldName => 'Nome';
+
+  @override
+  String get snippetsFieldOptions => 'Opções, separadas por vírgulas';
+
+  @override
+  String get snippetsFieldRequired => 'Preencha este campo.';
+
+  @override
+  String get snippetsFieldType => 'Tipo';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Uma linha',
+      'multiline': 'Várias linhas',
+      'choice': 'Escolha',
+      'other': 'Uma linha',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'A formatação será removida ao salvar.';
+
+  @override
+  String get snippetsGoToSnippet => 'Ir para o trecho';
+
+  @override
+  String get snippetsImport => 'Importar';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Abreviação já em uso';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Importar sem abreviação',
+      'renameWithSuffix': 'Adicionar um número à abreviação',
+      'skip': 'Ignorar',
+      'other': 'Importar sem abreviação',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Coleção com o mesmo nome';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Adicionar à existente',
+      'createNew': 'Criar uma nova',
+      'other': 'Adicionar à existente',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Converter marcadores conhecidos';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Novos: $added. Idênticos, ignorados: $identical. Alterados: $updated. Conflitos de abreviação: $conflicts. Inválidos: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Trechos importados';
+
+  @override
+  String get snippetsImportFailed => 'Falha na importação';
+
+  @override
+  String get snippetsImportFileType => 'Arquivos de trechos';
+
+  @override
+  String get snippetsImportFormat => 'Formato';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'Pacote do CopyPaste',
+      'json': 'Lista JSON',
+      'csv': 'CSV',
+      'other': 'Pacote do CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Linha $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Linhas que não serão importadas';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Frase secreta, se o arquivo estiver criptografado';
+
+  @override
+  String get snippetsImportPreview => 'Pré-visualizar';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Adicionados: $inserted. Atualizados: $updated. Ignorados: $skipped. Abreviações para revisar: $flagged. Marcadores não reconhecidos: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Mesmo trecho, conteúdo diferente';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Manter os dois',
+      'replace': 'Substituir o existente',
+      'skip': 'Ignorar',
+      'other': 'Manter os dois',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Importar trechos';
+
+  @override
+  String get snippetsInsert => 'Inserir';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Inserir marcador';
+
+  @override
+  String get snippetsKeepReferences => 'Manter como estão';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Navegue, organize e edite trechos e coleções.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'trechos modelos abreviações coleções texto snippets';
+
+  @override
+  String get snippetsLibraryTitle => 'Biblioteca de trechos';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Este marcador nunca é fechado.',
+      'malformed': 'Não é possível ler este marcador.',
+      'unknownPlaceholder':
+          'Marcador desconhecido “$detail”. Ele é colado como foi digitado.',
+      'unknownParameter': 'Opção desconhecida “$detail”.',
+      'duplicateParameter': 'A opção “$detail” aparece duas vezes.',
+      'missingParameter': 'Falta a opção “$detail”.',
+      'invalidValue': 'A opção “$detail” tem um valor inválido.',
+      'conflictingParameters': 'Estas opções não podem ser usadas juntas.',
+      'unknownLocale': 'Idioma desconhecido.',
+      'unknownTimeZone': 'Fuso horário desconhecido.',
+      'invalidPattern': 'Padrão de data inválido.',
+      'dateOutOfRange': 'A data está fora do intervalo.',
+      'unknownModifier': 'Modificador desconhecido “$detail”.',
+      'modifierFailed': 'Não foi possível aplicar o modificador “$detail”.',
+      'emptyClipboard': 'O item $detail da área de transferência está vazio.',
+      'extraCursor': 'Só o primeiro marcador de cursor é usado.',
+      'nestedCursor': 'Um cursor dentro de um trecho inserido é ignorado.',
+      'tooManyFields': 'O campo “$detail” passa do limite de 10 campos.',
+      'conflictingField':
+          'O campo “$detail” está definido duas vezes com configurações diferentes.',
+      'choiceDefaultNotOption':
+          'O valor padrão de “$detail” não é uma das opções.',
+      'cycle': 'Trechos inserem uns aos outros em loop: $detail.',
+      'depthExceeded': 'Trechos inseridos em mais de 3 níveis.',
+      'nestingLimit': 'Trechos inseridos demais.',
+      'unknownSnippet': 'Nenhum trecho tem esta abreviação.',
+      'containsPlaceholders':
+          'O texto contém marcadores. Ative Modelo para preenchê-los.',
+      'other': 'Há um problema neste marcador.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Não foi possível carregar os trechos';
+
+  @override
+  String get snippetsLoadMore => 'Carregar mais';
+
+  @override
+  String get snippetsMerge => 'Mesclar';
+
+  @override
+  String get snippetsMergeCollection => 'Mesclar com outra coleção';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Mesclar “$name” com';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Mover para';
+
+  @override
+  String get snippetsNewCollection => 'Nova coleção';
+
+  @override
+  String get snippetsNewSnippet => 'Novo trecho';
+
+  @override
+  String get snippetsNewText => 'Novo texto';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'Nenhum trecho corresponde a “$query”';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Repita a frase secreta';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Frase secreta, pelo menos $min caracteres';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Frase secreta';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Uma frase secreta esquecida não pode ser recuperada.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Curta demais',
+      'weak': 'Fraca',
+      'fair': 'Razoável',
+      'good': 'Boa',
+      'other': 'Forte',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Fixado';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Marcadores';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Data',
+      'dateShort': 'Data, curta',
+      'dateLong': 'Data, longa',
+      'dateIso': 'Data, ISO 8601',
+      'dateNextWeek': 'Data daqui a uma semana',
+      'now': 'Hora',
+      'dateTime': 'Data e hora',
+      'clipboard': 'Área de transferência',
+      'clipboardPrevious': 'Item anterior da área de transferência',
+      'field': 'Campo para preencher…',
+      'cursor': 'Posição do cursor',
+      'uuid': 'UUID',
+      'random': 'Número aleatório',
+      'upper': 'Modificador: maiúsculas',
+      'lower': 'Modificador: minúsculas',
+      'trim': 'Modificador: remover espaços',
+      'other': 'Marcador',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Inserir outro trecho';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Nenhum marcador corresponde';
+
+  @override
+  String get snippetsPreviewEmpty => 'Nada para mostrar';
+
+  @override
+  String get snippetsPreviewTab => 'Pré-visualização';
+
+  @override
+  String get snippetsPurge => 'Excluir permanentemente';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Eles serão apagados em todos os seus dispositivos. Isso não pode ser desfeito.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Excluir $count trechos permanentemente?',
+      one: 'Excluir o trecho permanentemente?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty =>
+      'Excluídos recentemente está vazio';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Adiciona ao histórico o texto dos trechos colados. Trechos ocultos nunca são registrados.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'histórico registrar colados trechos';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Registrar trechos colados no histórico';
+
+  @override
+  String get snippetsReplaceOriginal => 'Substituir o original';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Exclui o clipe original em todos os dispositivos depois de salvar. Desativado, os dois ficam.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Confirme que é você antes de usar ou mostrar um trecho oculto. Cada dispositivo pede separadamente.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'oculto senha biometria digital rosto bloqueio verificar';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Verificar antes de usar trechos ocultos';
+
+  @override
+  String get snippetsRestore => 'Restaurar';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Adicione texto para salvar.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'O título tem mais de $max caracteres.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'O texto tem mais de 64 KB.';
+
+  @override
+  String get snippetsSaveFailed => 'Não foi possível salvar';
+
+  @override
+  String get snippetsScopeAll => 'Todos';
+
+  @override
+  String get snippetsScopeEmpty => 'Nenhum trecho aqui';
+
+  @override
+  String get snippetsScopePinned => 'Fixados';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Excluídos recentemente';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Pesquisar trechos';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count selecionados',
+      one: '1 selecionado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Mostrar';
+
+  @override
+  String get snippetsShowAll => 'Mostrar todos';
+
+  @override
+  String get snippetsShowAttention => 'Revisar';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'Você tem $count trechos. São permitidos até 20.000.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Modelo';
+
+  @override
+  String get snippetsTemplateSwitch => 'Modelo';
+
+  @override
+  String get snippetsTitleLabel => 'Título';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Opcional';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Leve trechos entre apps ou mantenha um backup. As exportações são criptografadas por padrão.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'importar exportar backup pacote json csv frase secreta';
+
+  @override
+  String get snippetsTransferTitle => 'Importar e exportar';
+
+  @override
+  String get snippetsUndo => 'Desfazer';
+
+  @override
+  String get snippetsUnfiled => 'Sem coleção';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count marcadores são colados como foram digitados',
+      one: '1 marcador é colado como foi digitado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Desafixar';
+
+  @override
+  String get snippetsUnsavedMessage => 'Salvar as alterações antes de fechar?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Alterações não salvas';
+
+  @override
+  String get snippetsUntitled => 'Trecho sem título';
+
+  @override
+  String get snippetsUpdateReferences => 'Atualizar';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Outros modelos podem inserir “$from”. Atualizá-los para usar “$to”?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Atualizar referências?';
+
+  @override
+  String get snippetsUseFailed => 'Não foi possível usar o trecho';
 }

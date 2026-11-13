@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -83,8 +84,7 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
 
   bool get _editing => widget.clip != null;
   bool get _readOnly => widget.clip?.tooLarge ?? false;
-  bool get _dirty =>
-      !_readOnly && _text.text != (widget.clip?.text ?? '');
+  bool get _dirty => !_readOnly && _text.text != (widget.clip?.text ?? '');
   bool get _empty => _text.text.trim().isEmpty;
 
   @override
@@ -143,7 +143,9 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
           replaceOriginal: _replaceOriginal,
         );
       } else if (_destination == ClipEditDestination.snippet) {
-        final outcome = await widget.snippets.save(SnippetDraft(bodyText: text));
+        final outcome = await widget.snippets.save(
+          SnippetDraft(bodyText: text),
+        );
         id = switch (outcome) {
           SnippetSaved(:final detail) => detail.id,
           SnippetAbbreviationTaken() => throw StateError('no abbreviation'),
@@ -211,9 +213,7 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
                         onPressed: () => unawaited(_close()),
                         child: Semantics(
                           label: l10n.commonClose,
-                          child: const AppIconFrame(
-                            child: Icon(LucideIcons.x),
-                          ),
+                          child: const AppIconFrame(child: Icon(LucideIcons.x)),
                         ),
                       ),
                     ],

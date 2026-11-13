@@ -24,10 +24,8 @@ class SnippetEditorRequest {
 /// the list, search results and change subscription when the last view
 /// detaches, so a closed section holds no snippet content.
 class SnippetsController extends ChangeNotifier {
-  SnippetsController({
-    required SnippetRepository repository,
-    this.access,
-  }) : _repository = repository;
+  SnippetsController({required SnippetRepository repository, this.access})
+    : _repository = repository;
 
   final SnippetRepository _repository;
 
@@ -110,12 +108,11 @@ class SnippetsController extends ChangeNotifier {
   SnippetCollection? collection(String? id) =>
       _collections.where((collection) => collection.id == id).firstOrNull;
 
-  bool collectionNameTaken(String name, {String? exceptId}) =>
-      _collections.any(
-        (collection) =>
-            collection.id != exceptId &&
-            collection.name.toLowerCase() == name.trim().toLowerCase(),
-      );
+  bool collectionNameTaken(String name, {String? exceptId}) => _collections.any(
+    (collection) =>
+        collection.id != exceptId &&
+        collection.name.toLowerCase() == name.trim().toLowerCase(),
+  );
 
   void attach() {
     if (_attached++ > 0) return;
@@ -335,13 +332,12 @@ class SnippetsController extends ChangeNotifier {
         if (_scope.collectionId == id) _scope = SnippetListScope.all;
       });
 
-  Future<bool> mergeCollections(String from, String into) =>
-      _mutate(() async {
-        await _repository.mergeCollections(from, into);
-        if (_scope.collectionId == from) {
-          _scope = SnippetListScope.collection(into);
-        }
-      });
+  Future<bool> mergeCollections(String from, String into) => _mutate(() async {
+    await _repository.mergeCollections(from, into);
+    if (_scope.collectionId == from) {
+      _scope = SnippetListScope.collection(into);
+    }
+  });
 
   Future<bool> setPreference(SnippetPreference preference, bool value) =>
       _mutate(
@@ -352,18 +348,16 @@ class SnippetsController extends ChangeNotifier {
   /// Copies a snippet's output; [values] fill its template fields.
   Future<bool> copy(String id, {Map<String, String> values = const {}}) =>
       _mutate(
-        () => _repository.use(
-          id,
-          values: values,
-          delivery: SnippetDelivery.copy,
-        ),
+        () =>
+            _repository.use(id, values: values, delivery: SnippetDelivery.copy),
       );
 
+  /// Whether `snippets.require_auth` is on and the unlock window is closed.
+  bool get ownerLocked =>
+      _preferences.requireAuth && !(access?.unlocked ?? false);
+
   /// Whether using or revealing [snippet] needs the device owner first.
-  bool needsUnlock(SnippetSummary snippet) =>
-      snippet.concealed &&
-      _preferences.requireAuth &&
-      !(access?.unlocked ?? false);
+  bool needsUnlock(SnippetSummary snippet) => snippet.concealed && ownerLocked;
 
   @override
   void notifyListeners() {

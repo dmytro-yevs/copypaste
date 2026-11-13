@@ -23,16 +23,16 @@ extension SnippetMessages on AppLocalizations {
         SnippetSaveBlock.titleTooLong => snippetsSaveBlockTitle(
           SnippetLimits.maxTitle,
         ),
-        SnippetSaveBlock.abbreviationTooLong =>
-          snippetsAbbreviationTooLong(SnippetLimits.maxAbbreviationGraphemes),
+        SnippetSaveBlock.abbreviationTooLong => snippetsAbbreviationTooLong(
+          SnippetLimits.maxAbbreviationGraphemes,
+        ),
         SnippetSaveBlock.abbreviationWhitespace =>
           snippetsAbbreviationWhitespace,
         SnippetSaveBlock.abbreviationTaken => snippetsAbbreviationTaken(owner),
       };
 
   /// The list title of [snippet]; concealed ones never show their body.
-  String snippetTitle(SnippetSummary snippet) =>
-      snippet.title.trim().isNotEmpty
+  String snippetTitle(SnippetSummary snippet) => snippet.title.trim().isNotEmpty
       ? snippet.title.trim()
       : snippet.concealed
       ? snippetsConcealedTitle

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4738,4 +4737,719 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => '홈 화면 위젯 런처 최근';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return '약어 $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => '약어';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => '선택 사항, 예: sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return '“$title”에서 이미 사용 중입니다';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return '최대 $max자까지 사용하세요.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace => '약어에는 공백이나 제어 문자를 사용할 수 없습니다.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '동기화 후 검토가 필요한 스니펫 $count개',
+      zero: '검토할 스니펫이 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => '텍스트';
+
+  @override
+  String get snippetsBodyPlaceholder => '스니펫 텍스트 입력';
+
+  @override
+  String get snippetsClearSelection => '선택 해제';
+
+  @override
+  String get snippetsClipTooLarge => '너무 커서 편집할 수 없습니다. 이 클립은 읽기 전용으로 열립니다.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': '중립',
+      'blue': '파랑',
+      'green': '초록',
+      'amber': '호박색',
+      'red': '빨강',
+      'other': '중립',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => '강조 색상';
+
+  @override
+  String get snippetsCollectionIcon => '아이콘';
+
+  @override
+  String get snippetsCollectionLabel => '컬렉션';
+
+  @override
+  String get snippetsCollectionName => '이름';
+
+  @override
+  String get snippetsCollectionNameTaken => '이 이름의 컬렉션이 이미 있습니다.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return '최대 $max자까지 사용하세요.';
+  }
+
+  @override
+  String get snippetsConcealedBody => '이 스니펫은 숨겨져 있습니다.';
+
+  @override
+  String get snippetsConcealedConfirmAction => '계속';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      '이 기기에는 본인 확인에 사용할 암호, PIN 또는 생체 인식이 없습니다. 본인 기기인 경우에만 계속하세요.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => '본인 확인';
+
+  @override
+  String get snippetsConcealedPreview => '숨김 스니펫';
+
+  @override
+  String get snippetsConcealedSwitch => '숨김';
+
+  @override
+  String get snippetsConcealedTitle => '숨김 스니펫';
+
+  @override
+  String get snippetsConflictBadge => '충돌 사본';
+
+  @override
+  String get snippetsCopied => '복사됨';
+
+  @override
+  String get snippetsCreate => '스니펫 만들기';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '“$query” 스니펫 만들기';
+  }
+
+  @override
+  String get snippetsDeleteCollection => '컬렉션 삭제';
+
+  @override
+  String get snippetsDeleteCollectionMove => '스니펫을 미분류로 이동';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '“$name”을(를) 삭제할까요?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => '스니펫도 삭제';
+
+  @override
+  String get snippetsDeletedMessage => '최근 삭제된 항목으로 이동했습니다.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 삭제했습니다',
+      one: '스니펫을 삭제했습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => '저장 위치';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': '기록 클립',
+      'snippet': '스니펫',
+      'other': '기록 클립',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => '버리기';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      '동기화 중 다른 스니펫이 같은 약어를 받았습니다. 둘 중 하나를 변경하세요.';
+
+  @override
+  String get snippetsDuplicateBadge => '중복 약어';
+
+  @override
+  String get snippetsEditClip => '클립 편집';
+
+  @override
+  String get snippetsEditCollection => '컬렉션 편집';
+
+  @override
+  String get snippetsEditSnippet => '스니펫 편집';
+
+  @override
+  String get snippetsEditTab => '편집';
+
+  @override
+  String get snippetsEmptyMessage => '스니펫에 약어를 지정한 다음 Quick Paste에서 입력하세요.';
+
+  @override
+  String get snippetsEmptyTitle => '아직 스니펫이 없습니다';
+
+  @override
+  String get snippetsEnableTemplate => '켜기';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      '자리 표시자는 템플릿에서만 작동합니다. 이미 자리 표시자처럼 보이는 텍스트도 채워집니다.';
+
+  @override
+  String get snippetsEnableTemplateTitle => '템플릿을 켤까요?';
+
+  @override
+  String get snippetsExport => '내보내기';
+
+  @override
+  String get snippetsExportCollection => '컬렉션 내보내기';
+
+  @override
+  String get snippetsExportConcealedConfirm => '읽을 수 있는 파일에 숨김 스니펫 포함';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 기록했습니다',
+      zero: '기록된 스니펫이 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => '스니펫을 내보냈습니다';
+
+  @override
+  String get snippetsExportEncrypt => '암호 문구로 암호화';
+
+  @override
+  String get snippetsExportFailed => '내보내기 실패';
+
+  @override
+  String get snippetsExportPlainConfirm => '파일이 있는 누구나 읽을 수 있음을 이해합니다';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': '모든 스니펫',
+      'collections': '이 컬렉션',
+      'snippets': '선택한 스니펫($count)',
+      'other': '모든 스니펫',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => '스니펫 내보내기';
+
+  @override
+  String get snippetsFieldBuilderTitle => '필드 삽입';
+
+  @override
+  String get snippetsFieldDefault => '기본값';
+
+  @override
+  String get snippetsFieldName => '이름';
+
+  @override
+  String get snippetsFieldOptions => '옵션(쉼표로 구분)';
+
+  @override
+  String get snippetsFieldRequired => '이 필드를 입력하세요.';
+
+  @override
+  String get snippetsFieldType => '유형';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': '한 줄',
+      'multiline': '여러 줄',
+      'choice': '선택',
+      'other': '한 줄',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => '저장하면 서식이 제거됩니다.';
+
+  @override
+  String get snippetsGoToSnippet => '스니펫으로 이동';
+
+  @override
+  String get snippetsImport => '가져오기';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => '이미 사용 중인 약어';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': '약어 없이 가져오기',
+      'renameWithSuffix': '약어에 번호 추가',
+      'skip': '건너뛰기',
+      'other': '약어 없이 가져오기',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => '이름이 같은 컬렉션';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': '기존 컬렉션에 추가',
+      'createNew': '새로 만들기',
+      'other': '기존 컬렉션에 추가',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => '알려진 자리 표시자 변환';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return '새 항목: $added. 동일, 건너뜀: $identical. 변경됨: $updated. 약어 충돌: $conflicts. 잘못됨: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => '스니펫을 가져왔습니다';
+
+  @override
+  String get snippetsImportFailed => '가져오기 실패';
+
+  @override
+  String get snippetsImportFileType => '스니펫 파일';
+
+  @override
+  String get snippetsImportFormat => '형식';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste 번들',
+      'json': 'JSON 목록',
+      'csv': 'CSV',
+      'other': 'CopyPaste 번들',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return '$row행: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => '가져오지 않을 행';
+
+  @override
+  String get snippetsImportPassphraseHint => '암호 문구(파일이 암호화된 경우)';
+
+  @override
+  String get snippetsImportPreview => '미리 보기';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return '추가: $inserted. 업데이트: $updated. 건너뜀: $skipped. 검토할 약어: $flagged. 인식되지 않은 자리 표시자: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => '같은 스니펫, 다른 내용';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': '둘 다 유지',
+      'replace': '기존 항목 바꾸기',
+      'skip': '건너뛰기',
+      'other': '둘 다 유지',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => '스니펫 가져오기';
+
+  @override
+  String get snippetsInsert => '삽입';
+
+  @override
+  String get snippetsInsertPlaceholder => '자리 표시자 삽입';
+
+  @override
+  String get snippetsKeepReferences => '그대로 두기';
+
+  @override
+  String get snippetsLibraryDescription => '스니펫과 컬렉션을 둘러보고, 정리하고, 편집합니다.';
+
+  @override
+  String get snippetsLibraryKeywords => '스니펫 템플릿 약어 컬렉션 텍스트 상용구';
+
+  @override
+  String get snippetsLibraryTitle => '스니펫 라이브러리';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': '이 자리 표시자가 닫히지 않았습니다.',
+      'malformed': '이 자리 표시자를 읽을 수 없습니다.',
+      'unknownPlaceholder': '알 수 없는 자리 표시자 “$detail”. 입력한 그대로 붙여 넣습니다.',
+      'unknownParameter': '알 수 없는 옵션 “$detail”.',
+      'duplicateParameter': '옵션 “$detail”이(가) 두 번 지정되었습니다.',
+      'missingParameter': '옵션 “$detail”이(가) 없습니다.',
+      'invalidValue': '옵션 “$detail”의 값이 잘못되었습니다.',
+      'conflictingParameters': '이 옵션들은 함께 사용할 수 없습니다.',
+      'unknownLocale': '알 수 없는 언어입니다.',
+      'unknownTimeZone': '알 수 없는 시간대입니다.',
+      'invalidPattern': '날짜 패턴이 잘못되었습니다.',
+      'dateOutOfRange': '날짜가 범위를 벗어났습니다.',
+      'unknownModifier': '알 수 없는 수정자 “$detail”.',
+      'modifierFailed': '수정자 “$detail”을(를) 적용할 수 없습니다.',
+      'emptyClipboard': '클립보드 항목 $detail이(가) 비어 있습니다.',
+      'extraCursor': '첫 번째 커서 자리 표시자만 사용됩니다.',
+      'nestedCursor': '삽입된 스니펫 안의 커서는 무시됩니다.',
+      'tooManyFields': '필드 “$detail”이(가) 10개 필드 한도를 넘습니다.',
+      'conflictingField': '필드 “$detail”이(가) 다른 설정으로 두 번 정의되었습니다.',
+      'choiceDefaultNotOption': '“$detail”의 기본값이 옵션에 없습니다.',
+      'cycle': '스니펫이 서로를 순환하여 삽입합니다: $detail.',
+      'depthExceeded': '스니펫이 3단계보다 깊게 삽입되었습니다.',
+      'nestingLimit': '삽입된 스니펫이 너무 많습니다.',
+      'unknownSnippet': '이 약어를 가진 스니펫이 없습니다.',
+      'containsPlaceholders': '텍스트에 자리 표시자가 있습니다. 채우려면 템플릿을 켜세요.',
+      'other': '이 자리 표시자에 문제가 있습니다.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => '스니펫을 불러올 수 없습니다';
+
+  @override
+  String get snippetsLoadMore => '더 불러오기';
+
+  @override
+  String get snippetsMerge => '병합';
+
+  @override
+  String get snippetsMergeCollection => '다른 컬렉션에 병합';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '“$name” 병합 대상';
+  }
+
+  @override
+  String get snippetsMoveTo => '이동할 위치';
+
+  @override
+  String get snippetsNewCollection => '새 컬렉션';
+
+  @override
+  String get snippetsNewSnippet => '새 스니펫';
+
+  @override
+  String get snippetsNewText => '새 텍스트';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '“$query”와(과) 일치하는 스니펫이 없습니다';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => '암호 문구 다시 입력';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return '암호 문구, $min자 이상';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => '암호 문구';
+
+  @override
+  String get snippetsPassphraseNoRecovery => '잊어버린 암호 문구는 복구할 수 없습니다.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': '너무 짧음',
+      'weak': '약함',
+      'fair': '보통',
+      'good': '좋음',
+      'other': '강함',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => '고정됨';
+
+  @override
+  String get snippetsPlaceholderGroup => '자리 표시자';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': '날짜',
+      'dateShort': '날짜, 짧게',
+      'dateLong': '날짜, 길게',
+      'dateIso': '날짜, ISO 8601',
+      'dateNextWeek': '일주일 후 날짜',
+      'now': '시간',
+      'dateTime': '날짜 및 시간',
+      'clipboard': '클립보드',
+      'clipboardPrevious': '이전 클립보드 항목',
+      'field': '입력 필드…',
+      'cursor': '커서 위치',
+      'uuid': 'UUID',
+      'random': '임의의 숫자',
+      'upper': '수정자: 대문자',
+      'lower': '수정자: 소문자',
+      'trim': '수정자: 공백 제거',
+      'other': '자리 표시자',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => '다른 스니펫 삽입';
+
+  @override
+  String get snippetsPlaceholderNoMatch => '일치하는 자리 표시자가 없습니다';
+
+  @override
+  String get snippetsPreviewEmpty => '미리 볼 내용이 없습니다';
+
+  @override
+  String get snippetsPreviewTab => '미리 보기';
+
+  @override
+  String get snippetsPurge => '영구 삭제';
+
+  @override
+  String get snippetsPurgeMessage => '모든 기기에서 지워집니다. 이 작업은 되돌릴 수 없습니다.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 영구 삭제할까요?',
+      one: '스니펫을 영구 삭제할까요?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '최근 삭제된 항목이 없습니다';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      '붙여 넣은 스니펫 텍스트를 기록에 추가합니다. 숨김 스니펫은 기록되지 않습니다.';
+
+  @override
+  String get snippetsRecordPastedKeywords => '기록 저장 붙여넣기 스니펫';
+
+  @override
+  String get snippetsRecordPastedTitle => '붙여 넣은 스니펫을 기록에 저장';
+
+  @override
+  String get snippetsReplaceOriginal => '원본 바꾸기';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      '저장 후 모든 기기에서 원본 클립을 삭제합니다. 끄면 둘 다 남습니다.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      '숨김 스니펫을 사용하거나 표시하기 전에 본인 확인을 합니다. 기기마다 따로 확인합니다.';
+
+  @override
+  String get snippetsRequireAuthKeywords => '숨김 암호 생체 인식 지문 얼굴 잠금 확인';
+
+  @override
+  String get snippetsRequireAuthTitle => '숨김 스니펫 사용 전 본인 확인';
+
+  @override
+  String get snippetsRestore => '복원';
+
+  @override
+  String get snippetsSaveBlockEmpty => '저장하려면 텍스트를 입력하세요.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return '제목이 $max자를 넘습니다.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => '텍스트가 64KB를 넘습니다.';
+
+  @override
+  String get snippetsSaveFailed => '저장할 수 없습니다';
+
+  @override
+  String get snippetsScopeAll => '전체';
+
+  @override
+  String get snippetsScopeEmpty => '스니펫이 없습니다';
+
+  @override
+  String get snippetsScopePinned => '고정됨';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => '최근 삭제된 항목';
+
+  @override
+  String get snippetsSearchPlaceholder => '스니펫 검색';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 선택됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => '보기';
+
+  @override
+  String get snippetsShowAll => '모두 보기';
+
+  @override
+  String get snippetsShowAttention => '검토';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '스니펫이 $count개 있습니다. 최대 20,000개까지 허용됩니다.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => '템플릿';
+
+  @override
+  String get snippetsTemplateSwitch => '템플릿';
+
+  @override
+  String get snippetsTitleLabel => '제목';
+
+  @override
+  String get snippetsTitlePlaceholder => '선택 사항';
+
+  @override
+  String get snippetsTransferDescription =>
+      '앱 간에 스니펫을 옮기거나 백업을 보관하세요. 내보내기는 기본적으로 암호화됩니다.';
+
+  @override
+  String get snippetsTransferKeywords => '가져오기 내보내기 백업 번들 json csv 암호 문구';
+
+  @override
+  String get snippetsTransferTitle => '가져오기 및 내보내기';
+
+  @override
+  String get snippetsUndo => '실행 취소';
+
+  @override
+  String get snippetsUnfiled => '미분류';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '자리 표시자 $count개가 입력한 그대로 붙여 넣어집니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => '고정 해제';
+
+  @override
+  String get snippetsUnsavedMessage => '닫기 전에 변경 사항을 저장할까요?';
+
+  @override
+  String get snippetsUnsavedTitle => '저장되지 않은 변경 사항';
+
+  @override
+  String get snippetsUntitled => '제목 없는 스니펫';
+
+  @override
+  String get snippetsUpdateReferences => '업데이트';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return '다른 템플릿이 “$from”을(를) 삽입할 수 있습니다. “$to”을(를) 사용하도록 업데이트할까요?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '참조를 업데이트할까요?';
+
+  @override
+  String get snippetsUseFailed => '스니펫을 사용할 수 없습니다';
 }

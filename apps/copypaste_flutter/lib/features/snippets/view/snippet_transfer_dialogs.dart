@@ -124,7 +124,8 @@ class _ImportDialogState extends State<_ImportDialog> {
     final plan = await widget.controller.repository.previewImport(
       widget.path,
       format: _format,
-      passphrase: _format == SnippetImportFormat.bundle && _passphrase.isNotEmpty
+      passphrase:
+          _format == SnippetImportFormat.bundle && _passphrase.isNotEmpty
           ? _passphrase
           : null,
       convertPlaceholders: _format != SnippetImportFormat.bundle && _convert,
@@ -392,6 +393,8 @@ class _ExportDialogState extends State<_ExportDialog> {
   bool _working = false;
   String? _error;
 
+  static const _strengthNames = ['tooShort', 'weak', 'fair', 'good', 'strong'];
+
   /// 0 to 4 from length and character classes.
   static int strength(String passphrase) {
     if (passphrase.length < SnippetLimits.minPassphrase) return 0;
@@ -509,10 +512,7 @@ class _ExportDialogState extends State<_ExportDialog> {
                 if (value != null) setState(() => _scope = value);
               },
               itemBuilder: (context, scope) => Text(
-                l10n.snippetsExportScope(
-                  scope.name,
-                  widget.snippetIds.length,
-                ),
+                l10n.snippetsExportScope(scope.name, widget.snippetIds.length),
               ),
               popup: SelectPopup<SnippetExportScopeKind>(
                 items: SelectItemList(
@@ -552,7 +552,9 @@ class _ExportDialogState extends State<_ExportDialog> {
             const Gap(AppSpacing.sm),
             LinearProgressIndicator(value: score / 4),
             const Gap(AppSpacing.xs),
-            Text(l10n.snippetsPassphraseStrength(score)).small().muted(),
+            Text(
+              l10n.snippetsPassphraseStrength(_strengthNames[score]),
+            ).small().muted(),
             const Gap(AppSpacing.sm),
             TextField(
               key: const ValueKey('snippet-export-confirm'),

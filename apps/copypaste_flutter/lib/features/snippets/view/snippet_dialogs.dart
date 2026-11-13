@@ -93,14 +93,23 @@ Future<bool> showSnippetQuestion(
 }
 
 /// Verifies the device owner before a concealed snippet is used or shown
-/// while `snippets.require_auth` is on. Systems without device
-/// authentication confirm in the app instead.
+/// while `snippets.require_auth` is on.
 Future<bool> ensureSnippetAccess(
   BuildContext context,
   SnippetsController controller,
   SnippetSummary snippet,
+) async =>
+    !controller.needsUnlock(snippet) ||
+    await ensureOwnerAccess(context, controller);
+
+/// Verifies the device owner while `snippets.require_auth` is on, such as
+/// before that protection is turned off. Systems without device
+/// authentication confirm in the app instead.
+Future<bool> ensureOwnerAccess(
+  BuildContext context,
+  SnippetsController controller,
 ) async {
-  if (!controller.needsUnlock(snippet)) return true;
+  if (!controller.ownerLocked) return true;
   final l10n = context.l10n;
   final access = controller.access;
   final result = access == null

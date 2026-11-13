@@ -29,7 +29,8 @@ class RuntimeSnippetRepository
         SnippetScopeKind.unfiled => api.SnippetScopeKind.unfiled,
         SnippetScopeKind.collection => api.SnippetScopeKind.collection,
         SnippetScopeKind.pinned => api.SnippetScopeKind.pinned,
-        SnippetScopeKind.recentlyDeleted => api.SnippetScopeKind.recentlyDeleted,
+        SnippetScopeKind.recentlyDeleted =>
+          api.SnippetScopeKind.recentlyDeleted,
       },
       collectionId: scope.collectionId,
       cursor: cursor,
@@ -408,26 +409,25 @@ class RuntimeSnippetRepository
 
   static DateTime _time(int ms) => DateTime.fromMillisecondsSinceEpoch(ms);
 
-  static SnippetSummary _summary(api.SnippetSummaryView view) =>
-      SnippetSummary(
-        id: view.id,
-        collectionId: view.collectionId,
-        title: view.title,
-        abbreviation: view.abbreviation,
-        template: view.template,
-        pinned: view.pinned,
-        concealed: view.concealed,
-        preview: view.preview,
-        createdAt: _time(view.createdAtMs.toInt()),
-        deletedAt: view.deletedAtMs == null
-            ? null
-            : _time(view.deletedAtMs!.toInt()),
-        duplicateAbbreviation: view.duplicateAbbreviation,
-        conflictCopy: view.conflictCopy,
-        lastUsedAt: view.lastUsedAtMs == null
-            ? null
-            : _time(view.lastUsedAtMs!.toInt()),
-      );
+  static SnippetSummary _summary(api.SnippetSummaryView view) => SnippetSummary(
+    id: view.id,
+    collectionId: view.collectionId,
+    title: view.title,
+    abbreviation: view.abbreviation,
+    template: view.template,
+    pinned: view.pinned,
+    concealed: view.concealed,
+    preview: view.preview,
+    createdAt: _time(view.createdAtMs.toInt()),
+    deletedAt: view.deletedAtMs == null
+        ? null
+        : _time(view.deletedAtMs!.toInt()),
+    duplicateAbbreviation: view.duplicateAbbreviation,
+    conflictCopy: view.conflictCopy,
+    lastUsedAt: view.lastUsedAtMs == null
+        ? null
+        : _time(view.lastUsedAtMs!.toInt()),
+  );
 
   static TemplateLint _lint(api.TemplateLintView view) => TemplateLint(
     severity: switch (view.severity) {

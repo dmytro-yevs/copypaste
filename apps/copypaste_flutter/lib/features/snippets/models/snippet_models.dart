@@ -227,7 +227,10 @@ class SnippetSaved extends SnippetSaveOutcome {
 
 /// The normalized abbreviation belongs to another live snippet.
 class SnippetAbbreviationTaken extends SnippetSaveOutcome {
-  const SnippetAbbreviationTaken({required this.snippetId, required this.title});
+  const SnippetAbbreviationTaken({
+    required this.snippetId,
+    required this.title,
+  });
 
   final String snippetId;
   final String title;
@@ -487,8 +490,7 @@ enum AbbreviationProblem { tooLong, whitespace }
 
 /// Local syntax of an abbreviation (spec A-1); uniqueness is the runtime's.
 AbbreviationProblem? abbreviationProblem(String abbreviation) {
-  if (abbreviation.characters.length >
-      SnippetLimits.maxAbbreviationGraphemes) {
+  if (abbreviation.characters.length > SnippetLimits.maxAbbreviationGraphemes) {
     return AbbreviationProblem.tooLong;
   }
   final invalid = RegExp(r'[\s\x00-\x1F\x7F-\x9F]');

@@ -38,7 +38,8 @@ class AppToast extends StatelessWidget {
     VoidCallback? onAction,
   }) {
     final accessible =
-        actionLabel != null && MediaQuery.maybeAccessibleNavigationOf(context) == true;
+        actionLabel != null &&
+        MediaQuery.maybeAccessibleNavigationOf(context) == true;
     return showToast(
       context: context,
       showDuration: Duration(seconds: accessible ? 10 : 5),

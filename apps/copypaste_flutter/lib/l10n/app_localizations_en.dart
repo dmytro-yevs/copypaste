@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4983,4 +4982,743 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => 'home screen widget launcher recent';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Abbreviation $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Abbreviation';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Optional, for example sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Already used by “$title”';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Use at most $max characters.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'An abbreviation can\'t contain spaces or control characters.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets need review after a sync',
+      one: '1 snippet needs review after a sync',
+      zero: 'No snippets need review',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Text';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Type the snippet text';
+
+  @override
+  String get snippetsClearSelection => 'Clear selection';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Too large to edit. This clip opens read-only.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Neutral',
+      'blue': 'Blue',
+      'green': 'Green',
+      'amber': 'Amber',
+      'red': 'Red',
+      'other': 'Neutral',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Accent';
+
+  @override
+  String get snippetsCollectionIcon => 'Icon';
+
+  @override
+  String get snippetsCollectionLabel => 'Collection';
+
+  @override
+  String get snippetsCollectionName => 'Name';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'A collection with this name already exists.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Use at most $max characters.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'This snippet is concealed.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Continue';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'This device has no password, PIN or biometrics to verify you. Continue only if this is your device.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Confirm it\'s you';
+
+  @override
+  String get snippetsConcealedPreview => 'Concealed snippet';
+
+  @override
+  String get snippetsConcealedSwitch => 'Concealed';
+
+  @override
+  String get snippetsConcealedTitle => 'Concealed snippet';
+
+  @override
+  String get snippetsConflictBadge => 'Conflict copy';
+
+  @override
+  String get snippetsCopied => 'Copied';
+
+  @override
+  String get snippetsCreate => 'Create snippet';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Create snippet “$query”';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Delete collection';
+
+  @override
+  String get snippetsDeleteCollectionMove => 'Move its snippets to Unfiled';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return 'Delete “$name”?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Delete its snippets too';
+
+  @override
+  String get snippetsDeletedMessage => 'Moved to Recently Deleted.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets deleted',
+      one: 'Snippet deleted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Save to';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'History clip',
+      'snippet': 'Snippet',
+      'other': 'History clip',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Discard';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets',
+      one: '1 snippet',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Another snippet got the same abbreviation in a sync. Change one of them.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Duplicate abbreviation';
+
+  @override
+  String get snippetsEditClip => 'Edit clip';
+
+  @override
+  String get snippetsEditCollection => 'Edit collection';
+
+  @override
+  String get snippetsEditSnippet => 'Edit snippet';
+
+  @override
+  String get snippetsEditTab => 'Edit';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Give a snippet an abbreviation, then type it in Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'No snippets yet';
+
+  @override
+  String get snippetsEnableTemplate => 'Turn on';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Placeholders work only in templates. Text that already looks like a placeholder will be filled in too.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Turn on Template?';
+
+  @override
+  String get snippetsExport => 'Export';
+
+  @override
+  String get snippetsExportCollection => 'Export collection';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Include concealed snippets in the readable file';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets written',
+      one: '1 snippet written',
+      zero: 'No snippets written',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Snippets exported';
+
+  @override
+  String get snippetsExportEncrypt => 'Encrypt with passphrase';
+
+  @override
+  String get snippetsExportFailed => 'Export failed';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'I understand that anyone with the file can read it';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'All snippets',
+      'collections': 'This collection',
+      'snippets': 'Selected snippets ($count)',
+      'other': 'All snippets',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Export snippets';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Insert field';
+
+  @override
+  String get snippetsFieldDefault => 'Default value';
+
+  @override
+  String get snippetsFieldName => 'Name';
+
+  @override
+  String get snippetsFieldOptions => 'Options, separated by commas';
+
+  @override
+  String get snippetsFieldRequired => 'Fill in this field.';
+
+  @override
+  String get snippetsFieldType => 'Type';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Single line',
+      'multiline': 'Multiple lines',
+      'choice': 'Choice',
+      'other': 'Single line',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Formatting will be removed when you save.';
+
+  @override
+  String get snippetsGoToSnippet => 'Go to snippet';
+
+  @override
+  String get snippetsImport => 'Import';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Abbreviation already used';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Import without abbreviation',
+      'renameWithSuffix': 'Add a number to the abbreviation',
+      'skip': 'Skip',
+      'other': 'Import without abbreviation',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Collection with the same name';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Add to the existing one',
+      'createNew': 'Create a new one',
+      'other': 'Add to the existing one',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Convert known placeholders';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'New: $added. Identical, skipped: $identical. Changed: $updated. Abbreviation conflicts: $conflicts. Invalid: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Snippets imported';
+
+  @override
+  String get snippetsImportFailed => 'Import failed';
+
+  @override
+  String get snippetsImportFileType => 'Snippet files';
+
+  @override
+  String get snippetsImportFormat => 'Format';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste bundle',
+      'json': 'JSON list',
+      'csv': 'CSV',
+      'other': 'CopyPaste bundle',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Row $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Rows that won\'t be imported';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Passphrase, if the file is encrypted';
+
+  @override
+  String get snippetsImportPreview => 'Preview';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Added: $inserted. Updated: $updated. Skipped: $skipped. Abbreviations to review: $flagged. Unrecognized placeholders: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Same snippet, different content';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Keep both',
+      'replace': 'Replace existing',
+      'skip': 'Skip',
+      'other': 'Keep both',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Import snippets';
+
+  @override
+  String get snippetsInsert => 'Insert';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Insert placeholder';
+
+  @override
+  String get snippetsKeepReferences => 'Keep them';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Browse, organize and edit snippets and collections.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'snippets templates abbreviations collections text';
+
+  @override
+  String get snippetsLibraryTitle => 'Snippet library';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'This placeholder is never closed.',
+      'malformed': 'This placeholder can\'t be read.',
+      'unknownPlaceholder':
+          'Unknown placeholder “$detail”. It is pasted as typed.',
+      'unknownParameter': 'Unknown option “$detail”.',
+      'duplicateParameter': 'Option “$detail” is set twice.',
+      'missingParameter': 'Option “$detail” is missing.',
+      'invalidValue': 'Option “$detail” has an invalid value.',
+      'conflictingParameters': 'These options can\'t be used together.',
+      'unknownLocale': 'Unknown language.',
+      'unknownTimeZone': 'Unknown time zone.',
+      'invalidPattern': 'Invalid date pattern.',
+      'dateOutOfRange': 'The date is out of range.',
+      'unknownModifier': 'Unknown modifier “$detail”.',
+      'modifierFailed': 'Modifier “$detail” couldn\'t be applied.',
+      'emptyClipboard': 'Clipboard item $detail is empty.',
+      'extraCursor': 'Only the first cursor placeholder is used.',
+      'nestedCursor': 'A cursor inside an inserted snippet is ignored.',
+      'tooManyFields': 'Field “$detail” is over the limit of 10 fields.',
+      'conflictingField':
+          'Field “$detail” is defined twice with different settings.',
+      'choiceDefaultNotOption':
+          'The default of “$detail” is not one of its options.',
+      'cycle': 'Snippets insert each other in a loop: $detail.',
+      'depthExceeded': 'Snippets are inserted more than 3 levels deep.',
+      'nestingLimit': 'Too many inserted snippets.',
+      'unknownSnippet': 'No snippet has this abbreviation.',
+      'containsPlaceholders':
+          'The text contains placeholders. Turn on Template to fill them in.',
+      'other': 'This placeholder has a problem.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Couldn\'t load snippets';
+
+  @override
+  String get snippetsLoadMore => 'Load more';
+
+  @override
+  String get snippetsMerge => 'Merge';
+
+  @override
+  String get snippetsMergeCollection => 'Merge into another collection';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Merge “$name” into';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Move to';
+
+  @override
+  String get snippetsNewCollection => 'New collection';
+
+  @override
+  String get snippetsNewSnippet => 'New snippet';
+
+  @override
+  String get snippetsNewText => 'New text';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'No snippets match “$query”';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Repeat passphrase';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Passphrase, at least $min characters';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Passphrase';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'A forgotten passphrase can\'t be recovered.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Too short',
+      'weak': 'Weak',
+      'fair': 'Fair',
+      'good': 'Good',
+      'other': 'Strong',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Pinned';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Placeholders';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Date',
+      'dateShort': 'Date, short',
+      'dateLong': 'Date, long',
+      'dateIso': 'Date, ISO 8601',
+      'dateNextWeek': 'Date in one week',
+      'now': 'Time',
+      'dateTime': 'Date and time',
+      'clipboard': 'Clipboard',
+      'clipboardPrevious': 'Previous clipboard item',
+      'field': 'Fill-in field…',
+      'cursor': 'Cursor position',
+      'uuid': 'UUID',
+      'random': 'Random number',
+      'upper': 'Modifier: uppercase',
+      'lower': 'Modifier: lowercase',
+      'trim': 'Modifier: trim spaces',
+      'other': 'Placeholder',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Insert another snippet';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'No placeholders match';
+
+  @override
+  String get snippetsPreviewEmpty => 'Nothing to preview';
+
+  @override
+  String get snippetsPreviewTab => 'Preview';
+
+  @override
+  String get snippetsPurge => 'Delete permanently';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'They will be erased on all your devices. This can\'t be undone.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Delete $count snippets permanently?',
+      one: 'Delete snippet permanently?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => 'Recently Deleted is empty';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Adds pasted snippet text to History. Concealed snippets are never recorded.';
+
+  @override
+  String get snippetsRecordPastedKeywords => 'history record pasted snippets';
+
+  @override
+  String get snippetsRecordPastedTitle => 'Record pasted snippets in History';
+
+  @override
+  String get snippetsReplaceOriginal => 'Replace original';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Deletes the original clip on all devices after saving. When off, both stay.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Verify it\'s you before a concealed snippet is used or shown. Each device asks on its own.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'concealed password biometrics fingerprint face lock verify';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Verify before using concealed snippets';
+
+  @override
+  String get snippetsRestore => 'Restore';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Add some text to save.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'The title is longer than $max characters.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'The text is longer than 64 KB.';
+
+  @override
+  String get snippetsSaveFailed => 'Couldn\'t save';
+
+  @override
+  String get snippetsScopeAll => 'All';
+
+  @override
+  String get snippetsScopeEmpty => 'No snippets here';
+
+  @override
+  String get snippetsScopePinned => 'Pinned';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Recently Deleted';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Search snippets';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count selected',
+      one: '1 selected',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Show';
+
+  @override
+  String get snippetsShowAll => 'Show all';
+
+  @override
+  String get snippetsShowAttention => 'Review';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'You have $count snippets. Up to 20,000 are allowed.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Template';
+
+  @override
+  String get snippetsTemplateSwitch => 'Template';
+
+  @override
+  String get snippetsTitleLabel => 'Title';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Optional';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Move snippets between apps or keep a backup. Exports are encrypted by default.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'import export backup bundle json csv passphrase';
+
+  @override
+  String get snippetsTransferTitle => 'Import and export';
+
+  @override
+  String get snippetsUndo => 'Undo';
+
+  @override
+  String get snippetsUnfiled => 'Unfiled';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count placeholders are pasted as typed',
+      one: '1 placeholder is pasted as typed',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Unpin';
+
+  @override
+  String get snippetsUnsavedMessage => 'Save your changes before closing?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Unsaved changes';
+
+  @override
+  String get snippetsUntitled => 'Untitled snippet';
+
+  @override
+  String get snippetsUpdateReferences => 'Update';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Other templates may insert “$from”. Update them to use “$to”?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Update references?';
+
+  @override
+  String get snippetsUseFailed => 'Couldn\'t use the snippet';
 }
