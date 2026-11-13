@@ -225,6 +225,22 @@ pub(crate) enum Command {
     /// A push subscription, not a poll: the daemon writes when something
     /// happens and this process is idle in between.
     Watch,
+
+    /// Serve CopyPaste to an AI tool over MCP on stdin and stdout.
+    ///
+    /// Started by the AI tool, not by hand: it speaks JSON-RPC until stdin
+    /// closes. The connection's credential is read from `COPYPASTE_MCP_GRANT`;
+    /// without one, the CopyPaste app asks for approval on first use.
+    Mcp {
+        #[command(subcommand)]
+        action: Option<McpAction>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum McpAction {
+    /// Print whether AI tools can reach CopyPaste on this computer.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
