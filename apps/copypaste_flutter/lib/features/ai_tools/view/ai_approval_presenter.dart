@@ -19,7 +19,9 @@ class AiApprovalPresenter extends StatefulWidget {
     required this.child,
   });
 
-  final AiApprovalController controller;
+  /// Null until the runtime is ready; the presenter stays in the tree so the
+  /// app content keeps its state when approvals become available.
+  final AiApprovalController? controller;
   final Widget child;
 
   @override
@@ -34,7 +36,7 @@ class _AiApprovalPresenterState extends State<AiApprovalPresenter> {
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_changed);
+    widget.controller?.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
   }
 
@@ -42,22 +44,24 @@ class _AiApprovalPresenterState extends State<AiApprovalPresenter> {
   void didUpdateWidget(AiApprovalPresenter oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_changed);
-      widget.controller.addListener(_changed);
+      oldWidget.controller?.removeListener(_changed);
+      widget.controller?.addListener(_changed);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
     }
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_changed);
+    widget.controller?.removeListener(_changed);
     super.dispose();
   }
 
   void _changed() {
-    if (!mounted) return;
+    final controller = widget.controller;
+    if (!mounted || controller == null) return;
     final shown = _shown;
     if (shown != null) {
-      final stillPending = widget.controller.pending.any(
+      final stillPending = controller.pending.any(
         (request) => request.requestId == shown,
       );
       final dialog = _dialog?.currentContext;
@@ -67,11 +71,14 @@ class _AiApprovalPresenterState extends State<AiApprovalPresenter> {
       }
       return;
     }
-    final request = widget.controller.current;
-    if (request != null) unawaited(_present(request));
+    final request = controller.current;
+    if (request != null) unawaited(_present(controller, request));
   }
 
-  Future<void> _present(AiApprovalRequest request) async {
+  Future<void> _present(
+    AiApprovalController controller,
+    AiApprovalRequest request,
+  ) async {
     _shown = request.requestId;
     _closing = false;
     final key = _dialog = GlobalKey(debugLabel: 'ai-approval');
@@ -80,7 +87,7 @@ class _AiApprovalPresenterState extends State<AiApprovalPresenter> {
         context,
         key: key,
         request: request,
-        defaultLookback: widget.controller.defaultLookback,
+        defaultLookback: controller.defaultLookback,
       ),
       AiApprovalKind.volume => showAiVolumeDialog(
         context,
@@ -94,7 +101,7 @@ class _AiApprovalPresenterState extends State<AiApprovalPresenter> {
     _closing = false;
     if (!mounted) return;
     if (!closedForUs) {
-      final sent = await widget.controller.resolve(
+      final sent = await controller.resolve(
         request,
         decision ?? const AiApprovalDecision.deny(),
       );

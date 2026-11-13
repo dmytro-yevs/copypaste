@@ -297,9 +297,10 @@ class CopyPasteApp extends StatelessWidget {
                     ),
             ),
           );
-          final approvals = features?.aiApproval;
-          if (approvals == null) return content;
-          return AiApprovalPresenter(controller: approvals, child: content);
+          return AiApprovalPresenter(
+            controller: features?.aiApproval,
+            child: content,
+          );
         },
       ),
     );
