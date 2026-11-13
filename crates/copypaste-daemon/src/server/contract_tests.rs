@@ -108,11 +108,17 @@ fn expected(method: &Method) -> Expected {
         Method::PasteQueue { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::PasteQueue(_)))
         }
-        // Each feature group answers `unsupported` until its feature lands.
-        Method::Snippets { .. }
-        | Method::Clips { .. }
-        | Method::Rules { .. }
-        | Method::Ai { .. } => Expected::Error(ErrorCode::Unsupported),
+        Method::Snippets { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::SnippetHits(_)))
+        }
+        Method::Rules { .. } => Expected::Data(|data| matches!(data, ResponseData::RuleList(_))),
+        Method::Clips { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::ClipAnnotations(_)))
+        }
+        Method::Ai {
+            op: copypaste_ipc::ai::AiOp::RevokeGrant { .. },
+        } => Expected::Error(ErrorCode::NotFound),
+        Method::Ai { .. } => Expected::Data(|data| matches!(data, ResponseData::AiGrants(_))),
         Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::CopyText { .. }
