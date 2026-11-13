@@ -276,6 +276,7 @@ impl Runtime {
     }
 
     fn sweep_store(&self, now: i64) {
+        self.seed_builtin_rules();
         match self.store.sweep_local_state(now) {
             Ok(swept) if swept != Default::default() => tracing::debug!(
                 expired_ids = swept.expired_ids,

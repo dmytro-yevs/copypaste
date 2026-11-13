@@ -34,6 +34,10 @@ pub struct ContentRuleRecord {
     /// Wall-clock ms of the rule's creation or last semantic edit.
     pub effective_from: i64,
     pub deleted_at: Option<i64>,
+    /// Stamp of the version this one replaced where it was written, so a
+    /// concurrent edit is recognised (`storage::rules`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_stamp: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +84,7 @@ impl ContentRuleRecord {
         record_id: &str,
         stamp: i64,
     ) -> Result<(), StoreError> {
+        crate::storage::rules::observe_replaced(tx, self)?;
         let origin = match self.origin {
             RuleOrigin::Builtin => "builtin",
             RuleOrigin::User => "user",
@@ -192,6 +197,7 @@ pub(super) fn rule(conn: &Connection, id: &str) -> Result<Option<ContentRuleReco
         schema_version: schema,
         effective_from: from,
         deleted_at,
+        base_stamp: None,
     }))
 }
 

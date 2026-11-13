@@ -311,7 +311,11 @@ fn merge_state(
     Ok(())
 }
 
-fn insert_tags(tx: &Connection, clip_id: &str, tag_ids: &[String]) -> Result<(), StoreError> {
+pub(crate) fn insert_tags(
+    tx: &Connection,
+    clip_id: &str,
+    tag_ids: &[String],
+) -> Result<(), StoreError> {
     let mut insert = tx.prepare_cached(
         "INSERT OR IGNORE INTO clip_rule_tags(clip_id, tag_id) SELECT ?1, ?2 \
          WHERE EXISTS (SELECT 1 FROM clipboard_items WHERE id = ?1 AND deleted = 0)",

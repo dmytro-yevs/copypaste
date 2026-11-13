@@ -282,6 +282,7 @@ mod tests {
             schema_version: 1,
             effective_from: 0,
             deleted_at: None,
+            base_stamp: None,
         };
         let placement = RulePlacementRecord {
             id: id.into(),

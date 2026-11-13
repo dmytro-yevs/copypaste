@@ -210,12 +210,19 @@ impl Record {
     }
     /// Whether the local version holds a value that may only tighten (a purge,
     /// a revocation, a concurrent hide) which this version would loosen.
-    fn yields_to_local(&self, tx: &Connection) -> Result<bool, StoreError> {
+    fn yields_to_local(
+        &self,
+        tx: &Connection,
+        incoming: &IncomingItem<'_>,
+    ) -> Result<bool, StoreError> {
         match self {
             Self::Snippet(r) => snippets::keeps_purge(tx, r),
             Self::SnippetBody(r) => snippets::keeps_purged_body(tx, r),
             Self::AiGrant(r) => ai::keeps_revocation(tx, r),
             Self::ClipNote(r) => clip_notes::keeps_hidden(tx, r),
+            Self::ContentRule(r) => {
+                super::rules::keeps_deletion(tx, r, incoming.origin_device_id, incoming.created_at)
+            }
             _ => Ok(false),
         }
     }
@@ -292,7 +299,7 @@ pub(super) fn upsert_in_tx(
     else {
         return Ok(false);
     };
-    if record.yields_to_local(tx)? {
+    if record.yields_to_local(tx, incoming)? {
         restamp(tx, incoming.id, incoming.created_at)?;
         return Ok(true);
     }
