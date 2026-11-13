@@ -6289,5 +6289,858 @@
   "quickAccessWidgetKeywords": "home screen widget launcher recent",
   "@quickAccessWidgetKeywords": {
     "description": "Space-separated search keywords for the widget row; translate and add local synonyms."
+  },
+  "snippetsAbbreviationBadge": "Abbreviation {abbreviation}",
+  "@snippetsAbbreviationBadge": {
+    "description": "Screen-reader label of the abbreviation badge on a snippet row.",
+    "placeholders": {
+      "abbreviation": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsAbbreviationLabel": "Abbreviation",
+  "@snippetsAbbreviationLabel": {
+    "description": "Label of the abbreviation field in the snippet editor."
+  },
+  "snippetsAbbreviationPlaceholder": "Optional, for example sig",
+  "@snippetsAbbreviationPlaceholder": {
+    "description": "Placeholder of the abbreviation field; \"sig\" is a sample abbreviation and may be localized."
+  },
+  "snippetsAbbreviationTaken": "Already used by “{title}”",
+  "@snippetsAbbreviationTaken": {
+    "description": "Inline error: another snippet already has this abbreviation; title is that snippet's title.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsAbbreviationTooLong": "Use at most {max} characters.",
+  "@snippetsAbbreviationTooLong": {
+    "description": "Inline error: the abbreviation is too long.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsAbbreviationWhitespace": "An abbreviation can't contain spaces or control characters.",
+  "@snippetsAbbreviationWhitespace": {
+    "description": "Inline error: the abbreviation contains whitespace."
+  },
+  "snippetsAttention": "{count, plural, =0{No snippets need review} =1{1 snippet needs review after a sync} other{{count} snippets need review after a sync}}",
+  "@snippetsAttention": {
+    "description": "Banner above the snippet list: snippets with a duplicate abbreviation or conflict copies created by sync.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsBodyLabel": "Text",
+  "@snippetsBodyLabel": {
+    "description": "Label of the snippet body field."
+  },
+  "snippetsBodyPlaceholder": "Type the snippet text",
+  "@snippetsBodyPlaceholder": {
+    "description": "Placeholder of the empty snippet body field."
+  },
+  "snippetsClearSelection": "Clear selection",
+  "@snippetsClearSelection": {
+    "description": "Button that deselects all selected snippets."
+  },
+  "snippetsClipTooLarge": "Too large to edit. This clip opens read-only.",
+  "@snippetsClipTooLarge": {
+    "description": "Notice in the clip editor for clips over 256 KB."
+  },
+  "snippetsCollectionAccent": "{accent, select, neutral{Neutral} blue{Blue} green{Green} amber{Amber} red{Red} other{Neutral}}",
+  "@snippetsCollectionAccent": {
+    "description": "Name of a collection accent color.",
+    "placeholders": {
+      "accent": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsCollectionAccentLabel": "Accent",
+  "@snippetsCollectionAccentLabel": {
+    "description": "Label of the collection accent color picker."
+  },
+  "snippetsCollectionIcon": "Icon",
+  "@snippetsCollectionIcon": {
+    "description": "Label of the collection icon picker."
+  },
+  "snippetsCollectionLabel": "Collection",
+  "@snippetsCollectionLabel": {
+    "description": "Label of the collection picker in the snippet editor."
+  },
+  "snippetsCollectionName": "Name",
+  "@snippetsCollectionName": {
+    "description": "Label of the collection name field."
+  },
+  "snippetsCollectionNameTaken": "A collection with this name already exists.",
+  "@snippetsCollectionNameTaken": {
+    "description": "Inline error in the collection editor."
+  },
+  "snippetsCollectionNameTooLong": "Use at most {max} characters.",
+  "@snippetsCollectionNameTooLong": {
+    "description": "Inline error: the collection name is too long.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsConcealedBody": "This snippet is concealed.",
+  "@snippetsConcealedBody": {
+    "description": "Shown instead of the body of a concealed snippet in the editor until the user chooses Show."
+  },
+  "snippetsConcealedConfirmAction": "Continue",
+  "@snippetsConcealedConfirmAction": {
+    "description": "Confirms the in-app owner check on devices without device authentication."
+  },
+  "snippetsConcealedConfirmMessage": "This device has no password, PIN or biometrics to verify you. Continue only if this is your device.",
+  "@snippetsConcealedConfirmMessage": {
+    "description": "In-app owner check shown when the system cannot verify the device owner."
+  },
+  "snippetsConcealedConfirmTitle": "Confirm it's you",
+  "@snippetsConcealedConfirmTitle": {
+    "description": "Title of the in-app owner check."
+  },
+  "snippetsConcealedPreview": "Concealed snippet",
+  "@snippetsConcealedPreview": {
+    "description": "Shown and announced instead of a concealed snippet's text in lists."
+  },
+  "snippetsConcealedSwitch": "Concealed",
+  "@snippetsConcealedSwitch": {
+    "description": "Switch in the snippet editor that masks the snippet everywhere."
+  },
+  "snippetsConcealedTitle": "Concealed snippet",
+  "@snippetsConcealedTitle": {
+    "description": "Display title of a concealed snippet without a title."
+  },
+  "snippetsConflictBadge": "Conflict copy",
+  "@snippetsConflictBadge": {
+    "description": "Badge on a snippet created by a sync conflict."
+  },
+  "snippetsCopied": "Copied",
+  "@snippetsCopied": {
+    "description": "Toast title after a snippet was copied."
+  },
+  "snippetsCreate": "Create snippet",
+  "@snippetsCreate": {
+    "description": "Empty-state action that opens a new snippet."
+  },
+  "snippetsCreateNamed": "Create snippet “{query}”",
+  "@snippetsCreateNamed": {
+    "description": "Empty search action that creates a snippet from the query.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDeleteCollection": "Delete collection",
+  "@snippetsDeleteCollection": {
+    "description": "Action that deletes the selected collection."
+  },
+  "snippetsDeleteCollectionMove": "Move its snippets to Unfiled",
+  "@snippetsDeleteCollectionMove": {
+    "description": "Option when deleting a collection (default)."
+  },
+  "snippetsDeleteCollectionTitle": "Delete “{name}”?",
+  "@snippetsDeleteCollectionTitle": {
+    "description": "Title of the delete-collection dialog.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDeleteCollectionWithSnippets": "Delete its snippets too",
+  "@snippetsDeleteCollectionWithSnippets": {
+    "description": "Option when deleting a collection; the snippets go to Recently Deleted."
+  },
+  "snippetsDeletedMessage": "Moved to Recently Deleted.",
+  "@snippetsDeletedMessage": {
+    "description": "Toast message after deleting snippets."
+  },
+  "snippetsDeletedTitle": "{count, plural, =1{Snippet deleted} other{{count} snippets deleted}}",
+  "@snippetsDeletedTitle": {
+    "description": "Toast title after deleting snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsDestination": "Save to",
+  "@snippetsDestination": {
+    "description": "Label of the destination picker in the new-text editor."
+  },
+  "snippetsDestinationName": "{destination, select, historyClip{History clip} snippet{Snippet} other{History clip}}",
+  "@snippetsDestinationName": {
+    "description": "Destination of new text: a one-off history clip or a snippet.",
+    "placeholders": {
+      "destination": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDiscard": "Discard",
+  "@snippetsDiscard": {
+    "description": "Unsaved-changes dialog action that closes without saving."
+  },
+  "snippetsDragging": "{count, plural, =1{1 snippet} other{{count} snippets}}",
+  "@snippetsDragging": {
+    "description": "Label shown while dragging snippets to a collection.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsDuplicateAbbreviation": "Another snippet got the same abbreviation in a sync. Change one of them.",
+  "@snippetsDuplicateAbbreviation": {
+    "description": "Hint under the abbreviation of a snippet marked duplicate."
+  },
+  "snippetsDuplicateBadge": "Duplicate abbreviation",
+  "@snippetsDuplicateBadge": {
+    "description": "Badge on a snippet whose abbreviation is also used by another snippet after sync."
+  },
+  "snippetsEditClip": "Edit clip",
+  "@snippetsEditClip": {
+    "description": "Title of the clip editor."
+  },
+  "snippetsEditCollection": "Edit collection",
+  "@snippetsEditCollection": {
+    "description": "Title and action for editing a collection."
+  },
+  "snippetsEditSnippet": "Edit snippet",
+  "@snippetsEditSnippet": {
+    "description": "Title of the snippet editor for an existing snippet."
+  },
+  "snippetsEditTab": "Edit",
+  "@snippetsEditTab": {
+    "description": "Editor tab with the body field (narrow layouts)."
+  },
+  "snippetsEmptyMessage": "Give a snippet an abbreviation, then type it in Quick Paste.",
+  "@snippetsEmptyMessage": {
+    "description": "Empty state message of the snippet library."
+  },
+  "snippetsEmptyTitle": "No snippets yet",
+  "@snippetsEmptyTitle": {
+    "description": "Empty state title of the snippet library."
+  },
+  "snippetsEnableTemplate": "Turn on",
+  "@snippetsEnableTemplate": {
+    "description": "Confirms turning on Template before inserting a placeholder."
+  },
+  "snippetsEnableTemplateMessage": "Placeholders work only in templates. Text that already looks like a placeholder will be filled in too.",
+  "@snippetsEnableTemplateMessage": {
+    "description": "Asked before inserting a placeholder into a literal snippet whose text already contains double braces."
+  },
+  "snippetsEnableTemplateTitle": "Turn on Template?",
+  "@snippetsEnableTemplateTitle": {
+    "description": "Title of the question before turning on Template."
+  },
+  "snippetsExport": "Export",
+  "@snippetsExport": {
+    "description": "Action that exports snippets."
+  },
+  "snippetsExportCollection": "Export collection",
+  "@snippetsExportCollection": {
+    "description": "Action that exports the selected collection."
+  },
+  "snippetsExportConcealedConfirm": "Include concealed snippets in the readable file",
+  "@snippetsExportConcealedConfirm": {
+    "description": "Separate confirmation for concealed snippets in an unencrypted export."
+  },
+  "snippetsExportCount": "{count, plural, =0{No snippets written} =1{1 snippet written} other{{count} snippets written}}",
+  "@snippetsExportCount": {
+    "description": "Toast message after exporting.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsExportDone": "Snippets exported",
+  "@snippetsExportDone": {
+    "description": "Toast title after exporting."
+  },
+  "snippetsExportEncrypt": "Encrypt with passphrase",
+  "@snippetsExportEncrypt": {
+    "description": "Export switch, on by default."
+  },
+  "snippetsExportFailed": "Export failed",
+  "@snippetsExportFailed": {
+    "description": "Error title in the export dialog."
+  },
+  "snippetsExportPlainConfirm": "I understand that anyone with the file can read it",
+  "@snippetsExportPlainConfirm": {
+    "description": "Required confirmation for an unencrypted export."
+  },
+  "snippetsExportScope": "{scope, select, all{All snippets} collections{This collection} snippets{Selected snippets ({count})} other{All snippets}}",
+  "@snippetsExportScope": {
+    "description": "What an export contains.",
+    "placeholders": {
+      "scope": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsExportTitle": "Export snippets",
+  "@snippetsExportTitle": {
+    "description": "Title of the export dialog."
+  },
+  "snippetsFieldBuilderTitle": "Insert field",
+  "@snippetsFieldBuilderTitle": {
+    "description": "Title of the dialog that builds a fill-in field placeholder."
+  },
+  "snippetsFieldDefault": "Default value",
+  "@snippetsFieldDefault": {
+    "description": "Label of the default value of a fill-in field."
+  },
+  "snippetsFieldName": "Name",
+  "@snippetsFieldName": {
+    "description": "Label of the name of a fill-in field."
+  },
+  "snippetsFieldOptions": "Options, separated by commas",
+  "@snippetsFieldOptions": {
+    "description": "Label of the options of a choice field."
+  },
+  "snippetsFieldRequired": "Fill in this field.",
+  "@snippetsFieldRequired": {
+    "description": "Inline error under an empty required template field."
+  },
+  "snippetsFieldType": "Type",
+  "@snippetsFieldType": {
+    "description": "Label of the kind of a fill-in field."
+  },
+  "snippetsFieldTypeName": "{kind, select, text{Single line} multiline{Multiple lines} choice{Choice} other{Single line}}",
+  "@snippetsFieldTypeName": {
+    "description": "Kind of a fill-in field.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsFormattingNotice": "Formatting will be removed when you save.",
+  "@snippetsFormattingNotice": {
+    "description": "Notice when editing text that has rich formatting."
+  },
+  "snippetsGoToSnippet": "Go to snippet",
+  "@snippetsGoToSnippet": {
+    "description": "Link to the snippet that already uses an abbreviation."
+  },
+  "snippetsImport": "Import",
+  "@snippetsImport": {
+    "description": "Action that imports snippets."
+  },
+  "snippetsImportAbbreviationPolicy": "Abbreviation already used",
+  "@snippetsImportAbbreviationPolicy": {
+    "description": "Import policy for snippets whose abbreviation another snippet uses."
+  },
+  "snippetsImportAbbreviationPolicyName": "{policy, select, importWithout{Import without abbreviation} renameWithSuffix{Add a number to the abbreviation} skip{Skip} other{Import without abbreviation}}",
+  "@snippetsImportAbbreviationPolicyName": {
+    "description": "Choices of the abbreviation import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportCollectionPolicy": "Collection with the same name",
+  "@snippetsImportCollectionPolicy": {
+    "description": "Import policy for collections whose name already exists."
+  },
+  "snippetsImportCollectionPolicyName": "{policy, select, merge{Add to the existing one} createNew{Create a new one} other{Add to the existing one}}",
+  "@snippetsImportCollectionPolicyName": {
+    "description": "Choices of the collection import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportConvert": "Convert known placeholders",
+  "@snippetsImportConvert": {
+    "description": "Import switch that translates recognized foreign placeholders."
+  },
+  "snippetsImportCounts": "New: {added}. Identical, skipped: {identical}. Changed: {updated}. Abbreviation conflicts: {conflicts}. Invalid: {invalid}.",
+  "@snippetsImportCounts": {
+    "description": "Import preview counts.",
+    "placeholders": {
+      "added": {
+        "type": "int"
+      },
+      "identical": {
+        "type": "int"
+      },
+      "updated": {
+        "type": "int"
+      },
+      "conflicts": {
+        "type": "int"
+      },
+      "invalid": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsImportDone": "Snippets imported",
+  "@snippetsImportDone": {
+    "description": "Toast title after importing."
+  },
+  "snippetsImportFailed": "Import failed",
+  "@snippetsImportFailed": {
+    "description": "Error title in the import dialog."
+  },
+  "snippetsImportFileType": "Snippet files",
+  "@snippetsImportFileType": {
+    "description": "File type label in the file picker."
+  },
+  "snippetsImportFormat": "Format",
+  "@snippetsImportFormat": {
+    "description": "Label of the import format picker."
+  },
+  "snippetsImportFormatName": "{format, select, bundle{CopyPaste bundle} json{JSON list} csv{CSV} other{CopyPaste bundle}}",
+  "@snippetsImportFormatName": {
+    "description": "Import file formats.",
+    "placeholders": {
+      "format": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportInvalidRow": "Row {row}: {reason}",
+  "@snippetsImportInvalidRow": {
+    "description": "One invalid import row; reason comes from the app.",
+    "placeholders": {
+      "row": {
+        "type": "int"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportInvalidRows": "Rows that won't be imported",
+  "@snippetsImportInvalidRows": {
+    "description": "Heading of the invalid rows in the import preview."
+  },
+  "snippetsImportPassphraseHint": "Passphrase, if the file is encrypted",
+  "@snippetsImportPassphraseHint": {
+    "description": "Placeholder of the import passphrase field."
+  },
+  "snippetsImportPreview": "Preview",
+  "@snippetsImportPreview": {
+    "description": "Import dialog action that checks the file before importing."
+  },
+  "snippetsImportReport": "Added: {inserted}. Updated: {updated}. Skipped: {skipped}. Abbreviations to review: {flagged}. Unrecognized placeholders: {unrecognized}.",
+  "@snippetsImportReport": {
+    "description": "Toast message after importing.",
+    "placeholders": {
+      "inserted": {
+        "type": "int"
+      },
+      "updated": {
+        "type": "int"
+      },
+      "skipped": {
+        "type": "int"
+      },
+      "flagged": {
+        "type": "int"
+      },
+      "unrecognized": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsImportSameIdPolicy": "Same snippet, different content",
+  "@snippetsImportSameIdPolicy": {
+    "description": "Import policy for snippets that exist with different content."
+  },
+  "snippetsImportSameIdPolicyName": "{policy, select, keepBoth{Keep both} replace{Replace existing} skip{Skip} other{Keep both}}",
+  "@snippetsImportSameIdPolicyName": {
+    "description": "Choices of the same-snippet import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportTitle": "Import snippets",
+  "@snippetsImportTitle": {
+    "description": "Title of the import dialog."
+  },
+  "snippetsInsert": "Insert",
+  "@snippetsInsert": {
+    "description": "Action that inserts the built placeholder."
+  },
+  "snippetsInsertPlaceholder": "Insert placeholder",
+  "@snippetsInsertPlaceholder": {
+    "description": "Editor action that opens the placeholder palette."
+  },
+  "snippetsKeepReferences": "Keep them",
+  "@snippetsKeepReferences": {
+    "description": "Keeps other templates unchanged after an abbreviation rename."
+  },
+  "snippetsLibraryDescription": "Browse, organize and edit snippets and collections.",
+  "@snippetsLibraryDescription": {
+    "description": "Settings search description of the snippet library."
+  },
+  "snippetsLibraryKeywords": "snippets templates abbreviations collections text",
+  "@snippetsLibraryKeywords": {
+    "description": "Space-separated search keywords for the snippet library; translate and add local synonyms."
+  },
+  "snippetsLibraryTitle": "Snippet library",
+  "@snippetsLibraryTitle": {
+    "description": "Settings search title of the snippet library."
+  },
+  "snippetsLint": "{code, select, unclosed{This placeholder is never closed.} malformed{This placeholder can't be read.} unknownPlaceholder{Unknown placeholder “{detail}”. It is pasted as typed.} unknownParameter{Unknown option “{detail}”.} duplicateParameter{Option “{detail}” is set twice.} missingParameter{Option “{detail}” is missing.} invalidValue{Option “{detail}” has an invalid value.} conflictingParameters{These options can't be used together.} unknownLocale{Unknown language.} unknownTimeZone{Unknown time zone.} invalidPattern{Invalid date pattern.} dateOutOfRange{The date is out of range.} unknownModifier{Unknown modifier “{detail}”.} modifierFailed{Modifier “{detail}” couldn't be applied.} emptyClipboard{Clipboard item {detail} is empty.} extraCursor{Only the first cursor placeholder is used.} nestedCursor{A cursor inside an inserted snippet is ignored.} tooManyFields{Field “{detail}” is over the limit of 10 fields.} conflictingField{Field “{detail}” is defined twice with different settings.} choiceDefaultNotOption{The default of “{detail}” is not one of its options.} cycle{Snippets insert each other in a loop: {detail}.} depthExceeded{Snippets are inserted more than 3 levels deep.} nestingLimit{Too many inserted snippets.} unknownSnippet{No snippet has this abbreviation.} containsPlaceholders{The text contains placeholders. Turn on Template to fill them in.} other{This placeholder has a problem.}}",
+  "@snippetsLint": {
+    "description": "Template problem shown in the editor lint list and above the fill-in preview; detail is a name, option, number or loop from the template.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsLoadFailed": "Couldn't load snippets",
+  "@snippetsLoadFailed": {
+    "description": "Error state of the snippet library."
+  },
+  "snippetsLoadMore": "Load more",
+  "@snippetsLoadMore": {
+    "description": "Loads the next page of snippets."
+  },
+  "snippetsMerge": "Merge",
+  "@snippetsMerge": {
+    "description": "Confirms merging two collections."
+  },
+  "snippetsMergeCollection": "Merge into another collection",
+  "@snippetsMergeCollection": {
+    "description": "Action that merges the selected collection into another."
+  },
+  "snippetsMergeCollectionTitle": "Merge “{name}” into",
+  "@snippetsMergeCollectionTitle": {
+    "description": "Title of the merge dialog; followed by the target collection picker.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsMoveTo": "Move to",
+  "@snippetsMoveTo": {
+    "description": "Placeholder of the picker that moves selected snippets."
+  },
+  "snippetsNewCollection": "New collection",
+  "@snippetsNewCollection": {
+    "description": "Action and title for a new collection."
+  },
+  "snippetsNewSnippet": "New snippet",
+  "@snippetsNewSnippet": {
+    "description": "Action and title for a new snippet."
+  },
+  "snippetsNewText": "New text",
+  "@snippetsNewText": {
+    "description": "Title of the editor for new text without a source clip."
+  },
+  "snippetsNoMatch": "No snippets match “{query}”",
+  "@snippetsNoMatch": {
+    "description": "Empty search state of the snippet library.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPassphraseConfirm": "Repeat passphrase",
+  "@snippetsPassphraseConfirm": {
+    "description": "Placeholder of the passphrase confirmation field."
+  },
+  "snippetsPassphraseHint": "Passphrase, at least {min} characters",
+  "@snippetsPassphraseHint": {
+    "description": "Placeholder of the export passphrase field.",
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsPassphraseLabel": "Passphrase",
+  "@snippetsPassphraseLabel": {
+    "description": "Label of the import passphrase field."
+  },
+  "snippetsPassphraseNoRecovery": "A forgotten passphrase can't be recovered.",
+  "@snippetsPassphraseNoRecovery": {
+    "description": "Warning under the export passphrase."
+  },
+  "snippetsPassphraseStrength": "{score, select, tooShort{Too short} weak{Weak} fair{Fair} good{Good} other{Strong}}",
+  "@snippetsPassphraseStrength": {
+    "description": "Passphrase strength meter label.",
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPinnedSwitch": "Pinned",
+  "@snippetsPinnedSwitch": {
+    "description": "Switch in the snippet editor that shows the snippet in the Pinned section."
+  },
+  "snippetsPlaceholderGroup": "Placeholders",
+  "@snippetsPlaceholderGroup": {
+    "description": "Group of placeholders in the Insert placeholder palette."
+  },
+  "snippetsPlaceholderKind": "{kind, select, today{Date} dateShort{Date, short} dateLong{Date, long} dateIso{Date, ISO 8601} dateNextWeek{Date in one week} now{Time} dateTime{Date and time} clipboard{Clipboard} clipboardPrevious{Previous clipboard item} field{Fill-in field…} cursor{Cursor position} uuid{UUID} random{Random number} upper{Modifier: uppercase} lower{Modifier: lowercase} trim{Modifier: trim spaces} other{Placeholder}}",
+  "@snippetsPlaceholderKind": {
+    "description": "Entries of the Insert placeholder palette.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPlaceholderNestedGroup": "Insert another snippet",
+  "@snippetsPlaceholderNestedGroup": {
+    "description": "Group of snippets that can be inserted into a template."
+  },
+  "snippetsPlaceholderNoMatch": "No placeholders match",
+  "@snippetsPlaceholderNoMatch": {
+    "description": "Empty search state of the placeholder palette."
+  },
+  "snippetsPreviewEmpty": "Nothing to preview",
+  "@snippetsPreviewEmpty": {
+    "description": "Preview of an empty body."
+  },
+  "snippetsPreviewTab": "Preview",
+  "@snippetsPreviewTab": {
+    "description": "Editor tab and heading of the rendered preview."
+  },
+  "snippetsPurge": "Delete permanently",
+  "@snippetsPurge": {
+    "description": "Action that erases snippets from Recently Deleted."
+  },
+  "snippetsPurgeMessage": "They will be erased on all your devices. This can't be undone.",
+  "@snippetsPurgeMessage": {
+    "description": "Message of the permanent delete confirmation."
+  },
+  "snippetsPurgeTitle": "{count, plural, =1{Delete snippet permanently?} other{Delete {count} snippets permanently?}}",
+  "@snippetsPurgeTitle": {
+    "description": "Title of the permanent delete confirmation.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsRecentlyDeletedEmpty": "Recently Deleted is empty",
+  "@snippetsRecentlyDeletedEmpty": {
+    "description": "Empty state of Recently Deleted."
+  },
+  "snippetsRecordPastedDescription": "Adds pasted snippet text to History. Concealed snippets are never recorded.",
+  "@snippetsRecordPastedDescription": {
+    "description": "Description of the record pasted snippets setting."
+  },
+  "snippetsRecordPastedKeywords": "history record pasted snippets",
+  "@snippetsRecordPastedKeywords": {
+    "description": "Space-separated search keywords for the record pasted snippets setting; translate and add local synonyms."
+  },
+  "snippetsRecordPastedTitle": "Record pasted snippets in History",
+  "@snippetsRecordPastedTitle": {
+    "description": "Title of the record pasted snippets setting."
+  },
+  "snippetsReplaceOriginal": "Replace original",
+  "@snippetsReplaceOriginal": {
+    "description": "Clip editor switch that deletes the original clip after saving."
+  },
+  "snippetsReplaceOriginalHint": "Deletes the original clip on all devices after saving. When off, both stay.",
+  "@snippetsReplaceOriginalHint": {
+    "description": "Hint under the Replace original switch."
+  },
+  "snippetsRequireAuthDescription": "Verify it's you before a concealed snippet is used or shown. Each device asks on its own.",
+  "@snippetsRequireAuthDescription": {
+    "description": "Description of the device authentication setting for concealed snippets."
+  },
+  "snippetsRequireAuthKeywords": "concealed password biometrics fingerprint face lock verify",
+  "@snippetsRequireAuthKeywords": {
+    "description": "Space-separated search keywords for the device authentication setting; translate and add local synonyms."
+  },
+  "snippetsRequireAuthTitle": "Verify before using concealed snippets",
+  "@snippetsRequireAuthTitle": {
+    "description": "Title of the device authentication setting for concealed snippets."
+  },
+  "snippetsRestore": "Restore",
+  "@snippetsRestore": {
+    "description": "Restores snippets from Recently Deleted."
+  },
+  "snippetsSaveBlockEmpty": "Add some text to save.",
+  "@snippetsSaveBlockEmpty": {
+    "description": "Why Save is disabled: the body is empty."
+  },
+  "snippetsSaveBlockTitle": "The title is longer than {max} characters.",
+  "@snippetsSaveBlockTitle": {
+    "description": "Why Save is disabled: the title is too long.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsSaveBlockTooLarge": "The text is longer than 64 KB.",
+  "@snippetsSaveBlockTooLarge": {
+    "description": "Why Save is disabled: the body is too large."
+  },
+  "snippetsSaveFailed": "Couldn't save",
+  "@snippetsSaveFailed": {
+    "description": "Error title in editors."
+  },
+  "snippetsScopeAll": "All",
+  "@snippetsScopeAll": {
+    "description": "Scope with all snippets."
+  },
+  "snippetsScopeEmpty": "No snippets here",
+  "@snippetsScopeEmpty": {
+    "description": "Empty state of a collection or Unfiled."
+  },
+  "snippetsScopePinned": "Pinned",
+  "@snippetsScopePinned": {
+    "description": "Scope and section with pinned snippets."
+  },
+  "snippetsScopeRecentlyDeleted": "Recently Deleted",
+  "@snippetsScopeRecentlyDeleted": {
+    "description": "Scope with snippets deleted in the last 30 days."
+  },
+  "snippetsSearchPlaceholder": "Search snippets",
+  "@snippetsSearchPlaceholder": {
+    "description": "Placeholder of the snippet search field."
+  },
+  "snippetsSelected": "{count, plural, =1{1 selected} other{{count} selected}}",
+  "@snippetsSelected": {
+    "description": "Number of selected snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsShow": "Show",
+  "@snippetsShow": {
+    "description": "Reveals a concealed snippet in the editor."
+  },
+  "snippetsShowAll": "Show all",
+  "@snippetsShowAll": {
+    "description": "Leaves the review filter of the attention banner."
+  },
+  "snippetsShowAttention": "Review",
+  "@snippetsShowAttention": {
+    "description": "Shows only snippets that need review."
+  },
+  "snippetsSoftLimit": "You have {count} snippets. Up to 20,000 are allowed.",
+  "@snippetsSoftLimit": {
+    "description": "Warning shown from 10,000 snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsTemplateBadge": "Template",
+  "@snippetsTemplateBadge": {
+    "description": "Badge on a template snippet."
+  },
+  "snippetsTemplateSwitch": "Template",
+  "@snippetsTemplateSwitch": {
+    "description": "Switch that turns on placeholders for the snippet."
+  },
+  "snippetsTitleLabel": "Title",
+  "@snippetsTitleLabel": {
+    "description": "Label of the snippet title field."
+  },
+  "snippetsTitlePlaceholder": "Optional",
+  "@snippetsTitlePlaceholder": {
+    "description": "Placeholder of the snippet title field."
+  },
+  "snippetsTransferDescription": "Move snippets between apps or keep a backup. Exports are encrypted by default.",
+  "@snippetsTransferDescription": {
+    "description": "Description of the import and export row."
+  },
+  "snippetsTransferKeywords": "import export backup bundle json csv passphrase",
+  "@snippetsTransferKeywords": {
+    "description": "Space-separated search keywords for import and export; translate and add local synonyms."
+  },
+  "snippetsTransferTitle": "Import and export",
+  "@snippetsTransferTitle": {
+    "description": "Title of the import and export row."
+  },
+  "snippetsUndo": "Undo",
+  "@snippetsUndo": {
+    "description": "Toast action that restores deleted snippets."
+  },
+  "snippetsUnfiled": "Unfiled",
+  "@snippetsUnfiled": {
+    "description": "Snippets that belong to no collection."
+  },
+  "snippetsUnfilledWarning": "{count, plural, =1{1 placeholder is pasted as typed} other{{count} placeholders are pasted as typed}}",
+  "@snippetsUnfilledWarning": {
+    "description": "Warning above a preview: placeholders that cannot be filled in.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsUnpin": "Unpin",
+  "@snippetsUnpin": {
+    "description": "Removes a snippet from Pinned."
+  },
+  "snippetsUnsavedMessage": "Save your changes before closing?",
+  "@snippetsUnsavedMessage": {
+    "description": "Message of the unsaved changes dialog."
+  },
+  "snippetsUnsavedTitle": "Unsaved changes",
+  "@snippetsUnsavedTitle": {
+    "description": "Title of the unsaved changes dialog."
+  },
+  "snippetsUntitled": "Untitled snippet",
+  "@snippetsUntitled": {
+    "description": "Display title of a snippet without title or text."
+  },
+  "snippetsUpdateReferences": "Update",
+  "@snippetsUpdateReferences": {
+    "description": "Rewrites other templates after an abbreviation rename."
+  },
+  "snippetsUpdateReferencesMessage": "Other templates may insert “{from}”. Update them to use “{to}”?",
+  "@snippetsUpdateReferencesMessage": {
+    "description": "Asked when an abbreviation is renamed.",
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsUpdateReferencesTitle": "Update references?",
+  "@snippetsUpdateReferencesTitle": {
+    "description": "Title of the abbreviation rename question."
+  },
+  "snippetsUseFailed": "Couldn't use the snippet",
+  "@snippetsUseFailed": {
+    "description": "Error title of the fill-in form."
   }
 }

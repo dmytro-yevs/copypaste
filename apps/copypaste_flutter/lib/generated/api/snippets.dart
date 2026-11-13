@@ -8,8 +8,8 @@ import '../frb_generated.dart';
 import 'clips.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `clipboard_input`, `collection`, `detail`, `ids_or_internal`, `lint`, `snippet_op`, `summary`, `template_values`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `clipboard_input`, `collection`, `detail`, `ids_or_internal`, `lint`, `preferences_response`, `snippet_op`, `summary`, `template_values`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// List one scope; `collection_id` is required for [`SnippetScopeKind::Collection`].
 Future<SnippetPageView> listSnippets({
@@ -193,6 +193,17 @@ Future<BigInt> exportSnippets({
   ids: ids,
   passphrase: passphrase,
   includeConcealed: includeConcealed,
+);
+
+Future<SnippetPreferencesView> snippetPreferences() =>
+    RustLib.instance.api.crateApiSnippetsSnippetPreferences();
+
+Future<SnippetPreferencesView> setSnippetPreference({
+  required SnippetPreferenceKind key,
+  required bool value,
+}) => RustLib.instance.api.crateApiSnippetsSetSnippetPreference(
+  key: key,
+  value: value,
 );
 
 class RenderedSnippet {
@@ -620,6 +631,30 @@ class SnippetPageView {
           snippets == other.snippets &&
           nextCursor == other.nextCursor &&
           total == other.total;
+}
+
+enum SnippetPreferenceKind { recordPasted, requireAuth }
+
+/// Synced snippet preferences.
+class SnippetPreferencesView {
+  final bool recordPasted;
+  final bool requireAuth;
+
+  const SnippetPreferencesView({
+    required this.recordPasted,
+    required this.requireAuth,
+  });
+
+  @override
+  int get hashCode => recordPasted.hashCode ^ requireAuth.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SnippetPreferencesView &&
+          runtimeType == other.runtimeType &&
+          recordPasted == other.recordPasted &&
+          requireAuth == other.requireAuth;
 }
 
 enum SnippetSameIdPolicy { keepBoth, replace, skip }

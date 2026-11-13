@@ -17,10 +17,22 @@ class DynamicFormFields extends StatelessWidget {
     required this.draft,
     this.enabled = true,
     this.footer,
+    this.focusNodes = const {},
+    this.errors = const {},
+    this.onSubmitted,
   });
 
   final DynamicFormDraft draft;
   final bool enabled;
+
+  /// Owner focus nodes by field id, so the owner can move focus to a field.
+  final Map<String, FocusNode> focusNodes;
+
+  /// Inline messages by field id, shown under the field.
+  final Map<String, String> errors;
+
+  /// Enter in a single-line field.
+  final ValueChanged<String>? onSubmitted;
 
   /// Owner content after the fields, rebuilt with the draft.
   final Widget? Function(BuildContext context)? footer;
@@ -108,22 +120,53 @@ class DynamicFormFields extends StatelessWidget {
                   draft.fileName(field.id) ?? context.l10n.modulesChooseFile,
                 ),
               )
-            else if (field.secret)
+            else if (field.kind == DynamicFormFieldKind.choice)
+              Select<String>(
+                key: ValueKey(field.id),
+                focusNode: focusNodes[field.id],
+                enabled: enabled,
+                value: draft.values[field.id] as String?,
+                onChanged: (value) {
+                  if (value != null) draft.setValue(field.id, value);
+                },
+                itemBuilder: (context, id) => Text(
+                  field.options
+                          .where((option) => option.id == id)
+                          .firstOrNull
+                          ?.title ??
+                      id,
+                ),
+                popup: SelectPopup<String>(
+                  items: SelectItemList(
+                    children: [
+                      for (final option in field.options)
+                        SelectItemButton<String>(
+                          value: option.id,
+                          child: Text(option.title),
+                        ),
+                    ],
+                  ),
+                ).call,
+              )
+            else if (field.secret || field.kind == DynamicFormFieldKind.line)
               TextField(
                 key: ValueKey(field.id),
+                focusNode: focusNodes[field.id],
                 initialValue: draft.values[field.id] as String,
                 enabled: enabled,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
+                obscureText: field.secret,
+                autocorrect: !field.secret,
+                enableSuggestions: !field.secret,
                 decoration: AppOverlays.dialogFieldDecoration(context),
                 onChanged: enabled
                     ? (value) => draft.setValue(field.id, value)
                     : null,
+                onSubmitted: onSubmitted,
               )
             else
               TextArea(
                 key: ValueKey(field.id),
+                focusNode: focusNodes[field.id],
                 initialValue: draft.values[field.id] as String,
                 enabled: enabled,
                 decoration: AppOverlays.dialogFieldDecoration(context),
@@ -131,6 +174,19 @@ class DynamicFormFields extends StatelessWidget {
                     ? (value) => draft.setValue(field.id, value)
                     : null,
               ),
+          ],
+          if (errors[field.id] case final error?) ...[
+            const Gap(AppSpacing.xs),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                error,
+                key: ValueKey('${field.id}-error'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.destructive,
+                ),
+              ).small(),
+            ),
           ],
           const Gap(AppSpacing.md),
         ],

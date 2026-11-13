@@ -227,6 +227,10 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             policies: snippets::ImportPolicies::default(),
         },
         snippets::SnippetOp::Release,
+        snippets::SnippetOp::SetPreference {
+            key: snippets::SnippetPreferenceKey::RequireAuth,
+            value: true,
+        },
     ];
     let clip_ops = vec![
         clips::ClipOp::SaveEdit {

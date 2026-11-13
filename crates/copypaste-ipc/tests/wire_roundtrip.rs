@@ -125,6 +125,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Delivered(_) => "delivered",
         ResponseData::SnippetImportPlan(_) => "snippet_import_plan",
         ResponseData::SnippetImportReport(_) => "snippet_import_report",
+        ResponseData::SnippetPreferences(_) => "snippet_preferences",
         ResponseData::ClipAnnotations(_) => "clip_annotations",
         ResponseData::RuleTrace(_) => "rule_trace",
         ResponseData::MaybeItem(_) => "maybe_item",

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -5096,4 +5095,754 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get quickAccessWidgetKeywords =>
       'startbildschirm widget launcher letzte';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Kürzel $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Kürzel';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Optional, zum Beispiel mfg';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Bereits verwendet von „$title“';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Höchstens $max Zeichen verwenden.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Ein Kürzel darf keine Leer- oder Steuerzeichen enthalten.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count Textbausteine müssen nach einer Synchronisierung geprüft werden',
+      one: '1 Textbaustein muss nach einer Synchronisierung geprüft werden',
+      zero: 'Keine Textbausteine zu prüfen',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Text';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Text des Textbausteins eingeben';
+
+  @override
+  String get snippetsClearSelection => 'Auswahl aufheben';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Zu groß zum Bearbeiten. Dieser Clip wird schreibgeschützt geöffnet.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Neutral',
+      'blue': 'Blau',
+      'green': 'Grün',
+      'amber': 'Bernstein',
+      'red': 'Rot',
+      'other': 'Neutral',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Akzentfarbe';
+
+  @override
+  String get snippetsCollectionIcon => 'Symbol';
+
+  @override
+  String get snippetsCollectionLabel => 'Sammlung';
+
+  @override
+  String get snippetsCollectionName => 'Name';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'Eine Sammlung mit diesem Namen gibt es bereits.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Höchstens $max Zeichen verwenden.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Dieser Textbaustein ist verborgen.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Fortfahren';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Dieses Gerät hat kein Passwort, keine PIN und keine Biometrie, um dich zu prüfen. Fahre nur fort, wenn es dein Gerät ist.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Bestätige, dass du es bist';
+
+  @override
+  String get snippetsConcealedPreview => 'Verborgener Textbaustein';
+
+  @override
+  String get snippetsConcealedSwitch => 'Verborgen';
+
+  @override
+  String get snippetsConcealedTitle => 'Verborgener Textbaustein';
+
+  @override
+  String get snippetsConflictBadge => 'Konfliktkopie';
+
+  @override
+  String get snippetsCopied => 'Kopiert';
+
+  @override
+  String get snippetsCreate => 'Textbaustein erstellen';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Textbaustein „$query“ erstellen';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Sammlung löschen';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Textbausteine nach „Ohne Sammlung“ verschieben';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '„$name“ löschen?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets =>
+      'Textbausteine ebenfalls löschen';
+
+  @override
+  String get snippetsDeletedMessage => 'In „Zuletzt gelöscht“ verschoben.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Textbausteine gelöscht',
+      one: 'Textbaustein gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Speichern in';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Clip im Verlauf',
+      'snippet': 'Textbaustein',
+      'other': 'Clip im Verlauf',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Verwerfen';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Textbausteine',
+      one: '1 Textbaustein',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Ein anderer Textbaustein hat bei einer Synchronisierung dasselbe Kürzel erhalten. Ändere eines davon.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Doppeltes Kürzel';
+
+  @override
+  String get snippetsEditClip => 'Clip bearbeiten';
+
+  @override
+  String get snippetsEditCollection => 'Sammlung bearbeiten';
+
+  @override
+  String get snippetsEditSnippet => 'Textbaustein bearbeiten';
+
+  @override
+  String get snippetsEditTab => 'Bearbeiten';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Gib einem Textbaustein ein Kürzel und tippe es dann in Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'Noch keine Textbausteine';
+
+  @override
+  String get snippetsEnableTemplate => 'Einschalten';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Platzhalter funktionieren nur in Vorlagen. Text, der bereits wie ein Platzhalter aussieht, wird dann ebenfalls ausgefüllt.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Vorlage einschalten?';
+
+  @override
+  String get snippetsExport => 'Exportieren';
+
+  @override
+  String get snippetsExportCollection => 'Sammlung exportieren';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Verborgene Textbausteine in die lesbare Datei aufnehmen';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Textbausteine geschrieben',
+      one: '1 Textbaustein geschrieben',
+      zero: 'Keine Textbausteine geschrieben',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Textbausteine exportiert';
+
+  @override
+  String get snippetsExportEncrypt => 'Mit Passphrase verschlüsseln';
+
+  @override
+  String get snippetsExportFailed => 'Export fehlgeschlagen';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Mir ist klar, dass jeder mit der Datei sie lesen kann';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Alle Textbausteine',
+      'collections': 'Diese Sammlung',
+      'snippets': 'Ausgewählte Textbausteine ($count)',
+      'other': 'Alle Textbausteine',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Textbausteine exportieren';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Feld einfügen';
+
+  @override
+  String get snippetsFieldDefault => 'Standardwert';
+
+  @override
+  String get snippetsFieldName => 'Name';
+
+  @override
+  String get snippetsFieldOptions => 'Optionen, durch Kommas getrennt';
+
+  @override
+  String get snippetsFieldRequired => 'Fülle dieses Feld aus.';
+
+  @override
+  String get snippetsFieldType => 'Typ';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Eine Zeile',
+      'multiline': 'Mehrere Zeilen',
+      'choice': 'Auswahl',
+      'other': 'Eine Zeile',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Die Formatierung wird beim Speichern entfernt.';
+
+  @override
+  String get snippetsGoToSnippet => 'Zum Textbaustein';
+
+  @override
+  String get snippetsImport => 'Importieren';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Kürzel bereits verwendet';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Ohne Kürzel importieren',
+      'renameWithSuffix': 'Zahl an das Kürzel anhängen',
+      'skip': 'Überspringen',
+      'other': 'Ohne Kürzel importieren',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Sammlung mit demselben Namen';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Zur vorhandenen hinzufügen',
+      'createNew': 'Neue erstellen',
+      'other': 'Zur vorhandenen hinzufügen',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Bekannte Platzhalter umwandeln';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Neu: $added. Identisch, übersprungen: $identical. Geändert: $updated. Kürzelkonflikte: $conflicts. Ungültig: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Textbausteine importiert';
+
+  @override
+  String get snippetsImportFailed => 'Import fehlgeschlagen';
+
+  @override
+  String get snippetsImportFileType => 'Textbaustein-Dateien';
+
+  @override
+  String get snippetsImportFormat => 'Format';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste-Paket',
+      'json': 'JSON-Liste',
+      'csv': 'CSV',
+      'other': 'CopyPaste-Paket',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Zeile $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Zeilen, die nicht importiert werden';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Passphrase, falls die Datei verschlüsselt ist';
+
+  @override
+  String get snippetsImportPreview => 'Vorschau';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Hinzugefügt: $inserted. Aktualisiert: $updated. Übersprungen: $skipped. Zu prüfende Kürzel: $flagged. Unbekannte Platzhalter: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy =>
+      'Gleicher Textbaustein, anderer Inhalt';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Beide behalten',
+      'replace': 'Vorhandenen ersetzen',
+      'skip': 'Überspringen',
+      'other': 'Beide behalten',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Textbausteine importieren';
+
+  @override
+  String get snippetsInsert => 'Einfügen';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Platzhalter einfügen';
+
+  @override
+  String get snippetsKeepReferences => 'Beibehalten';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Textbausteine und Sammlungen durchsuchen, ordnen und bearbeiten.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'textbausteine snippets vorlagen kürzel sammlungen text';
+
+  @override
+  String get snippetsLibraryTitle => 'Textbaustein-Bibliothek';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Dieser Platzhalter wird nie geschlossen.',
+      'malformed': 'Dieser Platzhalter kann nicht gelesen werden.',
+      'unknownPlaceholder':
+          'Unbekannter Platzhalter „$detail“. Er wird unverändert eingefügt.',
+      'unknownParameter': 'Unbekannte Option „$detail“.',
+      'duplicateParameter': 'Option „$detail“ ist doppelt gesetzt.',
+      'missingParameter': 'Option „$detail“ fehlt.',
+      'invalidValue': 'Option „$detail“ hat einen ungültigen Wert.',
+      'conflictingParameters':
+          'Diese Optionen können nicht zusammen verwendet werden.',
+      'unknownLocale': 'Unbekannte Sprache.',
+      'unknownTimeZone': 'Unbekannte Zeitzone.',
+      'invalidPattern': 'Ungültiges Datumsmuster.',
+      'dateOutOfRange': 'Das Datum liegt außerhalb des Bereichs.',
+      'unknownModifier': 'Unbekannter Modifikator „$detail“.',
+      'modifierFailed': 'Modifikator „$detail“ konnte nicht angewendet werden.',
+      'emptyClipboard': 'Zwischenablage-Eintrag $detail ist leer.',
+      'extraCursor': 'Nur der erste Cursor-Platzhalter wird verwendet.',
+      'nestedCursor':
+          'Ein Cursor in einem eingefügten Textbaustein wird ignoriert.',
+      'tooManyFields':
+          'Feld „$detail“ überschreitet die Grenze von 10 Feldern.',
+      'conflictingField':
+          'Feld „$detail“ ist zweimal mit unterschiedlichen Einstellungen definiert.',
+      'choiceDefaultNotOption':
+          'Der Standardwert von „$detail“ ist keine seiner Optionen.',
+      'cycle':
+          'Textbausteine fügen sich gegenseitig in einer Schleife ein: $detail.',
+      'depthExceeded': 'Textbausteine sind mehr als 3 Ebenen tief eingefügt.',
+      'nestingLimit': 'Zu viele eingefügte Textbausteine.',
+      'unknownSnippet': 'Kein Textbaustein hat dieses Kürzel.',
+      'containsPlaceholders':
+          'Der Text enthält Platzhalter. Schalte „Vorlage“ ein, um sie auszufüllen.',
+      'other': 'Mit diesem Platzhalter stimmt etwas nicht.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Textbausteine konnten nicht geladen werden';
+
+  @override
+  String get snippetsLoadMore => 'Mehr laden';
+
+  @override
+  String get snippetsMerge => 'Zusammenführen';
+
+  @override
+  String get snippetsMergeCollection => 'Mit anderer Sammlung zusammenführen';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '„$name“ zusammenführen mit';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Verschieben nach';
+
+  @override
+  String get snippetsNewCollection => 'Neue Sammlung';
+
+  @override
+  String get snippetsNewSnippet => 'Neuer Textbaustein';
+
+  @override
+  String get snippetsNewText => 'Neuer Text';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'Keine Textbausteine für „$query“';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Passphrase wiederholen';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Passphrase, mindestens $min Zeichen';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Passphrase';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Eine vergessene Passphrase kann nicht wiederhergestellt werden.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Zu kurz',
+      'weak': 'Schwach',
+      'fair': 'Mittel',
+      'good': 'Gut',
+      'other': 'Stark',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Angeheftet';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Platzhalter';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Datum',
+      'dateShort': 'Datum, kurz',
+      'dateLong': 'Datum, lang',
+      'dateIso': 'Datum, ISO 8601',
+      'dateNextWeek': 'Datum in einer Woche',
+      'now': 'Uhrzeit',
+      'dateTime': 'Datum und Uhrzeit',
+      'clipboard': 'Zwischenablage',
+      'clipboardPrevious': 'Vorheriger Zwischenablage-Eintrag',
+      'field': 'Ausfüllfeld …',
+      'cursor': 'Cursorposition',
+      'uuid': 'UUID',
+      'random': 'Zufallszahl',
+      'upper': 'Modifikator: Großbuchstaben',
+      'lower': 'Modifikator: Kleinbuchstaben',
+      'trim': 'Modifikator: Leerzeichen entfernen',
+      'other': 'Platzhalter',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Anderen Textbaustein einfügen';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Keine passenden Platzhalter';
+
+  @override
+  String get snippetsPreviewEmpty => 'Keine Vorschau';
+
+  @override
+  String get snippetsPreviewTab => 'Vorschau';
+
+  @override
+  String get snippetsPurge => 'Endgültig löschen';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Sie werden auf allen deinen Geräten gelöscht. Das kann nicht rückgängig gemacht werden.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Textbausteine endgültig löschen?',
+      one: 'Textbaustein endgültig löschen?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '„Zuletzt gelöscht“ ist leer';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Fügt eingefügten Textbaustein-Text zum Verlauf hinzu. Verborgene Textbausteine werden nie gespeichert.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'verlauf speichern eingefügt textbausteine';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Eingefügte Textbausteine im Verlauf speichern';
+
+  @override
+  String get snippetsReplaceOriginal => 'Original ersetzen';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Löscht den ursprünglichen Clip nach dem Speichern auf allen Geräten. Ausgeschaltet bleiben beide erhalten.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Bestätige deine Identität, bevor ein verborgener Textbaustein verwendet oder angezeigt wird. Jedes Gerät fragt selbst.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'verborgen passwort biometrie fingerabdruck gesicht sperre bestätigen';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Vor verborgenen Textbausteinen bestätigen';
+
+  @override
+  String get snippetsRestore => 'Wiederherstellen';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Füge Text hinzu, um zu speichern.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'Der Titel ist länger als $max Zeichen.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'Der Text ist größer als 64 KB.';
+
+  @override
+  String get snippetsSaveFailed => 'Speichern fehlgeschlagen';
+
+  @override
+  String get snippetsScopeAll => 'Alle';
+
+  @override
+  String get snippetsScopeEmpty => 'Hier sind keine Textbausteine';
+
+  @override
+  String get snippetsScopePinned => 'Angeheftet';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Zuletzt gelöscht';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Textbausteine durchsuchen';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ausgewählt',
+      one: '1 ausgewählt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Anzeigen';
+
+  @override
+  String get snippetsShowAll => 'Alle anzeigen';
+
+  @override
+  String get snippetsShowAttention => 'Prüfen';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'Du hast $count Textbausteine. Erlaubt sind bis zu 20.000.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Vorlage';
+
+  @override
+  String get snippetsTemplateSwitch => 'Vorlage';
+
+  @override
+  String get snippetsTitleLabel => 'Titel';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Optional';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Textbausteine zwischen Apps übertragen oder sichern. Exporte sind standardmäßig verschlüsselt.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'import export sicherung paket json csv passphrase';
+
+  @override
+  String get snippetsTransferTitle => 'Import und Export';
+
+  @override
+  String get snippetsUndo => 'Rückgängig';
+
+  @override
+  String get snippetsUnfiled => 'Ohne Sammlung';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Platzhalter werden unverändert eingefügt',
+      one: '1 Platzhalter wird unverändert eingefügt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Lösen';
+
+  @override
+  String get snippetsUnsavedMessage =>
+      'Änderungen vor dem Schließen speichern?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Nicht gespeicherte Änderungen';
+
+  @override
+  String get snippetsUntitled => 'Textbaustein ohne Titel';
+
+  @override
+  String get snippetsUpdateReferences => 'Aktualisieren';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Andere Vorlagen fügen eventuell „$from“ ein. Sollen sie „$to“ verwenden?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Verweise aktualisieren?';
+
+  @override
+  String get snippetsUseFailed => 'Textbaustein konnte nicht verwendet werden';
 }

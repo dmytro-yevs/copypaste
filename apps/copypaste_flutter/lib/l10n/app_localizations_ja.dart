@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4758,4 +4757,720 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => 'ホーム画面 ウィジェット ランチャー 最近';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return '略語 $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => '略語';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => '省略可、例: sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return '「$title」で使用済みです';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return '$max 文字以内にしてください。';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace => '略語にスペースや制御文字は使用できません。';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '同期後に確認が必要なスニペット: $count 件',
+      zero: '確認が必要なスニペットはありません',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'テキスト';
+
+  @override
+  String get snippetsBodyPlaceholder => 'スニペットのテキストを入力';
+
+  @override
+  String get snippetsClearSelection => '選択を解除';
+
+  @override
+  String get snippetsClipTooLarge => '大きすぎるため編集できません。このクリップは読み取り専用で開きます。';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'ニュートラル',
+      'blue': '青',
+      'green': '緑',
+      'amber': '琥珀',
+      'red': '赤',
+      'other': 'ニュートラル',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'アクセントカラー';
+
+  @override
+  String get snippetsCollectionIcon => 'アイコン';
+
+  @override
+  String get snippetsCollectionLabel => 'コレクション';
+
+  @override
+  String get snippetsCollectionName => '名前';
+
+  @override
+  String get snippetsCollectionNameTaken => 'この名前のコレクションはすでにあります。';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return '$max 文字以内にしてください。';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'このスニペットは非表示です。';
+
+  @override
+  String get snippetsConcealedConfirmAction => '続ける';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'このデバイスには本人確認に使えるパスワード、PIN、生体認証がありません。自分のデバイスの場合のみ続けてください。';
+
+  @override
+  String get snippetsConcealedConfirmTitle => '本人確認';
+
+  @override
+  String get snippetsConcealedPreview => '非表示スニペット';
+
+  @override
+  String get snippetsConcealedSwitch => '非表示';
+
+  @override
+  String get snippetsConcealedTitle => '非表示スニペット';
+
+  @override
+  String get snippetsConflictBadge => '競合コピー';
+
+  @override
+  String get snippetsCopied => 'コピーしました';
+
+  @override
+  String get snippetsCreate => 'スニペットを作成';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'スニペット「$query」を作成';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'コレクションを削除';
+
+  @override
+  String get snippetsDeleteCollectionMove => 'スニペットを「未分類」に移動';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '「$name」を削除しますか?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'スニペットも削除';
+
+  @override
+  String get snippetsDeletedMessage => '「最近削除した項目」に移動しました。';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件のスニペットを削除しました',
+      one: 'スニペットを削除しました',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => '保存先';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': '履歴のクリップ',
+      'snippet': 'スニペット',
+      'other': '履歴のクリップ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => '破棄';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件のスニペット',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      '同期により別のスニペットが同じ略語になりました。どちらかを変更してください。';
+
+  @override
+  String get snippetsDuplicateBadge => '略語の重複';
+
+  @override
+  String get snippetsEditClip => 'クリップを編集';
+
+  @override
+  String get snippetsEditCollection => 'コレクションを編集';
+
+  @override
+  String get snippetsEditSnippet => 'スニペットを編集';
+
+  @override
+  String get snippetsEditTab => '編集';
+
+  @override
+  String get snippetsEmptyMessage => 'スニペットに略語を付けて、Quick Paste で入力します。';
+
+  @override
+  String get snippetsEmptyTitle => 'スニペットはまだありません';
+
+  @override
+  String get snippetsEnableTemplate => 'オンにする';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'プレースホルダーはテンプレートでのみ機能します。すでにプレースホルダーのように見えるテキストも埋め込まれます。';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'テンプレートをオンにしますか?';
+
+  @override
+  String get snippetsExport => '書き出す';
+
+  @override
+  String get snippetsExportCollection => 'コレクションを書き出す';
+
+  @override
+  String get snippetsExportConcealedConfirm => '読み取り可能なファイルに非表示スニペットを含める';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件のスニペットを書き出しました',
+      zero: 'スニペットは書き出されませんでした',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'スニペットを書き出しました';
+
+  @override
+  String get snippetsExportEncrypt => 'パスフレーズで暗号化';
+
+  @override
+  String get snippetsExportFailed => '書き出しに失敗しました';
+
+  @override
+  String get snippetsExportPlainConfirm => 'ファイルを持つ人なら誰でも読めることを理解しています';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'すべてのスニペット',
+      'collections': 'このコレクション',
+      'snippets': '選択したスニペット ($count)',
+      'other': 'すべてのスニペット',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'スニペットを書き出す';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'フィールドを挿入';
+
+  @override
+  String get snippetsFieldDefault => '既定値';
+
+  @override
+  String get snippetsFieldName => '名前';
+
+  @override
+  String get snippetsFieldOptions => '選択肢 (カンマ区切り)';
+
+  @override
+  String get snippetsFieldRequired => 'この項目を入力してください。';
+
+  @override
+  String get snippetsFieldType => '種類';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': '1 行',
+      'multiline': '複数行',
+      'choice': '選択',
+      'other': '1 行',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => '保存すると書式は削除されます。';
+
+  @override
+  String get snippetsGoToSnippet => 'スニペットへ移動';
+
+  @override
+  String get snippetsImport => '読み込む';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => '略語が使用済み';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': '略語なしで読み込む',
+      'renameWithSuffix': '略語に番号を付ける',
+      'skip': 'スキップ',
+      'other': '略語なしで読み込む',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => '同じ名前のコレクション';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': '既存のものに追加',
+      'createNew': '新しく作成',
+      'other': '既存のものに追加',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => '既知のプレースホルダーを変換';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return '新規: $added。同一 (スキップ): $identical。変更: $updated。略語の競合: $conflicts。無効: $invalid。';
+  }
+
+  @override
+  String get snippetsImportDone => 'スニペットを読み込みました';
+
+  @override
+  String get snippetsImportFailed => '読み込みに失敗しました';
+
+  @override
+  String get snippetsImportFileType => 'スニペットファイル';
+
+  @override
+  String get snippetsImportFormat => '形式';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste バンドル',
+      'json': 'JSON リスト',
+      'csv': 'CSV',
+      'other': 'CopyPaste バンドル',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return '$row 行目: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => '読み込まれない行';
+
+  @override
+  String get snippetsImportPassphraseHint => 'パスフレーズ (ファイルが暗号化されている場合)';
+
+  @override
+  String get snippetsImportPreview => 'プレビュー';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return '追加: $inserted。更新: $updated。スキップ: $skipped。確認が必要な略語: $flagged。認識できないプレースホルダー: $unrecognized。';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => '同じスニペットで内容が異なる';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': '両方を残す',
+      'replace': '既存のものを置き換える',
+      'skip': 'スキップ',
+      'other': '両方を残す',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'スニペットを読み込む';
+
+  @override
+  String get snippetsInsert => '挿入';
+
+  @override
+  String get snippetsInsertPlaceholder => 'プレースホルダーを挿入';
+
+  @override
+  String get snippetsKeepReferences => 'そのままにする';
+
+  @override
+  String get snippetsLibraryDescription => 'スニペットとコレクションを閲覧、整理、編集します。';
+
+  @override
+  String get snippetsLibraryKeywords => 'スニペット テンプレート 略語 コレクション テキスト 定型文';
+
+  @override
+  String get snippetsLibraryTitle => 'スニペットライブラリ';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'このプレースホルダーが閉じられていません。',
+      'malformed': 'このプレースホルダーを読み取れません。',
+      'unknownPlaceholder': '不明なプレースホルダー「$detail」。入力どおりに貼り付けられます。',
+      'unknownParameter': '不明なオプション「$detail」。',
+      'duplicateParameter': 'オプション「$detail」が 2 回指定されています。',
+      'missingParameter': 'オプション「$detail」がありません。',
+      'invalidValue': 'オプション「$detail」の値が無効です。',
+      'conflictingParameters': 'これらのオプションは同時に使用できません。',
+      'unknownLocale': '不明な言語です。',
+      'unknownTimeZone': '不明なタイムゾーンです。',
+      'invalidPattern': '日付のパターンが無効です。',
+      'dateOutOfRange': '日付が範囲外です。',
+      'unknownModifier': '不明な修飾子「$detail」。',
+      'modifierFailed': '修飾子「$detail」を適用できませんでした。',
+      'emptyClipboard': 'クリップボードの項目 $detail は空です。',
+      'extraCursor': '最初のカーソルプレースホルダーのみが使用されます。',
+      'nestedCursor': '挿入されたスニペット内のカーソルは無視されます。',
+      'tooManyFields': 'フィールド「$detail」は 10 個の上限を超えています。',
+      'conflictingField': 'フィールド「$detail」が異なる設定で 2 回定義されています。',
+      'choiceDefaultNotOption': '「$detail」の既定値が選択肢にありません。',
+      'cycle': 'スニペットが互いを循環して挿入しています: $detail。',
+      'depthExceeded': 'スニペットが 3 階層を超えて挿入されています。',
+      'nestingLimit': '挿入されたスニペットが多すぎます。',
+      'unknownSnippet': 'この略語のスニペットはありません。',
+      'containsPlaceholders': 'テキストにプレースホルダーが含まれています。入力するにはテンプレートをオンにしてください。',
+      'other': 'このプレースホルダーに問題があります。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'スニペットを読み込めませんでした';
+
+  @override
+  String get snippetsLoadMore => 'さらに読み込む';
+
+  @override
+  String get snippetsMerge => '統合';
+
+  @override
+  String get snippetsMergeCollection => '別のコレクションに統合';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '「$name」の統合先';
+  }
+
+  @override
+  String get snippetsMoveTo => '移動先';
+
+  @override
+  String get snippetsNewCollection => '新規コレクション';
+
+  @override
+  String get snippetsNewSnippet => '新規スニペット';
+
+  @override
+  String get snippetsNewText => '新規テキスト';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '「$query」に一致するスニペットはありません';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'パスフレーズをもう一度入力';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'パスフレーズ ($min 文字以上)';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'パスフレーズ';
+
+  @override
+  String get snippetsPassphraseNoRecovery => '忘れたパスフレーズは復元できません。';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': '短すぎます',
+      'weak': '弱い',
+      'fair': '普通',
+      'good': '良い',
+      'other': '強い',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'ピン留め';
+
+  @override
+  String get snippetsPlaceholderGroup => 'プレースホルダー';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': '日付',
+      'dateShort': '日付 (短い形式)',
+      'dateLong': '日付 (長い形式)',
+      'dateIso': '日付 (ISO 8601)',
+      'dateNextWeek': '1 週間後の日付',
+      'now': '時刻',
+      'dateTime': '日付と時刻',
+      'clipboard': 'クリップボード',
+      'clipboardPrevious': '前のクリップボード項目',
+      'field': '入力フィールド…',
+      'cursor': 'カーソル位置',
+      'uuid': 'UUID',
+      'random': '乱数',
+      'upper': '修飾子: 大文字',
+      'lower': '修飾子: 小文字',
+      'trim': '修飾子: 空白を削除',
+      'other': 'プレースホルダー',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => '別のスニペットを挿入';
+
+  @override
+  String get snippetsPlaceholderNoMatch => '一致するプレースホルダーはありません';
+
+  @override
+  String get snippetsPreviewEmpty => 'プレビューする内容がありません';
+
+  @override
+  String get snippetsPreviewTab => 'プレビュー';
+
+  @override
+  String get snippetsPurge => '完全に削除';
+
+  @override
+  String get snippetsPurgeMessage => 'すべてのデバイスから消去されます。この操作は元に戻せません。';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件のスニペットを完全に削除しますか?',
+      one: 'スニペットを完全に削除しますか?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '「最近削除した項目」は空です';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      '貼り付けたスニペットのテキストを履歴に追加します。非表示スニペットは記録されません。';
+
+  @override
+  String get snippetsRecordPastedKeywords => '履歴 記録 貼り付け スニペット';
+
+  @override
+  String get snippetsRecordPastedTitle => '貼り付けたスニペットを履歴に記録';
+
+  @override
+  String get snippetsReplaceOriginal => '元のクリップを置き換える';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      '保存後、すべてのデバイスで元のクリップを削除します。オフの場合は両方が残ります。';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      '非表示スニペットを使用または表示する前に本人確認を行います。デバイスごとに確認されます。';
+
+  @override
+  String get snippetsRequireAuthKeywords => '非表示 パスワード 生体認証 指紋 顔 ロック 本人確認';
+
+  @override
+  String get snippetsRequireAuthTitle => '非表示スニペットの使用前に本人確認';
+
+  @override
+  String get snippetsRestore => '復元';
+
+  @override
+  String get snippetsSaveBlockEmpty => '保存するにはテキストを入力してください。';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'タイトルが $max 文字を超えています。';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'テキストが 64 KB を超えています。';
+
+  @override
+  String get snippetsSaveFailed => '保存できませんでした';
+
+  @override
+  String get snippetsScopeAll => 'すべて';
+
+  @override
+  String get snippetsScopeEmpty => 'スニペットはありません';
+
+  @override
+  String get snippetsScopePinned => 'ピン留め';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => '最近削除した項目';
+
+  @override
+  String get snippetsSearchPlaceholder => 'スニペットを検索';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件選択',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => '表示';
+
+  @override
+  String get snippetsShowAll => 'すべて表示';
+
+  @override
+  String get snippetsShowAttention => '確認';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'スニペットが $count 件あります。上限は 20,000 件です。';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'テンプレート';
+
+  @override
+  String get snippetsTemplateSwitch => 'テンプレート';
+
+  @override
+  String get snippetsTitleLabel => 'タイトル';
+
+  @override
+  String get snippetsTitlePlaceholder => '省略可';
+
+  @override
+  String get snippetsTransferDescription =>
+      'アプリ間でスニペットを移したり、バックアップを残したりできます。書き出しは既定で暗号化されます。';
+
+  @override
+  String get snippetsTransferKeywords =>
+      '読み込み 書き出し インポート エクスポート バックアップ json csv パスフレーズ';
+
+  @override
+  String get snippetsTransferTitle => '読み込みと書き出し';
+
+  @override
+  String get snippetsUndo => '元に戻す';
+
+  @override
+  String get snippetsUnfiled => '未分類';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 個のプレースホルダーが入力どおりに貼り付けられます',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'ピン留めを解除';
+
+  @override
+  String get snippetsUnsavedMessage => '閉じる前に変更を保存しますか?';
+
+  @override
+  String get snippetsUnsavedTitle => '未保存の変更';
+
+  @override
+  String get snippetsUntitled => '無題のスニペット';
+
+  @override
+  String get snippetsUpdateReferences => '更新';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'ほかのテンプレートが「$from」を挿入している可能性があります。「$to」を使うように更新しますか?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '参照を更新しますか?';
+
+  @override
+  String get snippetsUseFailed => 'スニペットを使用できませんでした';
 }

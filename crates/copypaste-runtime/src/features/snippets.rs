@@ -46,6 +46,9 @@ impl Runtime {
                 Response::ok(id, ResponseData::Empty {})
             }
             SnippetOp::Use { .. } => usage::handle(self, id, op),
+            SnippetOp::Preferences | SnippetOp::SetPreference { .. } => {
+                usage::preferences(self, id, op)
+            }
             SnippetOp::SaveFromClip {
                 clip_id,
                 collection_id,
@@ -407,7 +410,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-    use copypaste_core::storage::organization::{PreferenceRecord, Record};
+    use copypaste_core::storage::organization::{PreferenceRecord, Record, RecordKey};
     use copypaste_core::{ClipboardPayload, ClipboardWriteError, Keyring};
     use copypaste_ipc::clips::{Delivered, Delivery};
     use copypaste_ipc::snippets::{
@@ -746,5 +749,31 @@ mod tests {
         assert!(detail.lints.is_empty(), "{:?}", detail.lints);
         let rendered = use_snippet(&runtime, &letter, &[], Delivery::Return);
         assert_eq!(rendered.text.as_deref(), Some("street / STREET"));
+    }
+
+    #[test]
+    fn snippet_preferences_default_off_and_persist_as_synced_records() {
+        let (runtime, _clipboard, _dir, _serial) = runtime();
+        let read = |op| match request(&runtime, op).data {
+            Some(ResponseData::SnippetPreferences(preferences)) => preferences,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(
+            read(SnippetOp::Preferences),
+            wire::SnippetPreferences::default()
+        );
+        let set = read(SnippetOp::SetPreference {
+            key: wire::SnippetPreferenceKey::RequireAuth,
+            value: true,
+        });
+        assert!(set.require_auth && !set.record_pasted);
+        assert!(matches!(
+            runtime.store.organization_record(RecordKey::Preference {
+                namespace: "snippets",
+                key: "require_auth",
+            }),
+            Ok(Some(Record::Preference(_)))
+        ));
+        assert_eq!(read(SnippetOp::Preferences), set);
     }
 }

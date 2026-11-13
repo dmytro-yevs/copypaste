@@ -4,7 +4,6 @@ import 'package:copypaste_flutter/features/settings/controller/settings_navigati
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_search_target.dart';
-import 'package:copypaste_flutter/features/snippets/view/snippets_settings_view.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -87,7 +86,8 @@ void main() {
     final sections = [
       SettingsFeatureSection(
         section: SettingsSectionId.snippets,
-        builder: (context, scope) => const SnippetsSettingsView(),
+        builder: (context, scope) =>
+            const SizedBox(key: ValueKey('snippets-content')),
         searchTargets: (context) => [
           SettingsSearchTarget(
             id: 'result-snippet-library',
@@ -132,7 +132,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 500));
     expect(controller.navigation.section, SettingsSectionId.snippets);
-    expect(find.byType(SnippetsSettingsView), findsOneWidget);
+    expect(find.byKey(const ValueKey('snippets-content')), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('settings-search')),
       'library',

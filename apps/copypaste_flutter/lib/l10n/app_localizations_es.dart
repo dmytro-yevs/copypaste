@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -5122,4 +5121,748 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get quickAccessWidgetKeywords =>
       'pantalla de inicio widget launcher recientes';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Abreviatura $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Abreviatura';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Opcional, por ejemplo firma';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Ya la usa «$title»';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Usa como máximo $max caracteres.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Una abreviatura no puede contener espacios ni caracteres de control.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count fragmentos necesitan revisión tras una sincronización',
+      one: '1 fragmento necesita revisión tras una sincronización',
+      zero: 'Ningún fragmento necesita revisión',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Texto';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Escribe el texto del fragmento';
+
+  @override
+  String get snippetsClearSelection => 'Quitar selección';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Demasiado grande para editar. Este recorte se abre en modo de solo lectura.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Neutro',
+      'blue': 'Azul',
+      'green': 'Verde',
+      'amber': 'Ámbar',
+      'red': 'Rojo',
+      'other': 'Neutro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Color de acento';
+
+  @override
+  String get snippetsCollectionIcon => 'Icono';
+
+  @override
+  String get snippetsCollectionLabel => 'Colección';
+
+  @override
+  String get snippetsCollectionName => 'Nombre';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'Ya existe una colección con este nombre.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Usa como máximo $max caracteres.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Este fragmento está oculto.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Continuar';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Este dispositivo no tiene contraseña, PIN ni biometría para verificarte. Continúa solo si es tu dispositivo.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Confirma que eres tú';
+
+  @override
+  String get snippetsConcealedPreview => 'Fragmento oculto';
+
+  @override
+  String get snippetsConcealedSwitch => 'Oculto';
+
+  @override
+  String get snippetsConcealedTitle => 'Fragmento oculto';
+
+  @override
+  String get snippetsConflictBadge => 'Copia en conflicto';
+
+  @override
+  String get snippetsCopied => 'Copiado';
+
+  @override
+  String get snippetsCreate => 'Crear fragmento';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Crear el fragmento «$query»';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Eliminar colección';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Mover sus fragmentos a Sin colección';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '¿Eliminar «$name»?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets =>
+      'Eliminar también sus fragmentos';
+
+  @override
+  String get snippetsDeletedMessage => 'Movido a Eliminados recientemente.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count fragmentos eliminados',
+      one: 'Fragmento eliminado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Guardar en';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Recorte del historial',
+      'snippet': 'Fragmento',
+      'other': 'Recorte del historial',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Descartar';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count fragmentos',
+      one: '1 fragmento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Otro fragmento recibió la misma abreviatura en una sincronización. Cambia una de ellas.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Abreviatura duplicada';
+
+  @override
+  String get snippetsEditClip => 'Editar recorte';
+
+  @override
+  String get snippetsEditCollection => 'Editar colección';
+
+  @override
+  String get snippetsEditSnippet => 'Editar fragmento';
+
+  @override
+  String get snippetsEditTab => 'Editar';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Dale una abreviatura a un fragmento y escríbela en Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'Aún no hay fragmentos';
+
+  @override
+  String get snippetsEnableTemplate => 'Activar';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Los marcadores solo funcionan en plantillas. El texto que ya parezca un marcador también se rellenará.';
+
+  @override
+  String get snippetsEnableTemplateTitle => '¿Activar Plantilla?';
+
+  @override
+  String get snippetsExport => 'Exportar';
+
+  @override
+  String get snippetsExportCollection => 'Exportar colección';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Incluir los fragmentos ocultos en el archivo legible';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Se escribieron $count fragmentos',
+      one: 'Se escribió 1 fragmento',
+      zero: 'No se escribió ningún fragmento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Fragmentos exportados';
+
+  @override
+  String get snippetsExportEncrypt => 'Cifrar con frase de contraseña';
+
+  @override
+  String get snippetsExportFailed => 'No se pudo exportar';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Entiendo que cualquiera con el archivo puede leerlo';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Todos los fragmentos',
+      'collections': 'Esta colección',
+      'snippets': 'Fragmentos seleccionados ($count)',
+      'other': 'Todos los fragmentos',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Exportar fragmentos';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Insertar campo';
+
+  @override
+  String get snippetsFieldDefault => 'Valor predeterminado';
+
+  @override
+  String get snippetsFieldName => 'Nombre';
+
+  @override
+  String get snippetsFieldOptions => 'Opciones, separadas por comas';
+
+  @override
+  String get snippetsFieldRequired => 'Rellena este campo.';
+
+  @override
+  String get snippetsFieldType => 'Tipo';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Una línea',
+      'multiline': 'Varias líneas',
+      'choice': 'Opción',
+      'other': 'Una línea',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => 'El formato se eliminará al guardar.';
+
+  @override
+  String get snippetsGoToSnippet => 'Ir al fragmento';
+
+  @override
+  String get snippetsImport => 'Importar';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Abreviatura ya en uso';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Importar sin abreviatura',
+      'renameWithSuffix': 'Añadir un número a la abreviatura',
+      'skip': 'Omitir',
+      'other': 'Importar sin abreviatura',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Colección con el mismo nombre';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Añadir a la existente',
+      'createNew': 'Crear una nueva',
+      'other': 'Añadir a la existente',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Convertir marcadores conocidos';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Nuevos: $added. Idénticos, omitidos: $identical. Modificados: $updated. Conflictos de abreviatura: $conflicts. No válidos: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Fragmentos importados';
+
+  @override
+  String get snippetsImportFailed => 'No se pudo importar';
+
+  @override
+  String get snippetsImportFileType => 'Archivos de fragmentos';
+
+  @override
+  String get snippetsImportFormat => 'Formato';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'Paquete de CopyPaste',
+      'json': 'Lista JSON',
+      'csv': 'CSV',
+      'other': 'Paquete de CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Fila $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Filas que no se importarán';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Frase de contraseña, si el archivo está cifrado';
+
+  @override
+  String get snippetsImportPreview => 'Vista previa';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Añadidos: $inserted. Actualizados: $updated. Omitidos: $skipped. Abreviaturas por revisar: $flagged. Marcadores no reconocidos: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy =>
+      'Mismo fragmento, contenido distinto';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Conservar ambos',
+      'replace': 'Reemplazar el existente',
+      'skip': 'Omitir',
+      'other': 'Conservar ambos',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Importar fragmentos';
+
+  @override
+  String get snippetsInsert => 'Insertar';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Insertar marcador';
+
+  @override
+  String get snippetsKeepReferences => 'Dejarlas así';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Explora, organiza y edita fragmentos y colecciones.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'fragmentos plantillas abreviaturas colecciones texto snippets';
+
+  @override
+  String get snippetsLibraryTitle => 'Biblioteca de fragmentos';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Este marcador no se cierra nunca.',
+      'malformed': 'No se puede leer este marcador.',
+      'unknownPlaceholder': 'Marcador desconocido «$detail». Se pega tal cual.',
+      'unknownParameter': 'Opción desconocida «$detail».',
+      'duplicateParameter': 'La opción «$detail» está dos veces.',
+      'missingParameter': 'Falta la opción «$detail».',
+      'invalidValue': 'La opción «$detail» tiene un valor no válido.',
+      'conflictingParameters': 'Estas opciones no se pueden usar juntas.',
+      'unknownLocale': 'Idioma desconocido.',
+      'unknownTimeZone': 'Zona horaria desconocida.',
+      'invalidPattern': 'Patrón de fecha no válido.',
+      'dateOutOfRange': 'La fecha está fuera de rango.',
+      'unknownModifier': 'Modificador desconocido «$detail».',
+      'modifierFailed': 'No se pudo aplicar el modificador «$detail».',
+      'emptyClipboard': 'El elemento $detail del portapapeles está vacío.',
+      'extraCursor': 'Solo se usa el primer marcador de cursor.',
+      'nestedCursor': 'Se ignora un cursor dentro de un fragmento insertado.',
+      'tooManyFields': 'El campo «$detail» supera el límite de 10 campos.',
+      'conflictingField':
+          'El campo «$detail» está definido dos veces con ajustes distintos.',
+      'choiceDefaultNotOption':
+          'El valor predeterminado de «$detail» no es una de sus opciones.',
+      'cycle': 'Los fragmentos se insertan entre sí en bucle: $detail.',
+      'depthExceeded':
+          'Los fragmentos se insertan a más de 3 niveles de profundidad.',
+      'nestingLimit': 'Demasiados fragmentos insertados.',
+      'unknownSnippet': 'Ningún fragmento tiene esta abreviatura.',
+      'containsPlaceholders':
+          'El texto contiene marcadores. Activa Plantilla para rellenarlos.',
+      'other': 'Este marcador tiene un problema.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'No se pudieron cargar los fragmentos';
+
+  @override
+  String get snippetsLoadMore => 'Cargar más';
+
+  @override
+  String get snippetsMerge => 'Combinar';
+
+  @override
+  String get snippetsMergeCollection => 'Combinar con otra colección';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Combinar «$name» con';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Mover a';
+
+  @override
+  String get snippetsNewCollection => 'Nueva colección';
+
+  @override
+  String get snippetsNewSnippet => 'Nuevo fragmento';
+
+  @override
+  String get snippetsNewText => 'Texto nuevo';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'Ningún fragmento coincide con «$query»';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Repite la frase de contraseña';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Frase de contraseña, al menos $min caracteres';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Frase de contraseña';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Una frase de contraseña olvidada no se puede recuperar.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Demasiado corta',
+      'weak': 'Débil',
+      'fair': 'Aceptable',
+      'good': 'Buena',
+      'other': 'Fuerte',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Fijado';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Marcadores';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Fecha',
+      'dateShort': 'Fecha, corta',
+      'dateLong': 'Fecha, larga',
+      'dateIso': 'Fecha, ISO 8601',
+      'dateNextWeek': 'Fecha dentro de una semana',
+      'now': 'Hora',
+      'dateTime': 'Fecha y hora',
+      'clipboard': 'Portapapeles',
+      'clipboardPrevious': 'Elemento anterior del portapapeles',
+      'field': 'Campo para rellenar…',
+      'cursor': 'Posición del cursor',
+      'uuid': 'UUID',
+      'random': 'Número aleatorio',
+      'upper': 'Modificador: mayúsculas',
+      'lower': 'Modificador: minúsculas',
+      'trim': 'Modificador: quitar espacios',
+      'other': 'Marcador',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Insertar otro fragmento';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Ningún marcador coincide';
+
+  @override
+  String get snippetsPreviewEmpty => 'Nada que mostrar';
+
+  @override
+  String get snippetsPreviewTab => 'Vista previa';
+
+  @override
+  String get snippetsPurge => 'Eliminar definitivamente';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Se borrarán en todos tus dispositivos. No se puede deshacer.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '¿Eliminar $count fragmentos definitivamente?',
+      one: '¿Eliminar el fragmento definitivamente?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty =>
+      'Eliminados recientemente está vacío';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Añade al historial el texto de los fragmentos pegados. Los fragmentos ocultos nunca se guardan.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'historial guardar pegado fragmentos';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Guardar en el historial los fragmentos pegados';
+
+  @override
+  String get snippetsReplaceOriginal => 'Reemplazar el original';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Elimina el recorte original en todos los dispositivos después de guardar. Si está desactivado, se conservan ambos.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Verifica que eres tú antes de usar o mostrar un fragmento oculto. Cada dispositivo lo pide por separado.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'oculto contraseña biometría huella rostro bloqueo verificar';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Verificar antes de usar fragmentos ocultos';
+
+  @override
+  String get snippetsRestore => 'Restaurar';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Añade texto para guardar.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'El título tiene más de $max caracteres.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'El texto ocupa más de 64 KB.';
+
+  @override
+  String get snippetsSaveFailed => 'No se pudo guardar';
+
+  @override
+  String get snippetsScopeAll => 'Todos';
+
+  @override
+  String get snippetsScopeEmpty => 'No hay fragmentos aquí';
+
+  @override
+  String get snippetsScopePinned => 'Fijados';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Eliminados recientemente';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Buscar fragmentos';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count seleccionados',
+      one: '1 seleccionado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Mostrar';
+
+  @override
+  String get snippetsShowAll => 'Mostrar todos';
+
+  @override
+  String get snippetsShowAttention => 'Revisar';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'Tienes $count fragmentos. Se permiten hasta 20.000.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Plantilla';
+
+  @override
+  String get snippetsTemplateSwitch => 'Plantilla';
+
+  @override
+  String get snippetsTitleLabel => 'Título';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Opcional';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Lleva fragmentos de una app a otra o guarda una copia de seguridad. Las exportaciones se cifran de forma predeterminada.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'importar exportar copia de seguridad paquete json csv contraseña';
+
+  @override
+  String get snippetsTransferTitle => 'Importar y exportar';
+
+  @override
+  String get snippetsUndo => 'Deshacer';
+
+  @override
+  String get snippetsUnfiled => 'Sin colección';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count marcadores se pegan tal cual',
+      one: '1 marcador se pega tal cual',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Dejar de fijar';
+
+  @override
+  String get snippetsUnsavedMessage => '¿Guardar los cambios antes de cerrar?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Cambios sin guardar';
+
+  @override
+  String get snippetsUntitled => 'Fragmento sin título';
+
+  @override
+  String get snippetsUpdateReferences => 'Actualizar';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Otras plantillas pueden insertar «$from». ¿Actualizarlas para que usen «$to»?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '¿Actualizar referencias?';
+
+  @override
+  String get snippetsUseFailed => 'No se pudo usar el fragmento';
 }

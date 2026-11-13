@@ -8354,6 +8354,996 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'home screen widget launcher recent'**
   String get quickAccessWidgetKeywords;
+
+  /// Screen-reader label of the abbreviation badge on a snippet row.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation {abbreviation}'**
+  String snippetsAbbreviationBadge(String abbreviation);
+
+  /// Label of the abbreviation field in the snippet editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation'**
+  String get snippetsAbbreviationLabel;
+
+  /// Placeholder of the abbreviation field; "sig" is a sample abbreviation and may be localized.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional, for example sig'**
+  String get snippetsAbbreviationPlaceholder;
+
+  /// Inline error: another snippet already has this abbreviation; title is that snippet's title.
+  ///
+  /// In en, this message translates to:
+  /// **'Already used by “{title}”'**
+  String snippetsAbbreviationTaken(String title);
+
+  /// Inline error: the abbreviation is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most {max} characters.'**
+  String snippetsAbbreviationTooLong(int max);
+
+  /// Inline error: the abbreviation contains whitespace.
+  ///
+  /// In en, this message translates to:
+  /// **'An abbreviation can\'t contain spaces or control characters.'**
+  String get snippetsAbbreviationWhitespace;
+
+  /// Banner above the snippet list: snippets with a duplicate abbreviation or conflict copies created by sync.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No snippets need review} =1{1 snippet needs review after a sync} other{{count} snippets need review after a sync}}'**
+  String snippetsAttention(int count);
+
+  /// Label of the snippet body field.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get snippetsBodyLabel;
+
+  /// Placeholder of the empty snippet body field.
+  ///
+  /// In en, this message translates to:
+  /// **'Type the snippet text'**
+  String get snippetsBodyPlaceholder;
+
+  /// Button that deselects all selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear selection'**
+  String get snippetsClearSelection;
+
+  /// Notice in the clip editor for clips over 256 KB.
+  ///
+  /// In en, this message translates to:
+  /// **'Too large to edit. This clip opens read-only.'**
+  String get snippetsClipTooLarge;
+
+  /// Name of a collection accent color.
+  ///
+  /// In en, this message translates to:
+  /// **'{accent, select, neutral{Neutral} blue{Blue} green{Green} amber{Amber} red{Red} other{Neutral}}'**
+  String snippetsCollectionAccent(String accent);
+
+  /// Label of the collection accent color picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Accent'**
+  String get snippetsCollectionAccentLabel;
+
+  /// Label of the collection icon picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Icon'**
+  String get snippetsCollectionIcon;
+
+  /// Label of the collection picker in the snippet editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Collection'**
+  String get snippetsCollectionLabel;
+
+  /// Label of the collection name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get snippetsCollectionName;
+
+  /// Inline error in the collection editor.
+  ///
+  /// In en, this message translates to:
+  /// **'A collection with this name already exists.'**
+  String get snippetsCollectionNameTaken;
+
+  /// Inline error: the collection name is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most {max} characters.'**
+  String snippetsCollectionNameTooLong(int max);
+
+  /// Shown instead of the body of a concealed snippet in the editor until the user chooses Show.
+  ///
+  /// In en, this message translates to:
+  /// **'This snippet is concealed.'**
+  String get snippetsConcealedBody;
+
+  /// Confirms the in-app owner check on devices without device authentication.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get snippetsConcealedConfirmAction;
+
+  /// In-app owner check shown when the system cannot verify the device owner.
+  ///
+  /// In en, this message translates to:
+  /// **'This device has no password, PIN or biometrics to verify you. Continue only if this is your device.'**
+  String get snippetsConcealedConfirmMessage;
+
+  /// Title of the in-app owner check.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm it\'s you'**
+  String get snippetsConcealedConfirmTitle;
+
+  /// Shown and announced instead of a concealed snippet's text in lists.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed snippet'**
+  String get snippetsConcealedPreview;
+
+  /// Switch in the snippet editor that masks the snippet everywhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed'**
+  String get snippetsConcealedSwitch;
+
+  /// Display title of a concealed snippet without a title.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed snippet'**
+  String get snippetsConcealedTitle;
+
+  /// Badge on a snippet created by a sync conflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflict copy'**
+  String get snippetsConflictBadge;
+
+  /// Toast title after a snippet was copied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get snippetsCopied;
+
+  /// Empty-state action that opens a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Create snippet'**
+  String get snippetsCreate;
+
+  /// Empty search action that creates a snippet from the query.
+  ///
+  /// In en, this message translates to:
+  /// **'Create snippet “{query}”'**
+  String snippetsCreateNamed(String query);
+
+  /// Action that deletes the selected collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete collection'**
+  String get snippetsDeleteCollection;
+
+  /// Option when deleting a collection (default).
+  ///
+  /// In en, this message translates to:
+  /// **'Move its snippets to Unfiled'**
+  String get snippetsDeleteCollectionMove;
+
+  /// Title of the delete-collection dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete “{name}”?'**
+  String snippetsDeleteCollectionTitle(String name);
+
+  /// Option when deleting a collection; the snippets go to Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete its snippets too'**
+  String get snippetsDeleteCollectionWithSnippets;
+
+  /// Toast message after deleting snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to Recently Deleted.'**
+  String get snippetsDeletedMessage;
+
+  /// Toast title after deleting snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Snippet deleted} other{{count} snippets deleted}}'**
+  String snippetsDeletedTitle(int count);
+
+  /// Label of the destination picker in the new-text editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to'**
+  String get snippetsDestination;
+
+  /// Destination of new text: a one-off history clip or a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'{destination, select, historyClip{History clip} snippet{Snippet} other{History clip}}'**
+  String snippetsDestinationName(String destination);
+
+  /// Unsaved-changes dialog action that closes without saving.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get snippetsDiscard;
+
+  /// Label shown while dragging snippets to a collection.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 snippet} other{{count} snippets}}'**
+  String snippetsDragging(int count);
+
+  /// Hint under the abbreviation of a snippet marked duplicate.
+  ///
+  /// In en, this message translates to:
+  /// **'Another snippet got the same abbreviation in a sync. Change one of them.'**
+  String get snippetsDuplicateAbbreviation;
+
+  /// Badge on a snippet whose abbreviation is also used by another snippet after sync.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate abbreviation'**
+  String get snippetsDuplicateBadge;
+
+  /// Title of the clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit clip'**
+  String get snippetsEditClip;
+
+  /// Title and action for editing a collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit collection'**
+  String get snippetsEditCollection;
+
+  /// Title of the snippet editor for an existing snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit snippet'**
+  String get snippetsEditSnippet;
+
+  /// Editor tab with the body field (narrow layouts).
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get snippetsEditTab;
+
+  /// Empty state message of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Give a snippet an abbreviation, then type it in Quick Paste.'**
+  String get snippetsEmptyMessage;
+
+  /// Empty state title of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets yet'**
+  String get snippetsEmptyTitle;
+
+  /// Confirms turning on Template before inserting a placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get snippetsEnableTemplate;
+
+  /// Asked before inserting a placeholder into a literal snippet whose text already contains double braces.
+  ///
+  /// In en, this message translates to:
+  /// **'Placeholders work only in templates. Text that already looks like a placeholder will be filled in too.'**
+  String get snippetsEnableTemplateMessage;
+
+  /// Title of the question before turning on Template.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on Template?'**
+  String get snippetsEnableTemplateTitle;
+
+  /// Action that exports snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get snippetsExport;
+
+  /// Action that exports the selected collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Export collection'**
+  String get snippetsExportCollection;
+
+  /// Separate confirmation for concealed snippets in an unencrypted export.
+  ///
+  /// In en, this message translates to:
+  /// **'Include concealed snippets in the readable file'**
+  String get snippetsExportConcealedConfirm;
+
+  /// Toast message after exporting.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No snippets written} =1{1 snippet written} other{{count} snippets written}}'**
+  String snippetsExportCount(int count);
+
+  /// Toast title after exporting.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets exported'**
+  String get snippetsExportDone;
+
+  /// Export switch, on by default.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypt with passphrase'**
+  String get snippetsExportEncrypt;
+
+  /// Error title in the export dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Export failed'**
+  String get snippetsExportFailed;
+
+  /// Required confirmation for an unencrypted export.
+  ///
+  /// In en, this message translates to:
+  /// **'I understand that anyone with the file can read it'**
+  String get snippetsExportPlainConfirm;
+
+  /// What an export contains.
+  ///
+  /// In en, this message translates to:
+  /// **'{scope, select, all{All snippets} collections{This collection} snippets{Selected snippets ({count})} other{All snippets}}'**
+  String snippetsExportScope(String scope, int count);
+
+  /// Title of the export dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Export snippets'**
+  String get snippetsExportTitle;
+
+  /// Title of the dialog that builds a fill-in field placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert field'**
+  String get snippetsFieldBuilderTitle;
+
+  /// Label of the default value of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Default value'**
+  String get snippetsFieldDefault;
+
+  /// Label of the name of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get snippetsFieldName;
+
+  /// Label of the options of a choice field.
+  ///
+  /// In en, this message translates to:
+  /// **'Options, separated by commas'**
+  String get snippetsFieldOptions;
+
+  /// Inline error under an empty required template field.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill in this field.'**
+  String get snippetsFieldRequired;
+
+  /// Label of the kind of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get snippetsFieldType;
+
+  /// Kind of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, text{Single line} multiline{Multiple lines} choice{Choice} other{Single line}}'**
+  String snippetsFieldTypeName(String kind);
+
+  /// Notice when editing text that has rich formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Formatting will be removed when you save.'**
+  String get snippetsFormattingNotice;
+
+  /// Link to the snippet that already uses an abbreviation.
+  ///
+  /// In en, this message translates to:
+  /// **'Go to snippet'**
+  String get snippetsGoToSnippet;
+
+  /// Action that imports snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get snippetsImport;
+
+  /// Import policy for snippets whose abbreviation another snippet uses.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation already used'**
+  String get snippetsImportAbbreviationPolicy;
+
+  /// Choices of the abbreviation import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, importWithout{Import without abbreviation} renameWithSuffix{Add a number to the abbreviation} skip{Skip} other{Import without abbreviation}}'**
+  String snippetsImportAbbreviationPolicyName(String policy);
+
+  /// Import policy for collections whose name already exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Collection with the same name'**
+  String get snippetsImportCollectionPolicy;
+
+  /// Choices of the collection import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, merge{Add to the existing one} createNew{Create a new one} other{Add to the existing one}}'**
+  String snippetsImportCollectionPolicyName(String policy);
+
+  /// Import switch that translates recognized foreign placeholders.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert known placeholders'**
+  String get snippetsImportConvert;
+
+  /// Import preview counts.
+  ///
+  /// In en, this message translates to:
+  /// **'New: {added}. Identical, skipped: {identical}. Changed: {updated}. Abbreviation conflicts: {conflicts}. Invalid: {invalid}.'**
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  );
+
+  /// Toast title after importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets imported'**
+  String get snippetsImportDone;
+
+  /// Error title in the import dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Import failed'**
+  String get snippetsImportFailed;
+
+  /// File type label in the file picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippet files'**
+  String get snippetsImportFileType;
+
+  /// Label of the import format picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Format'**
+  String get snippetsImportFormat;
+
+  /// Import file formats.
+  ///
+  /// In en, this message translates to:
+  /// **'{format, select, bundle{CopyPaste bundle} json{JSON list} csv{CSV} other{CopyPaste bundle}}'**
+  String snippetsImportFormatName(String format);
+
+  /// One invalid import row; reason comes from the app.
+  ///
+  /// In en, this message translates to:
+  /// **'Row {row}: {reason}'**
+  String snippetsImportInvalidRow(int row, String reason);
+
+  /// Heading of the invalid rows in the import preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Rows that won\'t be imported'**
+  String get snippetsImportInvalidRows;
+
+  /// Placeholder of the import passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase, if the file is encrypted'**
+  String get snippetsImportPassphraseHint;
+
+  /// Import dialog action that checks the file before importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get snippetsImportPreview;
+
+  /// Toast message after importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Added: {inserted}. Updated: {updated}. Skipped: {skipped}. Abbreviations to review: {flagged}. Unrecognized placeholders: {unrecognized}.'**
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  );
+
+  /// Import policy for snippets that exist with different content.
+  ///
+  /// In en, this message translates to:
+  /// **'Same snippet, different content'**
+  String get snippetsImportSameIdPolicy;
+
+  /// Choices of the same-snippet import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, keepBoth{Keep both} replace{Replace existing} skip{Skip} other{Keep both}}'**
+  String snippetsImportSameIdPolicyName(String policy);
+
+  /// Title of the import dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Import snippets'**
+  String get snippetsImportTitle;
+
+  /// Action that inserts the built placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert'**
+  String get snippetsInsert;
+
+  /// Editor action that opens the placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert placeholder'**
+  String get snippetsInsertPlaceholder;
+
+  /// Keeps other templates unchanged after an abbreviation rename.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep them'**
+  String get snippetsKeepReferences;
+
+  /// Settings search description of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse, organize and edit snippets and collections.'**
+  String get snippetsLibraryDescription;
+
+  /// Space-separated search keywords for the snippet library; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'snippets templates abbreviations collections text'**
+  String get snippetsLibraryKeywords;
+
+  /// Settings search title of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippet library'**
+  String get snippetsLibraryTitle;
+
+  /// Template problem shown in the editor lint list and above the fill-in preview; detail is a name, option, number or loop from the template.
+  ///
+  /// In en, this message translates to:
+  /// **'{code, select, unclosed{This placeholder is never closed.} malformed{This placeholder can\'t be read.} unknownPlaceholder{Unknown placeholder “{detail}”. It is pasted as typed.} unknownParameter{Unknown option “{detail}”.} duplicateParameter{Option “{detail}” is set twice.} missingParameter{Option “{detail}” is missing.} invalidValue{Option “{detail}” has an invalid value.} conflictingParameters{These options can\'t be used together.} unknownLocale{Unknown language.} unknownTimeZone{Unknown time zone.} invalidPattern{Invalid date pattern.} dateOutOfRange{The date is out of range.} unknownModifier{Unknown modifier “{detail}”.} modifierFailed{Modifier “{detail}” couldn\'t be applied.} emptyClipboard{Clipboard item {detail} is empty.} extraCursor{Only the first cursor placeholder is used.} nestedCursor{A cursor inside an inserted snippet is ignored.} tooManyFields{Field “{detail}” is over the limit of 10 fields.} conflictingField{Field “{detail}” is defined twice with different settings.} choiceDefaultNotOption{The default of “{detail}” is not one of its options.} cycle{Snippets insert each other in a loop: {detail}.} depthExceeded{Snippets are inserted more than 3 levels deep.} nestingLimit{Too many inserted snippets.} unknownSnippet{No snippet has this abbreviation.} containsPlaceholders{The text contains placeholders. Turn on Template to fill them in.} other{This placeholder has a problem.}}'**
+  String snippetsLint(String code, String detail);
+
+  /// Error state of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load snippets'**
+  String get snippetsLoadFailed;
+
+  /// Loads the next page of snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get snippetsLoadMore;
+
+  /// Confirms merging two collections.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge'**
+  String get snippetsMerge;
+
+  /// Action that merges the selected collection into another.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge into another collection'**
+  String get snippetsMergeCollection;
+
+  /// Title of the merge dialog; followed by the target collection picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge “{name}” into'**
+  String snippetsMergeCollectionTitle(String name);
+
+  /// Placeholder of the picker that moves selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to'**
+  String get snippetsMoveTo;
+
+  /// Action and title for a new collection.
+  ///
+  /// In en, this message translates to:
+  /// **'New collection'**
+  String get snippetsNewCollection;
+
+  /// Action and title for a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'New snippet'**
+  String get snippetsNewSnippet;
+
+  /// Title of the editor for new text without a source clip.
+  ///
+  /// In en, this message translates to:
+  /// **'New text'**
+  String get snippetsNewText;
+
+  /// Empty search state of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets match “{query}”'**
+  String snippetsNoMatch(String query);
+
+  /// Placeholder of the passphrase confirmation field.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat passphrase'**
+  String get snippetsPassphraseConfirm;
+
+  /// Placeholder of the export passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase, at least {min} characters'**
+  String snippetsPassphraseHint(int min);
+
+  /// Label of the import passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase'**
+  String get snippetsPassphraseLabel;
+
+  /// Warning under the export passphrase.
+  ///
+  /// In en, this message translates to:
+  /// **'A forgotten passphrase can\'t be recovered.'**
+  String get snippetsPassphraseNoRecovery;
+
+  /// Passphrase strength meter label.
+  ///
+  /// In en, this message translates to:
+  /// **'{score, select, tooShort{Too short} weak{Weak} fair{Fair} good{Good} other{Strong}}'**
+  String snippetsPassphraseStrength(String score);
+
+  /// Switch in the snippet editor that shows the snippet in the Pinned section.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get snippetsPinnedSwitch;
+
+  /// Group of placeholders in the Insert placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Placeholders'**
+  String get snippetsPlaceholderGroup;
+
+  /// Entries of the Insert placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, today{Date} dateShort{Date, short} dateLong{Date, long} dateIso{Date, ISO 8601} dateNextWeek{Date in one week} now{Time} dateTime{Date and time} clipboard{Clipboard} clipboardPrevious{Previous clipboard item} field{Fill-in field…} cursor{Cursor position} uuid{UUID} random{Random number} upper{Modifier: uppercase} lower{Modifier: lowercase} trim{Modifier: trim spaces} other{Placeholder}}'**
+  String snippetsPlaceholderKind(String kind);
+
+  /// Group of snippets that can be inserted into a template.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert another snippet'**
+  String get snippetsPlaceholderNestedGroup;
+
+  /// Empty search state of the placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'No placeholders match'**
+  String get snippetsPlaceholderNoMatch;
+
+  /// Preview of an empty body.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to preview'**
+  String get snippetsPreviewEmpty;
+
+  /// Editor tab and heading of the rendered preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get snippetsPreviewTab;
+
+  /// Action that erases snippets from Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete permanently'**
+  String get snippetsPurge;
+
+  /// Message of the permanent delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'They will be erased on all your devices. This can\'t be undone.'**
+  String get snippetsPurgeMessage;
+
+  /// Title of the permanent delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Delete snippet permanently?} other{Delete {count} snippets permanently?}}'**
+  String snippetsPurgeTitle(int count);
+
+  /// Empty state of Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently Deleted is empty'**
+  String get snippetsRecentlyDeletedEmpty;
+
+  /// Description of the record pasted snippets setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Adds pasted snippet text to History. Concealed snippets are never recorded.'**
+  String get snippetsRecordPastedDescription;
+
+  /// Space-separated search keywords for the record pasted snippets setting; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'history record pasted snippets'**
+  String get snippetsRecordPastedKeywords;
+
+  /// Title of the record pasted snippets setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Record pasted snippets in History'**
+  String get snippetsRecordPastedTitle;
+
+  /// Clip editor switch that deletes the original clip after saving.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace original'**
+  String get snippetsReplaceOriginal;
+
+  /// Hint under the Replace original switch.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletes the original clip on all devices after saving. When off, both stay.'**
+  String get snippetsReplaceOriginalHint;
+
+  /// Description of the device authentication setting for concealed snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify it\'s you before a concealed snippet is used or shown. Each device asks on its own.'**
+  String get snippetsRequireAuthDescription;
+
+  /// Space-separated search keywords for the device authentication setting; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'concealed password biometrics fingerprint face lock verify'**
+  String get snippetsRequireAuthKeywords;
+
+  /// Title of the device authentication setting for concealed snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify before using concealed snippets'**
+  String get snippetsRequireAuthTitle;
+
+  /// Restores snippets from Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get snippetsRestore;
+
+  /// Why Save is disabled: the body is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Add some text to save.'**
+  String get snippetsSaveBlockEmpty;
+
+  /// Why Save is disabled: the title is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'The title is longer than {max} characters.'**
+  String snippetsSaveBlockTitle(int max);
+
+  /// Why Save is disabled: the body is too large.
+  ///
+  /// In en, this message translates to:
+  /// **'The text is longer than 64 KB.'**
+  String get snippetsSaveBlockTooLarge;
+
+  /// Error title in editors.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t save'**
+  String get snippetsSaveFailed;
+
+  /// Scope with all snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get snippetsScopeAll;
+
+  /// Empty state of a collection or Unfiled.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets here'**
+  String get snippetsScopeEmpty;
+
+  /// Scope and section with pinned snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get snippetsScopePinned;
+
+  /// Scope with snippets deleted in the last 30 days.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently Deleted'**
+  String get snippetsScopeRecentlyDeleted;
+
+  /// Placeholder of the snippet search field.
+  ///
+  /// In en, this message translates to:
+  /// **'Search snippets'**
+  String get snippetsSearchPlaceholder;
+
+  /// Number of selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 selected} other{{count} selected}}'**
+  String snippetsSelected(int count);
+
+  /// Reveals a concealed snippet in the editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get snippetsShow;
+
+  /// Leaves the review filter of the attention banner.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all'**
+  String get snippetsShowAll;
+
+  /// Shows only snippets that need review.
+  ///
+  /// In en, this message translates to:
+  /// **'Review'**
+  String get snippetsShowAttention;
+
+  /// Warning shown from 10,000 snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'You have {count} snippets. Up to 20,000 are allowed.'**
+  String snippetsSoftLimit(int count);
+
+  /// Badge on a template snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Template'**
+  String get snippetsTemplateBadge;
+
+  /// Switch that turns on placeholders for the snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Template'**
+  String get snippetsTemplateSwitch;
+
+  /// Label of the snippet title field.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get snippetsTitleLabel;
+
+  /// Placeholder of the snippet title field.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional'**
+  String get snippetsTitlePlaceholder;
+
+  /// Description of the import and export row.
+  ///
+  /// In en, this message translates to:
+  /// **'Move snippets between apps or keep a backup. Exports are encrypted by default.'**
+  String get snippetsTransferDescription;
+
+  /// Space-separated search keywords for import and export; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'import export backup bundle json csv passphrase'**
+  String get snippetsTransferKeywords;
+
+  /// Title of the import and export row.
+  ///
+  /// In en, this message translates to:
+  /// **'Import and export'**
+  String get snippetsTransferTitle;
+
+  /// Toast action that restores deleted snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get snippetsUndo;
+
+  /// Snippets that belong to no collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Unfiled'**
+  String get snippetsUnfiled;
+
+  /// Warning above a preview: placeholders that cannot be filled in.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 placeholder is pasted as typed} other{{count} placeholders are pasted as typed}}'**
+  String snippetsUnfilledWarning(int count);
+
+  /// Removes a snippet from Pinned.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get snippetsUnpin;
+
+  /// Message of the unsaved changes dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Save your changes before closing?'**
+  String get snippetsUnsavedMessage;
+
+  /// Title of the unsaved changes dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsaved changes'**
+  String get snippetsUnsavedTitle;
+
+  /// Display title of a snippet without title or text.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled snippet'**
+  String get snippetsUntitled;
+
+  /// Rewrites other templates after an abbreviation rename.
+  ///
+  /// In en, this message translates to:
+  /// **'Update'**
+  String get snippetsUpdateReferences;
+
+  /// Asked when an abbreviation is renamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Other templates may insert “{from}”. Update them to use “{to}”?'**
+  String snippetsUpdateReferencesMessage(String from, String to);
+
+  /// Title of the abbreviation rename question.
+  ///
+  /// In en, this message translates to:
+  /// **'Update references?'**
+  String get snippetsUpdateReferencesTitle;
+
+  /// Error title of the fill-in form.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t use the snippet'**
+  String get snippetsUseFailed;
 }
 
 class _AppLocalizationsDelegate

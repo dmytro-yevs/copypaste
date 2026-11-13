@@ -43,7 +43,12 @@ abstract final class AppOverlays {
     required Widget child,
   }) => _DrawerDismissal(onDismiss: onDismiss, child: child);
 
-  static DrawerConfiguration drawerConfiguration(BuildContext context) {
+  /// [guarded] drawers close only through their own dismissal, so an
+  /// unsaved-changes prompt cannot be skipped by a barrier tap or a drag.
+  static DrawerConfiguration drawerConfiguration(
+    BuildContext context, {
+    bool guarded = false,
+  }) {
     final registry = OverlayAnchorRegistry.of(context);
     final side =
         MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector;
@@ -54,10 +59,10 @@ abstract final class AppOverlays {
           : LinkedAnchor(drawerBodyAnchor, registry: registry),
       position: side ? OverlayPosition.right : OverlayPosition.bottom,
       expands: true,
-      draggable: !side,
-      barrierDismissible: true,
+      draggable: !side && !guarded,
+      barrierDismissible: !guarded,
       transformBackdrop: false,
-      showDragHandle: !side,
+      showDragHandle: !side && !guarded,
       dragHandleSize: const Size(
         AppOverlaySize.dragHandleWidth,
         AppOverlaySize.dragHandleHeight,

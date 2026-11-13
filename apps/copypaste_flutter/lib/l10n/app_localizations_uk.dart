@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -5101,4 +5100,761 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get quickAccessWidgetKeywords =>
       'головний екран віджет лаунчер останні';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Скорочення $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Скорочення';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Необов’язково, наприклад підп';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Уже використовується у «$title»';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Використайте не більше $max символів.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Скорочення не може містити пробілів або керівних символів.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count фрагмента потребують перевірки після синхронізації',
+      many: '$count фрагментів потребують перевірки після синхронізації',
+      few: '$count фрагменти потребують перевірки після синхронізації',
+      one: '$count фрагмент потребує перевірки після синхронізації',
+      zero: 'Немає фрагментів для перевірки',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Текст';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Введіть текст фрагмента';
+
+  @override
+  String get snippetsClearSelection => 'Зняти виділення';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Завеликий для редагування. Цей кліп відкривається лише для читання.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Нейтральний',
+      'blue': 'Синій',
+      'green': 'Зелений',
+      'amber': 'Бурштиновий',
+      'red': 'Червоний',
+      'other': 'Нейтральний',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Колір акценту';
+
+  @override
+  String get snippetsCollectionIcon => 'Значок';
+
+  @override
+  String get snippetsCollectionLabel => 'Колекція';
+
+  @override
+  String get snippetsCollectionName => 'Назва';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'Колекція з такою назвою вже існує.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Використайте не більше $max символів.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Цей фрагмент прихований.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Продовжити';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'На цьому пристрої немає пароля, PIN-коду чи біометрії, щоб перевірити вас. Продовжуйте, лише якщо це ваш пристрій.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Підтвердьте, що це ви';
+
+  @override
+  String get snippetsConcealedPreview => 'Прихований фрагмент';
+
+  @override
+  String get snippetsConcealedSwitch => 'Прихований';
+
+  @override
+  String get snippetsConcealedTitle => 'Прихований фрагмент';
+
+  @override
+  String get snippetsConflictBadge => 'Конфліктна копія';
+
+  @override
+  String get snippetsCopied => 'Скопійовано';
+
+  @override
+  String get snippetsCreate => 'Створити фрагмент';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Створити фрагмент «$query»';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Видалити колекцію';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Перемістити її фрагменти в «Без колекції»';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return 'Видалити «$name»?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Видалити і її фрагменти';
+
+  @override
+  String get snippetsDeletedMessage => 'Переміщено в «Нещодавно видалені».';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалено $count фрагмента',
+      many: 'Видалено $count фрагментів',
+      few: 'Видалено $count фрагменти',
+      one: 'Видалено $count фрагмент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Зберегти в';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Кліп в історії',
+      'snippet': 'Фрагмент',
+      'other': 'Кліп в історії',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Відкинути';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count фрагмента',
+      many: '$count фрагментів',
+      few: '$count фрагменти',
+      one: '$count фрагмент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Інший фрагмент отримав таке саме скорочення під час синхронізації. Змініть одне з них.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Дубльоване скорочення';
+
+  @override
+  String get snippetsEditClip => 'Редагувати кліп';
+
+  @override
+  String get snippetsEditCollection => 'Редагувати колекцію';
+
+  @override
+  String get snippetsEditSnippet => 'Редагувати фрагмент';
+
+  @override
+  String get snippetsEditTab => 'Редагування';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Дайте фрагменту скорочення, а потім введіть його в Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'Ще немає фрагментів';
+
+  @override
+  String get snippetsEnableTemplate => 'Увімкнути';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Заповнювачі працюють лише в шаблонах. Текст, що вже схожий на заповнювач, теж буде заповнено.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Увімкнути «Шаблон»?';
+
+  @override
+  String get snippetsExport => 'Експортувати';
+
+  @override
+  String get snippetsExportCollection => 'Експортувати колекцію';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Додати приховані фрагменти до читабельного файлу';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Записано $count фрагмента',
+      many: 'Записано $count фрагментів',
+      few: 'Записано $count фрагменти',
+      one: 'Записано $count фрагмент',
+      zero: 'Жодного фрагмента не записано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Фрагменти експортовано';
+
+  @override
+  String get snippetsExportEncrypt => 'Зашифрувати парольною фразою';
+
+  @override
+  String get snippetsExportFailed => 'Не вдалося експортувати';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Я розумію, що будь-хто з цим файлом зможе його прочитати';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Усі фрагменти',
+      'collections': 'Ця колекція',
+      'snippets': 'Вибрані фрагменти ($count)',
+      'other': 'Усі фрагменти',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Експорт фрагментів';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Вставити поле';
+
+  @override
+  String get snippetsFieldDefault => 'Типове значення';
+
+  @override
+  String get snippetsFieldName => 'Назва';
+
+  @override
+  String get snippetsFieldOptions => 'Варіанти через кому';
+
+  @override
+  String get snippetsFieldRequired => 'Заповніть це поле.';
+
+  @override
+  String get snippetsFieldType => 'Тип';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Один рядок',
+      'multiline': 'Кілька рядків',
+      'choice': 'Вибір',
+      'other': 'Один рядок',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Форматування буде вилучено під час збереження.';
+
+  @override
+  String get snippetsGoToSnippet => 'Перейти до фрагмента';
+
+  @override
+  String get snippetsImport => 'Імпортувати';
+
+  @override
+  String get snippetsImportAbbreviationPolicy =>
+      'Скорочення вже використовується';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Імпортувати без скорочення',
+      'renameWithSuffix': 'Додати число до скорочення',
+      'skip': 'Пропустити',
+      'other': 'Імпортувати без скорочення',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Колекція з такою самою назвою';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Додати до наявної',
+      'createNew': 'Створити нову',
+      'other': 'Додати до наявної',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Перетворити відомі заповнювачі';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Нові: $added. Однакові, пропущено: $identical. Змінені: $updated. Конфлікти скорочень: $conflicts. Недійсні: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Фрагменти імпортовано';
+
+  @override
+  String get snippetsImportFailed => 'Не вдалося імпортувати';
+
+  @override
+  String get snippetsImportFileType => 'Файли фрагментів';
+
+  @override
+  String get snippetsImportFormat => 'Формат';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'Пакет CopyPaste',
+      'json': 'Список JSON',
+      'csv': 'CSV',
+      'other': 'Пакет CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Рядок $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Рядки, які не буде імпортовано';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Парольна фраза, якщо файл зашифровано';
+
+  @override
+  String get snippetsImportPreview => 'Переглянути';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Додано: $inserted. Оновлено: $updated. Пропущено: $skipped. Скорочення для перевірки: $flagged. Нерозпізнані заповнювачі: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Той самий фрагмент, інший вміст';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Залишити обидва',
+      'replace': 'Замінити наявний',
+      'skip': 'Пропустити',
+      'other': 'Залишити обидва',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Імпорт фрагментів';
+
+  @override
+  String get snippetsInsert => 'Вставити';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Вставити заповнювач';
+
+  @override
+  String get snippetsKeepReferences => 'Залишити';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Переглядайте, впорядковуйте й редагуйте фрагменти та колекції.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'фрагменти шаблони скорочення колекції текст сніпети';
+
+  @override
+  String get snippetsLibraryTitle => 'Бібліотека фрагментів';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Цей заповнювач не закрито.',
+      'malformed': 'Не вдається прочитати цей заповнювач.',
+      'unknownPlaceholder':
+          'Невідомий заповнювач «$detail». Його буде вставлено як є.',
+      'unknownParameter': 'Невідомий параметр «$detail».',
+      'duplicateParameter': 'Параметр «$detail» задано двічі.',
+      'missingParameter': 'Бракує параметра «$detail».',
+      'invalidValue': 'Параметр «$detail» має недійсне значення.',
+      'conflictingParameters': 'Ці параметри не можна використовувати разом.',
+      'unknownLocale': 'Невідома мова.',
+      'unknownTimeZone': 'Невідомий часовий пояс.',
+      'invalidPattern': 'Недійсний шаблон дати.',
+      'dateOutOfRange': 'Дата поза допустимим діапазоном.',
+      'unknownModifier': 'Невідомий модифікатор «$detail».',
+      'modifierFailed': 'Не вдалося застосувати модифікатор «$detail».',
+      'emptyClipboard': 'Елемент буфера обміну $detail порожній.',
+      'extraCursor': 'Використовується лише перший заповнювач курсора.',
+      'nestedCursor': 'Курсор у вставленому фрагменті ігнорується.',
+      'tooManyFields': 'Поле «$detail» перевищує ліміт у 10 полів.',
+      'conflictingField':
+          'Поле «$detail» визначено двічі з різними параметрами.',
+      'choiceDefaultNotOption':
+          'Типове значення «$detail» не входить до його варіантів.',
+      'cycle': 'Фрагменти вставляють один одного по колу: $detail.',
+      'depthExceeded': 'Фрагменти вкладено глибше ніж на 3 рівні.',
+      'nestingLimit': 'Забагато вставлених фрагментів.',
+      'unknownSnippet': 'Жоден фрагмент не має такого скорочення.',
+      'containsPlaceholders':
+          'Текст містить заповнювачі. Увімкніть «Шаблон», щоб заповнити їх.',
+      'other': 'Із цим заповнювачем проблема.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Не вдалося завантажити фрагменти';
+
+  @override
+  String get snippetsLoadMore => 'Завантажити ще';
+
+  @override
+  String get snippetsMerge => 'Об’єднати';
+
+  @override
+  String get snippetsMergeCollection => 'Об’єднати з іншою колекцією';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Об’єднати «$name» з';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Перемістити в';
+
+  @override
+  String get snippetsNewCollection => 'Нова колекція';
+
+  @override
+  String get snippetsNewSnippet => 'Новий фрагмент';
+
+  @override
+  String get snippetsNewText => 'Новий текст';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'Немає фрагментів для «$query»';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Повторіть парольну фразу';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Парольна фраза, щонайменше $min символів';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Парольна фраза';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Забуту парольну фразу неможливо відновити.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Закоротка',
+      'weak': 'Слабка',
+      'fair': 'Посередня',
+      'good': 'Добра',
+      'other': 'Надійна',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Закріплений';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Заповнювачі';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Дата',
+      'dateShort': 'Дата, коротка',
+      'dateLong': 'Дата, повна',
+      'dateIso': 'Дата, ISO 8601',
+      'dateNextWeek': 'Дата через тиждень',
+      'now': 'Час',
+      'dateTime': 'Дата й час',
+      'clipboard': 'Буфер обміну',
+      'clipboardPrevious': 'Попередній елемент буфера обміну',
+      'field': 'Поле для заповнення…',
+      'cursor': 'Позиція курсора',
+      'uuid': 'UUID',
+      'random': 'Випадкове число',
+      'upper': 'Модифікатор: великі літери',
+      'lower': 'Модифікатор: малі літери',
+      'trim': 'Модифікатор: прибрати пробіли',
+      'other': 'Заповнювач',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Вставити інший фрагмент';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Немає відповідних заповнювачів';
+
+  @override
+  String get snippetsPreviewEmpty => 'Нічого переглядати';
+
+  @override
+  String get snippetsPreviewTab => 'Перегляд';
+
+  @override
+  String get snippetsPurge => 'Видалити назавжди';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Їх буде стерто на всіх ваших пристроях. Цю дію неможливо скасувати.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалити $count фрагмента назавжди?',
+      many: 'Видалити $count фрагментів назавжди?',
+      few: 'Видалити $count фрагменти назавжди?',
+      one: 'Видалити $count фрагмент назавжди?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '«Нещодавно видалені» порожні';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Додає текст вставлених фрагментів до історії. Приховані фрагменти ніколи не записуються.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'історія записувати вставлені фрагменти';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Записувати вставлені фрагменти в історію';
+
+  @override
+  String get snippetsReplaceOriginal => 'Замінити оригінал';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Після збереження видаляє оригінальний кліп на всіх пристроях. Якщо вимкнено, залишаються обидва.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Підтверджуйте, що це ви, перед використанням або показом прихованого фрагмента. Кожен пристрій запитує окремо.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'прихований пароль біометрія відбиток обличчя блокування перевірка';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Перевіряти перед використанням прихованих фрагментів';
+
+  @override
+  String get snippetsRestore => 'Відновити';
+
+  @override
+  String get snippetsSaveBlockEmpty => 'Додайте текст, щоб зберегти.';
+
+  @override
+  String snippetsSaveBlockTitle(int max) {
+    return 'Назва довша за $max символів.';
+  }
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'Текст більший за 64 КБ.';
+
+  @override
+  String get snippetsSaveFailed => 'Не вдалося зберегти';
+
+  @override
+  String get snippetsScopeAll => 'Усі';
+
+  @override
+  String get snippetsScopeEmpty => 'Тут немає фрагментів';
+
+  @override
+  String get snippetsScopePinned => 'Закріплені';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Нещодавно видалені';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Шукати фрагменти';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Вибрано $count',
+      many: 'Вибрано $count',
+      few: 'Вибрано $count',
+      one: 'Вибрано $count',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Показати';
+
+  @override
+  String get snippetsShowAll => 'Показати всі';
+
+  @override
+  String get snippetsShowAttention => 'Перевірити';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'У вас $count фрагментів. Дозволено до 20 000.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Шаблон';
+
+  @override
+  String get snippetsTemplateSwitch => 'Шаблон';
+
+  @override
+  String get snippetsTitleLabel => 'Назва';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Необов’язково';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Переносьте фрагменти між програмами або зберігайте резервну копію. Експорт типово зашифрований.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'імпорт експорт резервна копія пакет json csv парольна фраза';
+
+  @override
+  String get snippetsTransferTitle => 'Імпорт і експорт';
+
+  @override
+  String get snippetsUndo => 'Скасувати';
+
+  @override
+  String get snippetsUnfiled => 'Без колекції';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count заповнювача буде вставлено як є',
+      many: '$count заповнювачів буде вставлено як є',
+      few: '$count заповнювачі буде вставлено як є',
+      one: '$count заповнювач буде вставлено як є',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Відкріпити';
+
+  @override
+  String get snippetsUnsavedMessage => 'Зберегти зміни перед закриттям?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Незбережені зміни';
+
+  @override
+  String get snippetsUntitled => 'Фрагмент без назви';
+
+  @override
+  String get snippetsUpdateReferences => 'Оновити';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Інші шаблони можуть вставляти «$from». Оновити їх, щоб вони використовували «$to»?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Оновити посилання?';
+
+  @override
+  String get snippetsUseFailed => 'Не вдалося використати фрагмент';
 }
