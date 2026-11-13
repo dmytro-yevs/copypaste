@@ -6093,4 +6093,829 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickPasteSnippetsUnavailable => 'Parçacıklar kullanılamıyor';
+
+  @override
+  String get rulesLoadFailed => 'İçerik kuralları yüklenemedi.';
+
+  @override
+  String get rulesNewRule => 'Yeni kural';
+
+  @override
+  String get rulesEditRule => 'Kuralı düzenle';
+
+  @override
+  String get rulesUntitled => 'Adsız kural';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Gizlilik varsayılanları';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Bu gizlilik ayarları, herhangi bir kural çalışmadan önce bu cihazdaki her kopyayı korur. Aşağıdaki yerleşik kurallar cihazlarınızla eşitlenir.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'gizlilik gizlenmiş geçici hariç uygulamalar yerleşik kimlik bilgileri parolalar kartlar';
+
+  @override
+  String rulesPrivacyState(String setting, String state) {
+    return '$setting: $state';
+  }
+
+  @override
+  String rulesExcludedApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count uygulama',
+      zero: 'yok',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesOpenPrivacy => 'Gizliliği aç';
+
+  @override
+  String get rulesMyRulesTitle => 'Kurallarım';
+
+  @override
+  String get rulesMyRulesDescription =>
+      'Yeni kopyalarda, yerleşik kurallardan sonra yukarıdan aşağıya çalışır ve cihazlarınızla eşitlenir.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'kurallar otomasyon etiket atla gizli süre sil desen regex';
+
+  @override
+  String get rulesEmptyTitle => 'Henüz kural yok';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Bir kural yeni kopyaları otomatik olarak etiketleyebilir, koruyabilir, süresini doldurabilir veya atlayabilir.';
+
+  @override
+  String get rulesDeletedTitle => 'Son silinenler';
+
+  @override
+  String get rulesDeletedDescription =>
+      'Silinen kurallar 30 gün boyunca geri yüklenebilir.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Silinme: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Geri yükle';
+
+  @override
+  String get rulesDeletedToast => 'Kural silindi';
+
+  @override
+  String get rulesDeletedToastMessage =>
+      '30 gün boyunca geri yükleyebilirsiniz.';
+
+  @override
+  String get rulesUndo => 'Geri al';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return '$device cihazında “$rule” için yapılan eşzamanlı düzenleme daha yeni bir düzenlemeyle değiştirildi.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'başka bir cihaz';
+
+  @override
+  String get rulesRestoreConflict => 'O sürümü kullan';
+
+  @override
+  String get rulesSkipLogTitle => 'Son atlananlar';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'CopyPaste başladığından beri kurallarınızın bu cihazda kaydetmediği kopyalar. Yalnızca zaman, uygulama ve kural saklanır.';
+
+  @override
+  String get rulesSkipLogKeywords => 'atlanan yok sayılan kaydedilmeyen günlük';
+
+  @override
+  String get rulesSkipLogShow => 'Göster';
+
+  @override
+  String get rulesSkipLogEmpty => 'Atlanan kopya yok.';
+
+  @override
+  String get rulesUnknownApp => 'Bilinmeyen uygulama';
+
+  @override
+  String get rulesMatchesEverything => 'herhangi bir kopya';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions ise → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, sonra dur';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' veya ',
+      'other': ' ve ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Çalıştığı cihazlar: $devices';
+  }
+
+  @override
+  String get rulesRunsOnAll => 'Tüm cihazlarda çalışır';
+
+  @override
+  String rulesMatchCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Burada $count kez eşleşti',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesLastMatched(String time) {
+    return 'son $time';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return '$device cihazından yeni';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Güncelleme gerekli';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Bu kuralı çalıştırmak için CopyPaste’i güncelleyin.';
+
+  @override
+  String get rulesErrorBadge => 'Hata';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Düzeltilene kadar bu kuralın eşleşebileceği kopyalar gizli olarak kaydedilir ve yapay zekâ araçlarından gizlenir.';
+  }
+
+  @override
+  String get rulesReorder => 'Yeniden sıralamak için sürükleyin';
+
+  @override
+  String get rulesMoreActions => 'Diğer işlemler';
+
+  @override
+  String get rulesEdit => 'Düzenle';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Yukarı taşı',
+      'down': 'Aşağı taşı',
+      'top': 'En üste taşı',
+      'other': 'En alta taşı',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Mevcut öğelere uygula…';
+
+  @override
+  String get rulesResetBuiltin => 'Varsayılana sıfırla';
+
+  @override
+  String get rulesNameLabel => 'Ad';
+
+  @override
+  String get rulesNamePlaceholder => 'Örneğin, İş bağlantıları';
+
+  @override
+  String get rulesWhenTitle => 'Ne zaman';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Herhangi bir koşul eşleşir',
+      'other': 'Tüm koşullar eşleşir',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions => 'Koşul yok: Bu kural her kopyaya uygulanır.';
+
+  @override
+  String get rulesAddCondition => 'Koşul ekle';
+
+  @override
+  String get rulesRemoveCondition => 'Koşulu kaldır';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Metin',
+      'content_type': 'İçerik türü',
+      'detected_kind': 'Algılanan tür',
+      'source_app': 'Kaynak uygulama',
+      'size': 'Boyut',
+      'privacy_marker': 'Gizlilik işareti',
+      'capture_origin': 'Kaynak',
+      'other': 'Bilinmeyen koşul',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'içerir',
+      'equals': 'eşittir',
+      'starts_with': 'ile başlar',
+      'ends_with': 'ile biter',
+      'matches_regex': 'desenle eşleşir',
+      'other': 'eşleşir',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'içermez',
+      'equals': 'eşit değildir',
+      'starts_with': 'ile başlamaz',
+      'ends_with': 'ile bitmez',
+      'matches_regex': 'desenle eşleşmez',
+      'other': 'eşleşmez',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'şu değil',
+      'other': 'şu',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'şundan küçük',
+      'other': 'şundan büyük',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'şundan küçük değil',
+      'other': 'şundan büyük değil',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'satır',
+      'bytes': 'bayt',
+      'other': 'karakter',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'satır',
+      'bytes': 'bayt',
+      'other': 'karakter',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Düz metin',
+      'rich_text': 'Zengin metin',
+      'image': 'Görsel',
+      'files': 'Dosyalar',
+      'color': 'Renk',
+      'link': 'Bağlantı',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Parola veya gizli bilgi',
+      'url': 'Web adresi',
+      'email': 'E-posta adresi',
+      'phone': 'Telefon numarası',
+      'code': 'Kod',
+      'color': 'Renk değeri',
+      'json': 'JSON',
+      'file_path': 'Dosya yolu',
+      'number': 'Sayı',
+      'one_time_code': 'Tek kullanımlık kod',
+      'payment_card': 'Kart numarası',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Gizlenmiş',
+      'transient': 'Geçici',
+      'auto_generated': 'Otomatik oluşturulmuş',
+      'excluded_from_history': 'Geçmişten hariç',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Bu cihazda kopyalandı',
+      'received': 'Başka bir cihazdan alındı',
+      'created_in_app': 'CopyPaste’te oluşturuldu',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Aranacak metin';
+
+  @override
+  String get rulesPatternPlaceholder => 'Desen, örneğin ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Desenler metnin ilk 1 MiB’ını denetler. İleriye bakma, geriye bakma ve geri başvurular desteklenmez.';
+
+  @override
+  String get rulesCaseSensitive => 'Büyük/küçük harf duyarlı';
+
+  @override
+  String get rulesChooseValues => 'Seç';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Bu koşul CopyPaste’in daha yeni bir sürümünden geliyor.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Android kaynak uygulamayı yalnızca CopyPaste klavyesiyle yapılan kopyalarda bilir. Android’deki diğer kopyalar bu koşulla hiçbir zaman eşleşmez.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Her sistem farklı işaretler bildirir. Sistemin bildirmediği bir işaret hiçbir zaman eşleşmez.';
+
+  @override
+  String get rulesThenTitle => 'O zaman';
+
+  @override
+  String get rulesNoActions => 'En az bir işlem ekleyin.';
+
+  @override
+  String get rulesAddAction => 'İşlem ekle';
+
+  @override
+  String get rulesRemoveAction => 'İşlemi kaldır';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Kaydetme',
+      'mark_secret': 'Gizli olarak işaretle',
+      'hide_from_ai': 'Yapay zekâ araçlarından gizle',
+      'delete_after': 'Şu süre sonra sil',
+      'add_tags': 'Etiket ekle',
+      'transform': 'Dönüştür',
+      'other': 'Bilinmeyen işlem',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“Kaydetme” diğer işlemlerle birleştirilemez.',
+      'present': 'Bu kuralda bu işlem zaten var.',
+      'other': 'Bir kuralda en fazla 8 işlem olabilir.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Bu işlem CopyPaste’in daha yeni bir sürümünden geliyor.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Eşleşen kopyalar hiçbir zaman kaydedilmez, dizine eklenmez veya eşitlenmez.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dakika',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count saat',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gün',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'O sırada pano hâlâ bu kopyayı içeriyorsa panoyu da temizle. Android’de bu, CopyPaste bir sonraki çalıştığında olur.';
+
+  @override
+  String get rulesNoTags => 'Burada kullanmak için Geçmiş’te etiket oluşturun.';
+
+  @override
+  String get rulesNoTransforms => 'Kullanılabilir dönüşüm yok.';
+
+  @override
+  String get rulesReplaceClipboard => 'Panoyu da sonuçla değiştir';
+
+  @override
+  String get rulesOptionsTitle => 'Seçenekler';
+
+  @override
+  String get rulesEnabledSwitch => 'Etkin';
+
+  @override
+  String get rulesStopProcessing =>
+      'Bu kural eşleşirse sonraki kuralları işleme';
+
+  @override
+  String get rulesRunsOnLabel => 'Çalıştığı yer';
+
+  @override
+  String get rulesAllDevices => 'Tüm cihazlar';
+
+  @override
+  String get rulesChosenDevices => 'Seçilen cihazlar';
+
+  @override
+  String get rulesTestTitle => 'Test';
+
+  @override
+  String get rulesTestDescription =>
+      'Kuralı örnek metinle deneyin. Örnek hiçbir zaman kaydedilmez veya eşitlenmez.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Örnek metni yapıştırın veya yazın';
+
+  @override
+  String get rulesTestFullSet => 'Tüm kurallarla birlikte test et';
+
+  @override
+  String get rulesRunTest => 'Testi çalıştır';
+
+  @override
+  String get rulesTestFailed => 'Test çalıştırılamadı.';
+
+  @override
+  String get rulesPreviewHistory => 'Geçmişte önizle';
+
+  @override
+  String rulesSaveBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'read_only': 'Bu kuralı düzenlemek için CopyPaste’i güncelleyin.',
+      'name_missing': 'Kurala bir ad verin.',
+      'name_too_long': 'En fazla 128 karakterlik bir ad kullanın.',
+      'no_actions': 'En az bir işlem ekleyin.',
+      'other': 'İşaretli alanları düzeltin.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesSaveFailed => 'Kural kaydedilemedi.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Bu kuralı CopyPaste’in daha yeni bir sürümü yazdı. Düzenlemek veya çalıştırmak için CopyPaste’i güncelleyin.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'Kural okunamadı.',
+      'unsupported_schema':
+          'Bu kural CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'unknown_condition_type':
+          'Bu koşul CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'unknown_action_type':
+          'Bu işlem CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'too_many_conditions': 'Bir kuralda en fazla 20 koşul olabilir.',
+      'too_many_actions': 'Bir kuralda en fazla 8 işlem olabilir.',
+      'too_many_rules': 'Yalnızca ilk 200 kural çalışır.',
+      'no_actions': 'En az bir işlem ekleyin.',
+      'conflicting_actions': '“Kaydetme” diğer işlemlerle birleştirilemez.',
+      'duplicate_action': 'Her işlem yalnızca bir kez kullanılabilir.',
+      'empty_value': 'Bir değer girin.',
+      'empty_list': 'En az bir değer seçin.',
+      'too_many_values': 'En fazla 64 değer seçin.',
+      'invalid_value': 'Bu değer geçerli değil.',
+      'pattern_too_long': 'Desenler en fazla 2.000 karakter olabilir.',
+      'unsupported_look_around':
+          'İleriye ve geriye bakma desteklenmez. Bunun yerine “Tüm koşullar eşleşir” ile iki koşul kullanın.',
+      'unsupported_backreference': 'Geri başvurular desteklenmez.',
+      'pattern_too_large': 'Bu desen çok karmaşık. Tekrarlarını basitleştirin.',
+      'invalid_pattern': 'Bu desen geçerli değil.',
+      'invalid_duration': '1 dakika ile 90 gün arasında bir süre seçin.',
+      'invalid_tags': 'En az bir etiket seçin.',
+      'invalid_transform': 'Bir dönüşüm seçin.',
+      'other': 'Bu kuralda bir sorun var.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'eşleşti',
+      'not_matched': 'eşleşmedi',
+      'unknown': 'bilinmiyor',
+      'skipped': 'çalıştırılmadı',
+      'other': 'hata',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Koşul $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'Hiçbir kural değerlendirilmedi.';
+
+  @override
+  String get rulesTraceStopped => 'Sonraki kurallar çalışmadı.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Bu kopya için bilinmiyor; bu yüzden koşul hiçbir durumda eşleşmez.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Bu kural burada çalışamadı; bu yüzden eşleşen kopyalar bunun yerine korunur.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Sonuç';
+
+  @override
+  String get rulesTraceNoEffect => 'Hiçbir kural bu kopyayı değiştirmez.';
+
+  @override
+  String get rulesTraceSkipped => 'Kaydedilmez';
+
+  @override
+  String get rulesTraceSecret => 'Gizli olarak kaydedilir';
+
+  @override
+  String get rulesTraceHidden => 'Yapay zekâ araçlarından gizlenir';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return '$duration sonra silinir';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Etiketler: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Dönüştürme: $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Dönüştürülmüş metin';
+
+  @override
+  String get rulesPreviewTitle => 'Mevcut öğelere uygula';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Son $count öğe denetleniyor…';
+  }
+
+  @override
+  String get rulesPreviewNone => 'Bu kuralla eşleşen yeni öğe yok.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe eşleşiyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silinir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe gizli olarak işaretlenir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe yapay zekâ araçlarından gizlenir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğeye silinme zamanı atanır',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe etiketlenir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Yalnızca son $count öğe denetlendi.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 've $count tane daha';
+  }
+
+  @override
+  String get rulesPreviewNote =>
+      'Uygulayana kadar hiçbir şey değişmez. Değişiklikler diğer cihazlarınızla normal düzenlemeler gibi eşitlenir.';
+
+  @override
+  String get rulesSecretItem => 'Gizli öğe';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return '$app uygulamasından gizli öğe';
+  }
+
+  @override
+  String get rulesPreviewCancelled =>
+      'Önizleme durduruldu. Hiçbir şey değişmedi.';
+
+  @override
+  String get rulesPreviewFailed => 'Önizleme çalıştırılamadı.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silinsin mi?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      '“Kaydetme” işlemini mevcut öğelere uygulamak, eşleşen öğeleri tüm cihazlarınızdaki Geçmiş’ten siler. Bu işlem geri alınamaz.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Sil ve uygula';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Uygulanıyor: $done/$total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe değiştirildi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silindi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe değiştirilemedi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled =>
+      'Durduruldu. Durdurmadan önce değiştirilen öğeler değişmiş olarak kalır.';
 }

@@ -6230,4 +6230,847 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get quickPasteSnippetsUnavailable =>
       'Los fragmentos no están disponibles';
+
+  @override
+  String get rulesLoadFailed =>
+      'No se pudieron cargar las reglas de contenido.';
+
+  @override
+  String get rulesNewRule => 'Nueva regla';
+
+  @override
+  String get rulesEditRule => 'Editar regla';
+
+  @override
+  String get rulesUntitled => 'Regla sin nombre';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Valores de privacidad';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Estos ajustes de privacidad protegen cada copia en este dispositivo antes de que se ejecute cualquier regla. Las reglas integradas de abajo se sincronizan con tus dispositivos.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'privacidad oculto temporal apps excluidas integradas credenciales contraseñas tarjetas';
+
+  @override
+  String rulesPrivacyState(String setting, String state) {
+    return '$setting: $state';
+  }
+
+  @override
+  String rulesExcludedApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count apps',
+      one: '1 app',
+      zero: 'ninguna',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesOpenPrivacy => 'Abrir Privacidad';
+
+  @override
+  String get rulesMyRulesTitle => 'Mis reglas';
+
+  @override
+  String get rulesMyRulesDescription =>
+      'Se ejecutan de arriba abajo en las copias nuevas, después de las reglas integradas, y se sincronizan con tus dispositivos.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'reglas automatización etiqueta omitir secreto caducar eliminar patrón regex';
+
+  @override
+  String get rulesEmptyTitle => 'Aún no hay reglas';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Una regla puede etiquetar, proteger, caducar u omitir copias nuevas automáticamente.';
+
+  @override
+  String get rulesDeletedTitle => 'Eliminadas recientemente';
+
+  @override
+  String get rulesDeletedDescription =>
+      'Las reglas eliminadas se pueden restaurar durante 30 días.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Eliminada: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Restaurar';
+
+  @override
+  String get rulesDeletedToast => 'Regla eliminada';
+
+  @override
+  String get rulesDeletedToastMessage => 'Puedes restaurarla durante 30 días.';
+
+  @override
+  String get rulesUndo => 'Deshacer';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return 'Una edición simultánea de «$rule» desde $device se sustituyó por una más reciente.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'otro dispositivo';
+
+  @override
+  String get rulesRestoreConflict => 'Usar esa versión';
+
+  @override
+  String get rulesSkipLogTitle => 'Omitidos recientemente';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Copias que tus reglas no guardaron en este dispositivo desde que se inició CopyPaste. Solo se conservan la hora, la app y la regla.';
+
+  @override
+  String get rulesSkipLogKeywords => 'omitidos ignorados no guardados registro';
+
+  @override
+  String get rulesSkipLogShow => 'Mostrar';
+
+  @override
+  String get rulesSkipLogEmpty => 'No se omitió ninguna copia.';
+
+  @override
+  String get rulesUnknownApp => 'App desconocida';
+
+  @override
+  String get rulesMatchesEverything => 'cualquier copia';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return 'Si $conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary y detener';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {'any': ' o ', 'other': ' y '});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Se ejecuta en $devices';
+  }
+
+  @override
+  String get rulesRunsOnAll => 'Se ejecuta en todos los dispositivos';
+
+  @override
+  String rulesMatchCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Coincidió $count veces aquí',
+      one: 'Coincidió una vez aquí',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesLastMatched(String time) {
+    return 'última vez $time';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return 'Nueva de $device';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Requiere actualización';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Actualiza CopyPaste para ejecutar esta regla.';
+
+  @override
+  String get rulesErrorBadge => 'Error';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Hasta que se corrija, las copias que esta regla podría afectar se guardan como secretas y ocultas a las herramientas de IA.';
+  }
+
+  @override
+  String get rulesReorder => 'Arrastra para reordenar';
+
+  @override
+  String get rulesMoreActions => 'Más acciones';
+
+  @override
+  String get rulesEdit => 'Editar';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Subir',
+      'down': 'Bajar',
+      'top': 'Mover al principio',
+      'other': 'Mover al final',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Aplicar a elementos existentes…';
+
+  @override
+  String get rulesResetBuiltin => 'Restablecer valores predeterminados';
+
+  @override
+  String get rulesNameLabel => 'Nombre';
+
+  @override
+  String get rulesNamePlaceholder => 'Por ejemplo, Enlaces de trabajo';
+
+  @override
+  String get rulesWhenTitle => 'Cuándo';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Se cumple alguna condición',
+      'other': 'Se cumplen todas las condiciones',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions =>
+      'Sin condiciones: esta regla se aplica a todas las copias.';
+
+  @override
+  String get rulesAddCondition => 'Añadir condición';
+
+  @override
+  String get rulesRemoveCondition => 'Quitar condición';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Texto',
+      'content_type': 'Tipo de contenido',
+      'detected_kind': 'Tipo detectado',
+      'source_app': 'App de origen',
+      'size': 'Tamaño',
+      'privacy_marker': 'Marca de privacidad',
+      'capture_origin': 'Origen',
+      'other': 'Condición desconocida',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'contiene',
+      'equals': 'es',
+      'starts_with': 'empieza por',
+      'ends_with': 'termina en',
+      'matches_regex': 'coincide con el patrón',
+      'other': 'coincide',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'no contiene',
+      'equals': 'no es',
+      'starts_with': 'no empieza por',
+      'ends_with': 'no termina en',
+      'matches_regex': 'no coincide con el patrón',
+      'other': 'no coincide',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'no es',
+      'other': 'es',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'es menor que',
+      'other': 'es mayor que',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'no es menor que',
+      'other': 'no es mayor que',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'líneas',
+      'bytes': 'bytes',
+      'other': 'caracteres',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'líneas',
+      'bytes': 'bytes',
+      'other': 'caracteres',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Texto sin formato',
+      'rich_text': 'Texto enriquecido',
+      'image': 'Imagen',
+      'files': 'Archivos',
+      'color': 'Color',
+      'link': 'Enlace',
+      'other': 'Otro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Contraseña o secreto',
+      'url': 'Dirección web',
+      'email': 'Correo electrónico',
+      'phone': 'Número de teléfono',
+      'code': 'Código',
+      'color': 'Valor de color',
+      'json': 'JSON',
+      'file_path': 'Ruta de archivo',
+      'number': 'Número',
+      'one_time_code': 'Código de un solo uso',
+      'payment_card': 'Número de tarjeta',
+      'other': 'Otro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Oculto',
+      'transient': 'Temporal',
+      'auto_generated': 'Generado automáticamente',
+      'excluded_from_history': 'Excluido del historial',
+      'other': 'Otro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Copiado en este dispositivo',
+      'received': 'Recibido de otro dispositivo',
+      'created_in_app': 'Creado en CopyPaste',
+      'other': 'Otro',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Texto que buscar';
+
+  @override
+  String get rulesPatternPlaceholder => 'Patrón, por ejemplo ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Los patrones revisan el primer MiB de texto. No se admiten búsquedas anticipadas, retrospectivas ni referencias inversas.';
+
+  @override
+  String get rulesCaseSensitive => 'Distinguir mayúsculas';
+
+  @override
+  String get rulesChooseValues => 'Elegir';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Esta condición proviene de una versión más reciente de CopyPaste.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Android solo conoce la app de origen de las copias hechas con el teclado de CopyPaste. Otras copias en Android nunca cumplen esta condición.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Cada sistema informa marcas distintas. Una marca que el sistema no informa nunca coincide.';
+
+  @override
+  String get rulesThenTitle => 'Entonces';
+
+  @override
+  String get rulesNoActions => 'Añade al menos una acción.';
+
+  @override
+  String get rulesAddAction => 'Añadir acción';
+
+  @override
+  String get rulesRemoveAction => 'Quitar acción';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'No guardar',
+      'mark_secret': 'Marcar como secreto',
+      'hide_from_ai': 'Ocultar a herramientas de IA',
+      'delete_after': 'Eliminar después de',
+      'add_tags': 'Añadir etiquetas',
+      'transform': 'Transformar',
+      'other': 'Acción desconocida',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone':
+          '«No guardar» no se puede combinar con otras acciones.',
+      'present': 'Esta regla ya tiene esta acción.',
+      'other': 'Una regla puede tener hasta 8 acciones.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Esta acción proviene de una versión más reciente de CopyPaste.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Las copias que coincidan nunca se guardan, indexan ni sincronizan.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count minutos',
+      one: '1 minuto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count horas',
+      one: '1 hora',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count días',
+      one: '1 día',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Vaciar también el portapapeles en ese momento si aún contiene esta copia. En Android ocurre la próxima vez que se ejecute CopyPaste.';
+
+  @override
+  String get rulesNoTags => 'Crea etiquetas en el Historial para usarlas aquí.';
+
+  @override
+  String get rulesNoTransforms => 'No hay transformaciones disponibles.';
+
+  @override
+  String get rulesReplaceClipboard =>
+      'Sustituir también el portapapeles por el resultado';
+
+  @override
+  String get rulesOptionsTitle => 'Opciones';
+
+  @override
+  String get rulesEnabledSwitch => 'Activada';
+
+  @override
+  String get rulesStopProcessing =>
+      'No procesar las reglas siguientes si esta coincide';
+
+  @override
+  String get rulesRunsOnLabel => 'Se ejecuta en';
+
+  @override
+  String get rulesAllDevices => 'Todos los dispositivos';
+
+  @override
+  String get rulesChosenDevices => 'Dispositivos elegidos';
+
+  @override
+  String get rulesTestTitle => 'Probar';
+
+  @override
+  String get rulesTestDescription =>
+      'Prueba la regla con texto de ejemplo. El ejemplo nunca se guarda ni se sincroniza.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Pega o escribe texto de ejemplo';
+
+  @override
+  String get rulesTestFullSet => 'Probar junto con todas las reglas';
+
+  @override
+  String get rulesRunTest => 'Ejecutar prueba';
+
+  @override
+  String get rulesTestFailed => 'No se pudo ejecutar la prueba.';
+
+  @override
+  String get rulesPreviewHistory => 'Vista previa con el historial';
+
+  @override
+  String rulesSaveBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'read_only': 'Actualiza CopyPaste para editar esta regla.',
+      'name_missing': 'Ponle un nombre a la regla.',
+      'name_too_long': 'Usa un nombre de hasta 128 caracteres.',
+      'no_actions': 'Añade al menos una acción.',
+      'other': 'Corrige los campos marcados.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesSaveFailed => 'No se pudo guardar la regla.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Una versión más reciente de CopyPaste escribió esta regla. Actualiza CopyPaste para editarla o ejecutarla.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'No se pudo leer la regla.',
+      'unsupported_schema':
+          'Esta regla requiere una versión más reciente de CopyPaste.',
+      'unknown_condition_type':
+          'Esta condición requiere una versión más reciente de CopyPaste.',
+      'unknown_action_type':
+          'Esta acción requiere una versión más reciente de CopyPaste.',
+      'too_many_conditions': 'Una regla puede tener hasta 20 condiciones.',
+      'too_many_actions': 'Una regla puede tener hasta 8 acciones.',
+      'too_many_rules': 'Solo se ejecutan las primeras 200 reglas.',
+      'no_actions': 'Añade al menos una acción.',
+      'conflicting_actions':
+          '«No guardar» no se puede combinar con otras acciones.',
+      'duplicate_action': 'Cada acción solo se puede usar una vez.',
+      'empty_value': 'Introduce un valor.',
+      'empty_list': 'Elige al menos un valor.',
+      'too_many_values': 'Elige hasta 64 valores.',
+      'invalid_value': 'Este valor no es válido.',
+      'pattern_too_long': 'Los patrones pueden tener hasta 2000 caracteres.',
+      'unsupported_look_around':
+          'No se admiten búsquedas anticipadas ni retrospectivas. Usa dos condiciones con «Se cumplen todas las condiciones».',
+      'unsupported_backreference': 'No se admiten referencias inversas.',
+      'pattern_too_large':
+          'Este patrón es demasiado complejo. Simplifica sus repeticiones.',
+      'invalid_pattern': 'Este patrón no es válido.',
+      'invalid_duration': 'Elige una duración de 1 minuto a 90 días.',
+      'invalid_tags': 'Elige al menos una etiqueta.',
+      'invalid_transform': 'Elige una transformación.',
+      'other': 'Esta regla tiene un problema.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'coincide',
+      'not_matched': 'no coincide',
+      'unknown': 'desconocido',
+      'skipped': 'no ejecutada',
+      'other': 'error',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Condición $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'No se evaluó ninguna regla.';
+
+  @override
+  String get rulesTraceStopped => 'Las reglas siguientes no se ejecutaron.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Se desconoce para esta copia, así que la condición no coincide en ningún caso.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Esta regla no pudo ejecutarse aquí, así que las copias que coincidan se protegen en su lugar.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Resultado';
+
+  @override
+  String get rulesTraceNoEffect => 'Ninguna regla cambia esta copia.';
+
+  @override
+  String get rulesTraceSkipped => 'No se guarda';
+
+  @override
+  String get rulesTraceSecret => 'Se guarda como secreto';
+
+  @override
+  String get rulesTraceHidden => 'Oculta a las herramientas de IA';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return 'Se elimina después de $duration';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Etiquetada: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Transformada con $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Texto transformado';
+
+  @override
+  String get rulesPreviewTitle => 'Aplicar a elementos existentes';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Revisando los últimos $count clips…';
+  }
+
+  @override
+  String get rulesPreviewNone =>
+      'Ningún clip reciente coincide con esta regla.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips coinciden',
+      one: '1 clip coincide',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count se eliminarían',
+      one: '1 se eliminaría',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count se marcarían como secretos',
+      one: '1 se marcaría como secreto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count se ocultarían a las herramientas de IA',
+      one: '1 se ocultaría a las herramientas de IA',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count tendrían una hora de eliminación',
+      one: '1 tendría una hora de eliminación',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count se etiquetarían',
+      one: '1 se etiquetaría',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Solo se revisaron los últimos $count clips.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 'y $count más';
+  }
+
+  @override
+  String get rulesPreviewNote =>
+      'Nada cambia hasta que apliques. Los cambios se sincronizan con tus otros dispositivos como ediciones normales.';
+
+  @override
+  String get rulesSecretItem => 'Elemento secreto';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return 'Elemento secreto de $app';
+  }
+
+  @override
+  String get rulesPreviewCancelled =>
+      'Se detuvo la vista previa. No cambió nada.';
+
+  @override
+  String get rulesPreviewFailed => 'No se pudo ejecutar la vista previa.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '¿Eliminar $count clips?',
+      one: '¿Eliminar 1 clip?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'Aplicar «No guardar» a elementos existentes elimina los clips que coinciden del Historial en todos tus dispositivos. No se puede deshacer.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Eliminar y aplicar';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Aplicando: $done de $total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips modificados',
+      one: '1 clip modificado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips eliminados',
+      one: '1 clip eliminado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'No se pudieron modificar $count clips',
+      one: 'No se pudo modificar 1 clip',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled =>
+      'Detenido. Los clips modificados antes de detener siguen modificados.';
 }
