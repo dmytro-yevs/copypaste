@@ -58,5 +58,35 @@
     "Platform metric adapters must be validated on each supported OS; unlike metrics cannot be compared as the same physical RAM value.",
     "Null thresholds are unresolved, never passing. Implementation cache limits are allocation controls, not measured release budgets.",
     "Subsecond peaks require suitable native tracing beyond low-rate samples. Offline receipts do not replace trusted release provenance."
-  ]
+  ],
+  "feature_budgets": {
+    "android": {
+      "ime_panel_visible_peak_bytes": null,
+      "ime_hidden_selected_steady_bytes": null,
+      "ime_cold_open_ms": null,
+      "ime_warm_open_ms": null,
+      "widget_refresh_cpu_ms": null,
+      "tile_action_latency_ms": null
+    },
+    "all": {
+      "rules_capture_evaluation_ms": null,
+      "rules_evaluator_bytes": null,
+      "snippets_render_64k_ms": null,
+      "snippets_import_10k_peak_bytes": null,
+      "snippets_search_ms": null,
+      "transforms_palette_open_peak_delta_bytes": null,
+      "transforms_16mib_peak_bytes": null,
+      "mcp_stdio_steady_bytes": null,
+      "mcp_stdio_peak_bytes": null,
+      "paste_queue_idle_wakeups_per_hour": null,
+      "binary_size_delta_bytes": null
+    },
+    "notes": [
+      "Feature budgets cover the paste queue, snippets, transforms, content rules, Android quick access and MCP. Every threshold is null: unresolved, never passing. check-resource-receipts.py does not read this object.",
+      "\"all\" means macOS, Windows and Android; the mcp_* keys apply to the desktops (macOS, Windows, Linux). Each measurement records the application, daemon or runtime, and workers separately and combined.",
+      "Spec proposals, not budgets: rules_capture_evaluation_ms 50 ms, snippets_render_64k_ms 50 ms, mcp_stdio_steady_bytes 15 MB, mcp_stdio_peak_bytes 30 MB. paste_queue_idle_wakeups_per_hour is compared with the feature disabled (paste-queue AC31).",
+      "binary_size_delta_bytes covers ICU4X compiled data, the bundled Windows tzdb, the YAML parser and rmcp in the daemon, CLI and Android library.",
+      "Optimization registry entries RUN-107 to RUN-122 describe the behavior each key measures."
+    ]
+  }
 }
