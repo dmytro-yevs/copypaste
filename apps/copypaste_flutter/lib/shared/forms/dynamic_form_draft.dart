@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 
 import '../../l10n/l10n.dart';
 
-enum DynamicFormFieldKind { text, boolean, file, choices }
+/// [text] is multi-line; [line] is a single line; [choices] picks several
+/// options and [choice] exactly one.
+enum DynamicFormFieldKind { text, line, boolean, file, choices, choice }
 
 class DynamicFormChoice {
   const DynamicFormChoice({required this.id, required this.title});

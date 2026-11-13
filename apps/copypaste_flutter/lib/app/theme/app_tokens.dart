@@ -115,6 +115,11 @@ abstract final class AppOverlaySize {
 
   /// Smallest height of a multi-line body field in an editor drawer.
   static const double editorBodyMinHeight = 160;
+
+  /// Widest editor drawer; wide windows show its body and preview side by
+  /// side from [editorSideBySideMinWidth].
+  static const double editorPanelMaxWidth = 880;
+  static const double editorSideBySideMinWidth = 640;
   static const double toastMaxWidth = 360;
   static const double dragHandleWidth = 36;
   static const double dragHandleHeight = 4;
