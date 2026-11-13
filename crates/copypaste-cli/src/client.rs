@@ -10,12 +10,13 @@
 
 use crate::error::CliError;
 use backon::{ConstantBuilder, Retryable as _, Sleeper};
+use copypaste_ipc::ai::AiOp;
 use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
-    ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingInviteData,
-    PairingProgressData, PeerInfo, Request, Response, ResponseData, StatusData, SyncResult,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    ErrorCode, EventData, EventKindFilter, ExportData, ImportData, Item, ItemPage, Method,
+    PairingInviteData, PairingProgressData, PeerInfo, Request, Response, ResponseData, StatusData,
+    SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
@@ -74,6 +75,16 @@ impl Connection {
     }
 
     async fn call(&mut self, method: Method, deadline: Instant) -> Result<Response, CliError> {
+        let id = self.send(method, deadline).await?;
+        let response = before(deadline, self.receive()).await??;
+        if response.id != id {
+            return Err(reply_mismatch(id, response.id));
+        }
+        Ok(response)
+    }
+
+    /// Write one request and answer its id.
+    async fn send(&mut self, method: Method, deadline: Instant) -> Result<u64, CliError> {
         let id = next_id();
         let request = Request {
             id,
@@ -86,25 +97,82 @@ impl Connection {
         before(deadline, self.framed.send(line))
             .await?
             .map_err(|_| CliError::DaemonUnreachable)?;
+        Ok(id)
+    }
 
-        let line = match before(deadline, self.framed.next()).await? {
+    /// Read one frame. Cancel safe: the codec keeps a partial line buffered.
+    async fn receive(&mut self) -> Result<Response, CliError> {
+        let line = match self.framed.next().await {
             Some(Ok(line)) => line,
             // A dropped connection with no reply is the daemon's read-timeout
             // behaviour, and is indistinguishable from it having gone away.
             Some(Err(_)) | None => return Err(CliError::DaemonUnreachable),
         };
+        serde_json::from_str(&line)
+            .map_err(|e| CliError::local(format!("could not understand the daemon's reply: {e}")))
+    }
+}
 
-        let response: Response = serde_json::from_str(&line).map_err(|e| {
-            CliError::local(format!("could not understand the daemon's reply: {e}"))
-        })?;
+fn reply_mismatch(expected: u64, got: u64) -> CliError {
+    CliError::local(format!(
+        "the daemon answered request {expected} with a reply for request {got}"
+    ))
+}
 
-        if response.id != id {
-            return Err(CliError::local(format!(
-                "the daemon answered request {} with a reply for request {}",
-                id, response.id
-            )));
+/// A long-lived `watch_events` subscription that can also own AI tool
+/// sessions: the daemon ends a session attached here when this connection
+/// closes, so a client process that exits or crashes frees its session.
+pub struct EventLink {
+    connection: Connection,
+    subscription_id: u64,
+}
+
+impl EventLink {
+    pub async fn open(path: &Path, kinds: Vec<EventKindFilter>) -> Result<Self, CliError> {
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let mut connection = Connection::open(path, deadline).await?;
+        let ack = connection
+            .call(Method::WatchEvents { kinds }, deadline)
+            .await?;
+        let subscription_id = ack.id;
+        into_data(ack)?;
+        Ok(Self {
+            connection,
+            subscription_id,
+        })
+    }
+
+    /// Bind an AI session to this connection. Events that arrive before the
+    /// reply are dropped; the caller re-reads status after attaching.
+    pub async fn attach(&mut self, session_id: &str) -> Result<(), CliError> {
+        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let method = Method::Ai {
+            op: AiOp::SessionAttach {
+                session_id: session_id.to_owned(),
+            },
+        };
+        let id = self.connection.send(method, deadline).await?;
+        loop {
+            let response = before(deadline, self.connection.receive()).await??;
+            if response.id == id {
+                return into_data(response).map(drop);
+            }
+            if response.id != self.subscription_id {
+                return Err(reply_mismatch(id, response.id));
+            }
         }
-        Ok(response)
+    }
+
+    /// Wait, with no deadline, for the next event. Cancel safe.
+    pub async fn next_event(&mut self) -> Result<(), CliError> {
+        let response = self.connection.receive().await?;
+        if response.id != self.subscription_id {
+            return Err(reply_mismatch(self.subscription_id, response.id));
+        }
+        match into_data(response)? {
+            Some(ResponseData::RuntimeEvent(_)) => Ok(()),
+            _ => Err(shape_error("a runtime event")),
+        }
     }
 }
 
@@ -240,7 +308,7 @@ fn completion_error(error: CliError) -> CliError {
     }
 }
 
-async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
+pub(crate) async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
     let timeout = timeout_for(&method);
     request_at_with_timeout(path, method, timeout).await
 }
@@ -317,18 +385,9 @@ async fn watch_at(
     // The subscription owns no deadline after its acknowledgement. Silence is
     // normal here; user interruption or the callback ends the stream.
     loop {
-        let line = match connection.framed.next().await {
-            Some(Ok(line)) => line,
-            Some(Err(_)) | None => return Err(CliError::DaemonUnreachable),
-        };
-        let response: Response = serde_json::from_str(&line).map_err(|e| {
-            CliError::local(format!("could not understand the daemon's reply: {e}"))
-        })?;
+        let response = connection.receive().await?;
         if response.id != subscription_id {
-            return Err(CliError::local(format!(
-                "the daemon answered request {} with a reply for request {}",
-                subscription_id, response.id
-            )));
+            return Err(reply_mismatch(subscription_id, response.id));
         }
         match into_data(response)? {
             Some(ResponseData::Event(event)) => {
@@ -489,6 +548,156 @@ pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliErr
     }
 }
 
+/// A scripted daemon on a real Unix socket, for clients that hold a
+/// connection open.
+#[cfg(all(test, unix))]
+pub(crate) mod stub {
+    use super::*;
+    use copypaste_ipc::{EventKind, RuntimeEventData};
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio::sync::broadcast;
+
+    /// A fixture socket path under Unix's small endpoint-name limit.
+    pub(crate) fn socket_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("cp-cli-{}-{name}.sock", std::process::id()));
+        // Keep fixture sockets inside the configured temp directory while
+        // staying under Unix's small endpoint-name limit: a temp directory
+        // nested in the checkout is shorter relative to the current
+        // directory, a system one (macOS `/var/folders/...`) is shorter
+        // absolute. The filesystem root is an ancestor of every path, so
+        // the relative spelling always exists but is not always shorter.
+        let cwd = std::env::current_dir().expect("current directory");
+        let relative = cwd
+            .ancestors()
+            .enumerate()
+            .find_map(|(depth, ancestor)| {
+                path.strip_prefix(ancestor).ok().map(|tail| {
+                    let mut relative = PathBuf::new();
+                    for _ in 0..depth {
+                        relative.push("..");
+                    }
+                    relative.join(tail)
+                })
+            })
+            .filter(|relative| relative.as_os_str().len() < path.as_os_str().len());
+        relative.unwrap_or(path)
+    }
+
+    type Answer = dyn Fn(&Method) -> ResponseData + Send + Sync;
+
+    /// Answers each ordinary request with `answer`. A `watch_events`
+    /// connection stays open, has its attaches acknowledged and receives one
+    /// event per [`ScriptedDaemon::push_event`]. Dropping it stops the daemon
+    /// and closes every connection.
+    pub(crate) struct ScriptedDaemon {
+        path: PathBuf,
+        events: broadcast::Sender<()>,
+        methods: Arc<Mutex<Vec<Method>>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl ScriptedDaemon {
+        pub(crate) fn start(
+            name: &str,
+            answer: impl Fn(&Method) -> ResponseData + Send + Sync + 'static,
+        ) -> Self {
+            let path = socket_path(name);
+            let _ = std::fs::remove_file(&path);
+            let listener = UnixListener::bind(&path).expect("bind stub socket");
+            let (events, _) = broadcast::channel(16);
+            let methods = Arc::new(Mutex::new(Vec::new()));
+            let answer: Arc<Answer> = Arc::new(answer);
+            let task = tokio::spawn({
+                let events = events.clone();
+                let methods = Arc::clone(&methods);
+                async move {
+                    let mut connections = tokio::task::JoinSet::new();
+                    while let Ok((stream, _)) = listener.accept().await {
+                        connections.spawn(serve(
+                            Framed::new(stream, LinesCodec::new()),
+                            Arc::clone(&answer),
+                            events.subscribe(),
+                            Arc::clone(&methods),
+                        ));
+                    }
+                }
+            });
+            Self {
+                path,
+                events,
+                methods,
+                task,
+            }
+        }
+
+        pub(crate) fn push_event(&self) {
+            let _ = self.events.send(());
+        }
+
+        pub(crate) fn methods(&self) -> Vec<Method> {
+            self.methods.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for ScriptedDaemon {
+        fn drop(&mut self) {
+            self.task.abort();
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    fn frame(response: Response) -> String {
+        serde_json::to_string(&response).expect("encodable response")
+    }
+
+    async fn serve(
+        mut framed: Framed<UnixStream, LinesCodec>,
+        answer: Arc<Answer>,
+        mut events: broadcast::Receiver<()>,
+        methods: Arc<Mutex<Vec<Method>>>,
+    ) {
+        let Some(Ok(line)) = framed.next().await else {
+            return;
+        };
+        let request: Request = serde_json::from_str(&line).expect("valid request");
+        methods.lock().unwrap().push(request.method.clone());
+        if !matches!(request.method, Method::WatchEvents { .. }) {
+            let reply = Response::ok(request.id, answer(&request.method));
+            let _ = framed.send(frame(reply)).await;
+            return;
+        }
+        let subscription = request.id;
+        let ack = Response::ok(subscription, ResponseData::Empty {});
+        let _ = framed.send(frame(ack)).await;
+        loop {
+            tokio::select! {
+                line = framed.next() => {
+                    let Some(Ok(line)) = line else { return };
+                    let request: Request = serde_json::from_str(&line).expect("valid request");
+                    methods.lock().unwrap().push(request.method.clone());
+                    let reply = Response::ok(request.id, ResponseData::Empty {});
+                    let _ = framed.send(frame(reply)).await;
+                }
+                pushed = events.recv() => {
+                    if pushed.is_err() {
+                        return;
+                    }
+                    let event = RuntimeEventData {
+                        file_operation: None,
+                        change: Some(EventData::change(EventKind::AiApproval, 0)),
+                        progress: None,
+                        capture: None,
+                    };
+                    let push = Response::ok(subscription, ResponseData::RuntimeEvent(Box::new(event)));
+                    let _ = framed.send(frame(push)).await;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,29 +840,7 @@ mod tests {
     #[cfg(unix)]
     impl StubDaemon {
         fn start(name: &str, actions: Vec<StubAction>) -> Self {
-            let path =
-                std::env::temp_dir().join(format!("cp-cli-{}-{name}.sock", std::process::id()));
-            // Keep fixture sockets inside the configured temp directory while
-            // staying under Unix's small endpoint-name limit: a temp directory
-            // nested in the checkout is shorter relative to the current
-            // directory, a system one (macOS `/var/folders/...`) is shorter
-            // absolute. The filesystem root is an ancestor of every path, so
-            // the relative spelling always exists but is not always shorter.
-            let cwd = std::env::current_dir().expect("current directory");
-            let relative = cwd
-                .ancestors()
-                .enumerate()
-                .find_map(|(depth, ancestor)| {
-                    path.strip_prefix(ancestor).ok().map(|tail| {
-                        let mut relative = PathBuf::new();
-                        for _ in 0..depth {
-                            relative.push("..");
-                        }
-                        relative.join(tail)
-                    })
-                })
-                .filter(|relative| relative.as_os_str().len() < path.as_os_str().len());
-            let path = relative.unwrap_or(path);
+            let path = stub::socket_path(name);
             let _ = std::fs::remove_file(&path);
             let listener = UnixListener::bind(&path).expect("bind stub socket");
             let request_ids = Arc::new(Mutex::new(Vec::new()));
