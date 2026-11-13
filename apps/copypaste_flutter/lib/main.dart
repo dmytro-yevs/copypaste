@@ -24,6 +24,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app/app.dart';
+import 'app/app_features.dart';
 import 'app/ui_memory_controller.dart';
 import 'app/resource_policy.dart';
 import 'platform/lifecycle/application_visibility.dart';
@@ -32,6 +33,12 @@ import 'app/navigation/settings_presentation_lifecycle.dart';
 import 'app/shell/macos_window_header.dart';
 import 'app/theme/app_motion.dart';
 import 'app/theme/app_theme.dart';
+import 'features/ai_tools/controller/ai_approval_controller.dart';
+import 'features/ai_tools/controller/ai_tools_controller.dart';
+import 'features/ai_tools/repository/ai_approval_notifier.dart';
+import 'features/ai_tools/repository/runtime_ai_tools_repository.dart';
+import 'features/content_rules/controller/content_rules_controller.dart';
+import 'features/content_rules/repository/runtime_content_rule_repository.dart';
 import 'features/devices/devices.dart';
 import 'features/notifications/notifications_controller.dart';
 import 'platform/notifications/pairing_notification_port.dart';
@@ -47,16 +54,24 @@ import 'features/onboarding/controller/onboarding_controller.dart';
 import 'features/onboarding/controller/platform_onboarding_setup.dart';
 import 'features/onboarding/view/onboarding_screen.dart';
 import 'features/paste_queue/controller/paste_queue_controller.dart';
+import 'features/paste_queue/controller/paste_queue_shortcuts_controller.dart';
 import 'features/paste_queue/repository/paste_queue_shortcuts_store.dart';
 import 'features/paste_queue/repository/runtime_paste_queue_repository.dart';
+import 'features/paste_queue/repository/system_paste_queue_notifier.dart';
+import 'features/quick_access/controller/quick_access_controller.dart';
 import 'features/quick_paste/quick_paste_app.dart';
 import 'features/quick_paste/quick_paste_controller.dart';
 import 'features/quick_paste/repository/runtime_quick_paste_delivery_repository.dart';
+import 'features/snippets/controller/concealed_snippet_access.dart';
+import 'features/snippets/controller/snippets_controller.dart';
 import 'features/snippets/repository/runtime_snippet_repository.dart';
+import 'features/transforms/controller/transforms_settings_controller.dart';
 import 'features/transforms/repository/runtime_transform_repository.dart';
 import 'features/transforms/repository/transform_recents_store.dart';
+import 'features/tray/controller/tray_menu_controller.dart';
 import 'platform/security/device_authenticator.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
+import 'features/settings/controller/settings_navigation_state.dart';
 import 'features/settings/controller/settings_controller.dart';
 import 'features/settings/controller/launch_at_login_controller.dart';
 import 'platform/startup/launch_at_login.dart';
@@ -69,6 +84,7 @@ import 'generated/api.dart' as runtime;
 import 'platform/desktop/desktop_window_bootstrap.dart';
 import 'platform/desktop/desktop_window_controller.dart';
 import 'platform/desktop/global_shortcut.dart';
+import 'platform/android/android_quick_access_gateway.dart';
 import 'platform/desktop/quick_paste_host.dart';
 import 'platform/pairing/pairing_presentation.dart';
 import 'platform/permissions/linux_integration.dart';
@@ -245,6 +261,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   DevicesController? _devicesController;
   NotificationsController? _notifications;
   QuickPasteSettingsController? _quickPasteSettings;
+  MethodChannelQuickPasteWindowHost? _quickPasteHost;
+  DesktopShortcutRegistrar? _shortcutRegistrar;
+  AppFeatures? _features;
   SettingsController? _settingsController;
   ModulesController? _modulesController;
   OnboardingController? _onboarding;
@@ -336,6 +355,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _onboardingReady &&
       (_onboarding?.complete ?? true) &&
       (_historyController?.canSuspend ?? true) &&
+      !(_features?.busy ?? false) &&
       _devicesController?.pairingEntryMode == null &&
       !(_devicesController?.systemScanInFlight ?? false) &&
       !(_devicesController?.actionInFlight ?? false) &&
@@ -445,8 +465,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           filePicker: const FileSelectorSettingsFilePicker(),
           backgroundCaptureStatusRequired: _desktopWindow != null,
         );
+        _createQuickPaste();
+        _features = _createFeatures();
       });
       final settingsController = _settingsController!;
+      final features = _features!;
       _settingsVisibilityChanged();
       _settingsPresentation.refresh();
       settingsController.addListener(_syncCaptureControls);
@@ -454,12 +477,14 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         await settingsController.toggleCapture();
       });
       await Future.wait([
-        _initializeQuickPaste(),
+        _quickPasteSettings?.initialize() ?? Future<void>.value(),
         settingsController.initialize(),
         _modulesController!.initialize(),
       ]);
       _syncCaptureControls();
       if (!mounted) return;
+      // After Quick Paste, which registers its shortcut first.
+      unawaited(features.start().catchError((Object _) {}));
       _notifications = NotificationsController(
         devices: _devicesController!,
         platform: PlatformPairingNotificationPort(),
@@ -567,18 +592,24 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     final devicesGateway = _devicesGateway;
     final quickPasteSettings = _quickPasteSettings;
     final settingsController = _settingsController;
+    final features = _features;
     _historyController = null;
     _devicesController = null;
     _historyRepository = null;
     _devicesGateway = null;
     _quickPasteSettings = null;
+    _quickPasteHost = null;
+    _shortcutRegistrar = null;
+    _features = null;
     _settingsController = null;
+    unawaited(features?.dispose().catchError((Object _) {}));
     historyController?.dispose();
     _modulesController?.dispose();
     _modulesController = null;
     _notifications?.dispose();
     _notifications = null;
     devicesController?.dispose();
+    quickPasteSettings?.removeListener(_syncTrayShortcut);
     quickPasteSettings?.dispose();
     settingsController?.removeListener(_syncCaptureControls);
     settingsController?.dispose();
@@ -639,9 +670,16 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _initializeQuickPaste() async {
+  void _openSettings(SettingsSectionId section) {
+    _settingsController?.showSection(section);
+    _navigation.selectDestination(AppDestination.settings);
+  }
+
+  /// Creates the Quick Paste window host and the shortcut registrar the
+  /// paste queue shares; the caller initializes the settings controller.
+  void _createQuickPaste() {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
-    final host = MethodChannelQuickPasteWindowHost();
+    final host = _quickPasteHost = MethodChannelQuickPasteWindowHost();
     host.setFindInHistoryHandler(_navigation.findInHistory);
     host.setOpenMainHandler(() {
       _navigation.selectDestination(AppDestination.history);
@@ -649,18 +687,87 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     host.setOpenSettingsHandler(() {
       _navigation.selectDestination(AppDestination.settings);
     });
-    final controller = QuickPasteSettingsController(
+    // One registrar binds every Linux portal shortcut in one session.
+    final registrar = _shortcutRegistrar = Platform.isLinux
+        ? LinuxPortalDesktopShortcutRegistrar()
+        : HotKeyManagerDesktopShortcutRegistrar();
+    _quickPasteSettings = QuickPasteSettingsController(
       store: SharedPreferencesQuickPastePreferencesStore(),
-      registrar: Platform.isLinux
-          ? LinuxPortalDesktopShortcutRegistrar()
-          : HotKeyManagerDesktopShortcutRegistrar(),
+      registrar: registrar,
       windowHost: host,
       linuxIntegration: Platform.isLinux
           ? MethodChannelLinuxIntegrationPort()
           : null,
+    )..addListener(_syncTrayShortcut);
+  }
+
+  AppFeatures _createFeatures() {
+    final desktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    final authenticator = MethodChannelDeviceAuthenticator();
+    final aiTools = RuntimeAiToolsRepository();
+    final host = _quickPasteHost;
+    final registrar = _shortcutRegistrar;
+    final desktopWindow = _desktopWindow;
+    // Without hideWindow, deliveries from this window only copy; the global
+    // shortcuts paste into the foreground application.
+    final pasteQueue = PasteQueueController(
+      repository: RuntimePasteQueueRepository(),
+      pasteHost: host ?? const _ClipboardOnlyPasteHost(),
+      notifier: desktop ? SystemPasteQueueNotifier() : null,
+      requestAccessibility: host?.requestAccessibility,
     );
-    _quickPasteSettings = controller;
-    await controller.initialize();
+    return AppFeatures(
+      pasteQueue: pasteQueue,
+      pasteQueueShortcuts: registrar == null
+          ? null
+          : PasteQueueShortcutsController(
+              queue: pasteQueue,
+              registrar: registrar,
+            ),
+      snippets: SnippetsController(
+        repository: RuntimeSnippetRepository(),
+        access: ConcealedSnippetAccess(authenticator: authenticator),
+      ),
+      transforms: TransformsSettingsController(
+        repository: RuntimeTransformRepository(),
+        platform: TransformsSettingsController.platformName(
+          defaultTargetPlatform,
+        ),
+      ),
+      contentRules: ContentRulesController(
+        repository: RuntimeContentRuleRepository(),
+      ),
+      aiTools: AiToolsController(repository: aiTools, serving: desktop),
+      aiApproval: desktop
+          ? AiApprovalController(
+              repository: aiTools,
+              notifier: SystemAiApprovalNotifier(),
+              visible: _visibility,
+              showWindow: () => unawaited(_desktopWindow?.showFromTrayOrDock()),
+            )
+          : null,
+      quickAccess: Platform.isAndroid
+          ? QuickAccessController(
+              const MethodChannelAndroidQuickAccessGateway(),
+            )
+          : null,
+      tray: desktopWindow == null
+          ? null
+          : TrayMenuController(
+              surface: desktopWindow,
+              authenticator: authenticator,
+            ),
+      openSettings: _openSettings,
+      capturePaused: () => _settingsController?.capture?.paused ?? false,
+    );
+  }
+
+  void _syncTrayShortcut() {
+    final settings = _quickPasteSettings;
+    _features?.showQuickPasteShortcut(
+      settings?.registeredShortcut,
+      description: settings?.registeredShortcutDescription,
+    );
   }
 
   void _syncCaptureControls() {
@@ -758,6 +865,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       language: widget.language,
       historyController: _historyController,
       devicesController: _devicesController,
+      features: _features,
       notifications: _notifications,
       quickPasteSettings: _quickPasteSettings,
       settingsController: _settingsController,
@@ -778,4 +886,22 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           : null,
     );
   }
+}
+
+/// Android puts queue entries on the clipboard; its keyboard inserts them.
+class _ClipboardOnlyPasteHost implements ForegroundPasteHost {
+  const _ClipboardOnlyPasteHost();
+
+  @override
+  Future<PasteOutcome> pasteForeground({bool plainText = false}) async =>
+      PasteOutcome.unsupported;
+
+  @override
+  Future<bool> moveCaretLeft(int count) async => false;
+
+  @override
+  Future<bool> accessibilityGranted() async => false;
+
+  @override
+  Future<bool?> secureFieldFocused() async => null;
 }

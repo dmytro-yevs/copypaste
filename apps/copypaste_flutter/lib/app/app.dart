@@ -9,7 +9,9 @@ import '../features/notifications/notifications_view.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../features/ai_tools/view/ai_approval_presenter.dart';
 import '../features/devices/devices.dart';
+import '../features/paste_queue/view/paste_queue_header_action.dart';
 import '../l10n/l10n.dart';
 import 'localization/app_language.dart';
 import '../features/history/controller/history_controller.dart';
@@ -26,6 +28,7 @@ import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
 import '../platform/desktop/desktop_shortcuts.dart';
 import '../shared/state_view.dart';
+import 'app_features.dart';
 import 'navigation/navigation.dart';
 import 'shell/shell.dart';
 import 'theme/app_theme.dart';
@@ -37,6 +40,7 @@ class CopyPasteApp extends StatelessWidget {
     required this.navigation,
     this.historyController,
     this.devicesController,
+    this.features,
     this.notifications,
     this.quickPasteSettings,
     this.settingsController,
@@ -54,6 +58,7 @@ class CopyPasteApp extends StatelessWidget {
   final AppNavigationController navigation;
   final HistoryController? historyController;
   final DevicesController? devicesController;
+  final AppFeatures? features;
   final NotificationsController? notifications;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
@@ -150,6 +155,17 @@ class CopyPasteApp extends StatelessWidget {
                 ],
               ],
               headerEnd: [
+                if (features case final features?)
+                  PasteQueueHeaderAction(
+                    key: features.pasteQueueAction,
+                    controller: features.pasteQueue,
+                    shortcuts: features.pasteQueueShortcuts,
+                    onOpenSettings: () => features.openSettings(
+                      features.pasteQueueSettingsSection,
+                    ),
+                    onDrawerVisibilityChanged:
+                        navigation.handleDrawerVisibilityChanged,
+                  ),
                 if (historyController?.transfers.fileOperations
                     case final transfers?)
                   FileOperationsHeaderAction(
@@ -222,6 +238,7 @@ class CopyPasteApp extends StatelessWidget {
                         appUpdate: appUpdateController,
                         modules: modulesController,
                         onOpenAndroidCaptureSetup: onOpenAndroidCaptureSetup,
+                        featureSections: features?.settingsSections ?? const [],
                       ),
               },
             );
@@ -264,7 +281,7 @@ class CopyPasteApp extends StatelessWidget {
             );
           }
 
-          return AnnotatedRegion<SystemUiOverlayStyle>(
+          final content = AnnotatedRegion<SystemUiOverlayStyle>(
             value: overlay.copyWith(
               statusBarColor: Colors.transparent,
               systemNavigationBarColor: theme.colorScheme.background,
@@ -280,6 +297,9 @@ class CopyPasteApp extends StatelessWidget {
                     ),
             ),
           );
+          final approvals = features?.aiApproval;
+          if (approvals == null) return content;
+          return AiApprovalPresenter(controller: approvals, child: content);
         },
       ),
     );
