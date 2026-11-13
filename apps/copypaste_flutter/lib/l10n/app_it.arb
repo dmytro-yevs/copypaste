@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Aggiorna",
   "snippetsUpdateReferencesMessage": "Altri modelli potrebbero inserire «{from}». Aggiornarli per usare «{to}»?",
   "snippetsUpdateReferencesTitle": "Aggiornare i riferimenti?",
-  "snippetsUseFailed": "Impossibile usare il frammento"
+  "snippetsUseFailed": "Impossibile usare il frammento",
+  "quickPasteTabQueue": "Coda",
+  "quickPasteMaskedMode": "Campo password: anteprime nascoste",
+  "quickPasteMaskedItem": "Nascosto: {kind}",
+  "quickPasteUnlockSecrets": "Sblocca gli elementi segreti",
+  "quickPastePastingWith": "Incolla con: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} incolla l'originale",
+  "quickPasteDefaultSkipped": "Trasformazione predefinita saltata",
+  "quickPasteDefaultSkippedMessage": "È stato usato l'originale.",
+  "quickPastePasteManually": "Il contenuto è negli appunti. Incollalo manualmente.",
+  "quickPastePaste": "Incolla",
+  "quickPasteSnippetsUnavailable": "I frammenti non sono disponibili"
 }

@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Aktualisieren",
   "snippetsUpdateReferencesMessage": "Andere Vorlagen fügen eventuell „{from}“ ein. Sollen sie „{to}“ verwenden?",
   "snippetsUpdateReferencesTitle": "Verweise aktualisieren?",
-  "snippetsUseFailed": "Textbaustein konnte nicht verwendet werden"
+  "snippetsUseFailed": "Textbaustein konnte nicht verwendet werden",
+  "quickPasteTabQueue": "Warteschlange",
+  "quickPasteMaskedMode": "Passwortfeld: Vorschauen sind ausgeblendet",
+  "quickPasteMaskedItem": "Verborgen: {kind}",
+  "quickPasteUnlockSecrets": "Geheime Einträge entsperren",
+  "quickPastePastingWith": "Einfügen mit: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} fügt das Original ein",
+  "quickPasteDefaultSkipped": "Standardumwandlung übersprungen",
+  "quickPasteDefaultSkippedMessage": "Stattdessen wurde das Original verwendet.",
+  "quickPastePasteManually": "Der Inhalt ist in der Zwischenablage. Fügen Sie ihn manuell ein.",
+  "quickPastePaste": "Einfügen",
+  "quickPasteSnippetsUnavailable": "Textbausteine sind nicht verfügbar"
 }

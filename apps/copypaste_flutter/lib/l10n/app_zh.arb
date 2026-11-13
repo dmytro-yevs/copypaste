@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "更新",
   "snippetsUpdateReferencesMessage": "其他模板可能会插入“{from}”。要更新它们以使用“{to}”吗？",
   "snippetsUpdateReferencesTitle": "更新引用？",
-  "snippetsUseFailed": "无法使用片段"
+  "snippetsUseFailed": "无法使用片段",
+  "quickPasteTabQueue": "队列",
+  "quickPasteMaskedMode": "密码字段：预览已隐藏",
+  "quickPasteMaskedItem": "已隐藏：{kind}",
+  "quickPasteUnlockSecrets": "解锁机密项目",
+  "quickPastePastingWith": "粘贴时使用：{name}",
+  "quickPastePasteOriginalHint": "{shortcut} 粘贴原始内容",
+  "quickPasteDefaultSkipped": "已跳过默认转换",
+  "quickPasteDefaultSkippedMessage": "已改用原始内容。",
+  "quickPastePasteManually": "内容已在剪贴板中，请手动粘贴。",
+  "quickPastePaste": "粘贴",
+  "quickPasteSnippetsUnavailable": "片段不可用"
 }

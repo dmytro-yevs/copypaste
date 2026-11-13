@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Mettre à jour",
   "snippetsUpdateReferencesMessage": "D'autres modèles peuvent insérer « {from} ». Les mettre à jour pour utiliser « {to} » ?",
   "snippetsUpdateReferencesTitle": "Mettre à jour les références ?",
-  "snippetsUseFailed": "Impossible d'utiliser l'extrait"
+  "snippetsUseFailed": "Impossible d'utiliser l'extrait",
+  "quickPasteTabQueue": "File",
+  "quickPasteMaskedMode": "Champ de mot de passe : aperçus masqués",
+  "quickPasteMaskedItem": "Masqué : {kind}",
+  "quickPasteUnlockSecrets": "Déverrouiller les éléments secrets",
+  "quickPastePastingWith": "Collage avec : {name}",
+  "quickPastePasteOriginalHint": "{shortcut} colle l'original",
+  "quickPasteDefaultSkipped": "Transformation par défaut ignorée",
+  "quickPasteDefaultSkippedMessage": "L'original a été utilisé à la place.",
+  "quickPastePasteManually": "Le contenu est dans le presse-papiers. Collez-le manuellement.",
+  "quickPastePaste": "Coller",
+  "quickPasteSnippetsUnavailable": "Les extraits ne sont pas disponibles"
 }

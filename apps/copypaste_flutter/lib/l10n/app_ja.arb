@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "更新",
   "snippetsUpdateReferencesMessage": "ほかのテンプレートが「{from}」を挿入している可能性があります。「{to}」を使うように更新しますか?",
   "snippetsUpdateReferencesTitle": "参照を更新しますか?",
-  "snippetsUseFailed": "スニペットを使用できませんでした"
+  "snippetsUseFailed": "スニペットを使用できませんでした",
+  "quickPasteTabQueue": "キュー",
+  "quickPasteMaskedMode": "パスワード欄: プレビューは非表示です",
+  "quickPasteMaskedItem": "非表示: {kind}",
+  "quickPasteUnlockSecrets": "シークレット項目のロックを解除",
+  "quickPastePastingWith": "貼り付けに使用: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} で元のまま貼り付け",
+  "quickPasteDefaultSkipped": "既定の変換をスキップしました",
+  "quickPasteDefaultSkippedMessage": "代わりに元の内容を使用しました。",
+  "quickPastePasteManually": "内容はクリップボードにあります。手動で貼り付けてください。",
+  "quickPastePaste": "貼り付け",
+  "quickPasteSnippetsUnavailable": "スニペットを利用できません"
 }

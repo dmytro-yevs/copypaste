@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Actualizar",
   "snippetsUpdateReferencesMessage": "Otras plantillas pueden insertar «{from}». ¿Actualizarlas para que usen «{to}»?",
   "snippetsUpdateReferencesTitle": "¿Actualizar referencias?",
-  "snippetsUseFailed": "No se pudo usar el fragmento"
+  "snippetsUseFailed": "No se pudo usar el fragmento",
+  "quickPasteTabQueue": "Cola",
+  "quickPasteMaskedMode": "Campo de contraseña: las vistas previas están ocultas",
+  "quickPasteMaskedItem": "Oculto: {kind}",
+  "quickPasteUnlockSecrets": "Desbloquear elementos secretos",
+  "quickPastePastingWith": "Pegando con: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} pega el original",
+  "quickPasteDefaultSkipped": "Transformación predeterminada omitida",
+  "quickPasteDefaultSkippedMessage": "Se usó el original en su lugar.",
+  "quickPastePasteManually": "El contenido está en el portapapeles. Pégalo manualmente.",
+  "quickPastePaste": "Pegar",
+  "quickPasteSnippetsUnavailable": "Los fragmentos no están disponibles"
 }

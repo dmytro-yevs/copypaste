@@ -9344,6 +9344,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Couldn\'t use the snippet'**
   String get snippetsUseFailed;
+
+  /// Quick Paste tab that shows the paste queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue'**
+  String get quickPasteTabQueue;
+
+  /// Notice in Quick Paste while the paste target is a password field, so every preview is masked.
+  ///
+  /// In en, this message translates to:
+  /// **'Password field: previews are hidden'**
+  String get quickPasteMaskedMode;
+
+  /// Masked row label in Quick Paste; the content is hidden and only its kind is named.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden: {kind}'**
+  String quickPasteMaskedItem(String kind);
+
+  /// Button label in Quick Paste that verifies the device owner to show and paste secret items.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock secret items'**
+  String get quickPasteUnlockSecrets;
+
+  /// Chip in Quick Paste naming the transform pipeline that Enter pastes text through.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasting with: {name}'**
+  String quickPastePastingWith(String name);
+
+  /// Hint next to the default transform chip naming the shortcut that pastes the original instead.
+  ///
+  /// In en, this message translates to:
+  /// **'{shortcut} pastes the original'**
+  String quickPastePasteOriginalHint(String shortcut);
+
+  /// Toast title when the default paste transform failed on an item.
+  ///
+  /// In en, this message translates to:
+  /// **'Default transform skipped'**
+  String get quickPasteDefaultSkipped;
+
+  /// Toast message when the default paste transform failed and the original item was used.
+  ///
+  /// In en, this message translates to:
+  /// **'The original was used instead.'**
+  String get quickPasteDefaultSkippedMessage;
+
+  /// Toast message when Quick Paste put content on the clipboard but could not paste it.
+  ///
+  /// In en, this message translates to:
+  /// **'The content is on the clipboard. Paste it manually.'**
+  String get quickPastePasteManually;
+
+  /// Primary button of the template fill-in form inside Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get quickPastePaste;
+
+  /// Error state of the Quick Paste snippet results.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets are unavailable'**
+  String get quickPasteSnippetsUnavailable;
 }
 
 class _AppLocalizationsDelegate

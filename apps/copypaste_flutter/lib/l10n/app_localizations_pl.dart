@@ -5871,4 +5871,44 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => 'Nie udało się użyć fragmentu';
+
+  @override
+  String get quickPasteTabQueue => 'Kolejka';
+
+  @override
+  String get quickPasteMaskedMode => 'Pole hasła: podglądy są ukryte';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Ukryte: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Odblokuj tajne elementy';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Wklejanie z: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut wkleja oryginał';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Pominięto domyślne przekształcenie';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => 'Zamiast tego użyto oryginału.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Zawartość jest w schowku. Wklej ją ręcznie.';
+
+  @override
+  String get quickPastePaste => 'Wklej';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Fragmenty są niedostępne';
 }

@@ -27,6 +27,13 @@ import '../history/models/history_models.dart';
 import '../history/view/history_inspector.dart';
 import '../history/presentation/history_clip_presentation.dart';
 import '../history/presentation/source_app_label.dart';
+import '../paste_queue/view/paste_queue_drawer.dart';
+import '../snippets/controller/template_fill_controller.dart';
+import '../snippets/models/snippet_models.dart';
+import '../snippets/presentation/snippet_messages.dart';
+import '../snippets/view/snippet_dialogs.dart';
+import '../snippets/view/template_fill_form.dart';
+import '../transforms/view/transform_palette.dart';
 import 'quick_paste_controller.dart';
 import 'middle_ellipsis.dart';
 import 'quick_paste_row_geometry.dart';
@@ -66,6 +73,10 @@ class _QuickPasteViewState extends State<QuickPasteView>
   _QuickPastePaneAnchor? _recentAnchor;
   _QuickPastePaneAnchor? _pinnedAnchor;
   bool _restoringWindowAnchors = false;
+  final _snippetScroll = ScrollController();
+  final _snippetKeys = <String, GlobalKey>{};
+  int _noticeRevision = 0;
+  TemplateFillController? _shownForm;
 
   void _preparePresentationFrame() {
     final id = controller.renderablePresentationId;
@@ -113,11 +124,14 @@ class _QuickPasteViewState extends State<QuickPasteView>
 
   Future<void> _prepareClipMedia(HistoryClip clip) async {
     try {
-      if (clip.secret) {
+      // Masked rows never load content they would not show.
+      final masked =
+          controller.maskedMode || (clip.secret && controller.secretsLocked);
+      if (clip.secret && !masked) {
         clip = await controller.history.media.spoilerContent(clip.id);
       }
       final loads = <Future<void>>[];
-      if (clip.contentKind == HistoryClipKind.image) {
+      if (!masked && clip.contentKind == HistoryClipKind.image) {
         loads.add(() async {
           final bounds = _quickPastePreviewBounds(context);
           final preview = await controller.history.media.requestImagePreview(
@@ -166,6 +180,8 @@ class _QuickPasteViewState extends State<QuickPasteView>
     _generation = controller.presentationGeneration;
     _operationErrorRevision = controller.history.errors.operationErrorRevision;
     _query = controller.history.window.query;
+    _noticeRevision = controller.noticeRevision;
+    controller.confirmUnlock = _confirmUnlock;
     controller.addListener(_presentationChanged);
     _scroll.addListener(_recentScrolled);
     _pinnedScroll.addListener(_pinnedScrolled);
@@ -191,7 +207,76 @@ class _QuickPasteViewState extends State<QuickPasteView>
     });
   }
 
+  /// Confirms an unlock in the app where the device cannot verify its owner.
+  Future<bool> _confirmUnlock() async {
+    if (!mounted) return false;
+    final l10n = context.l10n;
+    return showSnippetQuestion(
+      context,
+      icon: LucideIcons.lock,
+      title: l10n.snippetsConcealedConfirmTitle,
+      message: l10n.snippetsConcealedConfirmMessage,
+      confirmLabel: l10n.snippetsConcealedConfirmAction,
+    );
+  }
+
+  void _showNotice(QuickPasteNotice notice) {
+    final l10n = context.l10n;
+    final (title, message, tone) = switch (notice.kind) {
+      QuickPasteNoticeKind.copiedOnly => (
+        l10n.historyCopiedTitle,
+        l10n.quickPastePasteManually,
+        AppToastTone.information,
+      ),
+      QuickPasteNoticeKind.defaultSkipped => (
+        l10n.quickPasteDefaultSkipped,
+        l10n.quickPasteDefaultSkippedMessage,
+        AppToastTone.information,
+      ),
+      QuickPasteNoticeKind.addedToQueue => (
+        l10n.pasteQueueSettingsTitle,
+        l10n.pasteQueueAdded(notice.count),
+        AppToastTone.success,
+      ),
+      QuickPasteNoticeKind.failed => (
+        l10n.quickPasteActionFailedTitle,
+        notice.message ?? l10n.pasteQueueFailed,
+        AppToastTone.error,
+      ),
+    };
+    AppToast.show(context, title: title, message: message, tone: tone);
+  }
+
+  void _focusOpenedForm() {
+    final form = controller.templateFill;
+    if (identical(form, _shownForm)) return;
+    _shownForm = form;
+    if (form == null) {
+      _searchFocus.requestFocus();
+      return;
+    }
+    final first = form.snippet.fields.firstOrNull?.name;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(controller.templateFill, form)) {
+        form.focusNodes[first]?.requestFocus();
+      }
+    });
+  }
+
   void _presentationChanged() {
+    _focusOpenedForm();
+    if (_noticeRevision != controller.noticeRevision) {
+      _noticeRevision = controller.noticeRevision;
+      final notice = controller.notice;
+      final presentation = controller.presentationGeneration;
+      if (notice != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && controller.presentationGeneration == presentation) {
+            _showNotice(notice);
+          }
+        });
+      }
+    }
     final revision = controller.history.errors.operationErrorRevision;
     if (_operationErrorRevision != revision) {
       _operationErrorRevision = revision;
@@ -222,6 +307,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
     }
     if (_scroll.hasClients) _scroll.jumpTo(0);
     if (_pinnedScroll.hasClients) _pinnedScroll.jumpTo(0);
+    if (_snippetScroll.hasClients) _snippetScroll.jumpTo(0);
   }
 
   Future<Set<String>> _captureWindowAnchors() async {
@@ -316,6 +402,9 @@ class _QuickPasteViewState extends State<QuickPasteView>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (controller.confirmUnlock == _confirmUnlock) {
+      controller.confirmUnlock = null;
+    }
     controller.removeListener(_presentationChanged);
     controller.history.window.beforeWindowChange = null;
     controller.history.window.afterWindowChange = null;
@@ -323,6 +412,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
     _searchFocus.dispose();
     _scroll.dispose();
     _pinnedScroll.dispose();
+    _snippetScroll.dispose();
     super.dispose();
   }
 
@@ -451,14 +541,246 @@ class _QuickPasteViewState extends State<QuickPasteView>
           ),
         ],
       ),
+      if (controller.tabs case final tabs when tabs.length > 1) ...[
+        const Gap(AppSpacing.xs),
+        Tabs(
+          key: const ValueKey('quick-paste-tabs'),
+          expand: true,
+          index: tabs.indexOf(controller.tab),
+          onChanged: (index) => unawaited(controller.selectTab(tabs[index])),
+          children: [
+            for (final tab in tabs)
+              TabItem(child: Text(_tabLabel(context, tab))),
+          ],
+        ),
+      ],
+      if (controller.maskedMode) ...[
+        const Gap(AppSpacing.xs),
+        _Notice(
+          key: const ValueKey('quick-paste-masked-mode'),
+          icon: LucideIcons.lock,
+          text: context.l10n.quickPasteMaskedMode,
+        ),
+      ],
+      if (controller.defaultPipeline case final pipeline?
+          when controller.tab == QuickPasteTab.history &&
+              controller.templateFill == null) ...[
+        const Gap(AppSpacing.xs),
+        _Notice(
+          key: const ValueKey('quick-paste-default-pipeline'),
+          icon: LucideIcons.wandSparkles,
+          text: context.l10n.quickPastePastingWith(pipeline.name),
+          hint: context.l10n.quickPastePasteOriginalHint(
+            defaultTargetPlatform == TargetPlatform.macOS
+                ? '⌘⇧↩'
+                : 'Ctrl+Shift+Enter',
+          ),
+        ),
+      ],
       const Gap(AppSpacing.xs),
-      Expanded(child: _history(context)),
-      const Gap(AppSpacing.xs),
-      const Divider(),
-      const Gap(AppSpacing.xs),
-      _Footer(controller: controller),
+      Expanded(child: _body(context)),
+      if (controller.tab != QuickPasteTab.queue) ...[
+        const Gap(AppSpacing.xs),
+        const Divider(),
+        const Gap(AppSpacing.xs),
+        _Footer(controller: controller),
+      ],
     ],
   );
+
+  String _tabLabel(BuildContext context, QuickPasteTab tab) => switch (tab) {
+    QuickPasteTab.history => context.l10n.appDestinationHistory,
+    QuickPasteTab.snippets => context.l10n.settingsSectionSnippets,
+    QuickPasteTab.queue => context.l10n.quickPasteTabQueue,
+  };
+
+  Widget _body(BuildContext context) {
+    final form = controller.templateFill;
+    if (form != null) {
+      return _TemplatePanel(
+        key: ValueKey('quick-paste-template-${form.snippet.id}'),
+        controller: controller,
+        form: form,
+      );
+    }
+    return switch (controller.tab) {
+      QuickPasteTab.history => _historyWithSnippets(context),
+      QuickPasteTab.snippets => _snippetList(context),
+      QuickPasteTab.queue => _queue(),
+    };
+  }
+
+  Widget _historyWithSnippets(BuildContext context) {
+    final snippets = controller.snippetResults;
+    _retainSnippetKeys(snippets);
+    if (snippets.isEmpty) return _history(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Column(
+          key: const ValueKey('quick-paste-snippet-section'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [for (final snippet in snippets) _snippetRow(snippet)],
+        ),
+        const Gap(AppSpacing.xs),
+        Divider(color: AppTheme.popupBorder(context)),
+        const Gap(AppSpacing.xs),
+        Expanded(child: _history(context)),
+      ],
+    );
+  }
+
+  Widget _snippetList(BuildContext context) {
+    final l10n = context.l10n;
+    final rows = controller.snippetResults;
+    _retainSnippetKeys(rows);
+    if (rows.isEmpty) {
+      if (controller.snippetsLoading) {
+        return StateView.loading(message: l10n.commonLoading);
+      }
+      if (controller.snippetsFailed) {
+        return StateView.error(title: l10n.quickPasteSnippetsUnavailable);
+      }
+      final query = controller.query.trim();
+      return StateView.empty(
+        icon: LucideIcons.notebookText,
+        title: query.isEmpty
+            ? l10n.snippetsEmptyTitle
+            : l10n.snippetsNoMatch(query),
+      );
+    }
+    return Scrollbar(
+      controller: _snippetScroll,
+      child: ListView.builder(
+        key: const ValueKey('quick-paste-snippet-scroll'),
+        controller: _snippetScroll,
+        primary: false,
+        padding: EdgeInsets.zero,
+        itemCount: rows.length,
+        itemBuilder: (context, index) => _snippetRow(rows[index]),
+      ),
+    );
+  }
+
+  void _retainSnippetKeys(List<SnippetSummary> rows) {
+    final ids = {for (final row in rows) row.id};
+    _snippetKeys.removeWhere((id, _) => !ids.contains(id));
+  }
+
+  Widget _snippetRow(SnippetSummary snippet) {
+    final l10n = context.l10n;
+    final abbreviation = snippet.abbreviation;
+    final exact = controller.isExactSnippet(snippet.id);
+    final preview = snippet.concealed
+        ? l10n.snippetsConcealedPreview
+        : controller.maskedMode
+        ? _maskDots
+        : snippet.preview.trim().split('\n').first;
+    final theme = Theme.of(context);
+    return KeyedSubtree(
+      key: ValueKey('quick-paste-snippet-${snippet.id}'),
+      child: Builder(
+        key: _snippetKeys.putIfAbsent(snippet.id, GlobalKey.new),
+        builder: (context) => MouseRegion(
+          // Rows that move under a resting pointer must not take the
+          // focus, which would undo the preselected abbreviation.
+          onHover: (_) => controller.focusSnippet(snippet),
+          child: Button.ghost(
+            style: AppTheme.clipboardMenuButtonStyle(
+              selected: controller.focusedSnippet?.id == snippet.id,
+            ),
+            alignment: Alignment.centerLeft,
+            disableFocusOutline: true,
+            onFocus: (focused) {
+              if (focused) controller.focusSnippet(snippet);
+            },
+            onPressed: controller.activating
+                ? null
+                : () => unawaited(controller.activateSnippet(snippet)),
+            child: Row(
+              children: [
+                AppIconFrame(
+                  size: AppIconSize.sm,
+                  child: Icon(
+                    snippet.template
+                        ? LucideIcons.braces
+                        : LucideIcons.notebookText,
+                    size: AppIconSize.sm,
+                  ),
+                ),
+                const Gap(AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.snippetTitle(snippet),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        preview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.typography.xSmall.copyWith(
+                          color: theme.colorScheme.mutedForeground,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (abbreviation != null && abbreviation.isNotEmpty) ...[
+                  const Gap(AppSpacing.sm),
+                  Semantics(
+                    label: l10n.snippetsAbbreviationBadge(abbreviation),
+                    child: ExcludeSemantics(
+                      child: exact
+                          ? PrimaryBadge(
+                              key: ValueKey(
+                                'quick-paste-snippet-exact-${snippet.id}',
+                              ),
+                              child: Text(abbreviation),
+                            )
+                          : SecondaryBadge(child: Text(abbreviation)),
+                    ),
+                  ),
+                ],
+                if (snippet.duplicateAbbreviation) ...[
+                  const Gap(AppSpacing.xs),
+                  DestructiveBadge(child: Text(l10n.snippetsDuplicateBadge)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _queue() {
+    final queue = controller.queue;
+    if (queue == null) return const SizedBox.shrink();
+    return PasteQueueDrawer(
+      controller: queue,
+      onOpenSettings: () => unawaited(controller.openSettings()),
+      onClose: () => unawaited(controller.selectTab(QuickPasteTab.history)),
+    );
+  }
+
+  Future<void> _openTransforms() async {
+    final transforms = controller.transforms;
+    if (transforms == null || !controller.canTransform) return;
+    final source = await controller.transformSource();
+    if (source == null || !mounted) return;
+    await showTransformPalette(
+      context,
+      repository: transforms,
+      source: source,
+      recents: controller.transformRecents,
+      pasteForeground: controller.pasteTransformResult,
+    );
+  }
 
   void _recentScrolled() {
     _pinnedIsActive = false;
@@ -679,6 +1001,14 @@ class _QuickPasteViewState extends State<QuickPasteView>
       }
       await controller.moveFocus(offset);
       if (!mounted || generation != controller.presentationGeneration) return;
+      if (controller.focusedSnippet case final snippet?) {
+        await WidgetsBinding.instance.endOfFrame;
+        final row = _snippetKeys[snippet.id]?.currentContext;
+        if (mounted && row != null && row.mounted) {
+          await Scrollable.ensureVisible(row);
+        }
+        return;
+      }
       final clip = controller.focusedClip;
       if (clip != null) await _revealFocused(clip, generation, query);
     });
@@ -720,14 +1050,10 @@ class _QuickPasteViewState extends State<QuickPasteView>
   }
 
   Map<ShortcutActivator, VoidCallback> _shortcutBindings() {
-    final bindings = <ShortcutActivator, VoidCallback>{
+    final window = <ShortcutActivator, VoidCallback>{
       ...desktopWindowBindings(
         onClose: controller.close,
         onQuit: controller.quit,
-      ),
-      desktopShortcut(LogicalKeyboardKey.keyF): _find,
-      ...desktopRefreshBindings(
-        () => unawaited(controller.history.window.reload()),
       ),
       if (defaultTargetPlatform != TargetPlatform.macOS) ...{
         const SingleActivator(
@@ -737,8 +1063,37 @@ class _QuickPasteViewState extends State<QuickPasteView>
         ): () =>
             unawaited(controller.close()),
       },
+    };
+    // The form's own fields own Enter, Tab and the arrows; Esc goes back.
+    if (controller.templateFill != null) {
+      return {
+        ...window,
+        const SingleActivator(LogicalKeyboardKey.escape):
+            controller.closeTemplate,
+      };
+    }
+    final bindings = <ShortcutActivator, VoidCallback>{
+      ...window,
+      desktopShortcut(LogicalKeyboardKey.keyF): _find,
+      ...desktopRefreshBindings(
+        () => unawaited(controller.history.window.reload()),
+      ),
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(controller.close()),
+      desktopShortcut(LogicalKeyboardKey.keyT): () =>
+          unawaited(_openTransforms()),
+      desktopShortcut(LogicalKeyboardKey.keyQ, shift: true): () =>
+          unawaited(controller.addFocusedToQueue()),
+      desktopShortcut(LogicalKeyboardKey.enter, shift: true): () =>
+          unawaited(controller.activateFocused(bypassDefault: true)),
+      const SingleActivator(LogicalKeyboardKey.tab, control: true): () =>
+          unawaited(controller.cycleTab(1)),
+      const SingleActivator(
+        LogicalKeyboardKey.tab,
+        control: true,
+        shift: true,
+      ): () =>
+          unawaited(controller.cycleTab(-1)),
       const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveFocus(1),
       const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveFocus(-1),
       const SingleActivator(LogicalKeyboardKey.pageDown): () => _moveFocus(5),
@@ -766,9 +1121,11 @@ class _QuickPasteViewState extends State<QuickPasteView>
       desktopShortcut(LogicalKeyboardKey.comma): () =>
           unawaited(controller.openSettings()),
     };
-    for (final entry in controller.shortcuts.entries) {
-      bindings[desktopShortcut(entry.key)] = () =>
-          unawaited(controller.activate(entry.value));
+    if (controller.tab == QuickPasteTab.history) {
+      for (final entry in controller.shortcuts.entries) {
+        bindings[desktopShortcut(entry.key)] = () =>
+            unawaited(controller.activate(entry.value));
+      }
     }
     return bindings;
   }
@@ -788,7 +1145,7 @@ class _QuickPasteViewState extends State<QuickPasteView>
       child: Builder(
         key: _rowKeys.putIfAbsent(clip.id, GlobalKey.new),
         builder: (context) => MouseRegion(
-          onEnter: (_) => controller.hoverClip(clip, hovered: true),
+          onHover: (_) => controller.hoverClip(clip, hovered: true),
           onExit: (_) => controller.hoverClip(clip, hovered: false),
           child: Button.ghost(
             style: AppTheme.clipboardMenuButtonStyle(
@@ -964,6 +1321,9 @@ class _ClipContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.maskedMode || (clip.secret && controller.secretsLocked)) {
+      return _MaskedClip(clip: clip, controller: controller);
+    }
     if (clip.secret && !revealed) {
       return FutureBuilder<HistoryClip>(
         future: controller.history.media.spoilerContent(clip.id),
@@ -1075,6 +1435,195 @@ class _ClipContent extends StatelessWidget {
         return revealed
             ? image
             : Align(alignment: Alignment.centerLeft, child: image);
+      },
+    );
+  }
+}
+
+const _maskDots = '••••••••';
+
+/// A row's content while it must stay hidden: its kind only, and for a
+/// locked secret the action that unlocks secrets.
+class _MaskedClip extends StatelessWidget {
+  const _MaskedClip({required this.clip, required this.controller});
+
+  final HistoryClip clip;
+  final QuickPasteController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final kind = clip.contentKind.label;
+    final theme = Theme.of(context);
+    return Row(
+      key: ValueKey('quick-paste-masked-${clip.id}'),
+      children: [
+        Expanded(
+          child: Semantics(
+            label: l10n.quickPasteMaskedItem(kind),
+            child: ExcludeSemantics(
+              child: Text(
+                '$_maskDots  $kind',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.colorScheme.mutedForeground),
+              ),
+            ),
+          ),
+        ),
+        if (clip.secret && controller.secretsLocked && !controller.maskedMode)
+          Tooltip(
+            tooltip: (context) =>
+                TooltipContainer(child: Text(l10n.quickPasteUnlockSecrets)),
+            child: Button.ghost(
+              key: ValueKey('quick-paste-unlock-${clip.id}'),
+              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
+              onPressed: () => unawaited(controller.unlockSecrets()),
+              child: Semantics(
+                label: l10n.quickPasteUnlockSecrets,
+                child: const AppIconFrame(child: Icon(LucideIcons.lock)),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One line of state under the header, such as masked mode or the default
+/// paste transform.
+class _Notice extends StatelessWidget {
+  const _Notice({super.key, required this.icon, required this.text, this.hint});
+
+  final IconData icon;
+  final String text;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.typography.xSmall.copyWith(
+      color: theme.colorScheme.mutedForeground,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+      child: Row(
+        children: [
+          AppIconFrame(
+            size: AppIconSize.sm,
+            child: Icon(icon, size: AppIconSize.sm),
+          ),
+          const Gap(AppSpacing.xs),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.typography.small,
+            ),
+          ),
+          if (hint case final hint?) ...[
+            const Gap(AppSpacing.sm),
+            Expanded(
+              child: Text(
+                hint,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                style: muted,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A template's fill-in form inside the popup, with Back and Paste fixed
+/// below it; only the fields scroll.
+class _TemplatePanel extends StatelessWidget {
+  const _TemplatePanel({
+    super.key,
+    required this.controller,
+    required this.form,
+  });
+
+  final QuickPasteController controller;
+  final TemplateFillController form;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return ListenableBuilder(
+      listenable: form,
+      builder: (context, _) {
+        final busy = controller.activating || form.submitting;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+              child: Row(
+                children: [
+                  const AppIconFrame(
+                    size: AppIconSize.sm,
+                    child: Icon(LucideIcons.braces, size: AppIconSize.sm),
+                  ),
+                  const Gap(AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      l10n.snippetTitle(form.snippet.summary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Gap(AppSpacing.sm),
+            Expanded(
+              child: SingleChildScrollView(
+                key: const ValueKey('quick-paste-template-body'),
+                padding: const EdgeInsets.all(AppSpacing.xs),
+                child: TemplateFillForm(
+                  controller: form,
+                  onSubmit: () => unawaited(controller.submitTemplate()),
+                ),
+              ),
+            ),
+            const Gap(AppSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: Button.secondary(
+                    key: const ValueKey('quick-paste-template-back'),
+                    style: AppTheme.actionButtonStyle(
+                      const ButtonStyle.secondary(),
+                    ),
+                    alignment: Alignment.center,
+                    onPressed: controller.closeTemplate,
+                    child: Text(l10n.commonBack),
+                  ),
+                ),
+                const Gap(AppSpacing.sm),
+                Expanded(
+                  child: Button.primary(
+                    key: const ValueKey('quick-paste-template-paste'),
+                    style: AppTheme.actionButtonStyle(
+                      const ButtonStyle.primary(),
+                    ),
+                    alignment: Alignment.center,
+                    onPressed: busy
+                        ? null
+                        : () => unawaited(controller.submitTemplate()),
+                    child: Text(l10n.quickPastePaste),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
       },
     );
   }

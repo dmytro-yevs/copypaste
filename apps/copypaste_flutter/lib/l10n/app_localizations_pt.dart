@@ -5858,4 +5858,47 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => 'Não foi possível usar o trecho';
+
+  @override
+  String get quickPasteTabQueue => 'Fila';
+
+  @override
+  String get quickPasteMaskedMode =>
+      'Campo de senha: pré-visualizações ocultas';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Oculto: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Desbloquear itens secretos';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Colando com: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut cola o original';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Transformação padrão ignorada';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'O original foi usado em vez disso.';
+
+  @override
+  String get quickPastePasteManually =>
+      'O conteúdo está na área de transferência. Cole manualmente.';
+
+  @override
+  String get quickPastePaste => 'Colar';
+
+  @override
+  String get quickPasteSnippetsUnavailable =>
+      'Os trechos não estão disponíveis';
 }

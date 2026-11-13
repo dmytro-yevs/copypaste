@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Aktualizuj",
   "snippetsUpdateReferencesMessage": "Inne szablony mogą wstawiać „{from}”. Zaktualizować je, aby używały „{to}”?",
   "snippetsUpdateReferencesTitle": "Zaktualizować odwołania?",
-  "snippetsUseFailed": "Nie udało się użyć fragmentu"
+  "snippetsUseFailed": "Nie udało się użyć fragmentu",
+  "quickPasteTabQueue": "Kolejka",
+  "quickPasteMaskedMode": "Pole hasła: podglądy są ukryte",
+  "quickPasteMaskedItem": "Ukryte: {kind}",
+  "quickPasteUnlockSecrets": "Odblokuj tajne elementy",
+  "quickPastePastingWith": "Wklejanie z: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} wkleja oryginał",
+  "quickPasteDefaultSkipped": "Pominięto domyślne przekształcenie",
+  "quickPasteDefaultSkippedMessage": "Zamiast tego użyto oryginału.",
+  "quickPastePasteManually": "Zawartość jest w schowku. Wklej ją ręcznie.",
+  "quickPastePaste": "Wklej",
+  "quickPasteSnippetsUnavailable": "Fragmenty są niedostępne"
 }

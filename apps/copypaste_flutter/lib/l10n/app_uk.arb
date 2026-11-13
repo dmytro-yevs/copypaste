@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Оновити",
   "snippetsUpdateReferencesMessage": "Інші шаблони можуть вставляти «{from}». Оновити їх, щоб вони використовували «{to}»?",
   "snippetsUpdateReferencesTitle": "Оновити посилання?",
-  "snippetsUseFailed": "Не вдалося використати фрагмент"
+  "snippetsUseFailed": "Не вдалося використати фрагмент",
+  "quickPasteTabQueue": "Черга",
+  "quickPasteMaskedMode": "Поле пароля: попередній перегляд приховано",
+  "quickPasteMaskedItem": "Приховано: {kind}",
+  "quickPasteUnlockSecrets": "Розблокувати секретні елементи",
+  "quickPastePastingWith": "Вставлення з: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} вставляє оригінал",
+  "quickPasteDefaultSkipped": "Типове перетворення пропущено",
+  "quickPasteDefaultSkippedMessage": "Натомість використано оригінал.",
+  "quickPastePasteManually": "Вміст у буфері обміну. Вставте його вручну.",
+  "quickPastePaste": "Вставити",
+  "quickPasteSnippetsUnavailable": "Фрагменти недоступні"
 }

@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "업데이트",
   "snippetsUpdateReferencesMessage": "다른 템플릿이 “{from}”을(를) 삽입할 수 있습니다. “{to}”을(를) 사용하도록 업데이트할까요?",
   "snippetsUpdateReferencesTitle": "참조를 업데이트할까요?",
-  "snippetsUseFailed": "스니펫을 사용할 수 없습니다"
+  "snippetsUseFailed": "스니펫을 사용할 수 없습니다",
+  "quickPasteTabQueue": "대기열",
+  "quickPasteMaskedMode": "암호 필드: 미리 보기가 숨겨집니다",
+  "quickPasteMaskedItem": "숨김: {kind}",
+  "quickPasteUnlockSecrets": "비밀 항목 잠금 해제",
+  "quickPastePastingWith": "붙여넣기 변환: {name}",
+  "quickPastePasteOriginalHint": "{shortcut}: 원본 붙여넣기",
+  "quickPasteDefaultSkipped": "기본 변환을 건너뜀",
+  "quickPasteDefaultSkippedMessage": "대신 원본을 사용했습니다.",
+  "quickPastePasteManually": "내용이 클립보드에 있습니다. 직접 붙여넣으세요.",
+  "quickPastePaste": "붙여넣기",
+  "quickPasteSnippetsUnavailable": "스니펫을 사용할 수 없습니다"
 }

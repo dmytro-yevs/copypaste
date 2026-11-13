@@ -1534,5 +1534,16 @@
   "snippetsUpdateReferences": "Güncelle",
   "snippetsUpdateReferencesMessage": "Diğer şablonlar “{from}” ekliyor olabilir. “{to}” kullanacak şekilde güncellensinler mi?",
   "snippetsUpdateReferencesTitle": "Başvurular güncellensin mi?",
-  "snippetsUseFailed": "Parçacık kullanılamadı"
+  "snippetsUseFailed": "Parçacık kullanılamadı",
+  "quickPasteTabQueue": "Kuyruk",
+  "quickPasteMaskedMode": "Parola alanı: önizlemeler gizlendi",
+  "quickPasteMaskedItem": "Gizli: {kind}",
+  "quickPasteUnlockSecrets": "Gizli öğelerin kilidini aç",
+  "quickPastePastingWith": "Şununla yapıştırılıyor: {name}",
+  "quickPastePasteOriginalHint": "{shortcut} orijinali yapıştırır",
+  "quickPasteDefaultSkipped": "Varsayılan dönüşüm atlandı",
+  "quickPasteDefaultSkippedMessage": "Bunun yerine orijinal kullanıldı.",
+  "quickPastePasteManually": "İçerik panoda. Elle yapıştırın.",
+  "quickPastePaste": "Yapıştır",
+  "quickPasteSnippetsUnavailable": "Parçacıklar kullanılamıyor"
 }

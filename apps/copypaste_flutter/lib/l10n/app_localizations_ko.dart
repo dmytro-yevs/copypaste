@@ -5452,4 +5452,43 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get snippetsUseFailed => '스니펫을 사용할 수 없습니다';
+
+  @override
+  String get quickPasteTabQueue => '대기열';
+
+  @override
+  String get quickPasteMaskedMode => '암호 필드: 미리 보기가 숨겨집니다';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return '숨김: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => '비밀 항목 잠금 해제';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return '붙여넣기 변환: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut: 원본 붙여넣기';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => '기본 변환을 건너뜀';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => '대신 원본을 사용했습니다.';
+
+  @override
+  String get quickPastePasteManually => '내용이 클립보드에 있습니다. 직접 붙여넣으세요.';
+
+  @override
+  String get quickPastePaste => '붙여넣기';
+
+  @override
+  String get quickPasteSnippetsUnavailable => '스니펫을 사용할 수 없습니다';
 }
