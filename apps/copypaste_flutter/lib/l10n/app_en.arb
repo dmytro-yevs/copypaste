@@ -8545,5 +8545,146 @@
   "rulesApplyCancelled": "Stopped. Clips changed before you stopped stay changed.",
   "@rulesApplyCancelled": {
     "description": "Shown after applying was stopped."
+  },
+  "historyActionEdit": "Edit",
+  "@historyActionEdit": {
+    "description": "History clip action that opens the text editor; saving creates a new clip."
+  },
+  "historyActionSaveAsSnippet": "Save as snippet",
+  "@historyActionSaveAsSnippet": {
+    "description": "History clip action that saves the clip text as a new snippet."
+  },
+  "historyActionAddToQueue": "Add to Paste Queue",
+  "@historyActionAddToQueue": {
+    "description": "History action that adds the clip, or the selected clips, to the paste queue. Paste Queue is the feature name."
+  },
+  "historyActionTransform": "Transform…",
+  "@historyActionTransform": {
+    "description": "History clip action that opens the text transform palette."
+  },
+  "historyActionExplain": "Why is this here?",
+  "@historyActionExplain": {
+    "description": "History clip action that explains which content rules made the clip stored, secret or expiring."
+  },
+  "historyActionKeep": "Keep",
+  "@historyActionKeep": {
+    "description": "History clip action that cancels the automatic deletion of an expiring clip."
+  },
+  "historyNewClip": "New clip",
+  "@historyNewClip": {
+    "description": "Button and tooltip that opens the editor for a new clip the user types."
+  },
+  "historySavedTitle": "Saved",
+  "@historySavedTitle": {
+    "description": "Toast title after an edited clip, a new clip or a snippet was saved."
+  },
+  "historyEditSaved": "The edited text is a new clip at the top of History.",
+  "@historyEditSaved": {
+    "description": "Toast message after saving an edited clip, which creates a new clip."
+  },
+  "historyNewClipSaved": "Your text was saved.",
+  "@historyNewClipSaved": {
+    "description": "Toast message after saving text typed in the new clip editor."
+  },
+  "historySnippetSaved": "The clip's text is now a snippet.",
+  "@historySnippetSaved": {
+    "description": "Toast message after a clip was saved as a snippet."
+  },
+  "historySnippetSaveFailed": "This clip could not be saved as a snippet.",
+  "@historySnippetSaveFailed": {
+    "description": "Error toast when a clip could not be saved as a snippet."
+  },
+  "historyQueueAddedInOrder": "{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue in the order you selected them.}}",
+  "@historyQueueAddedInOrder": {
+    "description": "Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyQueueAddFailed": "Couldn't add to Paste Queue. Check that it is turned on.",
+  "@historyQueueAddFailed": {
+    "description": "Error toast when clips could not be added to the paste queue. Paste Queue is the feature name."
+  },
+  "historyHideFromAiFailed": "The clip's AI tools setting could not be changed.",
+  "@historyHideFromAiFailed": {
+    "description": "Error toast when hiding a clip from AI tools, or showing it again, failed."
+  },
+  "historyKeepFailed": "This clip could not be kept.",
+  "@historyKeepFailed": {
+    "description": "Error toast when an expiring clip could not be kept."
+  },
+  "historyExplainFailed": "The explanation could not be loaded.",
+  "@historyExplainFailed": {
+    "description": "Error shown when the content-rule explanation of a clip could not be loaded."
+  },
+  "historyDeletesSoon": "Deletes in less than a minute",
+  "@historyDeletesSoon": {
+    "description": "Countdown of an expiring clip with less than one minute left."
+  },
+  "historyDeletesInMinutes": "{count, plural, =1{Deletes in 1 min} other{Deletes in {count} min}}",
+  "@historyDeletesInMinutes": {
+    "description": "Countdown of an expiring clip, in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyDeletesInHours": "{count, plural, =1{Deletes in 1 h} other{Deletes in {count} h}}",
+  "@historyDeletesInHours": {
+    "description": "Countdown of an expiring clip, in hours.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyDeletesInDays": "{count, plural, =1{Deletes in 1 day} other{Deletes in {count} days}}",
+  "@historyDeletesInDays": {
+    "description": "Countdown of an expiring clip, in days.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProvenanceManual": "Manual",
+  "@historyProvenanceManual": {
+    "description": "Marker next to the source app of a clip the user typed in CopyPaste."
+  },
+  "historyProvenanceEdited": "Edited",
+  "@historyProvenanceEdited": {
+    "description": "Marker next to the source app of a clip saved from the clip editor."
+  },
+  "historyProvenanceTransformed": "Transformed",
+  "@historyProvenanceTransformed": {
+    "description": "Marker next to the source app of a clip created by a text transform."
+  },
+  "historyProvenanceAiTool": "AI tool",
+  "@historyProvenanceAiTool": {
+    "description": "Marker next to the source app of a clip an AI tool copied through CopyPaste."
+  },
+  "historyRuleTag": "{name} (auto)",
+  "@historyRuleTag": {
+    "description": "A tag that a content rule assigned automatically.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "historyMetadataExpiry": "Deletion",
+  "@historyMetadataExpiry": {
+    "description": "Clip details label for when an expiring clip is deleted."
+  },
+  "historyMetadataRuleTags": "Automatic tags",
+  "@historyMetadataRuleTags": {
+    "description": "Clip details label for tags assigned by content rules."
+  },
+  "historyMetadataAiTools": "AI tools",
+  "@historyMetadataAiTools": {
+    "description": "Clip details label for whether AI tools can see the clip."
   }
 }

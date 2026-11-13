@@ -1,5 +1,6 @@
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
+import 'package:copypaste_flutter/shared/clip_visibility.dart';
 import 'package:flutter/foundation.dart';
 
 /// The mutually exclusive filter and presentation kinds exposed by Rust.
@@ -202,6 +203,58 @@ class HistoryFacets {
   final List<HistoryTag> tags;
 }
 
+/// How CopyPaste itself created a clip, shown next to its source app.
+enum HistoryProvenance { manual, edited, transformed, aiTool }
+
+/// Runtime state attached to a clip beyond its captured payload.
+@immutable
+class HistoryClipAnnotations {
+  const HistoryClipAnnotations({
+    this.expiresAt,
+    this.hiddenFromAi = false,
+    this.ruleSecret = false,
+    this.provenance,
+    this.ruleTagIds = const [],
+    this.keep = false,
+  });
+
+  static const none = HistoryClipAnnotations();
+
+  /// When an expiring clip is deleted; null without expiry.
+  final DateTime? expiresAt;
+  final bool hiddenFromAi;
+
+  /// A local display mask set by a content rule.
+  final bool ruleSecret;
+  final HistoryProvenance? provenance;
+
+  /// Tags a content rule assigned; they are never synced memberships.
+  final List<String> ruleTagIds;
+
+  /// The user chose to keep the clip, which cancels any expiry.
+  final bool keep;
+
+  @override
+  bool operator ==(Object other) =>
+      other is HistoryClipAnnotations &&
+      other.expiresAt == expiresAt &&
+      other.hiddenFromAi == hiddenFromAi &&
+      other.ruleSecret == ruleSecret &&
+      other.provenance == provenance &&
+      listEquals(other.ruleTagIds, ruleTagIds) &&
+      other.keep == keep;
+
+  @override
+  int get hashCode => Object.hash(
+    expiresAt,
+    hiddenFromAi,
+    ruleSecret,
+    provenance,
+    Object.hashAll(ruleTagIds),
+    keep,
+  );
+}
+
 /// Compact item data returned by a page query.
 class HistoryClip {
   const HistoryClip({
@@ -225,8 +278,10 @@ class HistoryClip {
     this.image,
     this.colorRgba,
     this.tooLargeToSync = false,
+    this.annotations = HistoryClipAnnotations.none,
   });
 
+  /// The authenticated secret flag the user or the source app set.
   final bool secret;
   final bool transient;
   final String id;
@@ -255,9 +310,20 @@ class HistoryClip {
   /// Packed as `0xRRGGBBAA` for color clips.
   final int? colorRgba;
   final bool tooLargeToSync;
+  final HistoryClipAnnotations annotations;
 
   HistoryClipKind get contentKind =>
       kind ?? HistoryClipKindX.fromContentType(contentType);
+
+  ClipVisibility get visibility => ClipVisibility(
+    secret: secret,
+    ruleSecret: annotations.ruleSecret,
+    hiddenFromAi: annotations.hiddenFromAi,
+    expiresAt: annotations.expiresAt,
+  );
+
+  /// Shown behind a spoiler: secret, or masked by a content rule.
+  bool get masked => visibility.masked;
 
   HistoryClip copyWith({
     bool? pinned,
@@ -265,6 +331,7 @@ class HistoryClip {
     String? preview,
     bool? truncated,
     bool clearBody = false,
+    HistoryClipAnnotations? annotations,
   }) => HistoryClip(
     secret: secret ?? this.secret,
     transient: transient,
@@ -286,6 +353,7 @@ class HistoryClip {
     image: image,
     colorRgba: colorRgba,
     tooLargeToSync: tooLargeToSync,
+    annotations: annotations ?? this.annotations,
   );
 }
 

@@ -5,10 +5,21 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/generated/api/clips.dart' as clips;
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+import '../../content_rules/models/content_rule_models.dart';
+import '../../content_rules/repository/runtime_content_rule_repository.dart';
 import '../../devices/flutter_rust_devices_gateway.dart';
+import '../../paste_queue/models/paste_queue_models.dart';
+import '../../paste_queue/repository/runtime_paste_queue_repository.dart';
+import '../../snippets/repository/clip_edit_preferences.dart';
+import '../../snippets/repository/runtime_snippet_repository.dart';
+import '../../snippets/repository/snippet_repository.dart';
+import '../../transforms/repository/runtime_transform_repository.dart';
+import '../../transforms/repository/transform_recents_store.dart';
+import '../../transforms/repository/transform_repository.dart';
 import '../../../shared/runtime_event_service.dart';
 import '../models/history_models.dart';
 import 'history_repository.dart';
@@ -27,9 +38,74 @@ class RuntimeHistoryRepository
         HistorySpoilerRepository,
         HistoryFileDownloadCancellation,
         HistoryFileProgressRepository,
-        HistoryDownloadedFileRepository {
+        HistoryDownloadedFileRepository,
+        HistoryEditRepository,
+        HistoryQueueRepository,
+        HistoryTransformRepository,
+        HistoryAnnotationsRepository {
   bool _disposed = false;
   final _downloadTokens = <String, String>{};
+
+  // Feature adapters are created on first use, so History pays nothing for
+  // capabilities it never opens.
+  late final _snippets = RuntimeSnippetRepository();
+  late final _queue = RuntimePasteQueueRepository();
+  late final _rules = RuntimeContentRuleRepository(transforms: transforms);
+
+  @override
+  ClipEditRepository get clipEdits => _snippets;
+
+  @override
+  SnippetRepository get snippets => _snippets;
+
+  @override
+  late final ClipEditPreferences clipEditPreferences =
+      SharedPreferencesClipEditPreferences();
+
+  @override
+  late final TransformRepository transforms = RuntimeTransformRepository();
+
+  @override
+  late final TransformRecentsStore transformRecents =
+      SharedPreferencesTransformRecentsStore();
+
+  @override
+  Future<int> addToQueue(List<String> clipIds) async {
+    _ensureActive();
+    final snapshot = await _queue.add([
+      for (final id in clipIds) PasteQueueSource.clip(id),
+    ]);
+    return snapshot.pendingCount;
+  }
+
+  @override
+  Future<void> setHiddenFromAi(
+    List<String> clipIds, {
+    required bool hidden,
+  }) async {
+    _ensureActive();
+    await clips.setClipsHiddenFromAi(ids: clipIds, hidden: hidden);
+  }
+
+  @override
+  Future<HistoryClipAnnotations> keep(String clipId) async {
+    _ensureActive();
+    return _fromRuntimeAnnotations(
+      (await clips.keepClip(id: clipId)).annotations,
+    );
+  }
+
+  @override
+  Future<RuleTrace> ruleTrace(String clipId) {
+    _ensureActive();
+    return _rules.clipTrace(clipId);
+  }
+
+  @override
+  Future<RuleOptions> ruleOptions() {
+    _ensureActive();
+    return _rules.options();
+  }
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
@@ -529,6 +605,30 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
             height: imageDetails.height,
             sizeBytes: imageDetails.sizeBytes.toInt(),
           ),
+    annotations: _fromRuntimeAnnotations(clip.annotations),
+  );
+}
+
+HistoryClipAnnotations _fromRuntimeAnnotations(
+  clips.ClipAnnotationState? state,
+) {
+  if (state == null) return HistoryClipAnnotations.none;
+  final expiresAt = state.expiresAtMs;
+  return HistoryClipAnnotations(
+    expiresAt: expiresAt == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(expiresAt.toInt(), isUtc: true),
+    hiddenFromAi: state.hiddenFromAi,
+    ruleSecret: state.ruleSecret,
+    provenance: switch (state.provenance?.kind) {
+      clips.ClipProvenanceKind.manual => HistoryProvenance.manual,
+      clips.ClipProvenanceKind.edited => HistoryProvenance.edited,
+      clips.ClipProvenanceKind.transformed => HistoryProvenance.transformed,
+      clips.ClipProvenanceKind.aiTool => HistoryProvenance.aiTool,
+      null => null,
+    },
+    ruleTagIds: state.ruleTagIds,
+    keep: state.keep,
   );
 }
 

@@ -7069,4 +7069,130 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get rulesApplyCancelled =>
       'Interrompido. Os itens alterados antes da interrupção continuam alterados.';
+
+  @override
+  String get historyActionEdit => 'Editar';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Salvar como trecho';
+
+  @override
+  String get historyActionAddToQueue => 'Adicionar à Paste Queue';
+
+  @override
+  String get historyActionTransform => 'Transformar…';
+
+  @override
+  String get historyActionExplain => 'Por que isto está aqui?';
+
+  @override
+  String get historyActionKeep => 'Manter';
+
+  @override
+  String get historyNewClip => 'Novo clipe';
+
+  @override
+  String get historySavedTitle => 'Salvo';
+
+  @override
+  String get historyEditSaved =>
+      'O texto editado é um novo clipe no topo do histórico.';
+
+  @override
+  String get historyNewClipSaved => 'Seu texto foi salvo.';
+
+  @override
+  String get historySnippetSaved => 'O texto do clipe agora é um trecho.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Não foi possível salvar este clipe como trecho.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count clipes entraram na fila na ordem em que você os selecionou.',
+      one: '1 clipe entrou na fila.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Não foi possível adicionar à Paste Queue. Verifique se ela está ativada.';
+
+  @override
+  String get historyHideFromAiFailed =>
+      'Não foi possível alterar a configuração de ferramentas de IA deste clipe.';
+
+  @override
+  String get historyKeepFailed => 'Não foi possível manter este clipe.';
+
+  @override
+  String get historyExplainFailed => 'Não foi possível carregar a explicação.';
+
+  @override
+  String get historyDeletesSoon => 'Será excluído em menos de um minuto';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Será excluído em $count min',
+      one: 'Será excluído em 1 min',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Será excluído em $count h',
+      one: 'Será excluído em 1 h',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Será excluído em $count dias',
+      one: 'Será excluído em 1 dia',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Manual';
+
+  @override
+  String get historyProvenanceEdited => 'Editado';
+
+  @override
+  String get historyProvenanceTransformed => 'Transformado';
+
+  @override
+  String get historyProvenanceAiTool => 'Ferramenta de IA';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (auto)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Exclusão';
+
+  @override
+  String get historyMetadataRuleTags => 'Etiquetas automáticas';
+
+  @override
+  String get historyMetadataAiTools => 'Ferramentas de IA';
 }

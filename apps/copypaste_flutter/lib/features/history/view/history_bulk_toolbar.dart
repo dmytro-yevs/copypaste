@@ -8,6 +8,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../controller/history_controller.dart';
+import 'history_clip_menu.dart';
 import 'history_delete_dialog.dart';
 import 'history_tags_dialog.dart';
 
@@ -23,6 +24,7 @@ class HistoryBulkToolbar extends StatelessWidget {
     final hasSelection = controller.bulk.bulkSelectedIds.isNotEmpty;
     final canApply =
         hasSelection && !busy && !controller.bulk.isBulkDragSelecting;
+    final canQueue = controller.capabilities.queue != null;
     final actions = Wrap(
       alignment: WrapAlignment.end,
       spacing: AppSpacing.sm,
@@ -65,6 +67,34 @@ class HistoryBulkToolbar extends StatelessWidget {
             ),
           ),
         ),
+        if (canQueue)
+          Tooltip(
+            tooltip: (_) => TooltipContainer(
+              child: Text(context.l10n.historyActionAddToQueue),
+            ),
+            child: Semantics(
+              label: context.l10n.historyActionAddToQueue,
+              button: true,
+              child: Button.secondary(
+                key: const ValueKey('history-bulk-queue'),
+                style: AppTheme.historyToolbarIconStyle,
+                // The selection keeps the order the clips were selected in.
+                onPressed: !canApply
+                    ? null
+                    : () => unawaited(
+                        addHistoryClipsToQueue(
+                          context,
+                          controller: controller,
+                          clipIds: controller.bulk.bulkSelectedIds.toList(),
+                        ),
+                      ),
+                child: const AppIconFrame(
+                  size: AppIconSize.md,
+                  child: Icon(LucideIcons.listPlus, size: AppIconSize.md),
+                ),
+              ),
+            ),
+          ),
         Tooltip(
           tooltip: (_) =>
               TooltipContainer(child: Text(context.l10n.historyBulkPin)),
@@ -150,7 +180,9 @@ class HistoryBulkToolbar extends StatelessWidget {
           context,
           minimum: AppControlSize.large,
         );
-        final minimumWidth = text.width + extent * 5 + AppSpacing.sm * 5;
+        final buttons = canQueue ? 6 : 5;
+        final minimumWidth =
+            text.width + extent * buttons + AppSpacing.sm * buttons;
         text.dispose();
         if (constraints.maxWidth >= minimumWidth) {
           return Row(

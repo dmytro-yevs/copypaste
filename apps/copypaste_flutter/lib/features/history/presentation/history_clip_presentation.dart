@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../models/history_models.dart';
@@ -19,6 +20,18 @@ abstract final class HistoryClipPresentation {
     HistoryClipKind.other => LucideIcons.box,
   };
 
+  /// The marker of a clip CopyPaste created, shown next to its source app.
+  static String? provenance(
+    AppLocalizations strings,
+    HistoryProvenance? provenance,
+  ) => switch (provenance) {
+    HistoryProvenance.manual => strings.historyProvenanceManual,
+    HistoryProvenance.edited => strings.historyProvenanceEdited,
+    HistoryProvenance.transformed => strings.historyProvenanceTransformed,
+    HistoryProvenance.aiTool => strings.historyProvenanceAiTool,
+    null => null,
+  };
+
   /// The most displayed lines a History row gives to a text preview.
   static const previewMaxLines = 4;
 
@@ -30,7 +43,7 @@ abstract final class HistoryClipPresentation {
   /// always means a cut row; wrapped long lines and hidden clips stay
   /// unreported.
   static int? cutLineCount(HistoryClip clip) {
-    if (clip.secret || !clip.contentKind.isTextual) return null;
+    if (clip.masked || !clip.contentKind.isTextual) return null;
     final lines = clip.lineCount ?? _previewLineCount(clip);
     return lines != null && lines > previewMaxLines ? lines : null;
   }

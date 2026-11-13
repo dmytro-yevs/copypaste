@@ -21,6 +21,8 @@ import 'package:copypaste_flutter/features/history/presentation/source_app_label
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
+import 'package:copypaste_flutter/features/snippets/repository/clip_edit_preferences.dart';
+import 'package:copypaste_flutter/features/snippets/repository/snippet_repository.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -2221,6 +2223,58 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets(
+    'Mod+N on desktop and + on Android open the new clip editor',
+    (tester) async {
+      final repository = _EditScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'text',
+              contentType: 'text/plain',
+              preview: 'Existing clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await _pumpHoverActions(tester);
+
+      final newClip = find.byKey(const ValueKey('history-new-clip'));
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await tester.tap(newClip);
+      } else {
+        expect(newClip, findsNothing);
+        await tester.tap(find.byType(TextField).first);
+        await tester.pump();
+        final modifier = defaultTargetPlatform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+        await tester.sendKeyUpEvent(modifier);
+      }
+      await _pumpHoverActions(tester);
+      expect(find.byKey(const ValueKey('clip-edit-drawer')), findsOneWidget);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   testWidgets('keeps every compact icon-only toolbar control square', (
     tester,
   ) async {
@@ -3247,6 +3301,23 @@ class _ScreenRepository implements HistoryRepository {
       ],
     );
   }
+}
+
+class _EditScreenRepository extends _ScreenRepository
+    implements HistoryEditRepository {
+  @override
+  ClipEditRepository get clipEdits => _UnusedSnippets();
+  @override
+  SnippetRepository get snippets => _UnusedSnippets();
+  @override
+  ClipEditPreferences get clipEditPreferences => MemoryClipEditPreferences();
+}
+
+/// The new clip editor reaches these only on Save, which no test presses.
+class _UnusedSnippets implements ClipEditRepository, SnippetRepository {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
 }
 
 class _ScreenFileDownloader implements HistoryFileDownloader {

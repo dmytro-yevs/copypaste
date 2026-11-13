@@ -7060,4 +7060,133 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get rulesApplyCancelled =>
       'Gestoppt. Vor dem Stoppen geänderte Clips bleiben geändert.';
+
+  @override
+  String get historyActionEdit => 'Bearbeiten';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Als Textbaustein speichern';
+
+  @override
+  String get historyActionAddToQueue => 'Zur Paste Queue hinzufügen';
+
+  @override
+  String get historyActionTransform => 'Umwandeln…';
+
+  @override
+  String get historyActionExplain => 'Warum ist das hier?';
+
+  @override
+  String get historyActionKeep => 'Behalten';
+
+  @override
+  String get historyNewClip => 'Neuer Eintrag';
+
+  @override
+  String get historySavedTitle => 'Gespeichert';
+
+  @override
+  String get historyEditSaved =>
+      'Der bearbeitete Text ist ein neuer Eintrag oben im Verlauf.';
+
+  @override
+  String get historyNewClipSaved => 'Dein Text wurde gespeichert.';
+
+  @override
+  String get historySnippetSaved =>
+      'Der Text des Eintrags ist jetzt ein Textbaustein.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Dieser Eintrag konnte nicht als Textbaustein gespeichert werden.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count Einträge wurden in der gewählten Reihenfolge zur Warteschlange hinzugefügt.',
+      one: '1 Eintrag wurde zur Warteschlange hinzugefügt.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Hinzufügen zur Paste Queue fehlgeschlagen. Prüfe, ob sie eingeschaltet ist.';
+
+  @override
+  String get historyHideFromAiFailed =>
+      'Die KI-Tool-Einstellung dieses Eintrags konnte nicht geändert werden.';
+
+  @override
+  String get historyKeepFailed =>
+      'Dieser Eintrag konnte nicht behalten werden.';
+
+  @override
+  String get historyExplainFailed =>
+      'Die Erklärung konnte nicht geladen werden.';
+
+  @override
+  String get historyDeletesSoon => 'Wird in weniger als einer Minute gelöscht';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wird in $count Min. gelöscht',
+      one: 'Wird in 1 Min. gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wird in $count Std. gelöscht',
+      one: 'Wird in 1 Std. gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wird in $count Tagen gelöscht',
+      one: 'Wird in 1 Tag gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Manuell';
+
+  @override
+  String get historyProvenanceEdited => 'Bearbeitet';
+
+  @override
+  String get historyProvenanceTransformed => 'Umgewandelt';
+
+  @override
+  String get historyProvenanceAiTool => 'KI-Tool';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (automatisch)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Löschung';
+
+  @override
+  String get historyMetadataRuleTags => 'Automatische Tags';
+
+  @override
+  String get historyMetadataAiTools => 'KI-Tools';
 }

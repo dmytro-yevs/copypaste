@@ -6604,4 +6604,121 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get rulesApplyCancelled => '중지했습니다. 중지 전에 변경된 클립은 그대로 유지됩니다.';
+
+  @override
+  String get historyActionEdit => '편집';
+
+  @override
+  String get historyActionSaveAsSnippet => '스니펫으로 저장';
+
+  @override
+  String get historyActionAddToQueue => 'Paste Queue에 추가';
+
+  @override
+  String get historyActionTransform => '변환…';
+
+  @override
+  String get historyActionExplain => '이 항목이 여기 있는 이유';
+
+  @override
+  String get historyActionKeep => '유지';
+
+  @override
+  String get historyNewClip => '새 클립';
+
+  @override
+  String get historySavedTitle => '저장됨';
+
+  @override
+  String get historyEditSaved => '편집한 텍스트가 기록 맨 위에 새 클립으로 추가되었습니다.';
+
+  @override
+  String get historyNewClipSaved => '텍스트를 저장했습니다.';
+
+  @override
+  String get historySnippetSaved => '클립의 텍스트가 이제 스니펫입니다.';
+
+  @override
+  String get historySnippetSaveFailed => '이 클립을 스니펫으로 저장할 수 없습니다.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개를 선택한 순서대로 대기열에 추가했습니다.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed => 'Paste Queue에 추가할 수 없습니다. 켜져 있는지 확인하세요.';
+
+  @override
+  String get historyHideFromAiFailed => '이 클립의 AI 도구 설정을 변경할 수 없습니다.';
+
+  @override
+  String get historyKeepFailed => '이 클립을 유지할 수 없습니다.';
+
+  @override
+  String get historyExplainFailed => '설명을 불러올 수 없습니다.';
+
+  @override
+  String get historyDeletesSoon => '1분 이내에 삭제';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count분 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count시간 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count일 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => '직접 입력';
+
+  @override
+  String get historyProvenanceEdited => '편집됨';
+
+  @override
+  String get historyProvenanceTransformed => '변환됨';
+
+  @override
+  String get historyProvenanceAiTool => 'AI 도구';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name(자동)';
+  }
+
+  @override
+  String get historyMetadataExpiry => '삭제';
+
+  @override
+  String get historyMetadataRuleTags => '자동 태그';
+
+  @override
+  String get historyMetadataAiTools => 'AI 도구';
 }
