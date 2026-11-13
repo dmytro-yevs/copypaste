@@ -266,14 +266,19 @@ pub fn test_socket_path(
 ) -> std::path::PathBuf {
     let path = dir.path().join(name);
     let cwd = std::env::current_dir().expect("current directory");
-    // Relative endpoints keep task-owned evidence directories under SUN_LEN.
+    // Relative endpoints keep task-owned evidence directories under SUN_LEN,
+    // unless climbing out of a deep working directory makes them longer.
     for (depth, ancestor) in cwd.ancestors().enumerate() {
         if let Ok(tail) = path.strip_prefix(ancestor) {
             let mut relative = std::path::PathBuf::new();
             for _ in 0..depth {
                 relative.push("..");
             }
-            return relative.join(tail);
+            let relative = relative.join(tail);
+            if relative.as_os_str().len() < path.as_os_str().len() {
+                return relative;
+            }
+            break;
         }
     }
     path
