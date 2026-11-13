@@ -125,6 +125,7 @@ abstract final class AppOverlays {
     required WidgetBuilder builder,
     bool useRootNavigator = true,
     bool barrierDismissible = true,
+    double width = AppOverlaySize.dialogMaxWidth,
   }) {
     return showOverlay<T>(
       context,
@@ -137,10 +138,7 @@ abstract final class AppOverlays {
       ),
       builder: (dialogContext) => AppMotion.keyboardInsets(
         dialogContext,
-        child: SizedBox(
-          width: AppOverlaySize.dialogMaxWidth,
-          child: builder(dialogContext),
-        ),
+        child: SizedBox(width: width, child: builder(dialogContext)),
       ),
     ).future;
   }

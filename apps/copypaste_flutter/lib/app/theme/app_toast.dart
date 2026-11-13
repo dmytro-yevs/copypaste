@@ -1,6 +1,7 @@
 import 'package:copypaste_flutter/app/theme/app_icon_frame.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import 'app_motion.dart';
 import 'app_theme.dart';
 
 enum AppToastTone { information, success, error }
@@ -42,7 +43,9 @@ class AppToast extends StatelessWidget {
         MediaQuery.maybeAccessibleNavigationOf(context) == true;
     return showToast(
       context: context,
-      showDuration: Duration(seconds: accessible ? 10 : 5),
+      showDuration: accessible
+          ? AppMotion.toastActionHoldAccessible
+          : AppMotion.toastHold,
       builder: (context, overlay) => AppToast(
         title: title,
         message: message,

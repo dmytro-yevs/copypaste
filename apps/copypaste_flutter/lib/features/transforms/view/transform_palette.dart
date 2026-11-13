@@ -43,24 +43,17 @@ Future<TransformActionOutcome?> showTransformPalette(
   );
   unawaited(controller.open());
   try {
-    final outcome = await showOverlay<TransformActionOutcome>(
+    final outcome = await AppOverlays.showDialog<TransformActionOutcome>(
       context,
-      DialogConfiguration(
-        alignment: defaultTargetPlatform == TargetPlatform.android
-            ? Alignment.bottomCenter
-            : Alignment.center,
+      width: math.min(
+        AppLayoutSize.transformPaletteWidth,
+        MediaQuery.sizeOf(context).width - AppSpacing.lg * 2,
       ),
-      builder: (dialogContext) => SizedBox(
-        width: math.min(
-          AppLayoutSize.transformPaletteWidth,
-          MediaQuery.sizeOf(dialogContext).width - AppSpacing.lg * 2,
-        ),
-        child: TransformPalette(
-          controller: controller,
-          onDone: (outcome) => Navigator.of(dialogContext).pop(outcome),
-        ),
+      builder: (dialogContext) => TransformPalette(
+        controller: controller,
+        onDone: (outcome) => Navigator.of(dialogContext).pop(outcome),
       ),
-    ).future;
+    );
     if (outcome != null && context.mounted) {
       _announceOutcome(context, outcome);
     }
@@ -1004,8 +997,7 @@ class _PaletteItemState extends State<_PaletteItem> {
                 state.requestFocus();
                 controller.highlight(entry);
               },
-              child: AnimatedContainer(
-                duration: kDefaultDuration,
+              child: Container(
                 decoration: BoxDecoration(
                   color: focused
                       ? theme.colorScheme.accent
