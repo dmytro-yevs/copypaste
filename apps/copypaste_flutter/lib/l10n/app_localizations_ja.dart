@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4758,4 +4757,308 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => 'ホーム画面 ウィジェット ランチャー 最近';
+
+  @override
+  String get aiToolsEnableTitle => 'このコンピュータの CopyPaste への AI ツールのアクセスを許可';
+
+  @override
+  String get aiToolsEnableDescription =>
+      '接続した AI ツールは、下で許可したクリップボード項目を読み取れます。AI ツールと共有した内容は、そのツールの提供元に送信されます。';
+
+  @override
+  String aiToolsStatusOn(int count) {
+    return 'オン · 履歴を共有しているデバイス: $count';
+  }
+
+  @override
+  String get aiToolsStatusOff => 'オフ · 接続済みのツールはこのコンピュータの CopyPaste にアクセスできません';
+
+  @override
+  String get aiToolsThreatModelTitle => 'これらの制限が守るもの';
+
+  @override
+  String get aiToolsThreatModel =>
+      '権限、承認、伏せ字は、AI ツールが CopyPaste との接続を通じて見られる内容を制限します。あなたのアカウントで動作し、すでにクリップボードや履歴を読み取れる他のプログラムからは保護しません。';
+
+  @override
+  String get aiToolsGrantsTitle => '接続済みのツール';
+
+  @override
+  String get aiToolsGrantsDescription =>
+      'あなたのいずれかのコンピュータで接続された AI ツールです。変更は、接続を所有するコンピュータが同期したときに適用されます。';
+
+  @override
+  String aiToolsServedThrough(String desktops) {
+    return '提供元: $desktops';
+  }
+
+  @override
+  String get aiToolsConnect => 'AI ツールを接続';
+
+  @override
+  String get aiToolsEmptyTitle => '接続された AI ツールはまだありません';
+
+  @override
+  String get aiToolsEmptyMessage => 'AI ツールを接続すると、許可したクリップボード項目を検索できるようになります。';
+
+  @override
+  String get aiToolsEmptyServedTitle => 'AI ツールはコンピュータ経由で接続します';
+
+  @override
+  String get aiToolsEmptyServedMessage =>
+      'Mac、Windows、Linux のコンピュータで CopyPaste の AI ツールをオンにすると、スマートフォンの履歴をそこで利用できます。';
+
+  @override
+  String get aiToolsUnknownDevice => '別のコンピュータ';
+
+  @override
+  String aiToolsGrantOwner(String device) {
+    return '$device 上';
+  }
+
+  @override
+  String get aiToolsGrantWaiting => '最初の接続を待っています';
+
+  @override
+  String aiToolsGrantUsed(String date) {
+    return '接続済み · 最終使用 $date';
+  }
+
+  @override
+  String get aiToolsGrantRevoked => '取り消し済み';
+
+  @override
+  String aiToolsGrantRevokedRemote(String device) {
+    return '取り消し済み · $device の同期後に有効';
+  }
+
+  @override
+  String get aiToolsGrantReissue => '復元後は新しい接続が必要です';
+
+  @override
+  String get aiToolsGrantPaused => '一時停止中: このコンピュータでは AI ツールがオフです';
+
+  @override
+  String get aiToolsEdit => '編集';
+
+  @override
+  String get aiToolsActivity => 'アクティビティを表示';
+
+  @override
+  String get aiToolsRevoke => '取り消す';
+
+  @override
+  String aiToolsRevokeTitle(String name) {
+    return '$name を取り消しますか？';
+  }
+
+  @override
+  String get aiToolsRevokeMessage =>
+      'ツールは次のリクエストでアクセスを失います。再度接続するには、新しい接続を作成してください。';
+
+  @override
+  String aiToolsDeleteTitle(String name) {
+    return '$name を削除しますか？';
+  }
+
+  @override
+  String get aiToolsDeleteMessage => '接続は取り消され、すべてのデバイスから削除されます。';
+
+  @override
+  String get aiToolsChangeFailed => '変更を保存できませんでした。';
+
+  @override
+  String get aiToolsLoadFailed => 'AI ツールの設定を読み込めませんでした';
+
+  @override
+  String get aiToolsEditTitle => '接続を編集';
+
+  @override
+  String get aiToolsNameLabel => '名前';
+
+  @override
+  String get aiToolsScopesLabel => 'アクセス';
+
+  @override
+  String get aiToolsScopeReadHistory => '履歴の読み取り';
+
+  @override
+  String get aiToolsScopeReadSnippets => 'スニペットの読み取り';
+
+  @override
+  String get aiToolsScopeWriteClipboard => 'クリップボードへの書き込み';
+
+  @override
+  String get aiToolsScopeOrganize => '整理（ピン留め、スニペットの保存）';
+
+  @override
+  String get aiToolsLookbackLabel => '履歴の期間';
+
+  @override
+  String get aiToolsLookbackDay => '過去 24 時間';
+
+  @override
+  String get aiToolsLookbackWeek => '過去 7 日間';
+
+  @override
+  String get aiToolsLookbackMonth => '過去 30 日間';
+
+  @override
+  String get aiToolsLookbackAll => 'すべての履歴';
+
+  @override
+  String aiToolsActivityTitle(String name) {
+    return '$name のアクティビティ';
+  }
+
+  @override
+  String get aiToolsActivityEmpty => 'まだアクティビティはありません';
+
+  @override
+  String get aiToolsActivityFailed => 'アクティビティを読み込めませんでした';
+
+  @override
+  String aiToolsActivityEntry(String tool, int count) {
+    return '$tool · 結果: $count';
+  }
+
+  @override
+  String get aiToolsClientLabel => 'AI ツール';
+
+  @override
+  String get aiToolsClientOther => 'その他';
+
+  @override
+  String get aiToolsCreate => '接続を作成';
+
+  @override
+  String aiToolsConfigHint(String client) {
+    return 'この設定を $client に追加してください。アクセスキーは一度だけ表示されます。';
+  }
+
+  @override
+  String get aiToolsConfigHintOther =>
+      'この設定を AI ツールの MCP 設定に追加してください。アクセスキーは一度だけ表示されます。';
+
+  @override
+  String aiToolsRestartNote(String client) {
+    return '次に: $client を再起動するか、新しいセッションを開いてください。';
+  }
+
+  @override
+  String get aiToolsRestartNoteOther => '次に: AI ツールを再起動するか、新しいセッションを開いてください。';
+
+  @override
+  String get aiToolsCopied => 'コピーしました';
+
+  @override
+  String get aiToolsCopiedMessage => '履歴には保存されず、クリップボードは 60 秒後に消去されます。';
+
+  @override
+  String get aiToolsCopyFailed => '設定をコピーできませんでした。';
+
+  @override
+  String get aiToolsPolicyTitle => 'AI ツールが見られるもの';
+
+  @override
+  String get aiToolsPolicyNote => 'ここで何を許可しても、機密項目や検出された認証情報は共有されません。';
+
+  @override
+  String get aiToolsOtherDevicesTitle => '他のデバイスの項目を含める';
+
+  @override
+  String get aiToolsOtherDevicesDescription =>
+      '他のデバイスから同期された履歴です。デバイスをオフにすると、その項目は除外されます。';
+
+  @override
+  String get aiToolsKindsTitle => 'コンテンツの種類';
+
+  @override
+  String get aiToolsKindsDescription => 'AI ツールが読み取れるクリップボード項目の種類です。';
+
+  @override
+  String get aiToolsKindText => 'テキスト';
+
+  @override
+  String get aiToolsKindLink => 'リンク';
+
+  @override
+  String get aiToolsKindRichText => 'リッチテキスト';
+
+  @override
+  String get aiToolsKindImage => '画像';
+
+  @override
+  String get aiToolsKindFileMetadata => 'ファイル名とサイズ';
+
+  @override
+  String get aiToolsExcludedAppsTitle => '除外するアプリ';
+
+  @override
+  String get aiToolsExcludedAppsDescription => 'これらのアプリからコピーした項目は共有されません。';
+
+  @override
+  String get aiToolsAddApp => 'アプリを追加';
+
+  @override
+  String get aiToolsRemove => '削除';
+
+  @override
+  String get aiToolsDefaultLookbackTitle => '新しい接続の履歴の期間';
+
+  @override
+  String get aiToolsDefaultLookbackDescription =>
+      'それより古いピン留めされていない項目は接続から見えません。ピン留めした項目とスニペットは制限されません。';
+
+  @override
+  String get aiToolsKeywords =>
+      'ai 人工知能 mcp アシスタント claude codex cursor モデル エージェント';
+
+  @override
+  String aiToolsApprovalTitle(String client) {
+    return '$client が CopyPaste へのアクセスを求めています';
+  }
+
+  @override
+  String aiToolsReportedName(String name) {
+    return 'アプリが報告した名前: $name';
+  }
+
+  @override
+  String aiToolsReportedExecutable(String path) {
+    return 'プログラム: $path';
+  }
+
+  @override
+  String get aiToolsApprovalNote =>
+      '自分で起動したツールだけを許可してください。応答がない場合、リクエストは 2 分後に拒否されます。';
+
+  @override
+  String get aiToolsDeny => '拒否';
+
+  @override
+  String get aiToolsAllow => '許可';
+
+  @override
+  String get aiToolsVolumeTitle => 'さらに読み取りを許可しますか？';
+
+  @override
+  String aiToolsVolumeMessage(String client) {
+    return '$client はこのセッションで多くのクリップボード履歴を読み取りました。さらに許可しますか？';
+  }
+
+  @override
+  String get aiToolsNotificationBody => 'CopyPaste を開いて許可または拒否してください。';
+
+  @override
+  String get aiToolsDecisionFailed => '応答を送信できませんでした。リクエストはもう一度表示されます。';
+
+  @override
+  String get aiToolsHide => 'AI ツールから隠す';
+
+  @override
+  String get aiToolsShow => 'AI ツールに表示';
+
+  @override
+  String get aiToolsHiddenState => 'AI ツールから非表示';
 }

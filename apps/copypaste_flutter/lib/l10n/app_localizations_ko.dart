@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -4738,4 +4737,307 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get quickAccessWidgetKeywords => '홈 화면 위젯 런처 최근';
+
+  @override
+  String get aiToolsEnableTitle => 'AI 도구가 이 컴퓨터의 CopyPaste에 접근하도록 허용';
+
+  @override
+  String get aiToolsEnableDescription =>
+      '연결한 AI 도구는 아래에서 허용한 클립보드 항목을 읽을 수 있습니다. AI 도구와 공유한 내용은 해당 도구의 제공업체로 전송됩니다.';
+
+  @override
+  String aiToolsStatusOn(int count) {
+    return '켜짐 · 기록을 공유하는 기기: $count';
+  }
+
+  @override
+  String get aiToolsStatusOff => '꺼짐 · 연결된 도구가 이 컴퓨터의 CopyPaste에 접근할 수 없습니다';
+
+  @override
+  String get aiToolsThreatModelTitle => '이 제한이 보호하는 범위';
+
+  @override
+  String get aiToolsThreatModel =>
+      '권한, 승인, 가리기는 AI 도구가 CopyPaste 연결을 통해 볼 수 있는 내용을 제한합니다. 내 계정에서 실행되어 이미 클립보드와 기록을 읽을 수 있는 다른 프로그램으로부터는 보호하지 않습니다.';
+
+  @override
+  String get aiToolsGrantsTitle => '연결된 도구';
+
+  @override
+  String get aiToolsGrantsDescription =>
+      '내 컴퓨터 중 어디에서든 연결된 AI 도구입니다. 변경 사항은 연결을 소유한 컴퓨터가 동기화되면 적용됩니다.';
+
+  @override
+  String aiToolsServedThrough(String desktops) {
+    return '제공 컴퓨터: $desktops';
+  }
+
+  @override
+  String get aiToolsConnect => 'AI 도구 연결';
+
+  @override
+  String get aiToolsEmptyTitle => '아직 연결된 AI 도구가 없습니다';
+
+  @override
+  String get aiToolsEmptyMessage => 'AI 도구를 연결하면 허용한 클립보드 항목을 검색할 수 있습니다.';
+
+  @override
+  String get aiToolsEmptyServedTitle => 'AI 도구는 컴퓨터를 통해 연결됩니다';
+
+  @override
+  String get aiToolsEmptyServedMessage =>
+      'Mac, Windows 또는 Linux 컴퓨터의 CopyPaste에서 AI 도구를 켜면 휴대전화 기록을 그곳에서 사용할 수 있습니다.';
+
+  @override
+  String get aiToolsUnknownDevice => '다른 컴퓨터';
+
+  @override
+  String aiToolsGrantOwner(String device) {
+    return '$device에서';
+  }
+
+  @override
+  String get aiToolsGrantWaiting => '첫 연결 대기 중';
+
+  @override
+  String aiToolsGrantUsed(String date) {
+    return '연결됨 · 마지막 사용 $date';
+  }
+
+  @override
+  String get aiToolsGrantRevoked => '취소됨';
+
+  @override
+  String aiToolsGrantRevokedRemote(String device) {
+    return '취소됨 · $device이(가) 동기화되면 적용';
+  }
+
+  @override
+  String get aiToolsGrantReissue => '복원 후 새 연결이 필요합니다';
+
+  @override
+  String get aiToolsGrantPaused => '일시 중지됨: 이 컴퓨터에서 AI 도구가 꺼져 있습니다';
+
+  @override
+  String get aiToolsEdit => '편집';
+
+  @override
+  String get aiToolsActivity => '활동 보기';
+
+  @override
+  String get aiToolsRevoke => '취소';
+
+  @override
+  String aiToolsRevokeTitle(String name) {
+    return '$name 연결을 취소할까요?';
+  }
+
+  @override
+  String get aiToolsRevokeMessage =>
+      '도구는 다음 요청부터 접근 권한을 잃습니다. 다시 연결하려면 새 연결을 만드세요.';
+
+  @override
+  String aiToolsDeleteTitle(String name) {
+    return '$name 연결을 삭제할까요?';
+  }
+
+  @override
+  String get aiToolsDeleteMessage => '연결이 취소되고 모든 기기에서 삭제됩니다.';
+
+  @override
+  String get aiToolsChangeFailed => '변경 사항을 저장할 수 없습니다.';
+
+  @override
+  String get aiToolsLoadFailed => 'AI 도구 설정을 불러올 수 없습니다';
+
+  @override
+  String get aiToolsEditTitle => '연결 편집';
+
+  @override
+  String get aiToolsNameLabel => '이름';
+
+  @override
+  String get aiToolsScopesLabel => '접근 권한';
+
+  @override
+  String get aiToolsScopeReadHistory => '기록 읽기';
+
+  @override
+  String get aiToolsScopeReadSnippets => '스니펫 읽기';
+
+  @override
+  String get aiToolsScopeWriteClipboard => '클립보드에 쓰기';
+
+  @override
+  String get aiToolsScopeOrganize => '정리 (고정, 스니펫 저장)';
+
+  @override
+  String get aiToolsLookbackLabel => '기록 기간';
+
+  @override
+  String get aiToolsLookbackDay => '최근 24시간';
+
+  @override
+  String get aiToolsLookbackWeek => '최근 7일';
+
+  @override
+  String get aiToolsLookbackMonth => '최근 30일';
+
+  @override
+  String get aiToolsLookbackAll => '전체 기록';
+
+  @override
+  String aiToolsActivityTitle(String name) {
+    return '$name 활동';
+  }
+
+  @override
+  String get aiToolsActivityEmpty => '아직 활동이 없습니다';
+
+  @override
+  String get aiToolsActivityFailed => '활동을 불러올 수 없습니다';
+
+  @override
+  String aiToolsActivityEntry(String tool, int count) {
+    return '$tool · 결과: $count';
+  }
+
+  @override
+  String get aiToolsClientLabel => 'AI 도구';
+
+  @override
+  String get aiToolsClientOther => '기타';
+
+  @override
+  String get aiToolsCreate => '연결 만들기';
+
+  @override
+  String aiToolsConfigHint(String client) {
+    return '이 구성을 $client에 추가하세요. 접근 키는 한 번만 표시됩니다.';
+  }
+
+  @override
+  String get aiToolsConfigHintOther =>
+      '이 구성을 AI 도구의 MCP 설정에 추가하세요. 접근 키는 한 번만 표시됩니다.';
+
+  @override
+  String aiToolsRestartNote(String client) {
+    return '다음 단계: $client을(를) 다시 시작하거나 새 세션을 여세요.';
+  }
+
+  @override
+  String get aiToolsRestartNoteOther => '다음 단계: AI 도구를 다시 시작하거나 새 세션을 여세요.';
+
+  @override
+  String get aiToolsCopied => '복사됨';
+
+  @override
+  String get aiToolsCopiedMessage => '기록에 저장되지 않으며 클립보드는 60초 후에 지워집니다.';
+
+  @override
+  String get aiToolsCopyFailed => '구성을 복사할 수 없습니다.';
+
+  @override
+  String get aiToolsPolicyTitle => 'AI 도구가 볼 수 있는 항목';
+
+  @override
+  String get aiToolsPolicyNote => '여기서 무엇을 허용하든 민감한 항목과 감지된 자격 증명은 공유되지 않습니다.';
+
+  @override
+  String get aiToolsOtherDevicesTitle => '다른 기기의 항목 포함';
+
+  @override
+  String get aiToolsOtherDevicesDescription =>
+      '다른 기기에서 동기화된 기록입니다. 기기를 끄면 해당 항목이 제외됩니다.';
+
+  @override
+  String get aiToolsKindsTitle => '콘텐츠 종류';
+
+  @override
+  String get aiToolsKindsDescription => 'AI 도구가 읽을 수 있는 클립보드 항목의 종류입니다.';
+
+  @override
+  String get aiToolsKindText => '텍스트';
+
+  @override
+  String get aiToolsKindLink => '링크';
+
+  @override
+  String get aiToolsKindRichText => '서식 있는 텍스트';
+
+  @override
+  String get aiToolsKindImage => '이미지';
+
+  @override
+  String get aiToolsKindFileMetadata => '파일 이름 및 크기';
+
+  @override
+  String get aiToolsExcludedAppsTitle => '제외된 앱';
+
+  @override
+  String get aiToolsExcludedAppsDescription => '이 앱에서 복사한 항목은 공유되지 않습니다.';
+
+  @override
+  String get aiToolsAddApp => '앱 추가';
+
+  @override
+  String get aiToolsRemove => '제거';
+
+  @override
+  String get aiToolsDefaultLookbackTitle => '새 연결의 기록 기간';
+
+  @override
+  String get aiToolsDefaultLookbackDescription =>
+      '이보다 오래된 고정되지 않은 항목은 연결에 보이지 않습니다. 고정된 항목과 스니펫은 제한되지 않습니다.';
+
+  @override
+  String get aiToolsKeywords => 'ai 인공지능 mcp 어시스턴트 claude codex cursor 모델 에이전트';
+
+  @override
+  String aiToolsApprovalTitle(String client) {
+    return '$client이(가) CopyPaste 접근을 요청합니다';
+  }
+
+  @override
+  String aiToolsReportedName(String name) {
+    return '앱이 보고한 이름: $name';
+  }
+
+  @override
+  String aiToolsReportedExecutable(String path) {
+    return '프로그램: $path';
+  }
+
+  @override
+  String get aiToolsApprovalNote =>
+      '직접 실행한 도구만 허용하세요. 응답이 없으면 요청은 2분 후에 거부됩니다.';
+
+  @override
+  String get aiToolsDeny => '거부';
+
+  @override
+  String get aiToolsAllow => '허용';
+
+  @override
+  String get aiToolsVolumeTitle => '더 읽도록 허용할까요?';
+
+  @override
+  String aiToolsVolumeMessage(String client) {
+    return '$client이(가) 이 세션에서 클립보드 기록을 많이 읽었습니다. 더 허용할까요?';
+  }
+
+  @override
+  String get aiToolsNotificationBody => 'CopyPaste를 열어 허용하거나 거부하세요.';
+
+  @override
+  String get aiToolsDecisionFailed => '응답을 보낼 수 없습니다. 요청이 다시 표시됩니다.';
+
+  @override
+  String get aiToolsHide => 'AI 도구에서 숨기기';
+
+  @override
+  String get aiToolsShow => 'AI 도구에 표시';
+
+  @override
+  String get aiToolsHiddenState => 'AI 도구에서 숨겨짐';
 }

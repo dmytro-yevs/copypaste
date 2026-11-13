@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -5125,4 +5124,325 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get quickAccessWidgetKeywords =>
       'schermata home widget launcher recenti';
+
+  @override
+  String get aiToolsEnableTitle =>
+      'Consenti agli strumenti IA di accedere a CopyPaste su questo computer';
+
+  @override
+  String get aiToolsEnableDescription =>
+      'Gli strumenti IA che colleghi possono leggere gli elementi degli appunti che consenti qui sotto. Ciò che condividi con uno strumento IA viene inviato al suo fornitore.';
+
+  @override
+  String aiToolsStatusOn(int count) {
+    return 'Attivo · dispositivi che condividono la cronologia: $count';
+  }
+
+  @override
+  String get aiToolsStatusOff =>
+      'Disattivo · gli strumenti collegati non possono raggiungere CopyPaste su questo computer';
+
+  @override
+  String get aiToolsThreatModelTitle => 'Da cosa proteggono questi limiti';
+
+  @override
+  String get aiToolsThreatModel =>
+      'Autorizzazioni, approvazioni e oscuramento limitano ciò che uno strumento IA vede tramite la sua connessione a CopyPaste. Non proteggono da altri programmi eseguiti con il tuo account, che possono già leggere i tuoi appunti e la cronologia.';
+
+  @override
+  String get aiToolsGrantsTitle => 'Strumenti collegati';
+
+  @override
+  String get aiToolsGrantsDescription =>
+      'Strumenti IA collegati su uno qualsiasi dei tuoi computer. Una modifica si applica sul computer proprietario della connessione dopo la sincronizzazione.';
+
+  @override
+  String aiToolsServedThrough(String desktops) {
+    return 'Servito tramite: $desktops';
+  }
+
+  @override
+  String get aiToolsConnect => 'Collega strumento IA';
+
+  @override
+  String get aiToolsEmptyTitle => 'Nessuno strumento IA collegato';
+
+  @override
+  String get aiToolsEmptyMessage =>
+      'Collega uno strumento IA per permettergli di cercare tra gli elementi degli appunti che consenti.';
+
+  @override
+  String get aiToolsEmptyServedTitle =>
+      'Gli strumenti IA si collegano tramite il tuo computer';
+
+  @override
+  String get aiToolsEmptyServedMessage =>
+      'Attiva gli strumenti IA in CopyPaste su un computer Mac, Windows o Linux e la cronologia del telefono sarà disponibile lì.';
+
+  @override
+  String get aiToolsUnknownDevice => 'un altro computer';
+
+  @override
+  String aiToolsGrantOwner(String device) {
+    return 'Su $device';
+  }
+
+  @override
+  String get aiToolsGrantWaiting => 'In attesa della prima connessione';
+
+  @override
+  String aiToolsGrantUsed(String date) {
+    return 'Collegato · ultimo uso $date';
+  }
+
+  @override
+  String get aiToolsGrantRevoked => 'Revocato';
+
+  @override
+  String aiToolsGrantRevokedRemote(String device) {
+    return 'Revocato · effettivo quando $device si sincronizza';
+  }
+
+  @override
+  String get aiToolsGrantReissue =>
+      'Serve una nuova connessione dopo un ripristino';
+
+  @override
+  String get aiToolsGrantPaused =>
+      'In pausa: gli strumenti IA sono disattivati su questo computer';
+
+  @override
+  String get aiToolsEdit => 'Modifica';
+
+  @override
+  String get aiToolsActivity => 'Mostra attività';
+
+  @override
+  String get aiToolsRevoke => 'Revoca';
+
+  @override
+  String aiToolsRevokeTitle(String name) {
+    return 'Revocare $name?';
+  }
+
+  @override
+  String get aiToolsRevokeMessage =>
+      'Lo strumento perde l’accesso alla prossima richiesta. Per ricollegarlo, crea una nuova connessione.';
+
+  @override
+  String aiToolsDeleteTitle(String name) {
+    return 'Eliminare $name?';
+  }
+
+  @override
+  String get aiToolsDeleteMessage =>
+      'La connessione viene revocata e rimossa da tutti i tuoi dispositivi.';
+
+  @override
+  String get aiToolsChangeFailed => 'Impossibile salvare la modifica.';
+
+  @override
+  String get aiToolsLoadFailed =>
+      'Impossibile caricare le impostazioni degli strumenti IA';
+
+  @override
+  String get aiToolsEditTitle => 'Modifica connessione';
+
+  @override
+  String get aiToolsNameLabel => 'Nome';
+
+  @override
+  String get aiToolsScopesLabel => 'Accesso';
+
+  @override
+  String get aiToolsScopeReadHistory => 'Leggere la cronologia';
+
+  @override
+  String get aiToolsScopeReadSnippets => 'Leggere i frammenti';
+
+  @override
+  String get aiToolsScopeWriteClipboard => 'Scrivere negli appunti';
+
+  @override
+  String get aiToolsScopeOrganize => 'Organizzare (fissare, salvare frammenti)';
+
+  @override
+  String get aiToolsLookbackLabel => 'Periodo della cronologia';
+
+  @override
+  String get aiToolsLookbackDay => 'Ultime 24 ore';
+
+  @override
+  String get aiToolsLookbackWeek => 'Ultimi 7 giorni';
+
+  @override
+  String get aiToolsLookbackMonth => 'Ultimi 30 giorni';
+
+  @override
+  String get aiToolsLookbackAll => 'Tutta la cronologia';
+
+  @override
+  String aiToolsActivityTitle(String name) {
+    return 'Attività di $name';
+  }
+
+  @override
+  String get aiToolsActivityEmpty => 'Ancora nessuna attività';
+
+  @override
+  String get aiToolsActivityFailed => 'Impossibile caricare l’attività';
+
+  @override
+  String aiToolsActivityEntry(String tool, int count) {
+    return '$tool · risultati: $count';
+  }
+
+  @override
+  String get aiToolsClientLabel => 'Strumento IA';
+
+  @override
+  String get aiToolsClientOther => 'Altro';
+
+  @override
+  String get aiToolsCreate => 'Crea connessione';
+
+  @override
+  String aiToolsConfigHint(String client) {
+    return 'Aggiungi questa configurazione a $client. La sua chiave di accesso viene mostrata una sola volta.';
+  }
+
+  @override
+  String get aiToolsConfigHintOther =>
+      'Aggiungi questa configurazione alle impostazioni MCP del tuo strumento IA. La sua chiave di accesso viene mostrata una sola volta.';
+
+  @override
+  String aiToolsRestartNote(String client) {
+    return 'Poi: riavvia $client o apri una nuova sessione.';
+  }
+
+  @override
+  String get aiToolsRestartNoteOther =>
+      'Poi: riavvia lo strumento IA o apri una nuova sessione.';
+
+  @override
+  String get aiToolsCopied => 'Copiato';
+
+  @override
+  String get aiToolsCopiedMessage =>
+      'Non viene salvato nella cronologia e gli appunti si svuotano tra 60 secondi.';
+
+  @override
+  String get aiToolsCopyFailed => 'Impossibile copiare la configurazione.';
+
+  @override
+  String get aiToolsPolicyTitle => 'Cosa possono vedere gli strumenti IA';
+
+  @override
+  String get aiToolsPolicyNote =>
+      'Gli elementi sensibili e le credenziali rilevate non vengono mai condivisi, qualunque cosa tu consenta qui.';
+
+  @override
+  String get aiToolsOtherDevicesTitle =>
+      'Includi elementi di altri dispositivi';
+
+  @override
+  String get aiToolsOtherDevicesDescription =>
+      'Cronologia sincronizzata dai tuoi altri dispositivi. Disattiva un dispositivo per escluderne gli elementi.';
+
+  @override
+  String get aiToolsKindsTitle => 'Tipi di contenuto';
+
+  @override
+  String get aiToolsKindsDescription =>
+      'Tipi di elementi degli appunti che gli strumenti IA possono leggere.';
+
+  @override
+  String get aiToolsKindText => 'Testo';
+
+  @override
+  String get aiToolsKindLink => 'Link';
+
+  @override
+  String get aiToolsKindRichText => 'Testo formattato';
+
+  @override
+  String get aiToolsKindImage => 'Immagini';
+
+  @override
+  String get aiToolsKindFileMetadata => 'Nomi e dimensioni dei file';
+
+  @override
+  String get aiToolsExcludedAppsTitle => 'App escluse';
+
+  @override
+  String get aiToolsExcludedAppsDescription =>
+      'Gli elementi copiati da queste app non vengono mai condivisi.';
+
+  @override
+  String get aiToolsAddApp => 'Aggiungi app';
+
+  @override
+  String get aiToolsRemove => 'Rimuovi';
+
+  @override
+  String get aiToolsDefaultLookbackTitle =>
+      'Periodo della cronologia per le nuove connessioni';
+
+  @override
+  String get aiToolsDefaultLookbackDescription =>
+      'Gli elementi più vecchi non fissati restano invisibili a una connessione. Elementi fissati e frammenti non sono limitati.';
+
+  @override
+  String get aiToolsKeywords =>
+      'ia ai mcp assistente claude codex cursor modello agente';
+
+  @override
+  String aiToolsApprovalTitle(String client) {
+    return '$client vuole accedere a CopyPaste';
+  }
+
+  @override
+  String aiToolsReportedName(String name) {
+    return 'Nome dichiarato dall’app: $name';
+  }
+
+  @override
+  String aiToolsReportedExecutable(String path) {
+    return 'Programma: $path';
+  }
+
+  @override
+  String get aiToolsApprovalNote =>
+      'Consenti solo strumenti che hai avviato tu. Senza risposta, la richiesta viene negata dopo 2 minuti.';
+
+  @override
+  String get aiToolsDeny => 'Nega';
+
+  @override
+  String get aiToolsAllow => 'Consenti';
+
+  @override
+  String get aiToolsVolumeTitle => 'Consentire altre letture?';
+
+  @override
+  String aiToolsVolumeMessage(String client) {
+    return '$client ha letto molta cronologia degli appunti in questa sessione. Consentire di più?';
+  }
+
+  @override
+  String get aiToolsNotificationBody =>
+      'Apri CopyPaste per consentire o negare.';
+
+  @override
+  String get aiToolsDecisionFailed =>
+      'Impossibile inviare la risposta. La richiesta verrà mostrata di nuovo.';
+
+  @override
+  String get aiToolsHide => 'Nascondi agli strumenti IA';
+
+  @override
+  String get aiToolsShow => 'Mostra agli strumenti IA';
+
+  @override
+  String get aiToolsHiddenState => 'Nascosto agli strumenti IA';
 }

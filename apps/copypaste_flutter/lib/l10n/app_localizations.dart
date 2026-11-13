@@ -8354,6 +8354,534 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'home screen widget launcher recent'**
   String get quickAccessWidgetKeywords;
+
+  /// Desktop switch that lets connected AI tools (MCP clients) use this computer's CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow AI tools to access CopyPaste on this computer'**
+  String get aiToolsEnableTitle;
+
+  /// Explains the AI tools switch.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools you connect can read the clipboard items you allow below. Content you share with an AI tool is sent to that tool\'s provider.'**
+  String get aiToolsEnableDescription;
+
+  /// Status under the AI tools switch when it is on.
+  ///
+  /// In en, this message translates to:
+  /// **'On · devices sharing history: {count}'**
+  String aiToolsStatusOn(int count);
+
+  /// Status under the AI tools switch when it is off.
+  ///
+  /// In en, this message translates to:
+  /// **'Off · connected tools can\'t reach CopyPaste on this computer'**
+  String get aiToolsStatusOff;
+
+  /// Heading of the AI tools threat-model note.
+  ///
+  /// In en, this message translates to:
+  /// **'What these limits protect'**
+  String get aiToolsThreatModelTitle;
+
+  /// Threat-model note: AI tool limits do not protect against other programs of the same user.
+  ///
+  /// In en, this message translates to:
+  /// **'Scopes, approvals and redaction limit what an AI tool can see through its CopyPaste connection. They don\'t protect against other programs running under your account, which can already read your clipboard and history.'**
+  String get aiToolsThreatModel;
+
+  /// Heading of the list of connected AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected tools'**
+  String get aiToolsGrantsTitle;
+
+  /// Explains the connected AI tools list.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools connected on any of your computers. A change applies on the computer that owns the connection once it syncs.'**
+  String get aiToolsGrantsDescription;
+
+  /// Android status: computers that serve AI tool connections.
+  ///
+  /// In en, this message translates to:
+  /// **'Served through: {desktops}'**
+  String aiToolsServedThrough(String desktops);
+
+  /// Button and dialog title that connects a new AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect AI tool'**
+  String get aiToolsConnect;
+
+  /// Empty state of the connected AI tools list on a computer.
+  ///
+  /// In en, this message translates to:
+  /// **'No AI tools connected yet'**
+  String get aiToolsEmptyTitle;
+
+  /// Empty state message of the connected AI tools list on a computer.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect an AI tool to let it search the clipboard items you allow.'**
+  String get aiToolsEmptyMessage;
+
+  /// Empty state title on Android, where AI tools are served by a computer.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools connect through your computer'**
+  String get aiToolsEmptyServedTitle;
+
+  /// Empty state message on Android explaining how to set up AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on AI tools in CopyPaste on a Mac, Windows or Linux computer, and your phone\'s history will be available there.'**
+  String get aiToolsEmptyServedMessage;
+
+  /// Name used when the computer that owns a connection is unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'another computer'**
+  String get aiToolsUnknownDevice;
+
+  /// Which computer owns an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'On {device}'**
+  String aiToolsGrantOwner(String device);
+
+  /// Status of an AI tool connection that was never used.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for first connection'**
+  String get aiToolsGrantWaiting;
+
+  /// Status of an AI tool connection with the day it was last used.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected · last used {date}'**
+  String aiToolsGrantUsed(String date);
+
+  /// Status of a revoked AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked'**
+  String get aiToolsGrantRevoked;
+
+  /// Status of a connection revoked here but owned by another computer.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked · takes effect when {device} syncs'**
+  String aiToolsGrantRevokedRemote(String device);
+
+  /// Status of a connection whose access key was not restored from a backup.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs a new connection after a restore'**
+  String get aiToolsGrantReissue;
+
+  /// Status of a connection while AI tools are turned off.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused: AI tools are off on this computer'**
+  String get aiToolsGrantPaused;
+
+  /// Action that edits an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get aiToolsEdit;
+
+  /// Action that shows the access log of an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'View activity'**
+  String get aiToolsActivity;
+
+  /// Action that revokes an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke'**
+  String get aiToolsRevoke;
+
+  /// Confirmation title before revoking an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke {name}?'**
+  String aiToolsRevokeTitle(String name);
+
+  /// Confirmation message before revoking an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'The tool loses access on its next request. To connect it again, create a new connection.'**
+  String get aiToolsRevokeMessage;
+
+  /// Confirmation title before deleting an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name}?'**
+  String aiToolsDeleteTitle(String name);
+
+  /// Confirmation message before deleting an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'The connection is revoked and removed from all your devices.'**
+  String get aiToolsDeleteMessage;
+
+  /// Error when an AI tools setting could not be changed.
+  ///
+  /// In en, this message translates to:
+  /// **'The change could not be saved.'**
+  String get aiToolsChangeFailed;
+
+  /// Error title when the AI tools settings fail to load.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tools settings could not be loaded'**
+  String get aiToolsLoadFailed;
+
+  /// Title of the dialog that edits an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit connection'**
+  String get aiToolsEditTitle;
+
+  /// Label of the AI tool connection name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get aiToolsNameLabel;
+
+  /// Label above the access scope checkboxes of an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Access'**
+  String get aiToolsScopesLabel;
+
+  /// Scope: the AI tool may search and read clipboard history.
+  ///
+  /// In en, this message translates to:
+  /// **'Read history'**
+  String get aiToolsScopeReadHistory;
+
+  /// Scope: the AI tool may search, read and render snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Read snippets'**
+  String get aiToolsScopeReadSnippets;
+
+  /// Scope: the AI tool may put text on this computer's clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Write clipboard'**
+  String get aiToolsScopeWriteClipboard;
+
+  /// Scope: the AI tool may pin items and save new snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Organize (pin, save snippets)'**
+  String get aiToolsScopeOrganize;
+
+  /// Label of how far back unpinned history is visible to an AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'History window'**
+  String get aiToolsLookbackLabel;
+
+  /// History window option.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 24 hours'**
+  String get aiToolsLookbackDay;
+
+  /// History window option.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 7 days'**
+  String get aiToolsLookbackWeek;
+
+  /// History window option.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 30 days'**
+  String get aiToolsLookbackMonth;
+
+  /// History window option.
+  ///
+  /// In en, this message translates to:
+  /// **'All history'**
+  String get aiToolsLookbackAll;
+
+  /// Title of the access log dialog of an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity of {name}'**
+  String aiToolsActivityTitle(String name);
+
+  /// Empty access log of an AI tool connection.
+  ///
+  /// In en, this message translates to:
+  /// **'No activity yet'**
+  String get aiToolsActivityEmpty;
+
+  /// Error when the access log fails to load.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity could not be loaded'**
+  String get aiToolsActivityFailed;
+
+  /// One access log entry: the tool name the AI tool called and how many results it got.
+  ///
+  /// In en, this message translates to:
+  /// **'{tool} · results: {count}'**
+  String aiToolsActivityEntry(String tool, int count);
+
+  /// Label of the client picker in the Connect AI tool dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'AI tool'**
+  String get aiToolsClientLabel;
+
+  /// Client picker option for an AI tool that is not listed.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get aiToolsClientOther;
+
+  /// Button that creates an AI tool connection and shows its configuration.
+  ///
+  /// In en, this message translates to:
+  /// **'Create connection'**
+  String get aiToolsCreate;
+
+  /// Instruction above the configuration of a named AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Add this configuration to {client}. Its access key is shown only once.'**
+  String aiToolsConfigHint(String client);
+
+  /// Instruction above the configuration of an unlisted AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Add this configuration to your AI tool\'s MCP settings. Its access key is shown only once.'**
+  String get aiToolsConfigHintOther;
+
+  /// Next step after adding the configuration to a named AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Next: restart {client} or open a new session.'**
+  String aiToolsRestartNote(String client);
+
+  /// Next step after adding the configuration to an unlisted AI tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Next: restart your AI tool or open a new session.'**
+  String get aiToolsRestartNoteOther;
+
+  /// Toast title after copying an AI tool configuration.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get aiToolsCopied;
+
+  /// Toast message after copying a configuration that contains an access key.
+  ///
+  /// In en, this message translates to:
+  /// **'It isn\'t saved to history, and the clipboard clears in 60 seconds.'**
+  String get aiToolsCopiedMessage;
+
+  /// Error when copying an AI tool configuration failed.
+  ///
+  /// In en, this message translates to:
+  /// **'The configuration could not be copied.'**
+  String get aiToolsCopyFailed;
+
+  /// Heading of the AI exposure policy.
+  ///
+  /// In en, this message translates to:
+  /// **'What AI tools can see'**
+  String get aiToolsPolicyTitle;
+
+  /// Fixed note of the AI exposure policy.
+  ///
+  /// In en, this message translates to:
+  /// **'Sensitive items and detected credentials are never shared, whatever you allow here.'**
+  String get aiToolsPolicyNote;
+
+  /// Policy switch: share history synced from other devices.
+  ///
+  /// In en, this message translates to:
+  /// **'Include items from other devices'**
+  String get aiToolsOtherDevicesTitle;
+
+  /// Explains the other devices policy switch and the per-device switches.
+  ///
+  /// In en, this message translates to:
+  /// **'History synced from your other devices. Turn off a device to keep its items out.'**
+  String get aiToolsOtherDevicesDescription;
+
+  /// Policy row: kinds of items AI tools can read.
+  ///
+  /// In en, this message translates to:
+  /// **'Content kinds'**
+  String get aiToolsKindsTitle;
+
+  /// Explains the content kinds policy row.
+  ///
+  /// In en, this message translates to:
+  /// **'Kinds of clipboard items AI tools can read.'**
+  String get aiToolsKindsDescription;
+
+  /// Content kind.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get aiToolsKindText;
+
+  /// Content kind.
+  ///
+  /// In en, this message translates to:
+  /// **'Links'**
+  String get aiToolsKindLink;
+
+  /// Content kind.
+  ///
+  /// In en, this message translates to:
+  /// **'Rich text'**
+  String get aiToolsKindRichText;
+
+  /// Content kind.
+  ///
+  /// In en, this message translates to:
+  /// **'Images'**
+  String get aiToolsKindImage;
+
+  /// Content kind: file metadata only, never file contents.
+  ///
+  /// In en, this message translates to:
+  /// **'File names and sizes'**
+  String get aiToolsKindFileMetadata;
+
+  /// Policy row: apps whose items are never shared with AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Excluded apps'**
+  String get aiToolsExcludedAppsTitle;
+
+  /// Explains the excluded apps policy row.
+  ///
+  /// In en, this message translates to:
+  /// **'Items copied from these apps are never shared.'**
+  String get aiToolsExcludedAppsDescription;
+
+  /// Picker that adds an app to the excluded apps.
+  ///
+  /// In en, this message translates to:
+  /// **'Add app'**
+  String get aiToolsAddApp;
+
+  /// Action that removes an app from the excluded apps.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get aiToolsRemove;
+
+  /// Policy row: default history window of new connections.
+  ///
+  /// In en, this message translates to:
+  /// **'History window for new connections'**
+  String get aiToolsDefaultLookbackTitle;
+
+  /// Explains the history window.
+  ///
+  /// In en, this message translates to:
+  /// **'Older unpinned items stay invisible to a connection. Pinned items and snippets are not limited.'**
+  String get aiToolsDefaultLookbackDescription;
+
+  /// Space-separated search keywords for the AI tools settings; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'ai mcp assistant claude codex cursor model agent'**
+  String get aiToolsKeywords;
+
+  /// Title of the prompt and notification when an unknown AI tool asks for access. The name is reported by the tool.
+  ///
+  /// In en, this message translates to:
+  /// **'{client} wants to access CopyPaste'**
+  String aiToolsApprovalTitle(String client);
+
+  /// Line of the access prompt: the name the AI tool reports, which cannot be verified.
+  ///
+  /// In en, this message translates to:
+  /// **'Name reported by the app: {name}'**
+  String aiToolsReportedName(String name);
+
+  /// Line of the access prompt: the program that asks for access.
+  ///
+  /// In en, this message translates to:
+  /// **'Program: {path}'**
+  String aiToolsReportedExecutable(String path);
+
+  /// Note of the access prompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow only tools you started yourself. Without an answer, the request is denied in 2 minutes.'**
+  String get aiToolsApprovalNote;
+
+  /// Button that refuses an AI tool request.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get aiToolsDeny;
+
+  /// Button that allows an AI tool request.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get aiToolsAllow;
+
+  /// Title of the prompt when an AI tool read a lot in one session.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow more reading?'**
+  String get aiToolsVolumeTitle;
+
+  /// Message of the read-volume prompt.
+  ///
+  /// In en, this message translates to:
+  /// **'{client} has read a lot of clipboard history in this session. Allow more?'**
+  String aiToolsVolumeMessage(String client);
+
+  /// System notification body for an AI tool access request.
+  ///
+  /// In en, this message translates to:
+  /// **'Open CopyPaste to allow or deny.'**
+  String get aiToolsNotificationBody;
+
+  /// Error when an approval decision could not be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'The answer could not be sent. The request is shown again.'**
+  String get aiToolsDecisionFailed;
+
+  /// Item action that hides a clipboard item from AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide from AI tools'**
+  String get aiToolsHide;
+
+  /// Item action that makes a hidden clipboard item visible to AI tools again.
+  ///
+  /// In en, this message translates to:
+  /// **'Show to AI tools'**
+  String get aiToolsShow;
+
+  /// Accessibility state of an item hidden from AI tools.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden from AI tools'**
+  String get aiToolsHiddenState;
 }
 
 class _AppLocalizationsDelegate
