@@ -243,7 +243,7 @@ internal class PanelTransforms(
     override fun onShown(query: String) {
         this.query = query.trim()
         val field = host.field
-        selection = if (field.allowsTransform && !field.incognito) {
+        selection = if (field.allowsTransform) {
             host.inputConnection()?.getSelectedText(0)?.toString()?.takeIf { it.isNotEmpty() }
         } else {
             null

@@ -1,12 +1,15 @@
 package com.copypaste.app.ime
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.text.format.DateFormat
 import android.text.format.DateUtils
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -309,6 +312,31 @@ internal class PanelQueueTab(
     private fun move(entry: PanelQueueEntry, index: Int) =
         queueOp(opOf("move").put("entry_id", entry.id).put("to_index", index))
 
+    /** Drag by the handle: the row follows the finger and lands on the row under it. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun bindHandle(handle: View, row: View, entry: PanelQueueEntry) {
+        var startY = 0f
+        handle.setOnTouchListener { _, event ->
+            val list = views?.list ?: return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY
+                    list.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> row.translationY = event.rawY - startY
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val target = list.pointToPosition(list.width / 2, (row.top + row.height / 2 + row.translationY).toInt())
+                    row.translationY = 0f
+                    val from = entries().indexOf(entry)
+                    if (event.actionMasked == MotionEvent.ACTION_UP && target != AdapterView.INVALID_POSITION && from >= 0 && target != from) {
+                        move(entry, target)
+                    }
+                }
+            }
+            true
+        }
+    }
+
     private fun setCollecting(on: Boolean) = queueOp(opOf("set_collecting").put("on", on))
 
     private fun clear() = queueOp(opOf("clear")) { cleared ->
@@ -444,7 +472,7 @@ internal class PanelQueueTab(
         override fun hasStableIds(): Boolean = true
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val row = convertView ?: LayoutInflater.from(context).inflate(R.layout.ime_clip_row, parent, false)
+            val row = convertView ?: LayoutInflater.from(context).inflate(R.layout.ime_queue_row, parent, false)
             val entry = entries()[position]
             val meta = meta(entry, position + 1)
             val text = summary(entry)
@@ -455,6 +483,7 @@ internal class PanelQueueTab(
             ).joinToString(", ")
             bindFeatureRow(row, text, meta, if (entry.masked) R.drawable.ic_lucide_lock else 0, description, usable = entry.pending)
             bindRowActions(row, actionsFor(entry))
+            bindHandle(row.findViewById(R.id.ime_queue_handle), row, entry)
             return row
         }
     }

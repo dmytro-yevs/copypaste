@@ -71,6 +71,8 @@ internal class PanelSnippetsTab(
     private var generation = 0
     /** A runtime parse cache exists only once this tab rendered something. */
     private var rendered = false
+    /** The synced `snippets.require_auth`; until it is read, concealed snippets need the owner. */
+    private var requireAuth = true
 
     override fun createView(parent: ViewGroup): View {
         val view = LayoutInflater.from(context).inflate(R.layout.ime_snippets_tab, parent, false)
@@ -89,12 +91,18 @@ internal class PanelSnippetsTab(
         return view
     }
 
-    override fun onShown(query: String) = load(query)
+    override fun onShown(query: String) {
+        worker.op("snippets", opOf("preferences")) { reply ->
+            (reply as? RuntimeReply.Ok)?.objectData()?.let { requireAuth = it.optBoolean("require_auth", true) }
+        }
+        load(query)
+    }
 
     override fun onQueryChanged(query: String) = load(query)
 
     override fun release() {
         generation += 1
+        requireAuth = true
         form?.release()
         form = null
         rows.clear()
@@ -208,9 +216,9 @@ internal class PanelSnippetsTab(
         }
     }
 
-    /** A concealed snippet needs the device owner, like a secret clip. */
+    /** A concealed snippet needs the device owner while `snippets.require_auth` is on. */
     private fun unlocked(snippet: PanelSnippet, action: () -> Unit) {
-        if (snippet.concealed) host.unlockSecrets(action) else action()
+        if (snippet.concealed && requireAuth) host.unlockSecrets(action) else action()
     }
 
     /** Asks for the template's field values first when it has any. */

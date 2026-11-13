@@ -20,9 +20,14 @@ class PanelSnippetsTabTest {
     private val snippet = PanelSnippet(id = "s1", title = "Greeting", abbreviation = "hi", template = false, pinned = false, concealed = false)
 
     /** Output "Hi , 👋🏽 bye" with its cursor right after "Hi " (seven graphemes, ten UTF-16 units, before the end). */
+    private var requireAuth = false
     private val runtime = FeatureRuntime { method, op ->
         when {
             method != "snippets" -> FeatureRuntime.empty
+            op.optString("op") == "preferences" -> FeatureRuntime.Answer.Ok(
+                "snippet_preferences",
+                JSONObject().put("record_pasted", false).put("require_auth", requireAuth),
+            )
             op.optString("op") in setOf("use", "render") -> FeatureRuntime.Answer.Ok(
                 if (op.optString("op") == "use") "delivered" else "rendered",
                 JSONObject().put("text", "Hi , 👋🏽 bye").put("cursor_graphemes_from_end", 7),
@@ -35,6 +40,7 @@ class PanelSnippetsTabTest {
         val transforms = PanelTransforms(activity, host, runtime.worker)
         val tab = PanelSnippetsTab(activity, host, runtime.worker, transforms, PanelQueueTab(activity, host, runtime.worker))
         tab.createView(FrameLayout(activity))
+        tab.onShown("")
         return tab
     }
 
@@ -65,7 +71,19 @@ class PanelSnippetsTabTest {
 
         tab(host).insert(snippet)
 
-        assertEquals("final",runtime.op("snippets", "render")!!.getString("purpose"))
+        assertEquals("final", runtime.op("snippets", "render")!!.getString("purpose"))
         assertFalse(runtime.ops("snippets").any { it.optString("op") == "use" })
+    }
+
+    @Test fun concealedSnippetsNeedTheOwnerOnlyWhileRequireAuthIsOn() {
+        val host = FakeTabHost(FieldPolicy(textEditor = true)) { null }
+        val concealed = snippet.copy(concealed = true)
+
+        tab(host).insert(concealed)
+        assertEquals(0, host.unlocks)
+
+        requireAuth = true
+        tab(host).insert(concealed)
+        assertEquals(1, host.unlocks)
     }
 }
