@@ -697,7 +697,7 @@ mod native_tests {
                 BTreeMap::from([("languages".into(), serde_json::json!(["en"]))]),
             )
             .unwrap();
-        manager.set_enabled(&manifest.id, true).unwrap();
+        manager.set_enabled(&manifest.id, true, &[]).unwrap();
         let service = SemanticSearch::start(
             Arc::clone(&manager),
             &SearchBinding {
@@ -771,7 +771,7 @@ mod native_tests {
                 assert!(!found.contains(&id), "unrelated result: {id}");
             }
         }
-        manager.set_enabled(&manifest.id, false).unwrap();
+        manager.set_enabled(&manifest.id, false, &[]).unwrap();
         let query = HistoryQuery {
             search: Some("оплата житла".into()),
             sort: copypaste_core::HistorySort::Relevance,

@@ -131,10 +131,10 @@ pub(crate) fn qualify_with_inference(
 
 fn qualify_ocr(manager: &ModuleManager, fixtures: &Path, id: &str) -> Result<usize, String> {
     manager
-        .set_enabled(id, false)
+        .set_enabled(id, false, &[])
         .map_err(|error| error.to_string())?;
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     let cases: Vec<Fixture> = serde_json::from_slice(
         &fs::read(fixtures.join("fixtures.json")).map_err(|error| error.to_string())?,
@@ -186,7 +186,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
         return Err("A newly installed SMS module accepted an incoming message.".into());
     }
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     if !manager
         .has_sms_handler()
@@ -218,7 +218,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
     }
 
     manager
-        .set_enabled(id, false)
+        .set_enabled(id, false, &[])
         .map_err(|error| error.to_string())?;
     if manager
         .has_sms_handler()
@@ -234,7 +234,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
         return Err("A disabled SMS module accepted an incoming message.".into());
     }
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     if !manager
         .dispatch_sms("Your verification code is 765432.", |code| {

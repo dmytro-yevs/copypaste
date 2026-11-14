@@ -111,6 +111,10 @@ pub fn event_text(event: &EventData) -> String {
             Some(progress) => format!("progress {}/{}", progress.done, progress.total),
             None => "progress".to_string(),
         },
+        EventKind::ModulePrompt => format!(
+            "module prompts changed ({} waiting)",
+            event.module_prompts.unwrap_or(0)
+        ),
     }
 }
 

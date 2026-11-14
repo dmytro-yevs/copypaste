@@ -27,6 +27,7 @@ use copypaste_p2p::{NodeError, PairingPhase, PairingStatus};
 use crate::messages::*;
 use crate::settings::{SettingsError, SettingsTransition};
 use crate::Runtime;
+use copypaste_modules::ModuleCaller;
 
 /// Ceiling on one `reorder_pinned` request. The frame cap bounds the bytes;
 /// this bounds the work one write transaction may hold. It is above any
@@ -91,11 +92,22 @@ impl Runtime {
         )
     }
 
-    /// Dispatch one request in-process.
+    /// Dispatch one request in-process, on behalf of the app.
     pub async fn request(self: &Arc<Self>, id: u64, method: Method) -> Response {
+        self.request_from(id, method, ModuleCaller::App).await
+    }
+
+    /// Dispatch one request from `caller`, which decides what module
+    /// operations it may run.
+    pub async fn request_from(
+        self: &Arc<Self>,
+        id: u64,
+        method: Method,
+        caller: ModuleCaller,
+    ) -> Response {
         self.start_module_sync();
         let admission = match self.route(&method).await {
-            Route::Reactor => return self.request_async(id, method).await,
+            Route::Reactor => return self.request_async(id, method, caller).await,
             Route::Blocking(admission) => admission,
         };
         if matches!(
@@ -116,7 +128,7 @@ impl Runtime {
         response
     }
 
-    async fn request_async(&self, id: u64, method: Method) -> Response {
+    async fn request_async(&self, id: u64, method: Method, caller: ModuleCaller) -> Response {
         // Named before the pairing is gone, so hosts can drop what it sent.
         let removed_device = match &method {
             Method::Unpair { pairing_id } | Method::Revoke { pairing_id } => self
@@ -136,7 +148,7 @@ impl Runtime {
                 self.save_offer(id, &item_id, &dest_path, download_token)
                     .await
             }
-            Method::Modules { operation } => match self.modules.request(operation).await {
+            Method::Modules { operation } => match self.modules.request(operation, caller).await {
                 Ok(json) => Response::ok(id, ResponseData::Modules { json }),
                 Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
             },

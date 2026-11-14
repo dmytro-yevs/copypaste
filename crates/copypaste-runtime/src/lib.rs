@@ -344,6 +344,14 @@ impl Runtime {
                 ));
             }),
         );
+        let prompt_changes = Arc::clone(&changes);
+        modules
+            .set_prompt_listener(Arc::new(move |pending| {
+                prompt_changes.send(EventKind::ModulePrompt, |data| {
+                    data.module_prompts = Some(pending);
+                });
+            }))
+            .map_err(|_| RuntimeError::Storage)?;
         let shutdown = watch::channel(false).0;
         Self::install_module_services(
             &store, &meta, &settings, &p2p, &modules, &source, &changes, &shutdown,

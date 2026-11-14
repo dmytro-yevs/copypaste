@@ -15,7 +15,7 @@ copypaste-clock = { path = "../copypaste-clock" }
 copypaste-fs = { path = "../copypaste-fs" }
 copypaste-ipc = { path = "../copypaste-ipc" }
 backon.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
 # Framing is LinesCodec, the same codec the daemon uses — not a hand-rolled
 # byte-scanning read loop (the dependency policy).
 tokio-util.workspace = true

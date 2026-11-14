@@ -5199,6 +5199,70 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-124",
+      "title": "Bounded module endpoint connections",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "owner_module": "Module endpoints",
+      "source_references": [
+        "crates/copypaste-modules/src/endpoints.rs",
+        "crates/copypaste-daemon/src/server/endpoint.rs",
+        "crates/copypaste-daemon/src/server/listener.rs"
+      ],
+      "invariant": "At most 8 connections per module and 16 endpoint streams per daemon; 1 MiB frames; at most 2 MiB queued per connection before endpoint_send returns busy. An open connection keeps its module instance loaded; closing it delivers EndpointClose and releases the queue and the instance lease, so idle eviction applies again. Desktop only.",
+      "next_step": "Measure daemon plus loaded module with idle and busy connections, and release after the last close, on macOS and Windows.",
+      "functional_validation": "unit and lifecycle tests",
+      "bounds": {
+        "connections_per_module": 8,
+        "endpoint_streams": 16,
+        "frame_bytes": 1048576,
+        "queued_bytes_per_connection": 2097152
+      }
+    },
+    {
+      "id": "RUN-125",
+      "title": "Module prompts wait without polling",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "owner_module": "Module prompts",
+      "source_references": [
+        "crates/copypaste-modules/src/prompts.rs"
+      ],
+      "invariant": "At most 4 pending prompts per module; the asking module thread blocks on a one-slot channel with the prompt deadline (1-300 s), so no timer or poll runs. Stopping the module dismisses its prompts before teardown waits for it.",
+      "next_step": "None beyond the module host measurements.",
+      "functional_validation": "unit tests",
+      "bounds": {
+        "pending_per_module": 4,
+        "timeout_seconds_max": 300
+      }
     }
   ]
 }

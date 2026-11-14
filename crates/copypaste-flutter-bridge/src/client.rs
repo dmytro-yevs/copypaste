@@ -245,6 +245,8 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
             copypaste_ipc::EventKind::Library => "library",
             // `progress` already names file-transfer byte progress.
             copypaste_ipc::EventKind::Progress => "operation_progress",
+            // The pending prompts are read with `module_prompts`.
+            copypaste_ipc::EventKind::ModulePrompt => "module_prompt",
         }
         .into(),
         item_count: event.item_count,
@@ -378,6 +380,7 @@ mod tests {
             (copypaste_ipc::EventKind::PasteQueue, "paste_queue"),
             (copypaste_ipc::EventKind::Library, "library"),
             (copypaste_ipc::EventKind::Progress, "operation_progress"),
+            (copypaste_ipc::EventKind::ModulePrompt, "module_prompt"),
         ] {
             let mapped = runtime_event(copypaste_ipc::EventData {
                 sync_status: Some(copypaste_ipc::SyncStatus {

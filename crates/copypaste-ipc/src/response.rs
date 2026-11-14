@@ -53,6 +53,9 @@ pub enum EventKind {
     Library,
     /// A long operation advanced; [`EventData::operation`] carries the counts.
     Progress,
+    /// The set of module prompts waiting for the user changed;
+    /// [`EventData::module_prompts`] carries how many are pending.
+    ModulePrompt,
 }
 
 /// Bitset of the library record kinds a [`EventKind::Library`] event covers.
@@ -105,6 +108,7 @@ pub enum EventKindFilter {
         kinds: LibraryKinds,
     },
     Progress,
+    ModulePrompt,
     /// Capture-state snapshots, including the one sent on subscription.
     Status,
     /// File transfer operations and their byte progress.
@@ -127,6 +131,7 @@ impl EventKindFilter {
                         .is_none_or(|changed| changed.intersects(kinds))
             }
             Self::Progress => change.event == EventKind::Progress,
+            Self::ModulePrompt => change.event == EventKind::ModulePrompt,
             Self::Status | Self::Transfers => false,
         }
     }
@@ -174,6 +179,11 @@ pub struct EventData {
     pub paste_queue_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<OperationProgress>,
+    /// Pending prompts on a [`EventKind::ModulePrompt`] event. Their text is
+    /// read through the privileged `Prompts` operation, never pushed to
+    /// every watcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_prompts: Option<u32>,
 }
 
 impl EventData {
@@ -189,6 +199,7 @@ impl EventData {
             library: None,
             paste_queue_revision: None,
             operation: None,
+            module_prompts: None,
         }
     }
 }

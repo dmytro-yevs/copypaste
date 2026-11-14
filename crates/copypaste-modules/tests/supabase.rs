@@ -191,7 +191,9 @@ impl Device {
                 ]),
             )
             .unwrap();
-        manager.set_enabled("copypaste.supabase", true).unwrap();
+        manager
+            .set_enabled("copypaste.supabase", true, &[])
+            .unwrap();
         Self {
             group,
             _directory: directory,
@@ -246,7 +248,7 @@ impl Device {
 }
 impl Drop for Device {
     fn drop(&mut self) {
-        let _ = self.manager.set_enabled("copypaste.supabase", false);
+        let _ = self.manager.set_enabled("copypaste.supabase", false, &[]);
     }
 }
 #[derive(Clone, Default)]
@@ -465,7 +467,9 @@ async fn signed_native_provider_converges_and_preserves_state_through_disable_an
     assert!(!serde_json::to_string(&*rows.0.lock().unwrap())
         .unwrap()
         .contains("AKIAIOSFODNN7EXAMPLE"));
-    a.manager.set_enabled("copypaste.supabase", false).unwrap();
+    a.manager
+        .set_enabled("copypaste.supabase", false, &[])
+        .unwrap();
     assert!(a
         .manager
         .invoke("copypaste.supabase", "sync-now", BTreeMap::new())
@@ -475,7 +479,9 @@ async fn signed_native_provider_converges_and_preserves_state_through_disable_an
         .state("module:copypaste.supabase:cloud_refresh_token")
         .unwrap()
         .is_some());
-    a.manager.set_enabled("copypaste.supabase", true).unwrap();
+    a.manager
+        .set_enabled("copypaste.supabase", true, &[])
+        .unwrap();
     let ModuleOutput::Data { data } = a.invoke("status") else {
         panic!("typed account status")
     };
@@ -529,7 +535,7 @@ async fn disabling_an_active_request_cancels_native_work_before_acknowledgement(
     let started = Instant::now();
     device
         .manager
-        .set_enabled("copypaste.supabase", false)
+        .set_enabled("copypaste.supabase", false, &[])
         .unwrap();
     assert!(
         started.elapsed() < Duration::from_secs(2),

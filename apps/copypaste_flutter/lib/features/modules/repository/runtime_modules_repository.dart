@@ -109,16 +109,13 @@ class RuntimeModulesRepository implements ModulesRepository {
     bool enabled, {
     List<ModuleCapability> capabilities = const [],
   }) => guardModuleRequest(
-    () async => capabilities.isEmpty
-        ? runtime.moduleSetEnabled(id: id, enabled: enabled)
-        : await _send({
-            'operation': 'set_enabled',
-            'id': id,
-            'enabled': enabled,
-            'capabilities': [
-              for (final capability in capabilities) capability.wireName,
-            ],
-          }),
+    () => runtime.moduleSetEnabled(
+      id: id,
+      enabled: enabled,
+      capabilities: [
+        for (final capability in capabilities) capability.wireName,
+      ],
+    ),
   );
 
   @override
