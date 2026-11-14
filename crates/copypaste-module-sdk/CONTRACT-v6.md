@@ -119,8 +119,10 @@ items are exempt; `None` means all time). Before applying the scope, the host
 credentials, hidden from integrations (the renamed `hidden_from_ai` note and
 local-rule flags), or rule-secret. `HistoryEntry.preview` holds at most
 `HISTORY_PREVIEW_CHARS` characters, and `HistoryContent::Text` returns
-`HISTORY_TEXT_CHUNK_CHARS` characters per call. The host does not redact
-substrings; content-level redaction belongs to the module. The scope filters
+`HISTORY_TEXT_CHUNK_CHARS` characters per call. The host also redacts secrets
+inside returned text (tokens, private keys, payment cards, one-time codes) in
+history and snippet replies, and omits items that are mostly secret; modules
+never receive secret substrings. The scope filters
 `source_app` and `device` take ids from `history_facets`.
 
 `clipboard_write` records the provenance `ModuleProvenance { module_id, label }`.
