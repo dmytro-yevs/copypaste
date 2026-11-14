@@ -14,7 +14,7 @@ use chacha20poly1305::aead::generic_array::GenericArray;
 use chacha20poly1305::aead::stream::{DecryptorBE32, EncryptorBE32};
 use chacha20poly1305::aead::Payload;
 use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -152,14 +152,14 @@ pub(crate) struct SealWriter<W: Write> {
 impl<W: Write> SealWriter<W> {
     pub(crate) fn new(mut inner: W, passphrase: &str) -> Result<Self, TransferError> {
         check_passphrase(passphrase)?;
+        let salt: [u8; SALT_LEN] = OsRng.gen();
+        let nonce: [u8; NONCE_LEN] = OsRng.gen();
         let mut header = [0_u8; HEADER_LEN];
         header[..MAGIC.len()].copy_from_slice(&MAGIC);
-        OsRng.fill_bytes(&mut header[MAGIC.len()..]);
-        let cipher = cipher(passphrase, &header[MAGIC.len()..MAGIC.len() + SALT_LEN])?;
-        let stream = EncryptorBE32::from_aead(
-            cipher,
-            GenericArray::from_slice(&header[HEADER_LEN - NONCE_LEN..]),
-        );
+        header[MAGIC.len()..MAGIC.len() + SALT_LEN].copy_from_slice(&salt);
+        header[HEADER_LEN - NONCE_LEN..].copy_from_slice(&nonce);
+        let cipher = cipher(passphrase, &salt)?;
+        let stream = EncryptorBE32::from_aead(cipher, GenericArray::from_slice(&nonce));
         inner.write_all(&header)?;
         Ok(Self {
             inner,
@@ -225,10 +225,12 @@ pub(crate) struct OpenReader<R: Read> {
 
 impl<R: Read> OpenReader<R> {
     pub(crate) fn new(mut inner: R, passphrase: &str) -> Result<Self, TransferError> {
-        let mut header = [0_u8; HEADER_LEN];
-        inner
-            .read_exact(&mut header)
+        let mut read = Vec::with_capacity(HEADER_LEN);
+        (&mut inner)
+            .take(HEADER_LEN as u64)
+            .read_to_end(&mut read)
             .map_err(|_| TransferError::Damaged)?;
+        let header: [u8; HEADER_LEN] = read.try_into().map_err(|_| TransferError::Damaged)?;
         if !is_sealed(&header) {
             return Err(TransferError::Malformed);
         }
