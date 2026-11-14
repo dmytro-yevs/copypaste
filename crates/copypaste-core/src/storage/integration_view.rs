@@ -251,9 +251,9 @@ mod tests {
                 }),
             )
             .unwrap();
-        let mut secret = item("secret words", now + 2);
-        secret.payload_metadata = Some(r#"{"privacy":{"secret":true}}"#.into());
-        let secret = store.insert(secret).unwrap().id;
+        let mut masked_clip = item("secret words", now + 2);
+        masked_clip.payload_metadata = Some(r#"{"privacy":{"secret":true}}"#.into());
+        let masked_clip = store.insert(masked_clip).unwrap().id;
         let foreign = store.insert(item("foreign words", now + 3)).unwrap().id;
         store
             .conn()
@@ -293,7 +293,7 @@ mod tests {
         let mut expected = vec![visible.clone(), pinned_old.clone()];
         expected.sort();
         assert_eq!(ids, expected);
-        for id in [&hidden, &secret, &foreign, &app, &old] {
+        for id in [&hidden, &masked_clip, &foreign, &app, &old] {
             assert!(!store.integration_visible(id, &view).unwrap(), "{id}");
         }
         assert!(store.integration_visible(&visible, &view).unwrap());
