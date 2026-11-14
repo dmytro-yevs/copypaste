@@ -85,9 +85,9 @@ Validation (`ModuleManifest::validate`):
 the UI shows the declared capabilities and sends
 `SetEnabled { id, enabled: true, capabilities }` with every declared capability
 the user confirmed. The host refuses the request when any is missing
-(`ModuleManager::require_confirmed`). Host work still to do: persist the
-confirmed set, and disable the module until the user confirms again when an
-update declares new capabilities. Every host request is checked against
+(`ModuleManager::set_enabled`, atomically with the change). The host persists
+the confirmed set and leaves an update that declares new capabilities disabled
+until the user confirms again. Every host request is checked against
 `ModuleHostRequest::required_capabilities()`; missing capabilities produce
 `HostErrorCode::Denied`.
 
@@ -200,7 +200,8 @@ prompts; more return `busy`. The UI lists pending prompts with
 `ModuleOperation::Prompts` (`Vec<ModulePrompt>`) and answers with
 `AnswerPrompt { prompt_id, choice }`. The host emits the event kind named
 `MODULE_PROMPT_EVENT` (`module_prompt`, which is `EventKind::ModulePrompt`)
-whenever the pending set changes. The IPC variant is still to be added.
+whenever the pending set changes; its `module_prompts` field is the pending
+count, and the prompt text is read only through the privileged `Prompts`.
 
 ## Views
 
@@ -238,6 +239,8 @@ modules can localize their own runtime strings (views, prompts, frames).
 `SetEnabled.capabilities`. `ModuleOperation::privileged()` is true for
 everything except `List`, `Invoke` and `Connect`; `Method::privileged()` in
 `copypaste-ipc` should delegate to it. The host must also refuse `app_only`
-commands to callers that are not the app, which needs the caller identity
-passed into `ModuleHost::request`. The new operations are currently stubs that
-return "not supported yet".
+commands to callers that are not the app; `ModuleHost::request` takes the
+caller (`ModuleCaller`). The application services behind history, snippets,
+pins, clipboard writes and records are the `ModuleHostServices` trait in
+`copypaste-modules`; until a host implements a method it answers
+`unsupported`. `local_state` uses the same store as the sync provider state.

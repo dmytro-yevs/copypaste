@@ -78,10 +78,13 @@ impl ModuleHost {
             Method::CloudSyncNow => ("sync-now", BTreeMap::new()),
             Method::CloudStatus => ("status", BTreeMap::new()),
             Method::CloudSetEndpoint { url, anon_key } => {
-                self.request(ModuleOperation::SetPreferences {
-                    id: MODULE_ID.into(),
-                    values_json: serde_json::json!({"url":url,"anon_key":anon_key}).to_string(),
-                })
+                self.request(
+                    ModuleOperation::SetPreferences {
+                        id: MODULE_ID.into(),
+                        values_json: serde_json::json!({"url":url,"anon_key":anon_key}).to_string(),
+                    },
+                    crate::ModuleCaller::App,
+                )
                 .await
                 .map_err(|e| e.to_string())?;
                 ("status", BTreeMap::new())
@@ -89,12 +92,15 @@ impl ModuleHost {
             _ => return Err("Invalid sync provider request.".into()),
         };
         let json = self
-            .request(ModuleOperation::Invoke {
-                id: MODULE_ID.into(),
-                command: command.into(),
-                arguments_json: serde_json::to_string(&arguments)
-                    .map_err(|_| "Invalid account fields.")?,
-            })
+            .request(
+                ModuleOperation::Invoke {
+                    id: MODULE_ID.into(),
+                    command: command.into(),
+                    arguments_json: serde_json::to_string(&arguments)
+                        .map_err(|_| "Invalid account fields.")?,
+                },
+                crate::ModuleCaller::App,
+            )
             .await
             .map_err(|e| e.to_string())?;
         let ModuleOutput::Data { data } =

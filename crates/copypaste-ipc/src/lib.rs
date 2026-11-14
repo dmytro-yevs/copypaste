@@ -41,7 +41,9 @@ pub use config::{
     MIN_DECODED_IMAGE_MB, MIN_FILE_SIZE_BYTES, MIN_IMAGE_SIZE_BYTES, MIN_STORAGE_QUOTA_BYTES,
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
-pub use copypaste_module_sdk::ModuleOperation;
+pub use copypaste_module_sdk::{
+    EndpointConnected, EndpointFrame, ModuleOperation, MAX_DELIVERY_BYTES, MAX_ENDPOINT_FRAME_BYTES,
+};
 pub use error::ErrorCode;
 pub use health::SettingsHealth;
 pub use limits::{
@@ -549,7 +551,23 @@ impl Method {
     /// Served by the daemon only to the CopyPaste app (never to the CLI).
     #[must_use]
     pub fn privileged(&self) -> bool {
-        self.feature_op().is_some_and(OpGates::privileged)
+        match self {
+            Self::Modules { operation } => operation.privileged(),
+            _ => self.feature_op().is_some_and(OpGates::privileged),
+        }
+    }
+
+    /// Whether the daemon must settle if the caller is the app: privileged
+    /// verbs, plus module invocations and endpoints, whose outcome depends on it.
+    #[must_use]
+    pub fn needs_caller_identity(&self) -> bool {
+        self.privileged()
+            || matches!(
+                self,
+                Self::Modules {
+                    operation: ModuleOperation::Invoke { .. } | ModuleOperation::Connect { .. }
+                }
+            )
     }
 
     /// The operation of a feature-group method, for delegated gate answers.
@@ -688,6 +706,20 @@ mod tests {
         ] {
             assert!(!ordinary.is_long_running(), "{ordinary:?}");
         }
+    }
+
+    #[test]
+    fn module_privilege_follows_the_module_contract() {
+        let modules = |operation| Method::Modules { operation };
+        assert!(!modules(ModuleOperation::List).privileged());
+        assert!(modules(ModuleOperation::Prompts).privileged());
+        let connect = modules(ModuleOperation::Connect {
+            id: "copypaste.ai-tools".into(),
+            endpoint: "mcp".into(),
+        });
+        assert!(!connect.privileged());
+        assert!(connect.needs_caller_identity());
+        assert!(!modules(ModuleOperation::List).needs_caller_identity());
     }
 
     /// Absent means healthy, and it has to stay distinguishable from a health

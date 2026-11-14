@@ -1,12 +1,15 @@
 //! All native loading and pointer ownership are confined to this boundary.
-use crate::ModuleError;
+use crate::{
+    bridge::{HostAccess, HostBridge, HostShared},
+    endpoints::Endpoints,
+    ModuleError,
+};
 use copypaste_module_sdk::{
     native::{
-        to_exact_vec, NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply,
-        MAX_HOST_BYTES,
+        NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply, MAX_HOST_BYTES,
     },
-    HostError, HostErrorCode, ModuleEnvironment, ModuleInvocation, ModuleOutput,
-    ModuleUnloadPolicy, MAX_INVOCATION_BYTES, MODULE_API_VERSION,
+    HostError, ModuleDelivery, ModuleEnvironment, ModuleInvocation, ModuleOutput,
+    ModuleUnloadPolicy, MAX_DELIVERY_BYTES, MAX_INVOCATION_BYTES, MODULE_API_VERSION,
 };
 use libloading::Library;
 use std::{
@@ -14,7 +17,7 @@ use std::{
     ffi::c_void,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
 };
@@ -23,38 +26,55 @@ use std::{
 /// lock or serialize commands in other modules. Lifecycle changes close admission
 /// first and wait for already running work before releasing code and assets.
 pub(crate) struct ModuleInstance {
+    id: String,
+    owner: u64,
+    shared: Arc<HostShared>,
     accepting: Arc<AtomicBool>,
     lifetime: Arc<crate::host_lifetime::HostLifetime>,
+    endpoints: Arc<Endpoints>,
     module: Mutex<Option<NativeModule>>,
 }
 
+/// What loading an instance on first use needs.
+pub(crate) struct LoadSpec<'a> {
+    pub(crate) verifier: &'a crate::package::PackageVerifier,
+    pub(crate) package_dir: &'a Path,
+    pub(crate) data_dir: &'a Path,
+    pub(crate) preferences: &'a BTreeMap<String, serde_json::Value>,
+    pub(crate) access: HostAccess,
+}
+
 impl ModuleInstance {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(id: &str, shared: Arc<HostShared>) -> Self {
+        static OWNERS: AtomicU64 = AtomicU64::new(0);
         Self {
+            id: id.into(),
+            owner: OWNERS.fetch_add(1, Ordering::Relaxed),
+            shared,
             accepting: Arc::new(AtomicBool::new(true)),
             lifetime: Arc::new(crate::host_lifetime::HostLifetime::default()),
+            endpoints: Arc::default(),
             module: Mutex::new(None),
         }
     }
 
-    pub(crate) fn invoke(
+    pub(crate) fn endpoints(&self) -> &Endpoints {
+        &self.endpoints
+    }
+
+    fn loaded<'a>(
         &self,
-        verifier: &crate::package::PackageVerifier,
-        package_dir: &Path,
-        data_dir: &Path,
-        invocation: &ModuleInvocation,
-        services: Option<Arc<crate::SyncServices>>,
-        id: &str,
-    ) -> Result<ModuleOutput, ModuleError> {
-        let mut module = self.module.lock().map_err(|_| ModuleError::State)?;
+        module: &'a mut Option<NativeModule>,
+        spec: LoadSpec<'_>,
+    ) -> Result<&'a mut NativeModule, ModuleError> {
         if !self.accepting.load(Ordering::Acquire) {
             return Err(ModuleError::Disabled);
         }
         if module.is_none() {
-            let manifest = verifier.installed(package_dir, true)?;
-            std::fs::create_dir_all(data_dir)?;
+            let manifest = spec.verifier.installed(spec.package_dir, true)?;
+            std::fs::create_dir_all(spec.data_dir)?;
             if let Some(provider) = &manifest.search_provider {
-                let languages = invocation
+                let languages = spec
                     .preferences
                     .get(&provider.language_field)
                     .and_then(serde_json::Value::as_array)
@@ -63,42 +83,108 @@ impl ModuleInstance {
                     .map(|value| value.as_str().map(str::to_owned).ok_or(ModuleError::State))
                     .collect::<Result<Vec<_>, _>>()?;
                 let model = provider.model_for(&languages).ok_or(ModuleError::State)?;
-                crate::resources::verify(data_dir, model)?;
+                crate::resources::verify(spec.data_dir, model)?;
             }
             let environment = ModuleEnvironment {
-                package_dir: package_dir.to_string_lossy().into_owned(),
-                data_dir: data_dir.to_string_lossy().into_owned(),
+                package_dir: spec.package_dir.to_string_lossy().into_owned(),
+                data_dir: spec.data_dir.to_string_lossy().into_owned(),
             };
+            let host = spec.access.needed().then(|| {
+                Box::new(HostBridge {
+                    id: self.id.clone(),
+                    owner: self.owner,
+                    access: spec.access,
+                    shared: Arc::clone(&self.shared),
+                    accepting: Arc::clone(&self.accepting),
+                    lifetime: Arc::clone(&self.lifetime),
+                    endpoints: Arc::clone(&self.endpoints),
+                })
+            });
             *module = Some(NativeModule::load(
-                &package_dir.join(manifest.entrypoint),
+                &spec.package_dir.join(&manifest.entrypoint),
                 &environment,
                 manifest.unload_policy,
-                services.map(|services| {
-                    Box::new(HostBridge {
-                        id: id.into(),
-                        services,
-                        accepting: Arc::clone(&self.accepting),
-                        lifetime: Arc::clone(&self.lifetime),
-                    })
-                }),
+                !manifest.endpoints.is_empty(),
+                host,
             )?);
         }
-        module.as_mut().ok_or(ModuleError::Load)?.invoke(invocation)
+        module.as_mut().ok_or(ModuleError::Load)
+    }
+
+    pub(crate) fn invoke(
+        &self,
+        spec: LoadSpec<'_>,
+        invocation: &ModuleInvocation,
+    ) -> Result<ModuleOutput, ModuleError> {
+        let mut module = self.module.lock().map_err(|_| ModuleError::State)?;
+        self.loaded(&mut module, spec)?.invoke(invocation)
+    }
+
+    /// Loads the module if needed and delivers `EndpointOpen`.
+    pub(crate) fn open_endpoint(
+        &self,
+        spec: LoadSpec<'_>,
+        open: &ModuleDelivery,
+    ) -> Result<(), ModuleError> {
+        let mut module = self.module.lock().map_err(|_| ModuleError::State)?;
+        self.loaded(&mut module, spec)?.deliver(open)
+    }
+
+    /// Delivers to an open connection of the already loaded module.
+    pub(crate) fn deliver(
+        &self,
+        connection: &str,
+        delivery: &ModuleDelivery,
+    ) -> Result<(), ModuleError> {
+        let mut module = self.module.lock().map_err(|_| ModuleError::State)?;
+        if !self.accepting.load(Ordering::Acquire) || !self.endpoints.is_open(connection) {
+            return Err(ModuleError::Disabled);
+        }
+        module
+            .as_mut()
+            .ok_or(ModuleError::Disabled)?
+            .deliver(delivery)
+    }
+
+    /// The final delivery of a connection; a stopping instance already sent it.
+    pub(crate) fn deliver_close(&self, connection: &str) {
+        let Ok(mut module) = self.module.lock() else {
+            return;
+        };
+        if self.accepting.load(Ordering::Acquire) {
+            if let Some(module) = module.as_mut() {
+                let _ = module.deliver(&ModuleDelivery::EndpointClose {
+                    connection: connection.into(),
+                });
+            }
+        }
     }
 
     pub(crate) fn stop(&self) {
         self.accepting.store(false, Ordering::Release);
         self.lifetime.revoke();
+        // A command waiting on the user must return before teardown can lock it.
+        self.shared.prompts.dismiss(self.owner);
+        let connections = self.endpoints.close_all();
         // Poison must not prevent teardown after a committed lifecycle change.
-        self.module
+        let mut module = self
+            .module
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take();
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(loaded) = module.as_mut() {
+            for connection in connections {
+                let _ = loaded.deliver(&ModuleDelivery::EndpointClose { connection });
+            }
+        }
+        module.take();
     }
 }
 
+type DeliverFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> NativeReply;
+
 pub(crate) struct NativeModule {
     api: NativeApi,
+    deliver: Option<DeliverFn>,
     context: *mut c_void,
     _library: Arc<Library>,
     _host: Option<Box<HostBridge>>,
@@ -112,6 +198,7 @@ impl NativeModule {
         path: &Path,
         environment: &ModuleEnvironment,
         policy: ModuleUnloadPolicy,
+        endpoints: bool,
         host: Option<Box<HostBridge>>,
     ) -> Result<Self, ModuleError> {
         // SAFETY: only authenticated first-party code reaches this boundary. Its ABI must
@@ -137,6 +224,16 @@ impl NativeModule {
                 return Err(ModuleError::Load);
             }
             let api = *api;
+            // Resolved before creation, so a module missing it never runs.
+            let deliver = if endpoints {
+                Some(
+                    *library
+                        .get::<DeliverFn>(b"copypaste_module_deliver_v1\0")
+                        .map_err(|_| ModuleError::Load)?,
+                )
+            } else {
+                None
+            };
             let bytes = serde_json::to_vec(environment).map_err(|_| ModuleError::State)?;
             let context = if let Some(bridge) = host.as_deref() {
                 let host_api = NativeHostApi {
@@ -177,6 +274,7 @@ impl NativeModule {
             }
             Ok(Self {
                 api,
+                deliver,
                 context,
                 _library: library,
                 _host: host,
@@ -215,6 +313,37 @@ impl NativeModule {
                         String::from_utf8_lossy(bytes).into_owned(),
                     ))
                 }
+            };
+            (self.api.release)(reply.buffer);
+            result
+        }
+    }
+
+    fn deliver(&mut self, delivery: &ModuleDelivery) -> Result<(), ModuleError> {
+        let deliver = self
+            .deliver
+            .ok_or_else(|| ModuleError::Invalid("This module has no endpoints.".into()))?;
+        let bytes =
+            zeroize::Zeroizing::new(serde_json::to_vec(delivery).map_err(|_| ModuleError::State)?);
+        if bytes.len() > MAX_DELIVERY_BYTES {
+            return Err(ModuleError::Invalid(
+                "The message exceeds its size limit.".into(),
+            ));
+        }
+        // SAFETY: as for `invoke`; the export shares its context and release.
+        unsafe {
+            let reply = deliver(self.context, bytes.as_ptr(), bytes.len());
+            let result = if reply.status == 0 {
+                Ok(())
+            } else if reply.buffer.data.is_null() || reply.buffer.len > MAX_INVOCATION_BYTES {
+                Err(ModuleError::Invalid(
+                    "The module refused the message.".into(),
+                ))
+            } else {
+                let bytes = std::slice::from_raw_parts(reply.buffer.data, reply.buffer.len);
+                Err(ModuleError::Invalid(
+                    String::from_utf8_lossy(bytes).into_owned(),
+                ))
             };
             (self.api.release)(reply.buffer);
             result
@@ -280,12 +409,6 @@ impl Drop for NativeModule {
     }
 }
 
-struct HostBridge {
-    id: String,
-    services: Arc<crate::SyncServices>,
-    accepting: Arc<AtomicBool>,
-    lifetime: Arc<crate::host_lifetime::HostLifetime>,
-}
 unsafe extern "C" fn host_subscribe(
     context: *mut c_void,
     callback: unsafe extern "C" fn(*mut c_void),
@@ -312,7 +435,6 @@ unsafe extern "C" fn host_request(
     data: *const u8,
     len: usize,
 ) -> NativeReply {
-    // `None` is the untyped refusal every SDK version reads as unavailable.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || -> Result<Vec<u8>, Option<HostError>> {
             if context.is_null() || data.is_null() || len == 0 || len > MAX_HOST_BYTES {
@@ -321,27 +443,7 @@ unsafe extern "C" fn host_request(
             // SAFETY: NativeModule retains the bridge until its module and all workers are destroyed.
             let bridge = unsafe { &*context.cast::<HostBridge>() };
             // SAFETY: the caller lends this bounded input for the callback duration.
-            let input = unsafe { std::slice::from_raw_parts(data, len) };
-            // Already admitted token rotations may finish saving encrypted metadata
-            // during teardown. History access and the live lease close immediately.
-            if !bridge.accepting.load(Ordering::Acquire) && !is_state_operation(input) {
-                return Err(None);
-            }
-            // Parsed straight into the typed request: an intermediate JSON tree
-            // would hold another copy of the plaintext outside `Zeroizing`.
-            // Schema 6 host services are not served yet; their callers get a
-            // typed refusal, which earlier SDKs read as an unavailable service.
-            let request = serde_json::from_slice(input).map_err(|_| {
-                Some(HostError::new(
-                    HostErrorCode::Unsupported,
-                    "This host service is not available.",
-                ))
-            })?;
-            let output = bridge
-                .services
-                .request(&bridge.id, request)
-                .map_err(|_| None)?;
-            to_exact_vec(&output, MAX_HOST_BYTES).map_err(|_| None)
+            bridge.handle(unsafe { std::slice::from_raw_parts(data, len) })
         },
     ))
     .unwrap_or(Err(None));
@@ -360,20 +462,6 @@ unsafe extern "C" fn host_request(
         },
     }
 }
-/// Reads only the operation name, borrowed from the request.
-fn is_state_operation(input: &[u8]) -> bool {
-    #[derive(serde::Deserialize)]
-    struct Operation<'a> {
-        #[serde(borrow)]
-        operation: std::borrow::Cow<'a, str>,
-    }
-    serde_json::from_slice::<Operation>(input).is_ok_and(|request| {
-        matches!(
-            &*request.operation,
-            "read_state" | "write_state" | "clear_state"
-        )
-    })
-}
 unsafe extern "C" fn host_release(buffer: NativeBuffer) {
     if !buffer.data.is_null() {
         // SAFETY: the caller releases exactly the host allocation returned by host_request.
@@ -381,20 +469,5 @@ unsafe extern "C" fn host_release(buffer: NativeBuffer) {
             unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(buffer.data, buffer.len)) };
         use zeroize::Zeroize;
         bytes.zeroize();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn teardown_admits_only_state_operations() {
-        assert!(super::is_state_operation(
-            br#"{"operation":"write_state","values":{"k":"v"}}"#
-        ));
-        assert!(!super::is_state_operation(
-            br#"{"operation":"scan","since_ms":0,"after_item_id":null}"#
-        ));
-        assert!(!super::is_state_operation(br#"{"keys":[]}"#));
-        assert!(!super::is_state_operation(b"not json"));
     }
 }

@@ -116,7 +116,9 @@ fn staged_updates_wait_for_new_app_and_preserve_preferences_and_enabled_state() 
     manager
         .install(&fixture.package("0.1.0", b"old", |_| {}, None))
         .unwrap();
-    manager.set_enabled("copypaste.text-tools", false).unwrap();
+    manager
+        .set_enabled("copypaste.text-tools", false, &[])
+        .unwrap();
     manager
         .set_preferences(
             "copypaste.text-tools",
@@ -400,7 +402,7 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
             Ok(())
         })
         .unwrap());
-    manager.set_enabled(&installed.id, true).unwrap();
+    manager.set_enabled(&installed.id, true, &[]).unwrap();
     assert!(manager.has_sms_handler().unwrap());
     assert!(manager
         .dispatch_sms("123456", |code| {
@@ -414,7 +416,7 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
             "invalid output"
         ))
         .is_err());
-    manager.set_enabled(&installed.id, false).unwrap();
+    manager.set_enabled(&installed.id, false, &[]).unwrap();
     drop(manager);
     let manager = open();
     assert!(!manager.has_sms_handler().unwrap());
@@ -474,7 +476,7 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
             text: "  УКРАЇНА Ї Ґ Є І  ".into()
         }
     );
-    manager.set_enabled(&installed.id, false).unwrap();
+    manager.set_enabled(&installed.id, false, &[]).unwrap();
     assert!(matches!(
         manager.invoke(&installed.id, "transform", input.clone()),
         Err(ModuleError::Disabled)
@@ -488,7 +490,7 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
     assert_eq!(updated.version, "1.1.0");
     assert!(!updated.enabled);
     assert_eq!(updated.preferences["uppercase"], json!(true));
-    manager.set_enabled(&installed.id, true).unwrap();
+    manager.set_enabled(&installed.id, true, &[]).unwrap();
     manager.invoke(&installed.id, "transform", input).unwrap();
     let data = fixture
         .directory
@@ -505,6 +507,76 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
         .exists());
     drop(manager);
     assert!(fixture.manager().list().unwrap().is_empty());
+}
+
+#[test]
+fn endpoint_connections_need_confirmed_capabilities_and_end_with_the_module() {
+    use copypaste_module_sdk::ModuleCapability::{Endpoints, Prompts};
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let library = fs::read(native_library()).unwrap();
+    let declare = |capabilities: serde_json::Value| {
+        move |manifest: &mut serde_json::Value| {
+            manifest["schema_version"] = json!(6);
+            manifest["supported_platforms"] = json!([target().platform]);
+            manifest["capabilities"] = capabilities;
+            manifest["endpoints"] = json!([{"id": "echo", "platforms": [target().platform]}]);
+            manifest["commands"][0]["app_only"] = json!(true);
+        }
+    };
+    let id = "copypaste.text-tools";
+    let installed = manager
+        .install(&fixture.package("1.0.0", &library, declare(json!(["endpoints"])), None))
+        .unwrap();
+    assert!(!installed.enabled, "capabilities wait for confirmation");
+    assert!(matches!(
+        manager.connect(id, "echo", false),
+        Err(ModuleError::Disabled)
+    ));
+    assert!(manager.set_enabled(id, true, &[]).is_err());
+    manager.set_enabled(id, true, &[Endpoints]).unwrap();
+    let input = BTreeMap::from([("text".into(), json!(" a "))]);
+    assert!(manager
+        .invoke_as(id, "transform", input.clone(), false)
+        .is_err());
+    manager.invoke(id, "transform", input).unwrap();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut session = manager.connect(id, "echo", false).unwrap();
+    let link = session.link();
+    link.deliver("ping".into()).unwrap();
+    assert_eq!(
+        runtime.block_on(session.outbound()).as_deref(),
+        Some("ping")
+    );
+    manager.set_enabled(id, false, &[]).unwrap();
+    assert_eq!(runtime.block_on(session.outbound()), None);
+    assert!(link.deliver("late".into()).is_err());
+    link.close();
+
+    drop(manager);
+    let manager = fixture.manager();
+    manager.set_enabled(id, true, &[Endpoints]).unwrap();
+    drop(manager);
+    let manager = fixture.manager();
+    assert!(manager.list().unwrap()[0].enabled, "confirmation persists");
+    manager
+        .install(&fixture.package(
+            "1.1.0",
+            &library,
+            declare(json!(["endpoints", "prompts"])),
+            None,
+        ))
+        .unwrap();
+    assert!(
+        !manager.list().unwrap()[0].enabled,
+        "a new capability needs confirmation again"
+    );
+    manager
+        .set_enabled(id, true, &[Endpoints, Prompts])
+        .unwrap();
 }
 
 #[test]

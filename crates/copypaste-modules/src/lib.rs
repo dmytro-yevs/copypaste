@@ -1,7 +1,9 @@
 //! Installation, lifecycle, and command dispatch for first-party optional modules.
 #![deny(unsafe_code)]
 
+mod bridge;
 mod cloud_request;
+mod endpoints;
 mod host;
 #[allow(unsafe_code)]
 mod host_lifetime;
@@ -11,20 +13,25 @@ mod manager;
 #[allow(unsafe_code)]
 mod native;
 mod package;
+mod prompts;
 mod resources;
 mod semantic_search;
+mod services;
 mod staging_cleanup;
 mod sync;
 pub use copypaste_module_sdk::{
     ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,
 };
-pub use host::ModuleHost;
+pub use endpoints::{EndpointLink, EndpointSession};
+pub use host::{ModuleCaller, ModuleHost};
 #[cfg(target_os = "android")]
 pub use inference::AndroidInferenceLauncher;
 pub use inference::{
     run_inference_worker, DesktopInferenceLauncher, InferenceConnection, InferenceLauncher,
 };
 pub use manager::{InstalledModule, ModuleManager};
+pub use prompts::PromptListener;
+pub use services::{HistoryQuery, ModuleHostServices};
 pub use sync::SyncServices;
 
 /// The release signing identity already used by the application updater.
