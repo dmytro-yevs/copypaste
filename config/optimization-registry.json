@@ -4969,6 +4969,37 @@
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     },
     {
+      "id": "RUN-115",
+      "title": "AI Tools MCP endpoint that runs only while a client is connected",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "modules/ai-tools",
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
+      "source_references": [
+        "modules/ai-tools/src/endpoint.rs",
+        "modules/ai-tools/src/service.rs",
+        "modules/ai-tools/src/limits.rs",
+        "modules/ai-tools/src/tools.rs",
+        "modules/ai-tools/src/access_log.rs"
+      ],
+      "invariant": "AI tools are an optional module that is not installed by default. MCP clients reach it only through the module's host endpoint (copypaste module connect relays stdio), so the daemon opens no port. A one-thread runtime with a bounded blocking pool (8 workers that exit after 10 idle seconds) starts with the first connection and stops after the last one closes; connection state and the in-memory access log are released then. Prompts and tool calls never run on the host's delivery thread, at most four prompts are pending, and each connection queues at most 64 inbound frames. Replies are bounded to 64 KB of text in 16,000-character chunks and 640 KB images, and a connection reads at most 2 MB before the user allows more. The access log is written to local state in batches of 16 and bounded to 500 entries, 96 KB and 30 days. The host hides sensitive history before the module reads it.",
+      "next_step": "Measure daemon steady and peak memory, idle CPU and wakeups with the module absent, installed without a connection, and serving one idle and one active MCP client on macOS, Windows and Linux (MCP AC31). feature_budgets.all.ai_tools_mcp_steady_delta_bytes and ai_tools_mcp_peak_delta_bytes are unresolved, and the module library size per target is unmeasured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established",
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
       "id": "RUN-116",
       "title": "Engine-free IME panel over a blocking runtime facade",
       "domain": "runtime",
