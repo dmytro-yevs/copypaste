@@ -149,9 +149,7 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
             let applied = client::expect_config(data)?;
             out(&render::config_text(&applied));
         }
-        Command::Watch | Command::Mcp { .. } => {
-            unreachable!("handled before the request is sent")
-        }
+        Command::Watch => unreachable!("handled before the request is sent"),
         Command::Sync { .. } => {
             let results = client::expect_sync(data)?;
             out(&(render::sync_table(&results, "no paired devices")));

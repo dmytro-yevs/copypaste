@@ -3,11 +3,12 @@
 //! The CLI speaks IPC and nothing else: it does not depend on
 //! `copypaste-core`, so it cannot open the database, hold a key, or decide what
 //! has any content classification. Everything it knows comes back over the socket as typed
-//! [`copypaste_ipc`] values. Layout:
+//! [`copypaste_ipc`] values.
+//!
+//! Layout:
 //! * [`client`] — socket, framing, typed request/response
 //! * [`render`] — human-readable output (pure functions)
 //! * [`cloud`] — where `cloud sign-in` gets its two secrets, and why not argv
-//! * [`mcp`] — `copypaste mcp`, the MCP server AI tools launch over stdio
 //! * [`error`] — exit codes and the "no paths in errors" rule
 
 #![forbid(unsafe_code)]
@@ -17,7 +18,6 @@ mod client;
 mod cloud;
 mod doctor;
 mod error;
-mod mcp;
 mod render;
 mod report;
 #[cfg(any(windows, test))]
@@ -25,9 +25,7 @@ mod shutdown;
 
 #[cfg(test)]
 use clap::Parser;
-use cli::{
-    config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, McpAction, PairAction,
-};
+use cli::{config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, PairAction};
 use copypaste_ipc::{ExportData, Method, Response};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
@@ -50,16 +48,10 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<(), CliError> {
-    // Some commands are not one request and one reply, so they are handled
+    // Two commands are not one request and one reply, so they are handled
     // before the mapping below rather than bent into it.
     if let Command::Watch = &cli.command {
         return watch(cli.json).await;
-    }
-    if let Command::Mcp { action } = &cli.command {
-        return match action {
-            None => mcp::serve().await,
-            Some(McpAction::Status) => mcp::status(cli.json).await,
-        };
     }
 
     #[cfg(windows)]
@@ -168,7 +160,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 patch: config_patch(action),
             },
         },
-        Command::Watch | Command::Mcp { .. } => unreachable!("handled above"),
+        Command::Watch => unreachable!("handled above"),
         Command::Cloud { action } => match action {
             CloudAction::SignIn { email } => {
                 let (password, passphrase) = cloud::read_credentials()?;
