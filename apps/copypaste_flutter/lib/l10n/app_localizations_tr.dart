@@ -1640,16 +1640,10 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Uygulamayı hariç tut';
+  String get applicationPickerSearch => 'Uygulama ara';
 
   @override
-  String get settingsExcludeDialogAction => 'Hariç tut';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Uygulama tanımlayıcısı';
-
-  @override
-  String get settingsExcludeFailed => 'Uygulama hariç tutulamadı.';
+  String get applicationPickerEmpty => 'Uygulama bulunamadı';
 
   @override
   String get settingsSkipSecretTitle => 'Gizli pano içeriğini atla';
@@ -4707,15 +4701,12 @@ class AppLocalizationsTr extends AppLocalizations {
       'Belirli uygulamalarda farklı bir varsayılan kullan.';
 
   @override
-  String get transformsAppIdentifierPlaceholder => 'Uygulama tanımlayıcısı';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return 'yalnızca $platform';
   }
 
   @override
-  String get transformsAdd => 'Ekle';
+  String get transformsAddApp => 'Uygulama ekle';
 
   @override
   String get transformsRemove => 'Kaldır';

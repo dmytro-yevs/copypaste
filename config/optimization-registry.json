@@ -5200,6 +5200,37 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-123",
+      "title": "Installed applications load only while the application picker is open",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-source-app installed applications and the Flutter application picker",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-source-app/src/installed.rs",
+        "crates/copypaste-flutter-bridge/src/api/applications.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/InstalledAppsChannel.kt",
+        "apps/copypaste_flutter/lib/features/applications/controller/application_directory.dart",
+        "apps/copypaste_flutter/lib/features/applications/view/application_picker.dart"
+      ],
+      "invariant": "The installed-application list (at most 1,024 entries, names and identifiers only) is read when the picker opens and dropped when it closes. Icons are rendered on demand for visible rows at 64 px and 32 KiB at most, are never cached natively, and are memoized only by the view that requested them. Nothing is loaded by the daemon, and the Android worker thread exits after 30 idle seconds.",
+      "next_step": "Measure application RSS while the picker lists every installed application and after it closes on release builds of every listed platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
     }
   ]
 }

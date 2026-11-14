@@ -1523,16 +1523,10 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'アプリを除外';
+  String get applicationPickerSearch => 'アプリを検索';
 
   @override
-  String get settingsExcludeDialogAction => '除外';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'アプリ識別子';
-
-  @override
-  String get settingsExcludeFailed => 'アプリを除外できませんでした。';
+  String get applicationPickerEmpty => 'アプリが見つかりません';
 
   @override
   String get settingsSkipSecretTitle => '機密のクリップボードをスキップ';
@@ -4463,15 +4457,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsAppDefaultsDescription => '特定のアプリで別の既定を使います。';
 
   @override
-  String get transformsAppIdentifierPlaceholder => 'アプリ識別子';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return '$platform のみ';
   }
 
   @override
-  String get transformsAdd => '追加';
+  String get transformsAddApp => 'アプリを追加';
 
   @override
   String get transformsRemove => '削除';

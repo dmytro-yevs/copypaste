@@ -1666,16 +1666,10 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Виключити програму';
+  String get applicationPickerSearch => 'Пошук програм';
 
   @override
-  String get settingsExcludeDialogAction => 'Виключити';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Ідентифікатор програми';
-
-  @override
-  String get settingsExcludeFailed => 'Не вдалося виключити програму.';
+  String get applicationPickerEmpty => 'Програм не знайдено';
 
   @override
   String get settingsSkipSecretTitle => 'Пропускати конфіденційні дані';
@@ -4801,15 +4795,12 @@ class AppLocalizationsUk extends AppLocalizations {
       'Інше типове значення для окремих програм.';
 
   @override
-  String get transformsAppIdentifierPlaceholder => 'Ідентифікатор програми';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return 'лише на $platform';
   }
 
   @override
-  String get transformsAdd => 'Додати';
+  String get transformsAddApp => 'Додати програму';
 
   @override
   String get transformsRemove => 'Видалити';

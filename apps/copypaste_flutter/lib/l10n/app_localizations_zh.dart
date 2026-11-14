@@ -1469,16 +1469,10 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => '排除应用';
+  String get applicationPickerSearch => '搜索应用';
 
   @override
-  String get settingsExcludeDialogAction => '排除';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => '应用标识符';
-
-  @override
-  String get settingsExcludeFailed => '无法排除该应用。';
+  String get applicationPickerEmpty => '未找到应用';
 
   @override
   String get settingsSkipSecretTitle => '跳过机密剪贴板内容';
@@ -4339,15 +4333,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsAppDefaultsDescription => '为特定应用使用不同的默认设置。';
 
   @override
-  String get transformsAppIdentifierPlaceholder => '应用标识符';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return '仅限 $platform';
   }
 
   @override
-  String get transformsAdd => '添加';
+  String get transformsAddApp => '添加应用';
 
   @override
   String get transformsRemove => '移除';

@@ -26,6 +26,9 @@ import '../../../l10n/l10n.dart';
 import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
+import '../../applications/controller/application_directory.dart';
+import '../../applications/repository/application_catalog.dart';
+import '../../applications/view/application_picker.dart';
 import '../../transfers/file_operations_button_progress.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
@@ -57,6 +60,7 @@ class SettingsScreen extends StatefulWidget {
     this.onOpenAndroidCaptureSetup,
     this.language,
     this.featureSections = const [],
+    this.applications = const RuntimeApplicationCatalog(),
   });
 
   final SettingsController controller;
@@ -70,6 +74,9 @@ class SettingsScreen extends StatefulWidget {
 
   /// Feature-owned section content, in the order it renders.
   final List<SettingsFeatureSection> featureSections;
+
+  /// Applications the excluded applications list picks from and names.
+  final ApplicationCatalog applications;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -100,6 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _clipboardCaptureKey = GlobalKey();
   final _screenshotCaptureKey = GlobalKey();
   final _excludedApplicationsKey = GlobalKey();
+  late final _applications = ApplicationDirectory(widget.applications);
   final _retentionKey = GlobalKey();
   final _storageQuotaKey = GlobalKey();
   final _maxFileSizeKey = GlobalKey();
@@ -1422,49 +1430,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 for (final appId in settings.excludedAppIds)
                   Padding(
                     padding: const EdgeInsets.only(top: AppSpacing.xs),
-                    child: Row(
-                      children: [
-                        const AppIconFrame(
-                          size: AppIconSize.sm,
-                          child: Icon(
-                            LucideIcons.shieldCheck,
-                            size: AppIconSize.sm,
-                          ),
-                        ),
-                        const Gap(AppSpacing.sm),
-                        Expanded(
-                          child: Text(
-                            appId,
-                            style: Theme.of(context).typography.mono,
-                          ).textSmall(),
-                        ),
-                        Tooltip(
-                          showDuration: AppMotion.resolve(
-                            context,
-                            AppMotion.standard,
-                          ),
-                          tooltip: (context) => TooltipContainer(
-                            child: Text(
-                              context.l10n.settingsExcludedAppsRemove(appId),
+                    child: ApplicationIdentity(
+                      key: ValueKey('excluded-app-$appId'),
+                      id: appId,
+                      directory: _applications,
+                      builder: (context, app, label) => Row(
+                        children: [
+                          Expanded(child: label.small()),
+                          Tooltip(
+                            showDuration: AppMotion.resolve(
+                              context,
+                              AppMotion.standard,
+                            ),
+                            tooltip: (context) => TooltipContainer(
+                              child: Text(
+                                context.l10n.settingsExcludedAppsRemove(
+                                  app.name,
+                                ),
+                              ),
+                            ),
+                            child: Button.ghost(
+                              style: AppTheme.controlButtonStyle(
+                                const ButtonStyle.ghostIcon(),
+                              ),
+                              onPressed:
+                                  widget.controller.canStart(
+                                    SettingsOperation.excludedApps,
+                                  )
+                                  ? () => widget.controller.removeExcludedApp(
+                                      appId,
+                                    )
+                                  : null,
+                              child: const AppIconFrame(
+                                child: Icon(LucideIcons.x),
+                              ),
                             ),
                           ),
-                          child: Button.ghost(
-                            style: AppTheme.controlButtonStyle(
-                              const ButtonStyle.ghostIcon(),
-                            ),
-                            onPressed:
-                                widget.controller.canStart(
-                                  SettingsOperation.excludedApps,
-                                )
-                                ? () =>
-                                      widget.controller.removeExcludedApp(appId)
-                                : null,
-                            child: const AppIconFrame(
-                              child: Icon(LucideIcons.x),
-                            ),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
               ],
@@ -1938,33 +1941,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addExcludedApplication() async {
-    final l10n = context.l10n;
-    final input = TextEditingController();
-    try {
-      await AppOverlays.showActionDialog(
-        context,
-        icon: LucideIcons.shieldPlus,
-        title: Text(l10n.settingsExcludeDialogTitle),
-        actionLabel: l10n.settingsExcludeDialogAction,
-        destructive: false,
-        changes: input,
-        canConfirm: () =>
-            input.text.trim().isNotEmpty &&
-            widget.controller.canStart(SettingsOperation.excludedApps),
-        content: TextField(
-          controller: input,
-          autofocus: true,
-          placeholder: Text(l10n.settingsExcludeDialogPlaceholder),
-          decoration: AppOverlays.dialogFieldDecoration(context),
-        ),
-        onConfirm: () => widget.controller.addExcludedApp(input.text),
-        failureMessage: () =>
-            widget.controller.errorFor(SettingsOperation.excludedApps) ??
-            l10n.settingsExcludeFailed,
-      );
-    } finally {
-      input.dispose();
-    }
+    final app = await showApplicationPicker(
+      context,
+      catalog: widget.applications,
+      exclude: widget.controller.settings?.excludedAppIds ?? const [],
+    );
+    if (app == null || !mounted) return;
+    _applications.remember(app);
+    await widget.controller.addExcludedApp(app.id);
   }
 
   Future<void> _confirmRestore() async {

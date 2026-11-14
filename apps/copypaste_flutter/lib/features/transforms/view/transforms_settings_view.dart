@@ -9,6 +9,9 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
+import '../../applications/controller/application_directory.dart';
+import '../../applications/repository/application_catalog.dart';
+import '../../applications/view/application_picker.dart';
 import '../../settings/controller/settings_navigation_state.dart';
 import '../../settings/view/settings_search_target.dart';
 import '../../settings/view/settings_section.dart';
@@ -18,8 +21,9 @@ import 'pipeline_editor_drawer.dart';
 
 /// Settings → Transforms as a settings screen contribution.
 SettingsFeatureSection transformsSettingsSection(
-  TransformsSettingsController controller,
-) {
+  TransformsSettingsController controller, {
+  ApplicationCatalog applications = const RuntimeApplicationCatalog(),
+}) {
   final keys = TransformsSettingsKeys();
   return SettingsFeatureSection(
     section: SettingsSectionId.transforms,
@@ -27,6 +31,7 @@ SettingsFeatureSection transformsSettingsSection(
       controller: controller,
       keys: keys,
       scope: scope,
+      applications: applications,
     ),
     searchTargets: (context) => keys.targets(context),
   );
@@ -127,20 +132,24 @@ class TransformsSettingsView extends StatefulWidget {
     required this.controller,
     required this.keys,
     this.scope = const SettingsSectionScope(highlightedTargetId: null),
+    this.applications = const RuntimeApplicationCatalog(),
   });
 
   final TransformsSettingsController controller;
   final TransformsSettingsKeys keys;
   final SettingsSectionScope scope;
 
+  /// Applications per-app defaults pick from and name.
+  final ApplicationCatalog applications;
+
   @override
   State<TransformsSettingsView> createState() => _TransformsSettingsViewState();
 }
 
 class _TransformsSettingsViewState extends State<TransformsSettingsView> {
-  String _appIdentifier = '';
   String? _appPipeline;
   int _appFormRevision = 0;
+  late final _applications = ApplicationDirectory(widget.applications);
 
   TransformsSettingsController get _controller => widget.controller;
 
@@ -288,73 +297,80 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final entry in entries)
-            _listRow(
-              title: entry.identifier,
-              subtitle: [
-                if (entry.pipelineId case final id?)
-                  _controller.pipeline(id)?.name ??
-                      l10n.transformsRemovedPipeline
-                else
-                  l10n.transformsNoDefault,
-                if (entry.platform != _controller.platform)
-                  l10n.transformsOtherPlatform(entry.platform),
-              ].join(' · '),
-              actions: [
-                _iconButton(
-                  l10n.transformsRemove,
-                  LucideIcons.x,
-                  _controller.busy
-                      ? null
-                      : () => _run(() => _controller.clearAppDefault(entry)),
-                ),
-              ],
+            ApplicationIdentity(
+              key: ValueKey(
+                'transforms-app-${entry.platform}-${entry.identifier}',
+              ),
+              id: entry.identifier,
+              directory: _applications,
+              builder: (context, app, label) => _listRow(
+                leading: label,
+                title: app.name,
+                subtitle: [
+                  if (entry.pipelineId case final id?)
+                    _controller.pipeline(id)?.name ??
+                        l10n.transformsRemovedPipeline
+                  else
+                    l10n.transformsNoDefault,
+                  if (entry.platform != _controller.platform)
+                    l10n.transformsOtherPlatform(entry.platform),
+                ].join(' · '),
+                actions: [
+                  _iconButton(
+                    l10n.transformsRemove,
+                    LucideIcons.x,
+                    _controller.busy
+                        ? null
+                        : () => _run(() => _controller.clearAppDefault(entry)),
+                  ),
+                ],
+              ),
             ),
           if (entries.isNotEmpty) const Gap(AppSpacing.sm),
           Row(
             key: ValueKey('transforms-app-form-$_appFormRevision'),
             children: [
               Expanded(
-                child: TextField(
-                  key: const ValueKey('transforms-app-identifier'),
-                  placeholder: Text(l10n.transformsAppIdentifierPlaceholder),
-                  decoration: AppOverlays.dialogFieldDecoration(context),
-                  onChanged: (value) =>
-                      setState(() => _appIdentifier = value.trim()),
+                child: _pipelineSelect(
+                  key: const ValueKey('transforms-app-pipeline'),
+                  value: _appPipeline,
+                  onChanged: (id) => setState(() => _appPipeline = id),
                 ),
-              ),
-              const Gap(AppSpacing.sm),
-              _pipelineSelect(
-                key: const ValueKey('transforms-app-pipeline'),
-                value: _appPipeline,
-                onChanged: (id) => setState(() => _appPipeline = id),
               ),
               const Gap(AppSpacing.sm),
               Button.secondary(
+                key: const ValueKey('transforms-app-add'),
                 style: AppTheme.controlButtonStyle(
                   const ButtonStyle.secondary(),
                 ),
-                onPressed: _controller.busy || _appIdentifier.isEmpty
-                    ? null
-                    : () async {
-                        final added = await _controller.setAppDefault(
-                          _appIdentifier,
-                          _appPipeline,
-                        );
-                        if (added && mounted) {
-                          setState(() {
-                            _appIdentifier = '';
-                            _appPipeline = null;
-                            _appFormRevision++;
-                          });
-                        }
-                      },
-                child: Text(l10n.transformsAdd),
+                onPressed: _controller.busy ? null : _addAppDefault,
+                leading: const AppIconFrame(child: Icon(LucideIcons.plus)),
+                child: Text(l10n.transformsAddApp),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _addAppDefault() async {
+    final app = await showApplicationPicker(
+      context,
+      catalog: widget.applications,
+      exclude: [
+        for (final entry in _controller.preferences.appDefaults)
+          if (entry.platform == _controller.platform) entry.identifier,
+      ],
+    );
+    if (app == null || !mounted) return;
+    _applications.remember(app);
+    if (await _controller.setAppDefault(app.id, _appPipeline) && mounted) {
+      setState(() {
+        _appPipeline = null;
+        _appFormRevision++;
+      });
+    }
   }
 
   Widget _favoritesRow(BuildContext context) {
@@ -696,7 +712,9 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
     );
   }
 
+  /// A [leading] widget replaces the [title] text.
   Widget _listRow({
+    Widget? leading,
     required String title,
     String? subtitle,
     required List<Widget> actions,
@@ -708,7 +726,9 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis).small(),
+              (leading ??
+                      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis))
+                  .small(),
               if (subtitle != null)
                 Text(
                   subtitle,

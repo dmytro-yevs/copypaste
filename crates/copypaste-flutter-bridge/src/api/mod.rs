@@ -10,6 +10,7 @@ use copypaste_ipc::{Method, ResponseData};
 use crate::client;
 
 pub mod ai;
+pub mod applications;
 pub mod clips;
 pub mod paste_queue;
 pub mod rules;

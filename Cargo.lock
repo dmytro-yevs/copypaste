@@ -889,6 +889,7 @@ dependencies = [
  "copypaste-modules",
  "copypaste-p2p",
  "copypaste-runtime",
+ "copypaste-source-app",
  "flutter_rust_bridge",
  "futures-util",
  "image",

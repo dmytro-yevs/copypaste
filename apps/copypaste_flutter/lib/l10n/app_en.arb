@@ -1954,21 +1954,13 @@
       }
     }
   },
-  "settingsExcludeDialogTitle": "Exclude application",
-  "@settingsExcludeDialogTitle": {
-    "description": "Title of the dialog that adds an excluded application."
+  "applicationPickerSearch": "Search applications",
+  "@applicationPickerSearch": {
+    "description": "Search field placeholder of the list for choosing an application."
   },
-  "settingsExcludeDialogAction": "Exclude",
-  "@settingsExcludeDialogAction": {
-    "description": "Verb. Confirm button of the dialog that adds an excluded application."
-  },
-  "settingsExcludeDialogPlaceholder": "Application identifier",
-  "@settingsExcludeDialogPlaceholder": {
-    "description": "Placeholder of the field for the application identifier, such as a bundle ID or executable name."
-  },
-  "settingsExcludeFailed": "The application could not be excluded.",
-  "@settingsExcludeFailed": {
-    "description": "Error shown in the exclude application dialog when adding fails."
+  "applicationPickerEmpty": "No applications found",
+  "@applicationPickerEmpty": {
+    "description": "Shown when no application matches the search in the application list."
   },
   "settingsSkipSecretTitle": "Skip confidential clipboard",
   "@settingsSkipSecretTitle": {
@@ -5939,10 +5931,6 @@
   "@transformsAppDefaultsDescription": {
     "description": "Settings row description."
   },
-  "transformsAppIdentifierPlaceholder": "App identifier",
-  "@transformsAppIdentifierPlaceholder": {
-    "description": "Placeholder of the app identifier field for a per-app default."
-  },
   "transformsOtherPlatform": "only on {platform}",
   "@transformsOtherPlatform": {
     "description": "Marks a per-app default made for another platform.",
@@ -5953,9 +5941,9 @@
       }
     }
   },
-  "transformsAdd": "Add",
-  "@transformsAdd": {
-    "description": "Button that adds an entry to a list."
+  "transformsAddApp": "Add app",
+  "@transformsAddApp": {
+    "description": "Button that chooses an application to add a per-app default for."
   },
   "transformsRemove": "Remove",
   "@transformsRemove": {

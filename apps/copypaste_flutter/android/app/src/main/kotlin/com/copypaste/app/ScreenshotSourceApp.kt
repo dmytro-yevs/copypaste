@@ -2,9 +2,6 @@ package com.copypaste.app
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.Locale
 
@@ -12,8 +9,6 @@ internal data class ScreenshotSourceApp(val packageName: String, val name: Strin
 
 /** Optional attribution at capture time; failure must never prevent image ingestion. */
 internal object ScreenshotSourceApps {
-    private const val iconEdge = 64
-    private const val maximumIconBytes = 32 * 1024
     // ColorOS filenames identify the captured package, even when the launcher
     // resumes before MediaStore publishes the image. This is identity metadata,
     // not a content digest or an authentication mechanism.
@@ -26,19 +21,7 @@ internal object ScreenshotSourceApps {
         val packageName = packageFromFilename(context, displayName) ?: return null
         val info = runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.getOrNull()
         val name = info?.let { runCatching { context.packageManager.getApplicationLabel(it).toString() }.getOrNull() }
-        val icon = info?.let { runCatching {
-            val drawable = context.packageManager.getApplicationIcon(it)
-            val bitmap = Bitmap.createBitmap(iconEdge, iconEdge, Bitmap.Config.ARGB_8888)
-            try {
-                drawable.setBounds(0, 0, iconEdge, iconEdge)
-                drawable.draw(Canvas(bitmap))
-                ByteArrayOutputStream().use { output ->
-                    if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) null
-                    else output.toByteArray().takeIf { it.size <= maximumIconBytes }
-                }
-            } finally { bitmap.recycle() }
-        }.getOrNull() }
-        ScreenshotSourceApp(packageName, name, icon)
+        ScreenshotSourceApp(packageName, name, info?.let { AppIconPng.render(context.packageManager, it) })
     }.getOrNull()
 
     private fun packageFromFilename(context: Context, displayName: String): String? = runCatching {

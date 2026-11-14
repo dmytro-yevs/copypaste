@@ -1665,16 +1665,10 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Ignorar app';
+  String get applicationPickerSearch => 'Pesquisar apps';
 
   @override
-  String get settingsExcludeDialogAction => 'Ignorar';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Identificador do app';
-
-  @override
-  String get settingsExcludeFailed => 'Não foi possível ignorar o app.';
+  String get applicationPickerEmpty => 'Nenhum app encontrado';
 
   @override
   String get settingsSkipSecretTitle => 'Ignorar conteúdo confidencial';
@@ -4813,15 +4807,12 @@ class AppLocalizationsPt extends AppLocalizations {
       'Usa outro padrão em apps específicos.';
 
   @override
-  String get transformsAppIdentifierPlaceholder => 'Identificador do app';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return 'somente em $platform';
   }
 
   @override
-  String get transformsAdd => 'Adicionar';
+  String get transformsAddApp => 'Adicionar app';
 
   @override
   String get transformsRemove => 'Remover';

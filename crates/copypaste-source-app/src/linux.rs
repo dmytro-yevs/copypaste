@@ -16,6 +16,7 @@ use super::{
 };
 
 const MAX_DESKTOP_ENTRY_BYTES: u64 = 64 * 1024;
+const MAX_APPLICATION_ENTRIES: usize = 2048;
 const MAX_THEME_DEPTH: usize = 16;
 const FALLBACK_DIRECTORIES: &[&str] = &[
     "256x256/apps",
@@ -98,6 +99,74 @@ fn desktop_application_from_roots(
                     })
             })
     })
+}
+
+/// Launchable desktop entries as `(desktop ID, Name)`. An entry in an
+/// earlier data root shadows the same ID in later ones, as in menus.
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn installed() -> Vec<(String, String)> {
+    installed_from_roots(&data_roots())
+}
+
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn installed_name(app_id: &str) -> Option<String> {
+    valid_linux_app_id(app_id).then_some(())?;
+    desktop_value(app_id, &data_roots(), "Name")
+}
+
+fn installed_from_roots(roots: &[PathBuf]) -> Vec<(String, String)> {
+    let mut seen = HashSet::new();
+    let mut apps = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root.join("applications")) else {
+            continue;
+        };
+        for path in entries
+            .take(MAX_APPLICATION_ENTRIES)
+            .filter_map(|entry| Some(entry.ok()?.path()))
+        {
+            if path
+                .extension()
+                .is_none_or(|extension| extension != "desktop")
+            {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if !valid_linux_app_id(id) || !seen.insert(id.to_owned()) {
+                continue;
+            }
+            if let Some(name) = launchable_name(&path) {
+                apps.push((id.to_owned(), name));
+            }
+        }
+    }
+    apps
+}
+
+fn launchable_name(path: &Path) -> Option<String> {
+    let entry = String::from_utf8(read_bounded(path, MAX_DESKTOP_ENTRY_BYTES)?).ok()?;
+    let mut in_desktop_entry = false;
+    let (mut name, mut application) = (None, false);
+    for line in entry.lines().map(str::trim) {
+        if line.starts_with('[') && line.ends_with(']') {
+            in_desktop_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=').filter(|_| in_desktop_entry) else {
+            continue;
+        };
+        match (key.trim(), value.trim()) {
+            ("Type", value) => application = value == "Application",
+            ("NoDisplay" | "Hidden", "true") => return None,
+            ("Name", value) if !value.is_empty() && value.len() <= 255 => {
+                name = Some(value.to_owned());
+            }
+            _ => {}
+        }
+    }
+    name.filter(|_| application)
 }
 
 fn source_label_from_roots(app_id: &str, roots: &[PathBuf]) -> Option<SourceAppLabel> {
@@ -483,6 +552,33 @@ mod tests {
                 .map(SourceAppLabel::as_str),
             Some("org.example.Writer")
         );
+    }
+
+    #[test]
+    fn installed_lists_launchable_entries_and_honours_shadowing() {
+        let user = tempfile::tempdir().unwrap();
+        let system = tempfile::tempdir().unwrap();
+        let write = |root: &Path, id: &str, body: &str| {
+            let applications = root.join("applications");
+            std::fs::create_dir_all(&applications).unwrap();
+            std::fs::write(applications.join(format!("{id}.desktop")), body).unwrap();
+        };
+        let app = |name: &str| format!("[Desktop Entry]\nType=Application\nName={name}\n");
+        write(system.path(), "org.example.Writer", &app("Writer"));
+        write(system.path(), "org.example.Hidden", &app("Hidden"));
+        write(
+            system.path(),
+            "org.example.Link",
+            "[Desktop Entry]\nType=Link\nName=Link\n",
+        );
+        write(
+            user.path(),
+            "org.example.Hidden",
+            "[Desktop Entry]\nType=Application\nName=Hidden\nNoDisplay=true\n",
+        );
+        let mut apps = installed_from_roots(&[user.path().into(), system.path().into()]);
+        apps.sort();
+        assert_eq!(apps, [("org.example.Writer".into(), "Writer".into())]);
     }
 
     #[test]

@@ -1626,16 +1626,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Exclude application';
+  String get applicationPickerSearch => 'Search applications';
 
   @override
-  String get settingsExcludeDialogAction => 'Exclude';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Application identifier';
-
-  @override
-  String get settingsExcludeFailed => 'The application could not be excluded.';
+  String get applicationPickerEmpty => 'No applications found';
 
   @override
   String get settingsSkipSecretTitle => 'Skip confidential clipboard';
@@ -4688,15 +4682,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Use a different default in specific apps.';
 
   @override
-  String get transformsAppIdentifierPlaceholder => 'App identifier';
-
-  @override
   String transformsOtherPlatform(String platform) {
     return 'only on $platform';
   }
 
   @override
-  String get transformsAdd => 'Add';
+  String get transformsAddApp => 'Add app';
 
   @override
   String get transformsRemove => 'Remove';
