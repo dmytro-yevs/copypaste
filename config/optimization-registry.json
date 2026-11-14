@@ -4743,7 +4743,7 @@
         "crates/copypaste-daemon/src/macos_workspace.rs",
         "crates/copypaste-daemon/src/main.rs"
       ],
-      "invariant": "Every feature deadline (item expiry, paste-queue idle stop and undo, import and rule-preview plans, MCP session expiry) goes through one deadline task per runtime. It holds a timer only for the earliest deadline due within 1 h; later deadlines and an empty schedule hold no timer. Long-horizon deadlines are swept at task start, on resume, on sync receipt (coalesced into the 500 ms library flush) and on the first request after 15 quiet minutes, which covers the Android foreground and IME-only processes without an alarm. Resume signals: the macOS wake notification, Windows PowerRegisterSuspendResumeNotification and Linux logind PrepareForSleep. A 60 s re-arm cap applies only when the resume subscription failed and a short-horizon deadline exists.",
+      "invariant": "Every feature deadline (item expiry, paste-queue idle stop and undo, import and rule-preview plans) goes through one deadline task per runtime. It holds a timer only for the earliest deadline due within 1 h; later deadlines and an empty schedule hold no timer. Long-horizon deadlines are swept at task start, on resume, on sync receipt (coalesced into the 500 ms library flush) and on the first request after 15 quiet minutes, which covers the Android foreground and IME-only processes without an alarm. Resume signals: the macOS wake notification, Windows PowerRegisterSuspendResumeNotification and Linux logind PrepareForSleep. A 60 s re-arm cap applies only when the resume subscription failed and a short-horizon deadline exists.",
       "next_step": "Record daemon and Android runtime wakeups over a 10-minute idle trace with no deadlines, with one 30-day deadline and with one 5-minute deadline on release builds of every listed platform, and observe a sleep across a deadline (content-rules AC20). feature_budgets.paste_queue_idle_wakeups_per_hour is unresolved.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -4835,7 +4835,7 @@
         "crates/copypaste-core/src/storage/local_state.rs",
         "crates/copypaste-runtime/src/lib.rs"
       ],
-      "invariant": "Items received through sync are evaluated for protection actions (secret mask, hide from AI, expiry) and auto-tags with the same compiled evaluator as local captures, inside the apply transaction. Rule tags and derived expiry are a local projection in clip_rule_tags and clip_local_state, never synced records, so receipt adds no outgoing versions or sync traffic.",
+      "invariant": "Items received through sync are evaluated for protection actions (secret mask, hide from integrations, expiry) and auto-tags with the same compiled evaluator as local captures, inside the apply transaction. Rule tags and derived expiry are a local projection in clip_rule_tags and clip_local_state, never synced records, so receipt adds no outgoing versions or sync traffic.",
       "next_step": "Measure sync apply throughput and peak memory for a 5,000-item P2P catch-up with and without enabled rules on release builds of every listed platform. No budget exists.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -4927,7 +4927,7 @@
         "crates/copypaste-template/src/render.rs"
       ],
       "invariant": "ICU4X date formatters and jiff zone data are touched only when a date, time or datetime placeholder renders, and the formatters are not retained after the expansion. The compiled ICU data is embedded in the binary, so this bounds memory, not binary size.",
-      "next_step": "Measure the binary-size delta of ICU compiled data, the bundled Windows tzdb, the YAML parser and rmcp for the daemon, CLI and Android library (feature_budgets.binary_size_delta_bytes, unresolved) and switch to datagen-baked data for the 12 locales if it is material (risk K3).",
+      "next_step": "Measure the binary-size delta of ICU compiled data, the bundled Windows tzdb, the YAML parser for the daemon, CLI and Android library (feature_budgets.binary_size_delta_bytes, unresolved) and switch to datagen-baked data for the 12 locales if it is material (risk K3).",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
@@ -4961,36 +4961,6 @@
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",
-        "Windows": "not_established"
-      },
-      "measured_saving": null,
-      "evidence_refs": [],
-      "supersedes": [],
-      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
-    },
-    {
-      "id": "RUN-115",
-      "title": "MCP as a client-spawned stdio process without polling",
-      "domain": "runtime",
-      "implementation_status": "implemented_pending_native_evidence",
-      "priority": "P1",
-      "owner_module": "copypaste-cli mcp",
-      "platforms": [
-        "macOS",
-        "Windows"
-      ],
-      "source_references": [
-        "crates/copypaste-cli/src/mcp/mod.rs",
-        "crates/copypaste-cli/src/mcp/server.rs",
-        "crates/copypaste-cli/src/client.rs",
-        "crates/copypaste-runtime/src/features/ai/tools.rs",
-        "crates/copypaste-runtime/src/features/ai/limits.rs",
-        "crates/copypaste-core/src/storage/ai_view.rs"
-      ],
-      "invariant": "MCP runs only as copypaste mcp, spawned by the client over stdio and exiting when stdin closes; the daemon opens no port and runs no extra process while MCP is off. Paging, lookback, redaction and limits are applied in the runtime, images are downscaled on demand to a 1568 px edge only when images are enabled, and the access log is bounded to 1,000 rows or 30 days at insert. While connected the CLI has no timer; while the daemon is unreachable it reconnects with backoff from 1 s to a 30 s cap so it can announce tools/list_changed when CopyPaste starts.",
-      "next_step": "Measure the stdio process steady and peak memory in an idle and an active session, and daemon idle CPU, wakeups and memory with MCP off and on, on macOS, Windows and Linux (MCP AC31). feature_budgets.mcp_stdio_steady_bytes and mcp_stdio_peak_bytes are unresolved.",
-      "native_resource_qualification": {
-        "macOS": "not_established",
         "Windows": "not_established"
       },
       "measured_saving": null,
@@ -5143,7 +5113,7 @@
     },
     {
       "id": "RUN-121",
-      "title": "Coalesced library and progress events; MCP ignores copy events",
+      "title": "Coalesced library and progress events",
       "domain": "runtime",
       "implementation_status": "implemented_pending_native_evidence",
       "priority": "P1",
@@ -5155,13 +5125,10 @@
       ],
       "source_references": [
         "crates/copypaste-runtime/src/lib.rs",
-        "crates/copypaste-daemon/src/server/watch.rs",
-        "crates/copypaste-cli/src/mcp/server.rs",
-        "crates/copypaste-runtime/src/features/ai/sessions.rs",
-        "apps/copypaste_flutter/lib/features/ai_tools/controller/ai_approval_controller.dart"
+        "crates/copypaste-daemon/src/server/watch.rs"
       ],
-      "invariant": "Library change events are coalesced to at most one per 500 ms window and progress events to one per operation per 250 ms. Watchers subscribe with WatchEvents to the kinds they need; the MCP CLI subscribes only to AI approval, grant and status events, so a copy never wakes it. An MCP session ends with its watch connection, and unattached or idle sessions expire through the deadline task. The app's approval listener reuses the shared event stream and reads pending approvals only on approval events and once at start.",
-      "next_step": "Count daemon event deliveries and MCP process wakeups during a 100-copy burst and a 1,000-row snippet import on release builds of every listed platform. No budget exists.",
+      "invariant": "Library change events are coalesced to at most one per 500 ms window and progress events to one per operation per 250 ms. Watchers subscribe with WatchEvents to the kinds they need, so a copy never wakes a watcher that did not ask for history events.",
+      "next_step": "Count daemon event deliveries during a 100-copy burst and a 1,000-row snippet import on release builds of every listed platform. No budget exists.",
       "native_resource_qualification": {
         "macOS": "not_established",
         "Android": "not_established",

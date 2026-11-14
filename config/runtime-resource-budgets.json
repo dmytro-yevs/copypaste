@@ -76,17 +76,15 @@
       "snippets_search_ms": null,
       "transforms_palette_open_peak_delta_bytes": null,
       "transforms_16mib_peak_bytes": null,
-      "mcp_stdio_steady_bytes": null,
-      "mcp_stdio_peak_bytes": null,
       "paste_queue_idle_wakeups_per_hour": null,
       "binary_size_delta_bytes": null
     },
     "notes": [
-      "Feature budgets cover the paste queue, snippets, transforms, content rules, Android quick access and MCP. Every threshold is null: unresolved, never passing. check-resource-receipts.py does not read this object.",
-      "\"all\" means macOS, Windows and Android; the mcp_* keys apply to the desktops (macOS, Windows, Linux). Each measurement records the application, daemon or runtime, and workers separately and combined.",
-      "Spec proposals, not budgets: rules_capture_evaluation_ms 50 ms, snippets_render_64k_ms 50 ms, mcp_stdio_steady_bytes 15 MB, mcp_stdio_peak_bytes 30 MB. paste_queue_idle_wakeups_per_hour is compared with the feature disabled (paste-queue AC31).",
-      "binary_size_delta_bytes covers ICU4X compiled data, the bundled Windows tzdb, the YAML parser and rmcp in the daemon, CLI and Android library.",
-      "Optimization registry entries RUN-107 to RUN-122 describe the behavior each key measures."
+      "Feature budgets cover the paste queue, snippets, transforms, content rules and Android quick access. Every threshold is null: unresolved, never passing. check-resource-receipts.py does not read this object.",
+      "\"all\" means macOS, Windows and Android. Each measurement records the application, daemon or runtime, and workers separately and combined.",
+      "Spec proposals, not budgets: rules_capture_evaluation_ms 50 ms, snippets_render_64k_ms 50 ms. paste_queue_idle_wakeups_per_hour is compared with the feature disabled (paste-queue AC31).",
+      "binary_size_delta_bytes covers ICU4X compiled data, the bundled Windows tzdb and the YAML parser in the daemon, CLI and Android library.",
+      "Optimization registry entries RUN-107 to RUN-122 (except RUN-115, which moved with AI tools to the planned optional module) describe the behavior each key measures."
     ]
   }
 }

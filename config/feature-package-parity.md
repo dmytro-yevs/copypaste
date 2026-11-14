@@ -1,10 +1,10 @@
 # Feature package: parity checklist and evidence status
 
-This file covers the clipboard productivity package: Paste Queue, Snippets (with templates, clip editing and abbreviation search), Text Transforms, Content Rules, Android Quick Access (keyboard panel, tiles, widget and desktop tray parity) and the MCP server. It records:
+This file covers the clipboard productivity package: Paste Queue, Snippets (with templates, clip editing and abbreviation search), Text Transforms, Content Rules and Android Quick Access (keyboard panel, tiles, widget and desktop tray parity). AI tools (the MCP server) are not part of the core app; see section 1.6. It records:
 
 - which entry points exist on each platform;
-- the evidence status of every acceptance criterion (AC) in the six feature specs;
-- the stated policies that ship with the package: backup compatibility, the MCP threat model, Linux limits and the design-system exception for native Android surfaces;
+- the evidence status of every acceptance criterion (AC) in the five core feature specs;
+- the stated policies that ship with the package: backup compatibility, privileged operations, Linux limits and the design-system exception for native Android surfaces;
 - the resource behavior that was implemented. Native resource qualification has not been established for any of it.
 
 CopyPaste ships on macOS, Windows and Android. Linux is built from the desktop code and is listed only where its behavior differs.
@@ -78,14 +78,11 @@ Every row below still needs native verification on macOS, Windows and Android (p
 | Glance and copy recent | Widget (History, Pinned and Snippets filters; privacy level) | Tray/menu "Recent (N)" |
 | Pull from another device | **G**: no app or widget action (decision A3 assigns it there). Tile T4: Dev (decision A3) | Tray/menu "Copy latest from other device" |
 
-### 1.6 MCP
+### 1.6 AI tools (moved to an optional module)
 
-| Entry point | macOS | Windows | Linux | Android |
-|---|---|---|---|---|
-| Settings → AI tools (MCP) | Yes, with the local toggle and Connect | Yes | Yes | Yes, without the local toggle or Connect; "served through your computer" status |
-| Hide from AI tools / Show to AI tools | History row menu and inspector; Quick Paste inspector | Same | Same | History inspector drawer. IME item action: **G** |
-| `copypaste mcp` and `copypaste mcp status` | Yes | Yes | Yes | No MCP host (spec R35) |
-| First-use approval | In-app dialog; native notification while the window is hidden | Same | Same | — |
+AI tools are not part of the core app. The MCP server (`copypaste mcp`), Settings → AI tools, first-use approval and "Hide from AI tools" move to the planned optional `ai-tools` module, delivered through the module marketplace. Their parity and acceptance criteria will be tracked with that module.
+
+Core keeps only a neutral hook for such a module: the synced per-clip flag `hidden_from_integrations` and the `hide_from_integrations` rule action. The app shows neither while no integration module is installed. Built-in rules only mark detected credentials and payment cards secret; secret clips are excluded from any integration.
 
 ## 2. Acceptance-criteria status
 
@@ -172,7 +169,7 @@ The owning work package (WP) follows the plan's section 8.
 | 19, 22, 23, 25, 27 | U | R3 |
 | 20 | U + N | Purge within 5 s of wake (RUN-107) |
 | 21 | U + UK + N | R3, A1 |
-| 26 | U + Dev | Masking and MCP exclusion are tested. Secrets sync end-to-end encrypted like any item (decision R2, capture policy), not "local unless enabled" |
+| 26 | U + Dev | Masking is tested. Secrets sync end-to-end encrypted like any item (decision R2, capture policy), not "local unless enabled" |
 | 28 | U | F0, F3, R4 |
 | 34 | U | "Don't save" alone is enforced. Pin is removed as an action (decision R3) |
 | 35, 36 | U + UK + N | R5 and A1. "Create rule from this item" is **G** (section 1.4) |
@@ -201,20 +198,6 @@ The owning work package (WP) follows the plan's section 8.
 | 37 | N | TalkBack custom actions |
 | 38 | N | Resource runs for the `feature_budgets.android` keys (RUN-116, RUN-117) |
 
-### 2.6 MCP (spec section 7)
-
-| AC | Status | Evidence and notes |
-|---|---|---|
-| 1, 3, 5, 18, 21, 24, 25, 32 | U | M1 runtime and M2 CLI (stub-daemon tests are Unix-only) |
-| 2 | N | Claude Desktop, Claude Code, Codex and Cursor on macOS, Windows and Linux |
-| 4, 28 | U | M3; F10 refuses self-approval from a non-app peer |
-| 6 | U | M1 with F0: revocation arriving through apply |
-| 7–20, 22, 23, 29, 30 | U | M1 |
-| 26 | X | HTTP endpoint deferred (decision M3) |
-| 27 | X | Client config editing deferred (decision M5) |
-| 31 | N | Idle CPU, wakeups and memory with MCP off and on; stdio process (RUN-115) |
-| 5.5 Undo toast after `copy_to_clipboard` | G | Needs a runtime event (WP-M3 follow-up) |
-
 ## 3. Kotlin evidence
 
 Kotlin unit tests run under Robolectric with JDK 25 and the Gradle 9.8.0 wrapper that the Flutter tool generates (the wrapper scripts are not committed). Before this package no CI workflow ran them (plan fact V23). The `android-unit-tests` job in `.github/workflows/ci.yml` now runs `:app:testDebugUnitTest`. It is listed in `config/ci-policy.json`, so `CI required` depends on it.
@@ -239,25 +222,19 @@ Restore accepts only a backup whose schema matches the current one exactly. Ther
 - Migration `010_feature_package.sql` therefore makes backups created by earlier builds unrestorable by this build, as every earlier migration did.
 - Such a restore is refused with `RestoreError::InvalidBackup`, and live history is left intact.
 - The release notes must state this (decision U7).
-- `ai_grant_verifiers` and `ai_access_log` are never restored. After a restore, grants owned by the device show "Re-issue required" and reject their old credential.
 
-### 4.2 MCP threat model
+### 4.2 Privileged operations
 
-MCP privacy constrains a client that reaches CopyPaste **only through MCP tools**. It is not a boundary against a process that runs as the same OS user. Such a process can already run `copypaste get`, read the clipboard or drive the UI, and CopyPaste does not claim otherwise. Within that model:
+Un-hiding a clip from integrations (`ClipOp::SetHiddenFromIntegrations { hidden: false }`) is accepted only from the CopyPaste app (WP-F10), so another local client cannot widen what an integration module may see. This is not a boundary against a process that runs as the same OS user: such a process can already run `copypaste get`, read the clipboard or drive the UI. Any other IPC peer gets `ErrorCode::Forbidden`. Verification runs on the first privileged request of a connection and is then kept for that connection:
 
-- **Runtime enforcement.** Scopes, lookback, redaction, rate and volume limits, and grant checks run in the runtime. The CLI only translates and never uses the full `Get` method.
-- **Privileged operations are accepted only from the CopyPaste app** (WP-F10). These are approvals, grant administration, policy changes and un-hiding (`ClipOp::SetHiddenFromAi { hidden: false }`). Any other IPC peer gets `ErrorCode::Forbidden`. Verification runs on the first privileged request of a connection and is then kept for that connection:
-  - macOS: audit token → `SecCodeCopyGuestWithAttributes` → `SecCodeCheckValidity`. The requirement is the daemon's own designated requirement with the identifier `com.copypaste.app`. Release builds are re-signed locally with a self-signed certificate, so the check cannot use an Apple team id.
-  - Windows: the pipe client process image must be `CopyPaste.exe` next to the daemon, signed by the same Authenticode subject as the daemon (`WinVerifyTrust`, cache only).
-  - Linux (weaker): the canonical `/proc/<pid>/exe` path must equal the installed app binary. It is path-based, has no signature, and pid reuse is possible between capture and check.
-  - Unsigned development builds: only in debug builds with an unsigned daemon, a peer whose path is the development app path is accepted.
-- **The credential never enters history.** The Connect dialog copies it through the concealed transient path, and the clipboard is cleared after 60 s if it still holds the credential.
-- **Sessions are bound to the CLI's watch connection.** They end when that connection closes. Unattached sessions expire after 10 s, and idle ones after 30 min.
-- **Known limits:**
-  - `copypaste mcp status` cannot validate the credential, because opening a session would prompt for approval. It reports only whether `COPYPASTE_MCP_GRANT` is set.
-  - The launching executable is reported only on Linux, and it is untrusted.
-  - Protocol revisions are capped at 2025-11-25, the last revision with an initialize handshake.
-  - `SnippetOp::SetPreference` is not privileged, so any same-user IPC caller can turn off `snippets.require_auth`. That is consistent with this threat model but is open for review (follow-up).
+- macOS: audit token → `SecCodeCopyGuestWithAttributes` → `SecCodeCheckValidity`. The requirement is the daemon's own designated requirement with the identifier `com.copypaste.app`. Release builds are re-signed locally with a self-signed certificate, so the check cannot use an Apple team id.
+- Windows: the pipe client process image must be `CopyPaste.exe` next to the daemon, signed by the same Authenticode subject as the daemon (`WinVerifyTrust`, cache only).
+- Linux (weaker): the canonical `/proc/<pid>/exe` path must equal the installed app binary. It is path-based, has no signature, and pid reuse is possible between capture and check.
+- Unsigned development builds: only in debug builds with an unsigned daemon, a peer whose path is the development app path is accepted.
+
+Known limit:
+
+- `SnippetOp::SetPreference` is not privileged, so any same-user IPC caller can turn off `snippets.require_auth`. That is consistent with this model but is open for review (follow-up).
 
 ### 4.3 Device authentication and peer identity on Linux
 
@@ -289,7 +266,7 @@ The decision also asks for a one-line exception in AGENTS.md. AGENTS.md is no lo
 
 Every entry is `implemented_pending_native_evidence`, and native resource qualification is `not_established` on every listed platform. No native measurement was taken. All feature budgets in `config/runtime-resource-budgets.json` (`feature_budgets`) are null, which means unresolved and never passing.
 
-The plan numbered these entries RUN-104 to RUN-119. Those ids were taken on the branch by entries that landed after the plan's baseline, so the registry uses RUN-107 to RUN-122:
+The plan numbered these entries RUN-104 to RUN-119. Those ids were taken on the branch by entries that landed after the plan's baseline, so the registry uses RUN-107 to RUN-122. RUN-115 (the MCP stdio process) moved with AI tools to the planned optional module:
 
 | Plan id | Registry id | Behavior |
 |---|---|---|
@@ -301,13 +278,12 @@ The plan numbered these entries RUN-104 to RUN-119. Those ids were taken on the 
 | RUN-109 | RUN-112 | Snippet search projection; bounded template cache released on close |
 | RUN-110 | RUN-113 | Template date formatters built on demand |
 | RUN-111 | RUN-114 | Lazy transform catalogue; bounded, debounced, cancellable previews |
-| RUN-112 | RUN-115 | MCP stdio process without polling |
 | RUN-113 | RUN-116 | Engine-free IME panel over the blocking facade |
 | RUN-114 | RUN-117 | Event-driven widget; active-mode tiles |
 | RUN-115 | RUN-118 | Cloud withholds items expiring within 1 h |
 | RUN-116 | RUN-119 | Tray Recent built on menu open |
 | RUN-117 | RUN-120 | P2P withholds new kinds from legacy peers |
-| RUN-118 | RUN-121 | Coalesced library and progress events; MCP ignores copies |
+| RUN-118 | RUN-121 | Coalesced library and progress events |
 | RUN-119 | RUN-122 | One import plan and one rule-preview plan |
 
 Integration-level behavior to measure with those entries:
@@ -323,13 +299,12 @@ Integration-level behavior to measure with those entries:
   - Feature adapters are created lazily.
   - Each visible expiring clip has one timer, re-armed only when its countdown text changes.
   - The rule trace and its options load only when the "Why" dialog opens.
-  - Hide from AI and Keep patch the loaded row without re-reading it.
+  - Keep patches the loaded row without re-reading it.
 - **App wiring (I3):**
   - No new timers or polling.
   - Queue shortcuts share one `DesktopShortcutRegistrar`.
-  - The approval listener reads pending approvals on events and once at start.
   - Settings controllers load only while their section is shown.
-- **Settings sections (S6, T6, R5, M3):**
+- **Settings sections (S6, T6, R5):**
   - Content loads on attach and is dropped on detach.
   - The only timers are editor pauses (snippet editor 300 ms, rule validation 300 ms, transform preview 120 ms), and they stop when the editor closes.
   - The rule-preview dialog sends Cancel on close to release the runtime plan.
@@ -337,14 +312,13 @@ Integration-level behavior to measure with those entries:
   - Tabs keep no state once the panel hides.
   - Every runtime call runs on the shared worker thread.
   - Template previews refresh 150 ms after a change, never on a timer.
-- **MCP CLI (M2):** while the daemon is unreachable, the CLI reconnects with backoff from 1 s to a 30 s cap (Dev: spec 6.2 asks for no polling, but AC25 needs `tools/list_changed` when CopyPaste starts). Once connected it runs no timer.
 
 Still to measure:
 
 - P2P session bytes for a mixed-version pair (risk K2);
-- the binary-size delta of ICU data, the Windows tzdb, the YAML parser and rmcp (risk K3);
+- the binary-size delta of ICU data, the Windows tzdb and the YAML parser (risk K3);
 - IME, widget and tile resource runs on physical devices;
-- the idle traces for paste-queue AC31, snippets AC43, transforms AC44 and MCP AC31.
+- the idle traces for paste-queue AC31, snippets AC43 and transforms AC44.
 
 ## 6. Native verification still to run
 
@@ -374,16 +348,14 @@ Still to measure:
   - TalkBack custom actions;
   - lock-screen and before-first-unlock states;
   - tile and widget refresh counts.
-- **MCP clients:** Claude Desktop, Claude Code, Codex and Cursor on macOS, Windows and Linux (MCP AC2).
 
 ## 7. Follow-ups
 
 1. Gaps from section 1:
    - "Create rule from this item" (History and IME);
-   - IME "Hide from AI tools" and "Save as snippet" item actions;
+   - IME "Save as snippet" item action;
    - widget "Copy next" (decision P4);
-   - Android app and widget "Copy latest from other device" (decision A3);
-   - the MCP `copy_to_clipboard` Undo toast.
+   - Android app and widget "Copy latest from other device" (decision A3).
 2. A native hook that hides the main window and reactivates the previous app, so the main-window queue drawer can paste instead of only copying (I3).
 3. Quick Paste masks only authenticated secrets (`clip.secret`). History also masks clips that a rule marked secret (`HistoryClip.masked`). Aligning the two is a possible follow-up.
 4. The per-app default paste pipeline is not applied in Quick Paste, because the host does not report the target app.
