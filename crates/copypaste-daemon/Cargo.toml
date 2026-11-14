@@ -115,6 +115,9 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 image.workspace = true
 copypaste-runtime = { path = "../copypaste-runtime", features = ["test-support"] }
 copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
+# The module end-to-end test installs a package signed with a test key.
+copypaste-modules = { path = "../copypaste-modules", features = ["test-support"] }
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
 tokio = { workspace = true, features = ["test-util"] }
 # The paste-file staging diagnostics are the one place a filename, a content id
 # or decrypted bytes could reach a log, so the tests assert on what is emitted

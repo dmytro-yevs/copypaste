@@ -816,6 +816,7 @@ dependencies = [
  "copypaste-feedback",
  "copypaste-fs",
  "copypaste-ipc",
+ "copypaste-module-sdk",
  "copypaste-modules",
  "copypaste-p2p",
  "copypaste-retry",
