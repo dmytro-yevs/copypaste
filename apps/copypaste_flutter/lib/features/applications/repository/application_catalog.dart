@@ -15,6 +15,9 @@ abstract interface class ApplicationCatalog {
   Future<HistorySourceAppIcon?> installedIcon(String id);
 
   Future<HistorySourceAppIcon?> seenIcon(String iconId);
+
+  /// Drops icon renders still waiting, such as rows of a closed picker.
+  void cancelIcons();
 }
 
 class RuntimeApplicationCatalog implements ApplicationCatalog {
@@ -45,6 +48,9 @@ class RuntimeApplicationCatalog implements ApplicationCatalog {
 
   @override
   Future<HistorySourceAppIcon?> installedIcon(String id) => _apps.icon(id);
+
+  @override
+  void cancelIcons() => _apps.cancelIcons();
 
   @override
   Future<HistorySourceAppIcon?> seenIcon(String iconId) async {

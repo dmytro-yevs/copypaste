@@ -10,13 +10,12 @@ use std::sync::{
 
 use resvg::{tiny_skia, usvg};
 
-use super::{
-    normalize_png, valid_package_id, AppIcon, SourceAppLabel, MAX_SOURCE_ICON_BYTES,
-    MAX_SOURCE_ICON_EDGE,
-};
+use super::{normalize_png, AppIcon, SourceAppLabel, MAX_SOURCE_ICON_BYTES, MAX_SOURCE_ICON_EDGE};
 
 const MAX_DESKTOP_ENTRY_BYTES: u64 = 64 * 1024;
 const MAX_APPLICATION_ENTRIES: usize = 2048;
+/// How deep `applications/` subfolders, which prefix desktop IDs, are read.
+const MAX_APPLICATION_DEPTH: usize = 2;
 const MAX_THEME_DEPTH: usize = 16;
 const FALLBACK_DIRECTORIES: &[&str] = &[
     "256x256/apps",
@@ -41,7 +40,7 @@ pub(super) fn source_label(app_id: &str) -> Option<SourceAppLabel> {
 }
 
 fn resolve_from_roots(app_id: &str, roots: &[PathBuf]) -> Option<AppIcon> {
-    if !valid_package_id(app_id) {
+    if !valid_linux_app_id(app_id) {
         return None;
     }
     let icon = desktop_value(app_id, roots, "Icon")?;
@@ -118,31 +117,82 @@ fn installed_from_roots(roots: &[PathBuf]) -> Vec<(String, String)> {
     let mut seen = HashSet::new();
     let mut apps = Vec::new();
     for root in roots {
-        let Ok(entries) = std::fs::read_dir(root.join("applications")) else {
-            continue;
-        };
-        for path in entries
-            .take(MAX_APPLICATION_ENTRIES)
-            .filter_map(|entry| Some(entry.ok()?.path()))
-        {
-            if path
-                .extension()
-                .is_none_or(|extension| extension != "desktop")
-            {
-                continue;
-            }
-            let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            if !valid_linux_app_id(id) || !seen.insert(id.to_owned()) {
+        let mut entries = Vec::new();
+        let mut budget = MAX_APPLICATION_ENTRIES;
+        collect_entries(
+            &root.join("applications"),
+            "",
+            MAX_APPLICATION_DEPTH,
+            &mut budget,
+            &mut entries,
+        );
+        for (id, path) in entries {
+            if !seen.insert(id.clone()) {
                 continue;
             }
             if let Some(name) = launchable_name(&path) {
-                apps.push((id.to_owned(), name));
+                apps.push((id, name));
             }
         }
     }
     apps
+}
+
+/// Desktop entries under [dir] with their desktop IDs: the path below
+/// `applications/` with `/` replaced by `-`, as `kde-foo` for `kde/foo`.
+fn collect_entries(
+    dir: &Path,
+    prefix: &str,
+    depth: usize,
+    budget: &mut usize,
+    out: &mut Vec<(String, PathBuf)>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if let Some(stem) = name.strip_suffix(".desktop") {
+            let id = format!("{prefix}{stem}");
+            if valid_linux_app_id(&id) {
+                out.push((id, path));
+            }
+        } else if depth > 0
+            && valid_folder_name(name)
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+        {
+            collect_entries(&path, &format!("{prefix}{name}-"), depth - 1, budget, out);
+        }
+    }
+}
+
+/// The desktop entry file a desktop ID names below [applications]: the
+/// file itself, else one in a subfolder whose name prefixes the ID.
+fn desktop_entry_path(applications: &Path, app_id: &str, depth: usize) -> Option<PathBuf> {
+    let direct = applications.join(format!("{app_id}.desktop"));
+    if direct.is_file() {
+        return Some(direct);
+    }
+    if depth == 0 {
+        return None;
+    }
+    app_id.match_indices('-').find_map(|(index, _)| {
+        let folder = &app_id[..index];
+        let nested = applications.join(folder);
+        (valid_folder_name(folder) && nested.is_dir())
+            .then(|| desktop_entry_path(&nested, &app_id[index + 1..], depth - 1))?
+    })
+}
+
+fn valid_folder_name(value: &str) -> bool {
+    !value.starts_with('.') && valid_linux_app_id(value)
 }
 
 fn launchable_name(path: &Path) -> Option<String> {
@@ -300,11 +350,10 @@ fn data_roots() -> Vec<PathBuf> {
 }
 
 fn desktop_value(app_id: &str, roots: &[PathBuf], key: &str) -> Option<String> {
+    valid_linux_app_id(app_id).then_some(())?;
     roots.iter().find_map(|root| {
-        desktop_value_from_path(
-            &root.join("applications").join(format!("{app_id}.desktop")),
-            key,
-        )
+        let path = desktop_entry_path(&root.join("applications"), app_id, MAX_APPLICATION_DEPTH)?;
+        desktop_value_from_path(&path, key)
     })
 }
 
@@ -579,6 +628,45 @@ mod tests {
         let mut apps = installed_from_roots(&[user.path().into(), system.path().into()]);
         apps.sort();
         assert_eq!(apps, [("org.example.Writer".into(), "Writer".into())]);
+    }
+
+    #[test]
+    fn nested_and_undotted_desktop_ids_are_listed_and_resolved() {
+        let root = tempfile::tempdir().unwrap();
+        let roots = [root.path().into()];
+        let applications = root.path().join("applications");
+        std::fs::create_dir_all(applications.join("kde")).unwrap();
+        std::fs::write(
+            applications.join("kde/foo.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Foo\nIcon=foo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            applications.join("firefox.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Firefox\nIcon=firefox\n",
+        )
+        .unwrap();
+        let icons = root.path().join("icons/hicolor/48x48/apps");
+        std::fs::create_dir_all(&icons).unwrap();
+        std::fs::write(icons.join("foo.png"), png(48, 48)).unwrap();
+        std::fs::write(icons.join("firefox.png"), png(48, 48)).unwrap();
+
+        let mut apps = installed_from_roots(&roots);
+        apps.sort();
+        assert_eq!(
+            apps,
+            [
+                ("firefox".into(), "Firefox".into()),
+                ("kde-foo".into(), "Foo".into()),
+            ]
+        );
+        assert_eq!(
+            desktop_value("kde-foo", &roots, "Name").as_deref(),
+            Some("Foo")
+        );
+        assert!(resolve_from_roots("kde-foo", &roots).is_some());
+        assert!(resolve_from_roots("firefox", &roots).is_some());
+        assert_eq!(desktop_value("..-foo", &roots, "Name"), None);
     }
 
     #[test]

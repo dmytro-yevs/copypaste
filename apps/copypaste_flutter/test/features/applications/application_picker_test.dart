@@ -10,6 +10,13 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 class _Catalog implements ApplicationCatalog {
   final iconRequests = <String>[];
+  final lookups = <String>[];
+  var seenLoads = 0;
+  var cancelled = 0;
+  var seenApps = const [
+    ApplicationChoice(id: 'com.example.writer', name: 'writer', iconId: 'c1'),
+    ApplicationChoice(id: 'org.example.Mail', name: 'Mail', iconId: 'c2'),
+  ];
 
   @override
   Future<List<ApplicationChoice>> installed() async => const [
@@ -19,14 +26,19 @@ class _Catalog implements ApplicationCatalog {
   ];
 
   @override
-  Future<ApplicationChoice?> installedById(String id) async =>
-      (await installed()).where((app) => app.id == id).firstOrNull;
+  Future<ApplicationChoice?> installedById(String id) async {
+    lookups.add(id);
+    return (await installed()).where((app) => app.id == id).firstOrNull;
+  }
 
   @override
-  Future<List<ApplicationChoice>> seen() async => const [
-    ApplicationChoice(id: 'com.example.writer', name: 'writer', iconId: 'c1'),
-    ApplicationChoice(id: 'org.example.Mail', name: 'Mail', iconId: 'c2'),
-  ];
+  Future<List<ApplicationChoice>> seen() async {
+    seenLoads++;
+    return seenApps;
+  }
+
+  @override
+  void cancelIcons() => cancelled++;
 
   @override
   Future<HistorySourceAppIcon?> installedIcon(String id) async {
@@ -67,6 +79,65 @@ void main() {
       exclude: const ['EDITOR'],
     );
     expect(apps, isEmpty);
+  });
+
+  test('only seen apps with this platform\'s identifier form are offered', () {
+    const seen = [
+      ApplicationChoice(id: 'zoom.exe', name: 'Zoom'),
+      ApplicationChoice(id: 'com.example.notes', name: 'Notes'),
+      ApplicationChoice(id: 'org.gnome.gedit-beta', name: 'Gedit'),
+      ApplicationChoice(id: 'firefox', name: 'Firefox'),
+    ];
+    List<String> offered(TargetPlatform platform) => [
+      for (final app in ApplicationDirectory(
+        _Catalog(),
+        platform: platform,
+      ).merge(installed: const [], seen: seen))
+        app.id,
+    ];
+    expect(offered(TargetPlatform.windows), ['zoom.exe']);
+    expect(offered(TargetPlatform.macOS), [
+      'org.gnome.gedit-beta',
+      'com.example.notes',
+    ]);
+    expect(offered(TargetPlatform.android), ['com.example.notes']);
+    expect(offered(TargetPlatform.linux), [
+      'firefox',
+      'org.gnome.gedit-beta',
+      'com.example.notes',
+    ]);
+  });
+
+  test('misses are retried and History is released after lookups', () async {
+    final catalog = _Catalog();
+    var now = DateTime(2026);
+    final directory = ApplicationDirectory(catalog, clock: () => now);
+
+    final (writer, gone) = await (
+      directory.describe('com.example.writer'),
+      directory.describe('com.example.gone'),
+    ).wait;
+    expect(writer?.name, 'Writer');
+    expect(gone, isNull);
+    expect(catalog.seenLoads, 1);
+
+    expect(await directory.describe('com.example.gone'), isNull);
+    expect(
+      catalog.lookups.where((id) => id == 'com.example.gone'),
+      hasLength(1),
+    );
+
+    now = now.add(ApplicationDirectory.missLifetime);
+    catalog.seenApps = const [
+      ApplicationChoice(id: 'com.example.gone', name: 'Back'),
+    ];
+    expect((await directory.describe('com.example.gone'))?.name, 'Back');
+    expect(catalog.seenLoads, 2);
+    expect((await directory.describe('com.example.writer'))?.name, 'Writer');
+    expect(
+      catalog.lookups.where((id) => id == 'com.example.writer'),
+      hasLength(1),
+    );
   });
 
   testWidgets('picking an application resolves to its identifier', (
@@ -110,5 +181,6 @@ void main() {
     await tester.tap(find.textContaining('Mail', findRichText: true));
     await tester.pumpAndSettle();
     expect(picked?.id, 'org.example.Mail');
+    expect(catalog.cancelled, 1);
   });
 }

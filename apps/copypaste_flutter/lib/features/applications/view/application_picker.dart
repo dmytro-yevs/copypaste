@@ -38,6 +38,12 @@ class _ApplicationPickerState extends State<_ApplicationPicker> {
   late final _directory = ApplicationDirectory(widget.catalog);
   late final _candidates = _directory.candidates(exclude: widget.exclude);
 
+  @override
+  void dispose() {
+    widget.catalog.cancelIcons();
+    super.dispose();
+  }
+
   Stream<List<Widget>> _results(String? query) async* {
     final needle = (query ?? '').trim().toLowerCase();
     final apps = await _candidates;
