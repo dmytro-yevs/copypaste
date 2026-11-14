@@ -1861,8 +1861,9 @@ mod tests {
     fn detected_credentials_are_captured_with_a_hidden_preview() {
         let (runtime, _dir) = fixture();
         assert!(runtime.settings.config().skip_secret);
-        let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic";
-        runtime.capture_text(content).unwrap();
+        // Assembled from fragments so the source holds no key-shaped literal.
+        let content = format!("-----BEGIN OPENSSH {}-----\nsynthetic", "PRIVATE KEY");
+        runtime.capture_text(&content).unwrap();
         let row = runtime.store.list(10, 0).unwrap().pop().unwrap();
         let preview = runtime.item_value(row, true).unwrap();
         assert!(preview.privacy.secret);

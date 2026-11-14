@@ -29,6 +29,11 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Golden input for the JWT decode transform. Unsigned (alg none, empty signature segment) with a payload of only nbf, so it authorises nothing."
+targetRules = ["jwt"]
+regexes = ['''eyJhbGciOiJub25lIn0\.eyJuYmYiOjQxMDI0NDQ4MDB9\.''']
+
+[[allowlists]]
 description = "Two-segment stub in the test asserting Debug for Session redacts its tokens. Not a signed JWT: it has no signature segment."
 targetRules = ["generic-api-key"]
 regexes = ['''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.secret''']
