@@ -9,6 +9,7 @@ import android.content.pm.ResolveInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,6 +17,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -40,6 +45,29 @@ class InstalledAppsTest {
         assertEquals("Writer", InstalledApps.find(app, "org.example.writer")?.get("name"))
         assertNotNull(InstalledApps.icon(app, "org.example.writer")?.get("bytes"))
         assertNull(InstalledApps.find(app, "org.example.missing"))
+    }
+
+    @Test fun iconWorkIsBoundedAndCancelledWhenThePickerCloses() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val replies = Collections.synchronizedList(mutableListOf<Any?>())
+        val done = CountDownLatch(4)
+        val worker = CancellableWorker(capacity = 2) { it.run() }
+        val reply: (Any?) -> Unit = { replies.add(it); done.countDown() }
+        val ran = AtomicInteger()
+
+        worker.submit(cancellable = true, work = { started.countDown(); release.await(); "first" }, reply = reply)
+        assertTrue(started.await(5, TimeUnit.SECONDS))
+        worker.submit(cancellable = true, work = { ran.incrementAndGet(); "queued" }, reply = reply)
+        worker.submit(cancellable = false, work = { "found" }, reply = reply)
+        worker.submit(cancellable = true, work = { ran.incrementAndGet(); "overflow" }, reply = reply)
+        worker.cancel()
+        release.countDown()
+
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        worker.shutdown()
+        assertEquals(0, ran.get())
+        assertEquals(listOf(null, "first", null, "found"), replies.toList())
     }
 
     private fun install(packageName: String, label: String) {

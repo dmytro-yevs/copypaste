@@ -5215,12 +5215,13 @@
       ],
       "source_references": [
         "crates/copypaste-source-app/src/installed.rs",
+        "crates/copypaste-source-app/src/windows_programs.rs",
         "crates/copypaste-flutter-bridge/src/api/applications.rs",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/InstalledAppsChannel.kt",
         "apps/copypaste_flutter/lib/features/applications/controller/application_directory.dart",
         "apps/copypaste_flutter/lib/features/applications/view/application_picker.dart"
       ],
-      "invariant": "The installed-application list (at most 1,024 entries, names and identifiers only) is read when the picker opens and dropped when it closes. Icons are rendered on demand for visible rows at 64 px and 32 KiB at most, are never cached natively, and are memoized only by the view that requested them. Nothing is loaded by the daemon, and the Android worker thread exits after 30 idle seconds.",
+      "invariant": "The installed-application list (at most 1,024 entries, names and identifiers only) is read when the picker opens and dropped when it closes. Icons are rendered on demand for visible rows at 64 px and 32 KiB at most, are never cached natively, and are memoized only by the view that requested them; misses are retried after a minute and the History source-app list is held only while a lookup runs. On Windows one uninstall-registry listing (at most 1,024 entries with executable paths) answers listing, lookups and icons for 30 seconds and is dropped on the next call after that; the daemon capture path never scans uninstall registrations. Nothing is loaded by the daemon. The Android worker queues at most 64 requests, pending icon renders are dropped when the picker closes, and its thread exits after 30 idle seconds.",
       "next_step": "Measure application RSS while the picker lists every installed application and after it closes on release builds of every listed platform.",
       "native_resource_qualification": {
         "macOS": "not_established",

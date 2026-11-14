@@ -28,6 +28,9 @@ abstract interface class InstalledApplications {
   Future<InstalledApplication?> find(String id);
 
   Future<HistorySourceAppIcon?> icon(String id);
+
+  /// Drops icon renders still waiting; they resolve to null.
+  void cancelIcons();
 }
 
 /// macOS, Windows and Linux through the native bridge.
@@ -59,6 +62,9 @@ class DesktopInstalledApplications implements InstalledApplications {
             height: icon.height,
           );
   }
+
+  @override
+  void cancelIcons() {}
 }
 
 /// Launcher apps through the Android host.
@@ -97,6 +103,9 @@ class AndroidInstalledApplications implements InstalledApplications {
       _ => null,
     };
   }
+
+  @override
+  void cancelIcons() => _channel.invokeMethod<void>('cancelIcons').ignore();
 
   static InstalledApplication? _application(Map<Object?, Object?>? value) =>
       switch (value) {
