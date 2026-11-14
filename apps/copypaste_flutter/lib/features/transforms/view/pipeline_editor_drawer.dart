@@ -5,6 +5,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
@@ -297,10 +298,12 @@ class _PipelineEditorDrawerState extends State<PipelineEditorDrawer> {
                 ),
                 Semantics(
                   label: l10n.transformsStepEnabled,
-                  child: Switch(
-                    value: step.enabled,
-                    onChanged: (value) => setState(
-                      () => _steps[index] = step.copyWith(enabled: value),
+                  child: AppSwitchFrame(
+                    child: Switch(
+                      value: step.enabled,
+                      onChanged: (value) => setState(
+                        () => _steps[index] = step.copyWith(enabled: value),
+                      ),
                     ),
                   ),
                 ),

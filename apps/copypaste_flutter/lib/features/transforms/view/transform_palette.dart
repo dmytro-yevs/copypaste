@@ -7,6 +7,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
@@ -1143,14 +1144,16 @@ class _ChainStrip extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Switch(
-                      key: const ValueKey('transform-step-enabled'),
-                      value: chain[selected].enabled,
-                      onChanged: (value) =>
-                          controller.setStepEnabled(selected, value),
-                    ),
-                    const Gap(AppSpacing.xs),
                     Text(l10n.transformsStepEnabled).small(),
+                    const Gap(AppSpacing.sm),
+                    AppSwitchFrame(
+                      child: Switch(
+                        key: const ValueKey('transform-step-enabled'),
+                        value: chain[selected].enabled,
+                        onChanged: (value) =>
+                            controller.setStepEnabled(selected, value),
+                      ),
+                    ),
                   ],
                 ),
               ),

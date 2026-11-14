@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
@@ -152,12 +153,17 @@ class _AiPolicyEditorState extends State<AiPolicyEditor> {
     required String label,
     required bool value,
     required ValueChanged<bool>? onChanged,
-  }) => MergeSemantics(
-    child: Row(
-      children: [
-        Expanded(child: Text(label).small()),
-        Switch(value: value, onChanged: onChanged),
-      ],
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+    child: MergeSemantics(
+      child: Row(
+        children: [
+          Expanded(child: Text(label).small()),
+          AppSwitchFrame(
+            child: Switch(value: value, onChanged: onChanged),
+          ),
+        ],
+      ),
     ),
   );
 

@@ -4,6 +4,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_icon_frame.dart';
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_switch_frame.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
@@ -593,22 +594,33 @@ class _TransformsSettingsViewState extends State<TransformsSettingsView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 for (final detector in TransformDetector.values)
-                  MergeSemantics(
-                    child: Row(
-                      children: [
-                        Expanded(child: Text(_detectorLabel(detector)).small()),
-                        Switch(
-                          value: !preferences.disabledDetectors.contains(
-                            detector.wireName,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: MergeSemantics(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(_detectorLabel(detector)).small(),
                           ),
-                          onChanged: _controller.busy
-                              ? null
-                              : (value) => _run(
-                                  () =>
-                                      _controller.setDetector(detector, value),
-                                ),
-                        ),
-                      ],
+                          AppSwitchFrame(
+                            child: Switch(
+                              value: !preferences.disabledDetectors.contains(
+                                detector.wireName,
+                              ),
+                              onChanged: _controller.busy
+                                  ? null
+                                  : (value) => _run(
+                                      () => _controller.setDetector(
+                                        detector,
+                                        value,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
               ],
