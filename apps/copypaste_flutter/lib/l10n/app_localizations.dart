@@ -10395,12 +10395,6 @@ abstract class AppLocalizations {
   /// **'{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}'**
   String modulesCapability(String capability);
 
-  /// Error when the app cannot perform a newer module operation yet.
-  ///
-  /// In en, this message translates to:
-  /// **'This CopyPaste version can\'t do this yet.'**
-  String get modulesUnsupportedOperation;
-
   /// Line naming the module that asks a question; {module} is the module name.
   ///
   /// In en, this message translates to:
@@ -10418,6 +10412,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your answer was not sent.'**
   String get modulesPromptAnswerFailed;
+
+  /// System notification text for a module question that arrives while the app is hidden.
+  ///
+  /// In en, this message translates to:
+  /// **'Open CopyPaste to answer.'**
+  String get modulesPromptNotificationBody;
 
   /// Shown instead of a device name that is no longer known.
   ///

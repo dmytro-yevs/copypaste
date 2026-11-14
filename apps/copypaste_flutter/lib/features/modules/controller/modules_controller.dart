@@ -21,12 +21,19 @@ class ModulesController extends ChangeNotifier {
     Future<void> Function()? restart,
     ModuleAccessRepository? access,
     ModuleDeviceCatalog? devices,
+    Stream<void>? reconnects,
   }) : _repository = repository,
        _marketplace = marketplace,
        _inputPicker = inputPicker,
        _restart = restart,
        _access = access,
-       _devices = devices;
+       _devices = devices {
+    _reconnects = reconnects?.listen(
+      (_) => unawaited(_applyLocale()),
+      onError: (Object _) {},
+    );
+  }
+  late final StreamSubscription<void>? _reconnects;
   final ModuleAccessRepository? _access;
   final ModuleDeviceCatalog? _devices;
   final ModulesRepository _repository;
@@ -164,7 +171,10 @@ class ModulesController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_disposed || _busy) return;
     _state = ModulesLoadState.loading;
+    String? listedLocale;
     await _perform(() async {
+      listedLocale = _locale;
+      await _localeSent;
       final modules = await _repository.list();
       if (!_disposed) {
         _modules = modules;
@@ -176,6 +186,8 @@ class ModulesController extends ChangeNotifier {
       _state = ModulesLoadState.error;
       notifyListeners();
     }
+    // The language resolved while the first list was in flight.
+    if (!_disposed && _locale != listedLocale) unawaited(_applyLocale());
   }
 
   Future<void> install(MarketplaceModule module) async {
@@ -290,26 +302,36 @@ class ModulesController extends ChangeNotifier {
   }
 
   String? _locale;
+  Future<void>? _localeSent;
 
   /// Reports the app language, then rereads the summaries it localizes.
+  /// The runtime may keep it in memory only, so it is sent again on every
+  /// reconnect.
   void useLocale(String locale) {
     if (_disposed || _locale == locale) return;
     _locale = locale;
-    unawaited(_sendLocale(locale));
+    unawaited(_applyLocale());
   }
 
-  Future<void> _sendLocale(String locale) async {
+  Future<void> _applyLocale() async {
+    final locale = _locale;
+    if (_disposed || locale == null) return;
+    final sent = _localeSent = _repository.setLocale(locale).catchError((
+      Object _,
+    ) {
+      // Summaries keep their English strings.
+    });
+    await sent;
+    if (_disposed || _locale != locale || _state != ModulesLoadState.ready) {
+      return;
+    }
     try {
-      await _repository.setLocale(locale);
-      if (_disposed || _locale != locale || _state != ModulesLoadState.ready) {
-        return;
-      }
       final modules = await _repository.list();
       if (_disposed || _locale != locale || _busy) return;
       _modules = modules;
       notifyListeners();
     } catch (_) {
-      // Summaries keep their English strings.
+      // Keep the last known list.
     }
   }
 
@@ -428,6 +450,7 @@ class ModulesController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_reconnects?.cancel());
     _marketplace.dispose();
     super.dispose();
   }

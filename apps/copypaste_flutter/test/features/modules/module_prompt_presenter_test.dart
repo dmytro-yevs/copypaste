@@ -34,6 +34,21 @@ class _Prompts implements ModulePromptsRepository {
   }
 }
 
+class _Notifier implements ModulePromptNotifier {
+  final openedEvents = StreamController<String>.broadcast();
+  final shown = <String>[];
+  var dismissed = 0;
+
+  @override
+  Stream<String> get opened => openedEvents.stream;
+
+  @override
+  Future<void> show(ModulePrompt prompt) async => shown.add(prompt.id);
+
+  @override
+  Future<void> dismiss() async => dismissed++;
+}
+
 ModulePrompt _prompt(String id) => ModulePrompt(
   id: id,
   moduleId: 'copypaste.ai-tools',
@@ -124,5 +139,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Continue?'), findsNothing);
     expect(repository.answers, isEmpty);
+  });
+
+  test('notifies while hidden and shows the app when opened', () async {
+    final repository = _Prompts();
+    final notifier = _Notifier();
+    final visible = ValueNotifier(false);
+    var shownApp = 0;
+    final controller = ModulePromptController(
+      repository: repository,
+      moduleTitle: (_) => null,
+      notifier: notifier,
+      visible: visible,
+      showApp: () {
+        shownApp++;
+        visible.value = true;
+      },
+    );
+    addTearDown(controller.dispose);
+    repository.publish([_prompt('one')]);
+    await pumpEventQueue();
+    repository.publish([_prompt('one')]);
+    await pumpEventQueue();
+    expect(notifier.shown, ['one']);
+
+    notifier.openedEvents.add('one');
+    await pumpEventQueue();
+    expect(shownApp, 1);
+    expect(notifier.dismissed, 1);
+    expect(controller.current?.id, 'one');
+
+    await controller.resolve(controller.current!, 'allow');
+    visible.value = false;
+    expect(notifier.shown, ['one']);
   });
 }

@@ -6182,9 +6182,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get modulesUnsupportedOperation => '此 CopyPaste 版本尚不支持此操作。';
-
-  @override
   String modulesPromptFrom(String module) {
     return '来自 $module';
   }
@@ -6194,6 +6191,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get modulesPromptAnswerFailed => '你的回答未发送。';
+
+  @override
+  String get modulesPromptNotificationBody => '打开 CopyPaste 以回复。';
 
   @override
   String get modulesUnknownDevice => '未知设备';

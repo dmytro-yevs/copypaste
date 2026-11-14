@@ -11,6 +11,7 @@ abstract final class RuntimeEventKind {
   static const pasteQueue = 'paste_queue';
   static const library = 'library';
   static const operationProgress = 'operation_progress';
+  static const modulePrompt = 'module_prompt';
 }
 
 /// Synced record kinds a [RuntimeEventKind.library] event can cover.

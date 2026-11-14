@@ -6,22 +6,7 @@ import '../models/module_models.dart';
 import '../models/module_view.dart';
 import 'modules_repository.dart';
 
-/// Sends a `ModuleOperation` as its JSON object and returns the reply JSON.
-typedef ModuleOperationSender =
-    Future<String> Function(Map<String, Object?> operation);
-
-/// The bridge adapter for the schema 6 operations (`SetEnabled` with
-/// capabilities, `SetLocale`, `Prompts`, `AnswerPrompt`). TODO: call the
-/// runtime bridge once it forwards these `ModuleOperation`s.
-Future<String> sendModuleOperation(Map<String, Object?> operation) async =>
-    throw ModulesException(AppStrings.current.modulesUnsupportedOperation);
-
 class RuntimeModulesRepository implements ModulesRepository {
-  RuntimeModulesRepository({ModuleOperationSender send = sendModuleOperation})
-    : _send = send;
-
-  final ModuleOperationSender _send;
-
   @override
   Future<List<InstalledModule>> list() => guardModuleRequest(() async {
     final values = jsonDecode(await runtime.modulesList()) as List<dynamic>;
@@ -119,9 +104,8 @@ class RuntimeModulesRepository implements ModulesRepository {
   );
 
   @override
-  Future<void> setLocale(String locale) => guardModuleRequest(
-    () => _send({'operation': 'set_locale', 'locale': locale}),
-  );
+  Future<void> setLocale(String locale) =>
+      guardModuleRequest(() => runtime.moduleSetLocale(locale: locale));
   @override
   Future<void> setPreferences(String id, Map<String, Object> values) =>
       guardModuleRequest(

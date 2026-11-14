@@ -259,6 +259,47 @@ void main() {
       expect(marketplace.disposed, isTrue);
     },
   );
+
+  test('reports the locale before listing and again on reconnect', () async {
+    final repository = _ListingRepository()..modules = [testModule];
+    final reconnects = StreamController<void>();
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      reconnects: reconnects.stream,
+    );
+    addTearDown(controller.dispose);
+    controller.useLocale('uk');
+    await controller.initialize();
+    expect(repository.calls, ['locale:uk', 'list']);
+
+    reconnects.add(null);
+    await pumpEventQueue();
+    expect(repository.calls, ['locale:uk', 'list', 'locale:uk', 'list']);
+    await reconnects.close();
+  });
+
+  test('relists when the language resolves during the first list', () async {
+    final repository = _ListingRepository()..modules = [testModule];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+    );
+    addTearDown(controller.dispose);
+    final initialized = controller.initialize();
+    controller.useLocale('uk');
+    await initialized;
+    await pumpEventQueue();
+    expect(repository.calls, ['locale:uk', 'list', 'locale:uk', 'list']);
+  });
+}
+
+class _ListingRepository extends MemoryModulesRepository {
+  @override
+  Future<List<InstalledModule>> list() {
+    calls.add('list');
+    return super.list();
+  }
 }
 
 class _UnlistableAfterInstallRepository extends MemoryModulesRepository {

@@ -1,68 +1,59 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter_test/flutter_test.dart';
-import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/runtime_module_prompts_repository.dart';
-import 'package:copypaste_flutter/features/modules/repository/runtime_modules_repository.dart';
+import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/shared/runtime_event_service.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('schema 6 operations use the ModuleOperation wire shape', () async {
-    final sent = <Map<String, Object?>>[];
-    Future<String> send(Map<String, Object?> operation) async {
-      sent.add(operation);
-      return switch (operation['operation']) {
-        'prompts' => jsonEncode([
-          {
-            'prompt_id': 'p1',
-            'module_id': 'copypaste.ai-tools',
-            'title': 'Allow?',
-            'body': 'Claude asks.',
-            'choices': [
-              {'id': 'deny', 'title': 'Deny', 'destructive': true},
-              {'id': 'allow', 'title': 'Allow'},
-            ],
-            'expires_at_ms': 1000,
-          },
-        ]),
-        _ => 'null',
-      };
-    }
-
-    final modules = RuntimeModulesRepository(send: send);
-    await modules.setEnabled(
-      'copypaste.ai-tools',
-      true,
-      capabilities: const [
-        ModuleCapability.historyRead,
-        ModuleCapability.clipboardWrite,
-      ],
+  test('prompts map the runtime JSON, events and answers', () async {
+    final source = StreamController<runtime.RuntimeEvent>();
+    final answers = <(String, String?)>[];
+    final prompts = RuntimeModulePromptsRepository(
+      read: () async => jsonEncode([
+        {
+          'prompt_id': 'p1',
+          'module_id': 'copypaste.ai-tools',
+          'title': 'Allow?',
+          'body': 'Claude asks.',
+          'choices': [
+            {'id': 'deny', 'title': 'Deny', 'destructive': true},
+            {'id': 'allow', 'title': 'Allow'},
+          ],
+          'expires_at_ms': 1000,
+        },
+      ]),
+      answer: (id, choice) async => answers.add((id, choice)),
+      events: RuntimeEventService(
+        allocate: () async => BigInt.one,
+        cancel: (_) async {},
+        watch: (_) => source.stream,
+      ),
     );
-    await modules.setLocale('pt-BR');
-    final prompts = RuntimeModulePromptsRepository(send: send);
-    final pending = await prompts.pending();
-    await prompts.answer('p1', null);
+    var changes = 0;
+    final subscription = prompts.changes().listen((_) => changes++);
+    await Future<void>.delayed(Duration.zero);
+    for (final kind in ['ready', 'items', 'module_prompt']) {
+      source.add(
+        runtime.RuntimeEvent(
+          kind: kind,
+          itemCount: BigInt.zero,
+          captured: false,
+          runtimeWatch: true,
+        ),
+      );
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(changes, 2);
 
-    expect(sent, [
-      {
-        'operation': 'set_enabled',
-        'id': 'copypaste.ai-tools',
-        'enabled': true,
-        'capabilities': ['history_read', 'clipboard_write'],
-      },
-      {'operation': 'set_locale', 'locale': 'pt-BR'},
-      {'operation': 'prompts'},
-      {'operation': 'answer_prompt', 'prompt_id': 'p1', 'choice': null},
-    ]);
-    final prompt = pending.single;
+    final prompt = (await prompts.pending()).single;
     expect(prompt.moduleId, 'copypaste.ai-tools');
     expect(prompt.choices.map((choice) => choice.destructive), [true, false]);
     expect(prompt.expiresAt, DateTime.fromMillisecondsSinceEpoch(1000));
-  });
-
-  test('operations fail as unsupported until the bridge is wired', () async {
-    await expectLater(
-      RuntimeModulesRepository().setLocale('uk'),
-      throwsA(isA<ModulesException>()),
-    );
+    await prompts.answer('p1', null);
+    expect(answers, [('p1', null)]);
+    await subscription.cancel();
+    await source.close();
   });
 }

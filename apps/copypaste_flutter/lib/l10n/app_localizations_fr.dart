@@ -6816,10 +6816,6 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get modulesUnsupportedOperation =>
-      'Cette version de CopyPaste ne le permet pas encore.';
-
-  @override
   String modulesPromptFrom(String module) {
     return 'De $module';
   }
@@ -6829,6 +6825,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get modulesPromptAnswerFailed => 'Votre réponse n\'a pas été envoyée.';
+
+  @override
+  String get modulesPromptNotificationBody => 'Ouvrez CopyPaste pour répondre.';
 
   @override
   String get modulesUnknownDevice => 'Appareil inconnu';

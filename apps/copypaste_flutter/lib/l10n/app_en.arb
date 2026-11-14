@@ -8165,10 +8165,6 @@
       }
     }
   },
-  "modulesUnsupportedOperation": "This CopyPaste version can't do this yet.",
-  "@modulesUnsupportedOperation": {
-    "description": "Error when the app cannot perform a newer module operation yet."
-  },
   "modulesPromptFrom": "From {module}",
   "@modulesPromptFrom": {
     "description": "Line naming the module that asks a question; {module} is the module name.",
@@ -8185,6 +8181,10 @@
   "modulesPromptAnswerFailed": "Your answer was not sent.",
   "@modulesPromptAnswerFailed": {
     "description": "Error when an answer to a module question could not be sent."
+  },
+  "modulesPromptNotificationBody": "Open CopyPaste to answer.",
+  "@modulesPromptNotificationBody": {
+    "description": "System notification text for a module question that arrives while the app is hidden."
   },
   "modulesUnknownDevice": "Unknown device",
   "@modulesUnknownDevice": {

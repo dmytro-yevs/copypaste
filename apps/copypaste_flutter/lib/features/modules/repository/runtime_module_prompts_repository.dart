@@ -1,30 +1,36 @@
 import 'dart:convert';
 
+import '../../../generated/api.dart' as runtime;
 import '../../../shared/runtime_event_service.dart';
 import '../models/module_prompt.dart';
 import 'modules_repository.dart';
 import 'runtime_modules_repository.dart';
 
-/// [ModulePromptsRepository] over the runtime's module operations and its
+/// [ModulePromptsRepository] over the runtime's module prompts and its
 /// `module_prompt` events.
 class RuntimeModulePromptsRepository implements ModulePromptsRepository {
   RuntimeModulePromptsRepository({
-    ModuleOperationSender send = sendModuleOperation,
+    Future<String> Function()? read,
+    Future<void> Function(String promptId, String? choice)? answer,
     RuntimeEventService? events,
-  }) : _send = send,
+  }) : _read = read ?? runtime.modulePrompts,
+       _answer =
+           answer ??
+           ((promptId, choice) =>
+               runtime.moduleAnswerPrompt(promptId: promptId, choice: choice)),
        _events = events ?? RuntimeEventService.instance;
 
-  static const eventKind = 'module_prompt';
-
-  final ModuleOperationSender _send;
+  final Future<String> Function() _read;
+  final Future<void> Function(String promptId, String? choice) _answer;
   final RuntimeEventService _events;
 
   @override
-  Stream<void> changes() => _events.eventsOf(const {eventKind}).map((_) {});
+  Stream<void> changes() =>
+      _events.eventsOf(const {RuntimeEventKind.modulePrompt}).map((_) {});
 
   @override
   Future<List<ModulePrompt>> pending() => guardModuleRequest(() async {
-    final prompts = jsonDecode(await _send({'operation': 'prompts'})) as List;
+    final prompts = jsonDecode(await _read()) as List;
     return List.unmodifiable(
       prompts.cast<Map<String, dynamic>>().map(
         (prompt) => ModulePrompt(
@@ -50,11 +56,6 @@ class RuntimeModulePromptsRepository implements ModulePromptsRepository {
   });
 
   @override
-  Future<void> answer(String promptId, String? choice) => guardModuleRequest(
-    () => _send({
-      'operation': 'answer_prompt',
-      'prompt_id': promptId,
-      'choice': choice,
-    }),
-  );
+  Future<void> answer(String promptId, String? choice) =>
+      guardModuleRequest(() => _answer(promptId, choice));
 }

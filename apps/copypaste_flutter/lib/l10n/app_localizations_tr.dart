@@ -6643,10 +6643,6 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get modulesUnsupportedOperation =>
-      'Bu CopyPaste sürümü bunu henüz desteklemiyor.';
-
-  @override
   String modulesPromptFrom(String module) {
     return 'Gönderen: $module';
   }
@@ -6656,6 +6652,10 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get modulesPromptAnswerFailed => 'Yanıtınız gönderilmedi.';
+
+  @override
+  String get modulesPromptNotificationBody =>
+      'Yanıtlamak için CopyPaste\'i açın.';
 
   @override
   String get modulesUnknownDevice => 'Bilinmeyen cihaz';

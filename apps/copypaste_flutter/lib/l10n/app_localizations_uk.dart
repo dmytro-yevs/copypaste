@@ -6815,10 +6815,6 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get modulesUnsupportedOperation =>
-      'Ця версія CopyPaste ще не підтримує цю дію.';
-
-  @override
   String modulesPromptFrom(String module) {
     return 'Від $module';
   }
@@ -6828,6 +6824,10 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get modulesPromptAnswerFailed => 'Вашу відповідь не надіслано.';
+
+  @override
+  String get modulesPromptNotificationBody =>
+      'Відкрийте CopyPaste, щоб відповісти.';
 
   @override
   String get modulesUnknownDevice => 'Невідомий пристрій';

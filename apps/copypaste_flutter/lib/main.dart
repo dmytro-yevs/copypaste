@@ -8,6 +8,7 @@ import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/module_prompt_controller.dart';
 import 'features/modules/repository/runtime_module_prompts_repository.dart';
+import 'features/modules/repository/system_module_prompt_notifier.dart';
 import 'features/modules/controller/modules_controller.dart';
 import 'features/modules/controller/module_app_update_preparer.dart';
 import 'features/modules/repository/module_update_stager.dart';
@@ -88,6 +89,7 @@ import 'platform/desktop/quick_paste_host.dart';
 import 'platform/pairing/pairing_presentation.dart';
 import 'platform/permissions/linux_integration.dart';
 import 'platform/update/app_update_platform.dart';
+import 'shared/runtime_event_service.dart';
 import 'shared/state_view.dart';
 
 Future<void> main([List<String> arguments = const []]) async {
@@ -435,6 +437,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           ),
           inputPicker: const FileSelectorModuleInputPicker(),
           devices: const RuntimeModuleDeviceCatalog(),
+          reconnects: RuntimeEventService.instance.eventsOf(const {}),
           restart: () async {
             if (Platform.isAndroid) {
               await _prepareForTermination();
@@ -446,9 +449,14 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           },
         );
         final modules = _modulesController!;
+        // Before the first list, so its summaries are already localized.
+        modules.useLocale(AppStrings.locale.toLanguageTag());
         _modulePrompts = ModulePromptController(
           repository: RuntimeModulePromptsRepository(),
           moduleTitle: (id) => modules.installedModule(id)?.title,
+          notifier: SystemModulePromptNotifier(),
+          visible: _visibility,
+          showApp: () => unawaited(_desktopWindow?.showFromTrayOrDock()),
         );
         _historyController = HistoryController(
           _historyRepository!,

@@ -37,6 +37,9 @@ abstract final class AppStrings {
 
   static AppLocalizations get current => _current;
 
+  /// The resolved interface locale [current] reads.
+  static Locale get locale => _locale;
+
   static void useLocale(Locale locale) {
     final next = AppLocalizations.delegate.isSupported(locale)
         ? locale

@@ -36,6 +36,14 @@ abstract interface class ModulePromptsRepository {
   Future<void> answer(String promptId, String? choice);
 }
 
+/// A system notification for a prompt that arrives while the app is hidden;
+/// activating it reports the prompt id.
+abstract interface class ModulePromptNotifier {
+  Stream<String> get opened;
+  Future<void> show(ModulePrompt prompt);
+  Future<void> dismiss();
+}
+
 /// Devices a device-set field can name, by the ids history uses.
 abstract interface class ModuleDeviceCatalog {
   Future<List<ModuleChoice>> devices();
