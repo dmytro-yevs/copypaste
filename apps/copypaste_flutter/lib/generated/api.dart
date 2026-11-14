@@ -26,8 +26,31 @@ Future<void> moduleStageUpdate({
   appVersion: appVersion,
 );
 
-Future<void> moduleSetEnabled({required String id, required bool enabled}) =>
-    RustLib.instance.api.crateApiModuleSetEnabled(id: id, enabled: enabled);
+/// Enabling echoes every declared capability the user confirmed, by its wire
+/// name (`history_read`, …).
+Future<void> moduleSetEnabled({
+  required String id,
+  required bool enabled,
+  required List<String> capabilities,
+}) => RustLib.instance.api.crateApiModuleSetEnabled(
+  id: id,
+  enabled: enabled,
+  capabilities: capabilities,
+);
+
+/// The app UI locale for module strings, such as `uk` or `en-US`.
+Future<void> moduleSetLocale({required String locale}) =>
+    RustLib.instance.api.crateApiModuleSetLocale(locale: locale);
+
+/// JSON list of the module prompts waiting for the user.
+Future<String> modulePrompts() => RustLib.instance.api.crateApiModulePrompts();
+
+/// `None` dismisses the prompt.
+Future<void> moduleAnswerPrompt({required String promptId, String? choice}) =>
+    RustLib.instance.api.crateApiModuleAnswerPrompt(
+      promptId: promptId,
+      choice: choice,
+    );
 
 Future<void> moduleSetPreferences({
   required String id,

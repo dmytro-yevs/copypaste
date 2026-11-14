@@ -79,8 +79,13 @@ class RuntimeModulesRepository implements ModulesRepository {
     await runtime.moduleInstall(packagePath: packagePath);
   });
   @override
-  Future<void> setEnabled(String id, bool enabled) =>
-      _guard(() => runtime.moduleSetEnabled(id: id, enabled: enabled));
+  Future<void> setEnabled(String id, bool enabled) => _guard(
+    () => runtime.moduleSetEnabled(
+      id: id,
+      enabled: enabled,
+      capabilities: const [],
+    ),
+  );
   @override
   Future<void> setPreferences(String id, Map<String, Object> values) => _guard(
     () => runtime.moduleSetPreferences(id: id, valuesJson: jsonEncode(values)),

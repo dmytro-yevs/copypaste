@@ -65,14 +65,47 @@ pub async fn module_stage_update(
     .map(|_| ())
 }
 
-pub async fn module_set_enabled(id: String, enabled: bool) -> Result<(), RuntimeError> {
+/// Enabling echoes every declared capability the user confirmed, by its wire
+/// name (`history_read`, …).
+pub async fn module_set_enabled(
+    id: String,
+    enabled: bool,
+    capabilities: Vec<String>,
+) -> Result<(), RuntimeError> {
+    let capabilities = capabilities
+        .into_iter()
+        .map(|name| serde_json::from_value(serde_json::Value::String(name)))
+        .collect::<Result<_, _>>()
+        .map_err(|_| RuntimeError::internal())?;
     module_request(copypaste_ipc::ModuleOperation::SetEnabled {
         id,
         enabled,
-        capabilities: Vec::new(),
+        capabilities,
     })
     .await
     .map(|_| ())
+}
+
+/// The app UI locale for module strings, such as `uk` or `en-US`.
+pub async fn module_set_locale(locale: String) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::SetLocale { locale })
+        .await
+        .map(|_| ())
+}
+
+/// JSON list of the module prompts waiting for the user.
+pub async fn module_prompts() -> Result<String, RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::Prompts).await
+}
+
+/// `None` dismisses the prompt.
+pub async fn module_answer_prompt(
+    prompt_id: String,
+    choice: Option<String>,
+) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::AnswerPrompt { prompt_id, choice })
+        .await
+        .map(|_| ())
 }
 
 pub async fn module_set_preferences(id: String, values_json: String) -> Result<(), RuntimeError> {
