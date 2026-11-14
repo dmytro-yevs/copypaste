@@ -1706,5 +1706,17 @@
   "historyProvenanceTransformed": "Przekształcony",
   "historyRuleTag": "{name} (auto)",
   "historyMetadataExpiry": "Usunięcie",
-  "historyMetadataRuleTags": "Tagi automatyczne"
+  "historyMetadataRuleTags": "Tagi automatyczne",
+  "modulesEnableTitle": "Włączyć moduł {module}?",
+  "modulesEnableAccess": "Moduł będzie mógł:",
+  "modulesCapability": "{capability, select, history_read{Czytać historię schowka} clipboard_write{Kopiować do schowka} library_write{Zapisywać fragmenty i przypinać elementy} snippets{Czytać Twoje fragmenty} synced_records{Synchronizować swoje dane między urządzeniami} local_state{Przechowywać swoje dane na tym urządzeniu} prompts{Prosić o potwierdzenie działań} endpoints{Przyjmować połączenia z lokalnych aplikacji} other{Korzystać z usługi CopyPaste}}",
+  "modulesUnsupportedOperation": "Ta wersja CopyPaste jeszcze tego nie obsługuje.",
+  "modulesPromptFrom": "Od {module}",
+  "modulesUnknownModule": "Nieznany moduł",
+  "modulesPromptAnswerFailed": "Nie wysłano odpowiedzi.",
+  "modulesUnknownDevice": "Nieznane urządzenie",
+  "modulesChooseDevices": "Wybierz urządzenia",
+  "modulesAddApp": "Dodaj aplikację",
+  "modulesRemoveApp": "Usuń {app}",
+  "modulesNoApps": "Nie wybrano aplikacji"
 }

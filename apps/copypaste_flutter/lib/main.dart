@@ -6,6 +6,8 @@ import 'l10n/l10n.dart';
 
 import 'platform/lifecycle/application_restarter.dart';
 
+import 'features/modules/controller/module_prompt_controller.dart';
+import 'features/modules/repository/runtime_module_prompts_repository.dart';
 import 'features/modules/controller/modules_controller.dart';
 import 'features/modules/controller/module_app_update_preparer.dart';
 import 'features/modules/repository/module_update_stager.dart';
@@ -262,6 +264,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   AppFeatures? _features;
   SettingsController? _settingsController;
   ModulesController? _modulesController;
+  ModulePromptController? _modulePrompts;
   OnboardingController? _onboarding;
   bool _ownsOnboarding = false;
   bool _onboardingReady = false;
@@ -430,6 +433,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
             currentTarget: ModuleMarketplacePlatform().currentTarget,
           ),
           inputPicker: const FileSelectorModuleInputPicker(),
+          devices: const RuntimeModuleDeviceCatalog(),
           restart: () async {
             if (Platform.isAndroid) {
               await _prepareForTermination();
@@ -439,6 +443,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
               await _startRuntime();
             }
           },
+        );
+        final modules = _modulesController!;
+        _modulePrompts = ModulePromptController(
+          repository: RuntimeModulePromptsRepository(),
+          moduleTitle: (id) => modules.installedModule(id)?.title,
         );
         _historyController = HistoryController(
           _historyRepository!,
@@ -600,6 +609,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _settingsController = null;
     unawaited(features?.dispose().catchError((Object _) {}));
     historyController?.dispose();
+    _modulePrompts?.dispose();
+    _modulePrompts = null;
     _modulesController?.dispose();
     _modulesController = null;
     _notifications?.dispose();
@@ -857,6 +868,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       settingsController: _settingsController,
       launchAtLogin: _launchAtLogin,
       modulesController: _modulesController,
+      modulePrompts: _modulePrompts,
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {

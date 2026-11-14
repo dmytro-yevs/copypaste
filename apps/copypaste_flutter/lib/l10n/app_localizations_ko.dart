@@ -6275,4 +6275,59 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => '자동 태그';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module을(를) 켜시겠습니까?';
+  }
+
+  @override
+  String get modulesEnableAccess => '이 모듈이 할 수 있는 작업:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': '클립보드 기록 읽기',
+      'clipboard_write': '클립보드에 복사',
+      'library_write': '스니펫 저장 및 항목 고정',
+      'snippets': '스니펫 읽기',
+      'synced_records': '기기 간 데이터 동기화',
+      'local_state': '이 기기에 데이터 보관',
+      'prompts': '작업 확인 요청',
+      'endpoints': '로컬 앱의 연결 수락',
+      'other': 'CopyPaste 서비스 사용',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation => '이 CopyPaste 버전에서는 아직 지원되지 않습니다.';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return '$module에서';
+  }
+
+  @override
+  String get modulesUnknownModule => '알 수 없는 모듈';
+
+  @override
+  String get modulesPromptAnswerFailed => '응답을 보내지 못했습니다.';
+
+  @override
+  String get modulesUnknownDevice => '알 수 없는 기기';
+
+  @override
+  String get modulesChooseDevices => '기기 선택';
+
+  @override
+  String get modulesAddApp => '앱 추가';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app 제거';
+  }
+
+  @override
+  String get modulesNoApps => '선택한 앱 없음';
 }

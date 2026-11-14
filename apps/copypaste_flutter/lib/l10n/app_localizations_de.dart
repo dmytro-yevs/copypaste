@@ -6757,4 +6757,60 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => 'Automatische Tags';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module aktivieren?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Das Modul kann dann:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Deinen Zwischenablageverlauf lesen',
+      'clipboard_write': 'In deine Zwischenablage kopieren',
+      'library_write': 'Textbausteine speichern und Einträge anheften',
+      'snippets': 'Deine Textbausteine lesen',
+      'synced_records': 'Seine Daten zwischen deinen Geräten synchronisieren',
+      'local_state': 'Seine Daten auf diesem Gerät speichern',
+      'prompts': 'Dich um Bestätigung bitten',
+      'endpoints': 'Verbindungen lokaler Apps annehmen',
+      'other': 'Einen CopyPaste-Dienst nutzen',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation =>
+      'Diese CopyPaste-Version unterstützt das noch nicht.';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Von $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Unbekanntes Modul';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Deine Antwort wurde nicht gesendet.';
+
+  @override
+  String get modulesUnknownDevice => 'Unbekanntes Gerät';
+
+  @override
+  String get modulesChooseDevices => 'Geräte wählen';
+
+  @override
+  String get modulesAddApp => 'App hinzufügen';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app entfernen';
+  }
+
+  @override
+  String get modulesNoApps => 'Keine Apps gewählt';
 }

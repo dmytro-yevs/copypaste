@@ -1706,5 +1706,17 @@
   "historyProvenanceTransformed": "Trasformato",
   "historyRuleTag": "{name} (auto)",
   "historyMetadataExpiry": "Eliminazione",
-  "historyMetadataRuleTags": "Tag automatici"
+  "historyMetadataRuleTags": "Tag automatici",
+  "modulesEnableTitle": "Attivare {module}?",
+  "modulesEnableAccess": "Potrà:",
+  "modulesCapability": "{capability, select, history_read{Leggere la cronologia degli appunti} clipboard_write{Copiare negli appunti} library_write{Salvare frammenti e fissare elementi} snippets{Leggere i tuoi frammenti} synced_records{Sincronizzare i suoi dati tra i tuoi dispositivi} local_state{Conservare i suoi dati su questo dispositivo} prompts{Chiederti di confermare azioni} endpoints{Accettare connessioni da app locali} other{Usare un servizio di CopyPaste}}",
+  "modulesUnsupportedOperation": "Questa versione di CopyPaste non lo supporta ancora.",
+  "modulesPromptFrom": "Da {module}",
+  "modulesUnknownModule": "Modulo sconosciuto",
+  "modulesPromptAnswerFailed": "La tua risposta non è stata inviata.",
+  "modulesUnknownDevice": "Dispositivo sconosciuto",
+  "modulesChooseDevices": "Scegli dispositivi",
+  "modulesAddApp": "Aggiungi app",
+  "modulesRemoveApp": "Rimuovi {app}",
+  "modulesNoApps": "Nessuna app scelta"
 }

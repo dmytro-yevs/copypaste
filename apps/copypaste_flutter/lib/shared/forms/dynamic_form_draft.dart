@@ -3,8 +3,18 @@ import 'package:flutter/foundation.dart';
 import '../../l10n/l10n.dart';
 
 /// [text] is multi-line; [line] is a single line; [choices] picks several
-/// options and [choice] exactly one.
-enum DynamicFormFieldKind { text, line, boolean, file, choices, choice }
+/// options and [choice] exactly one. [devices] and [applications] hold ids
+/// chosen from pickers that the form's owner renders.
+enum DynamicFormFieldKind {
+  text,
+  line,
+  boolean,
+  file,
+  choices,
+  choice,
+  devices,
+  applications,
+}
 
 class DynamicFormChoice {
   const DynamicFormChoice({required this.id, required this.title});
@@ -88,12 +98,16 @@ class DynamicFormDraft extends ChangeNotifier {
   bool get valid =>
       fields.every((field) {
         final value = _values[field.id];
-        if (field.kind == DynamicFormFieldKind.choices) {
+        if (field.kind
+            case DynamicFormFieldKind.choices ||
+                DynamicFormFieldKind.devices ||
+                DynamicFormFieldKind.applications) {
           if (value is! List || (field.required && value.isEmpty)) return false;
           return value.length == value.toSet().length &&
-              value.every(
-                (id) => field.options.any((option) => option.id == id),
-              );
+              (field.kind != DynamicFormFieldKind.choices ||
+                  value.every(
+                    (id) => field.options.any((option) => option.id == id),
+                  ));
         }
         return !field.required ||
             field.kind == DynamicFormFieldKind.boolean ||

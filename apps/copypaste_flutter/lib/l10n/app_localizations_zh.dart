@@ -6156,4 +6156,59 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => '自动标签';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '启用 $module？';
+  }
+
+  @override
+  String get modulesEnableAccess => '它将能够：';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': '读取剪贴板历史',
+      'clipboard_write': '复制到剪贴板',
+      'library_write': '保存片段并置顶条目',
+      'snippets': '读取你的片段',
+      'synced_records': '在你的设备间同步其数据',
+      'local_state': '在此设备上保存其数据',
+      'prompts': '请你确认操作',
+      'endpoints': '接受本地应用的连接',
+      'other': '使用 CopyPaste 服务',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation => '此 CopyPaste 版本尚不支持此操作。';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return '来自 $module';
+  }
+
+  @override
+  String get modulesUnknownModule => '未知模块';
+
+  @override
+  String get modulesPromptAnswerFailed => '你的回答未发送。';
+
+  @override
+  String get modulesUnknownDevice => '未知设备';
+
+  @override
+  String get modulesChooseDevices => '选择设备';
+
+  @override
+  String get modulesAddApp => '添加应用';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '移除 $app';
+  }
+
+  @override
+  String get modulesNoApps => '未选择应用';
 }
