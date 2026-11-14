@@ -54,9 +54,11 @@ class ModuleViewSections extends StatelessWidget {
                                   key: ValueKey(
                                     'module-view-action-${action.command}-${action.title}',
                                   ),
-                                  style: action.destructive
-                                      ? const ButtonStyle.destructive()
-                                      : const ButtonStyle.secondary(),
+                                  style: AppTheme.actionButtonStyle(
+                                    action.destructive
+                                        ? const ButtonStyle.destructive()
+                                        : const ButtonStyle.secondary(),
+                                  ),
                                   onPressed: enabled
                                       ? () => onAction(action)
                                       : null,
