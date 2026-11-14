@@ -11,6 +11,8 @@ use winreg::types::FromRegValue;
 use winreg::{RegKey, RegValue, HKEY};
 
 const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
+const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+const MAX_UNINSTALL_ENTRIES: usize = 4096;
 
 pub fn image_names() -> Option<BTreeSet<String>> {
     image_names_at(APP_PATHS)
@@ -29,13 +31,56 @@ fn image_names_at(base: &str) -> Option<BTreeSet<String>> {
     readable.then_some(names)
 }
 
+/// `(DisplayIcon, DisplayName)` of installed programs that are not system
+/// components.
+pub fn uninstall_entries() -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for (root, access) in search_order() {
+        let Ok(programs) = RegKey::predef(root).open_subkey_with_flags(UNINSTALL, access) else {
+            continue;
+        };
+        for key in programs
+            .enum_keys()
+            .filter_map(Result::ok)
+            .take(MAX_UNINSTALL_ENTRIES)
+        {
+            let Ok(program) = programs.open_subkey_with_flags(&key, access) else {
+                continue;
+            };
+            if program
+                .get_value::<u32, _>("SystemComponent")
+                .is_ok_and(|value| value == 1)
+            {
+                continue;
+            }
+            let icon = program.get_value::<String, _>("DisplayIcon");
+            let name = program.get_value::<String, _>("DisplayName");
+            if let (Ok(icon), Ok(name)) = (icon, name) {
+                entries.push((icon, name.trim().to_owned()));
+            }
+        }
+    }
+    entries
+}
+
 pub fn executable(image_name: &str) -> Option<PathBuf> {
     if let Some(path) = lookup(APP_PATHS, image_name) {
         return Some(path);
     }
-    let root = std::env::var("SystemRoot").ok()?;
-    let path = PathBuf::from(root).join("System32").join(image_name);
-    path.is_file().then_some(path)
+    if let Ok(root) = std::env::var("SystemRoot") {
+        let path = PathBuf::from(root).join("System32").join(image_name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    uninstall_entries().into_iter().find_map(|(icon, _)| {
+        let path = PathBuf::from(crate::installed::display_icon_path(&icon));
+        let matches = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(image_name));
+        (matches && path.is_file()).then_some(path)
+    })
 }
 
 fn search_order() -> [(HKEY, u32); 6] {

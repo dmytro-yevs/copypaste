@@ -1646,16 +1646,10 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Uygulamayı hariç tut';
+  String get applicationPickerSearch => 'Uygulama ara';
 
   @override
-  String get settingsExcludeDialogAction => 'Hariç tut';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Uygulama tanımlayıcısı';
-
-  @override
-  String get settingsExcludeFailed => 'Uygulama hariç tutulamadı.';
+  String get applicationPickerEmpty => 'Uygulama bulunamadı';
 
   @override
   String get settingsSkipSecretTitle => 'Gizli pano içeriğini atla';
@@ -4711,10 +4705,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Bir uygulamanın varsayılanını paket kimliği, yürütülebilir dosya veya paket adıyla geçersiz kılın. Başka platformda yapılan girişler eşitlenir ama burada etkisizdir.';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => 'Uygulama tanımlayıcısı';
+      'Belirli uygulamalar için varsayılanı geçersiz kılın.';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4722,7 +4713,7 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => 'Ekle';
+  String get transformsAddApp => 'Uygulama ekle';
 
   @override
   String get transformsRemove => 'Kaldır';

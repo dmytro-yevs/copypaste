@@ -1677,16 +1677,10 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Exclure une application';
+  String get applicationPickerSearch => 'Rechercher des applications';
 
   @override
-  String get settingsExcludeDialogAction => 'Exclure';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Identifiant de l’application';
-
-  @override
-  String get settingsExcludeFailed => 'Impossible d’exclure l’application.';
+  String get applicationPickerEmpty => 'Aucune application trouvée';
 
   @override
   String get settingsSkipSecretTitle =>
@@ -4836,10 +4830,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Remplacez la valeur par défaut d\'une app via son identifiant de bundle, son exécutable ou son nom de paquet. Les entrées d\'une autre plateforme se synchronisent sans effet ici.';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => 'Identifiant de l\'app';
+      'Remplacez la valeur par défaut pour certaines apps.';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4847,7 +4838,7 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => 'Ajouter';
+  String get transformsAddApp => 'Ajouter une app';
 
   @override
   String get transformsRemove => 'Supprimer';

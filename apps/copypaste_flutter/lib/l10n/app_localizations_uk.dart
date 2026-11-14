@@ -1673,16 +1673,10 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Виключити програму';
+  String get applicationPickerSearch => 'Пошук програм';
 
   @override
-  String get settingsExcludeDialogAction => 'Виключити';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Ідентифікатор програми';
-
-  @override
-  String get settingsExcludeFailed => 'Не вдалося виключити програму.';
+  String get applicationPickerEmpty => 'Програм не знайдено';
 
   @override
   String get settingsSkipSecretTitle => 'Пропускати конфіденційні дані';
@@ -4806,10 +4800,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Перевизначте типове для програми за ідентифікатором пакета, виконуваним файлом або назвою пакета. Записи з іншої платформи синхронізуються, але тут не діють.';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => 'Ідентифікатор програми';
+      'Перевизначте типове для окремих програм.';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4817,7 +4808,7 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => 'Додати';
+  String get transformsAddApp => 'Додати програму';
 
   @override
   String get transformsRemove => 'Видалити';

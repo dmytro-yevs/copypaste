@@ -8,17 +8,15 @@
 
 import 'api.dart';
 import 'api/ai.dart';
+import 'api/applications.dart';
 import 'api/clips.dart';
 import 'api/paste_queue.dart';
 import 'api/rules.dart';
 import 'api/snippets.dart';
 import 'api/transforms.dart';
-
 import 'dart:async';
 import 'dart:convert';
-
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -168,6 +166,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  InstalledApplication dco_decode_box_autoadd_installed_application(
+    dynamic raw,
+  );
 
   @protected
   OperationProgressView dco_decode_box_autoadd_operation_progress_view(
@@ -381,6 +384,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  InstalledApplication dco_decode_installed_application(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
@@ -437,6 +443,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<HistoryTag> dco_decode_list_history_tag(dynamic raw);
+
+  @protected
+  List<InstalledApplication> dco_decode_list_installed_application(dynamic raw);
 
   @protected
   List<PasteQueueEntryView> dco_decode_list_paste_queue_entry_view(dynamic raw);
@@ -638,6 +647,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  InstalledApplication? dco_decode_opt_box_autoadd_installed_application(
+    dynamic raw,
+  );
 
   @protected
   OperationProgressView? dco_decode_opt_box_autoadd_operation_progress_view(
@@ -1207,6 +1221,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  InstalledApplication sse_decode_box_autoadd_installed_application(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   OperationProgressView sse_decode_box_autoadd_operation_progress_view(
     SseDeserializer deserializer,
   );
@@ -1458,6 +1477,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  InstalledApplication sse_decode_installed_application(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
@@ -1534,6 +1558,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<HistoryTag> sse_decode_list_history_tag(SseDeserializer deserializer);
+
+  @protected
+  List<InstalledApplication> sse_decode_list_installed_application(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<PasteQueueEntryView> sse_decode_list_paste_queue_entry_view(
@@ -1805,6 +1834,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  InstalledApplication? sse_decode_opt_box_autoadd_installed_application(
+    SseDeserializer deserializer,
+  );
 
   @protected
   OperationProgressView? sse_decode_opt_box_autoadd_operation_progress_view(
@@ -2560,6 +2594,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_installed_application(
+    InstalledApplication self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_operation_progress_view(
     OperationProgressView self,
     SseSerializer serializer,
@@ -2881,6 +2921,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_installed_application(
+    InstalledApplication self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
@@ -2973,6 +3019,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_history_tag(
     List<HistoryTag> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_installed_application(
+    List<InstalledApplication> self,
     SseSerializer serializer,
   );
 
@@ -3306,6 +3358,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_i_64(
     PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_installed_application(
+    InstalledApplication? self,
     SseSerializer serializer,
   );
 

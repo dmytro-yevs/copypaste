@@ -2800,29 +2800,17 @@ abstract class AppLocalizations {
   /// **'Remove {app}'**
   String settingsExcludedAppsRemove(String app);
 
-  /// Title of the dialog that adds an excluded application.
+  /// Search field placeholder of the list for choosing an application.
   ///
   /// In en, this message translates to:
-  /// **'Exclude application'**
-  String get settingsExcludeDialogTitle;
+  /// **'Search applications'**
+  String get applicationPickerSearch;
 
-  /// Verb. Confirm button of the dialog that adds an excluded application.
+  /// Shown when no application matches the search in the application list.
   ///
   /// In en, this message translates to:
-  /// **'Exclude'**
-  String get settingsExcludeDialogAction;
-
-  /// Placeholder of the field for the application identifier, such as a bundle ID or executable name.
-  ///
-  /// In en, this message translates to:
-  /// **'Application identifier'**
-  String get settingsExcludeDialogPlaceholder;
-
-  /// Error shown in the exclude application dialog when adding fails.
-  ///
-  /// In en, this message translates to:
-  /// **'The application could not be excluded.'**
-  String get settingsExcludeFailed;
+  /// **'No applications found'**
+  String get applicationPickerEmpty;
 
   /// Settings row title for not capturing clipboard content that the source app marked as confidential.
   ///
@@ -7866,14 +7854,8 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.'**
+  /// **'Override the default for specific apps.'**
   String get transformsAppDefaultsDescription;
-
-  /// Placeholder of the app identifier field for a per-app default.
-  ///
-  /// In en, this message translates to:
-  /// **'App identifier'**
-  String get transformsAppIdentifierPlaceholder;
 
   /// Marks a per-app default made for another platform.
   ///
@@ -7881,11 +7863,11 @@ abstract class AppLocalizations {
   /// **'only on {platform}'**
   String transformsOtherPlatform(String platform);
 
-  /// Button that adds an entry to a list.
+  /// Button that chooses an application to add a per-app default for.
   ///
   /// In en, this message translates to:
-  /// **'Add'**
-  String get transformsAdd;
+  /// **'Add app'**
+  String get transformsAddApp;
 
   /// Button that removes an entry from a list.
   ///

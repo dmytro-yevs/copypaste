@@ -189,6 +189,7 @@ class MainActivity : FlutterActivity() {
     private var historyFilesChannel: HistoryFilesChannel? = null
     private var deviceAuthChannel: DeviceAuthChannel? = null
     private var quickAccessChannel: QuickAccessChannel? = null
+    private var installedAppsChannel: InstalledAppsChannel? = null
     private val clipboardFocusGuard = ClipboardFocusCaptureGuard()
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
@@ -227,6 +228,7 @@ class MainActivity : FlutterActivity() {
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         deviceAuthChannel = DeviceAuthChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         quickAccessChannel = QuickAccessChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        installedAppsChannel = InstalledAppsChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/app_language")
             .setMethodCallHandler { call, result ->
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -620,6 +622,8 @@ class MainActivity : FlutterActivity() {
         deviceAuthChannel = null
         quickAccessChannel?.dispose()
         quickAccessChannel = null
+        installedAppsChannel?.dispose()
+        installedAppsChannel = null
         foregroundCaptureEligible = false
         AndroidClipboardReader.retireForeground(foregroundCaptureHost)
         foregroundCaptureHost = null

@@ -1537,16 +1537,10 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'アプリを除外';
+  String get applicationPickerSearch => 'アプリを検索';
 
   @override
-  String get settingsExcludeDialogAction => '除外';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'アプリ識別子';
-
-  @override
-  String get settingsExcludeFailed => 'アプリを除外できませんでした。';
+  String get applicationPickerEmpty => 'アプリが見つかりません';
 
   @override
   String get settingsSkipSecretTitle => '機密のクリップボードをスキップ';
@@ -4478,11 +4472,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get transformsAppDefaultsTitle => 'アプリごとの既定';
 
   @override
-  String get transformsAppDefaultsDescription =>
-      'バンドル ID、実行ファイル、またはパッケージ名でアプリごとに既定を上書きします。他のプラットフォームの設定は同期されますが、ここでは効果がありません。';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => 'アプリ識別子';
+  String get transformsAppDefaultsDescription => '特定のアプリで既定を上書きします。';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4490,7 +4480,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => '追加';
+  String get transformsAddApp => 'アプリを追加';
 
   @override
   String get transformsRemove => '削除';

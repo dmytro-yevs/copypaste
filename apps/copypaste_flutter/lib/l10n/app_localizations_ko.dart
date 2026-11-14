@@ -1535,16 +1535,10 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => '앱 제외';
+  String get applicationPickerSearch => '앱 검색';
 
   @override
-  String get settingsExcludeDialogAction => '제외';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => '앱 식별자';
-
-  @override
-  String get settingsExcludeFailed => '앱을 제외할 수 없습니다.';
+  String get applicationPickerEmpty => '앱을 찾을 수 없습니다';
 
   @override
   String get settingsSkipSecretTitle => '기밀 클립보드 건너뛰기';
@@ -4458,11 +4452,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get transformsAppDefaultsTitle => '앱별 기본값';
 
   @override
-  String get transformsAppDefaultsDescription =>
-      '번들 ID, 실행 파일 또는 패키지 이름으로 앱별 기본값을 재정의합니다. 다른 플랫폼에서 만든 항목은 동기화되지만 여기서는 적용되지 않습니다.';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => '앱 식별자';
+  String get transformsAppDefaultsDescription => '특정 앱의 기본값을 재정의합니다.';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4470,7 +4460,7 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => '추가';
+  String get transformsAddApp => '앱 추가';
 
   @override
   String get transformsRemove => '제거';

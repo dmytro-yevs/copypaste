@@ -28,6 +28,9 @@ image.workspace = true
 qrcode.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+copypaste-source-app = { path = "../copypaste-source-app" }
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
 ndk-context = "0.1.1"

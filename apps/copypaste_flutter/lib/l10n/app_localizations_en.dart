@@ -1635,16 +1635,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Exclude application';
+  String get applicationPickerSearch => 'Search applications';
 
   @override
-  String get settingsExcludeDialogAction => 'Exclude';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Application identifier';
-
-  @override
-  String get settingsExcludeFailed => 'The application could not be excluded.';
+  String get applicationPickerEmpty => 'No applications found';
 
   @override
   String get settingsSkipSecretTitle => 'Skip confidential clipboard';
@@ -4695,10 +4689,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.';
-
-  @override
-  String get transformsAppIdentifierPlaceholder => 'App identifier';
+      'Override the default for specific apps.';
 
   @override
   String transformsOtherPlatform(String platform) {
@@ -4706,7 +4697,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get transformsAdd => 'Add';
+  String get transformsAddApp => 'Add app';
 
   @override
   String get transformsRemove => 'Remove';
