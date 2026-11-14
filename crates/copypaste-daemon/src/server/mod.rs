@@ -10,6 +10,7 @@
 //!   themselves are the shared `copypaste_runtime` dispatch.
 //! * [`watch`] — the push half: a connection that has subscribed, and what it
 //!   is exempt from.
+//! * [`endpoint`] — a connection relaying frames to a module endpoint.
 //! * [`messages`] — the transport's own failure strings; the handler
 //!   sentences live with the shared dispatch.
 //! * [`halted`] — the socket when there is no history to serve at all.
@@ -25,6 +26,7 @@ mod contract_tests;
 #[cfg(test)]
 mod dbadmin;
 pub(crate) mod dispatch;
+mod endpoint;
 mod halted;
 #[cfg(test)]
 mod items;

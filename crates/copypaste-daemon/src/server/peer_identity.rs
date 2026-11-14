@@ -63,7 +63,7 @@ impl PeerIdentity {
         method: &Method,
         verify: fn(Option<platform::PeerHandle>) -> bool,
     ) -> CallerIdentity {
-        if self.verdict.is_none() && method.privileged() {
+        if self.verdict.is_none() && method.needs_caller_identity() {
             let handle = self.handle.take();
             let is_app = tokio::task::spawn_blocking(move || verify(handle))
                 .await

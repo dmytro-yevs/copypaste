@@ -391,14 +391,20 @@ where
 pub(super) async fn dispatch_request(
     state: &Arc<AppState>,
     request: Request,
+    caller: CallerIdentity,
     wire_lease: Option<WireLease>,
 ) -> AdmittedResponse {
     let id = request.id;
     let method = request.method;
     let admission = match state.runtime.route(&method).await {
         Route::Reactor => {
+            let caller = if caller.is_app {
+                copypaste_modules::ModuleCaller::App
+            } else {
+                copypaste_modules::ModuleCaller::Client
+            };
             return AdmittedResponse {
-                response: state.runtime.request(id, method).await,
+                response: state.runtime.request_from(id, method, caller).await,
                 _lease: None,
                 _wire_lease: wire_lease,
             };
@@ -729,7 +735,12 @@ mod tests {
                 bounds: None,
             },
         };
-        let mut preview = Box::pin(dispatch_request(&state, request, None));
+        let mut preview = Box::pin(dispatch_request(
+            &state,
+            request,
+            CallerIdentity::default(),
+            None,
+        ));
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut preview)
                 .await
@@ -742,7 +753,7 @@ mod tests {
         };
         let response = tokio::time::timeout(
             Duration::from_secs(2),
-            dispatch_request(&state, status, None),
+            dispatch_request(&state, status, CallerIdentity::default(), None),
         )
         .await
         .expect("queued preview must not block status");

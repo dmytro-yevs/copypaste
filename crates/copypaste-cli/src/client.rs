@@ -13,9 +13,10 @@ use backon::{ConstantBuilder, Retryable as _, Sleeper};
 use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
-    ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingInviteData,
-    PairingProgressData, PeerInfo, Request, Response, ResponseData, StatusData, SyncResult,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    EndpointConnected, EndpointFrame, ErrorCode, EventData, ExportData, ImportData, Item, ItemPage,
+    Method, ModuleOperation, PairingInviteData, PairingProgressData, PeerInfo, Request, Response,
+    ResponseData, StatusData, SyncResult, MAX_ENDPOINT_FRAME_BYTES, MAX_FRAME_BYTES,
+    PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::future::Future;
@@ -24,7 +25,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::time::{timeout_at, Instant};
-use tokio_util::codec::{Framed, LinesCodec};
+use tokio_util::codec::{Framed, FramedRead, LinesCodec};
 
 #[cfg(any(windows, test))]
 use crate::shutdown::{self, Completion};
@@ -337,6 +338,86 @@ async fn watch_at(
                 }
             }
             _ => return Err(shape_error("a change event")),
+        }
+    }
+}
+
+/// Open a module endpoint and relay it to stdin and stdout until either side
+/// closes. One stdin line is one message; so is one stdout line.
+pub async fn connect_endpoint(id: &str, endpoint: &str) -> Result<(), CliError> {
+    let deadline = Instant::now() + REQUEST_TIMEOUT;
+    let mut connection = Connection::open(&socket_path(), deadline).await?;
+    let ack = connection
+        .call(
+            Method::Modules {
+                operation: ModuleOperation::Connect {
+                    id: id.into(),
+                    endpoint: endpoint.into(),
+                },
+            },
+            deadline,
+        )
+        .await?;
+    match into_data(ack)? {
+        Some(ResponseData::Modules { json })
+            if serde_json::from_str::<EndpointConnected>(&json).is_ok() => {}
+        _ => return Err(shape_error("an endpoint connection")),
+    }
+    relay(connection.framed, tokio::io::stdin(), tokio::io::stdout()).await
+}
+
+/// The relay after the acknowledgement. No deadline: an idle connection is
+/// normal, and stdin closing or the daemon hanging up ends it.
+async fn relay<S, I, O>(
+    mut daemon: Framed<S, LinesCodec>,
+    input: I,
+    mut output: O,
+) -> Result<(), CliError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    I: tokio::io::AsyncRead + Unpin,
+    O: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    let mut input = FramedRead::new(
+        input,
+        LinesCodec::new_with_max_length(MAX_ENDPOINT_FRAME_BYTES),
+    );
+    loop {
+        tokio::select! {
+            line = input.next() => match line {
+                None => return Ok(()),
+                Some(Ok(data)) => {
+                    let frame = serde_json::to_string(&EndpointFrame::Data { data })
+                        .map_err(|e| CliError::local(format!("could not encode a message: {e}")))?;
+                    daemon.send(frame).await.map_err(|_| CliError::DaemonUnreachable)?;
+                }
+                Some(Err(_)) => {
+                    return Err(CliError::local("a message on stdin exceeds 1 MiB or is not UTF-8"));
+                }
+            },
+            line = daemon.next() => {
+                let Some(Ok(line)) = line else {
+                    return Err(CliError::DaemonUnreachable);
+                };
+                match serde_json::from_str::<EndpointFrame>(&line) {
+                    Ok(EndpointFrame::Data { data }) => {
+                        let written = async {
+                            output.write_all(data.as_bytes()).await?;
+                            output.write_all(b"\n").await?;
+                            output.flush().await
+                        };
+                        if written.await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    Ok(EndpointFrame::Close { reason: None }) => return Ok(()),
+                    Ok(EndpointFrame::Close { reason: Some(reason) }) => {
+                        return Err(CliError::local(reason));
+                    }
+                    Err(_) => return Err(shape_error("an endpoint message")),
+                }
+            }
         }
     }
 }
@@ -875,6 +956,44 @@ mod tests {
             .await
             .expect("post-ack silence must not time out");
         assert_eq!(observed.unwrap().item_count, 7);
+    }
+
+    #[tokio::test]
+    async fn endpoint_relay_carries_lines_as_frames_and_ends_on_close() {
+        let (client, daemon) = tokio::io::duplex(4096);
+        let mut daemon = Framed::new(daemon, LinesCodec::new());
+        let (mut stdin, input) = tokio::io::duplex(4096);
+        let (output, mut stdout) = tokio::io::duplex(4096);
+        let relay = tokio::spawn(relay(Framed::new(client, LinesCodec::new()), input, output));
+
+        tokio::io::AsyncWriteExt::write_all(&mut stdin, b"{\"jsonrpc\":\"2.0\"}\n")
+            .await
+            .unwrap();
+        let frame: EndpointFrame =
+            serde_json::from_str(&daemon.next().await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            frame,
+            EndpointFrame::Data {
+                data: r#"{"jsonrpc":"2.0"}"#.into()
+            }
+        );
+        for frame in [
+            EndpointFrame::Data {
+                data: "reply".into(),
+            },
+            EndpointFrame::Close { reason: None },
+        ] {
+            daemon
+                .send(serde_json::to_string(&frame).unwrap())
+                .await
+                .unwrap();
+        }
+        relay.await.unwrap().unwrap();
+        let mut written = String::new();
+        tokio::io::AsyncReadExt::read_to_string(&mut stdout, &mut written)
+            .await
+            .unwrap();
+        assert_eq!(written, "reply\n");
     }
 
     /// The network verbs are the ones this test was missing. On the five-second
