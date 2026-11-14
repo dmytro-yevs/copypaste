@@ -1,6 +1,7 @@
 //! Native qualification of production-signed packages in an isolated host.
 #![deny(unsafe_code)]
 
+mod ai_tools;
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 mod android;
@@ -83,6 +84,7 @@ pub(crate) fn qualify_with_inference(
         "copypaste.semantic-search" => semantic::qualify(&manager, fixtures, data, &installed.id)?,
         "copypaste.supabase" => supabase::qualify(&manager, &installed.id)?,
         "copypaste.sms-codes" => qualify_sms(&manager, &installed.id)?,
+        "copypaste.ai-tools" => ai_tools::qualify(&manager, &installed, target)?,
         _ => return Err("No native qualification scenario exists for this module.".into()),
     };
     manager

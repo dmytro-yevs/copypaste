@@ -92,6 +92,7 @@ jobs:
             .
             modules/supabase
             modules/sms-codes
+            modules/ai-tools
       - run: ./scripts/ci/install-postgresql-server.sh
       - run: python3 -m unittest scripts/test_release_safety.py
       - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_rpm_candidate.py'
@@ -106,6 +107,10 @@ jobs:
         run: |
           cargo +1.96 test --manifest-path modules/supabase/Cargo.toml --locked
           cargo +1.96 clippy --manifest-path modules/supabase/Cargo.toml --locked --all-targets -- -D warnings
+      - name: AI Tools module contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/ai-tools/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/ai-tools/Cargo.toml --locked --all-targets -- -D warnings
       - run: ./supabase/dev/verify-schema.sh
 
   macos-core:
