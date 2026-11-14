@@ -7,12 +7,14 @@
 
 mod clips;
 mod delivery;
+mod module_services;
 mod paste_queue;
 mod rules;
 mod snippets;
 mod transforms;
 
 pub(crate) use delivery::ClipboardOwner;
+pub use module_services::ModuleHistoryFilters;
 pub(crate) use paste_queue::PasteQueue;
 
 use copypaste_ipc::{ErrorCode, Response};
