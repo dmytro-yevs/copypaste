@@ -66,9 +66,13 @@ pub async fn module_stage_update(
 }
 
 pub async fn module_set_enabled(id: String, enabled: bool) -> Result<(), RuntimeError> {
-    module_request(copypaste_ipc::ModuleOperation::SetEnabled { id, enabled })
-        .await
-        .map(|_| ())
+    module_request(copypaste_ipc::ModuleOperation::SetEnabled {
+        id,
+        enabled,
+        capabilities: Vec::new(),
+    })
+    .await
+    .map(|_| ())
 }
 
 pub async fn module_set_preferences(id: String, values_json: String) -> Result<(), RuntimeError> {

@@ -354,6 +354,10 @@ impl ModuleHost {
                 ModuleOperation::List
                     | ModuleOperation::Invoke { .. }
                     | ModuleOperation::StageUpdate { .. }
+                    | ModuleOperation::Connect { .. }
+                    | ModuleOperation::SetLocale { .. }
+                    | ModuleOperation::Prompts
+                    | ModuleOperation::AnswerPrompt { .. }
             );
             let result = match operation {
                 ModuleOperation::List => {
@@ -371,7 +375,14 @@ impl ModuleHost {
                     manager.stage_update(&id, Path::new(&package_path), &app_version)?;
                     serde_json::Value::Null
                 }
-                ModuleOperation::SetEnabled { id, enabled } => {
+                ModuleOperation::SetEnabled {
+                    id,
+                    enabled,
+                    capabilities,
+                } => {
+                    if enabled {
+                        manager.require_confirmed(&id, &capabilities)?;
+                    }
                     manager.set_enabled(&id, enabled)?;
                     serde_json::Value::Null
                 }
@@ -393,6 +404,14 @@ impl ModuleHost {
                     decode_values(&arguments_json)?,
                 )?)
                 .map_err(|_| ModuleError::State)?,
+                ModuleOperation::Connect { .. }
+                | ModuleOperation::SetLocale { .. }
+                | ModuleOperation::Prompts
+                | ModuleOperation::AnswerPrompt { .. } => {
+                    return Err(ModuleError::Invalid(
+                        "This module operation is not supported yet.".into(),
+                    ))
+                }
             };
             if changed {
                 if let Some(service) = host.search_service() {

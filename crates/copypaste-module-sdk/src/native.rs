@@ -1,6 +1,7 @@
 //! The audited C ABI boundary. Allocations are always released by their owner.
 use crate::{
-    Module, ModuleEnvironment, ModuleInvocation, MAX_INVOCATION_BYTES, MODULE_API_VERSION,
+    HostError, HostErrorCode, Module, ModuleDelivery, ModuleEnvironment, ModuleHostRequest,
+    ModuleInvocation, MAX_DELIVERY_BYTES, MAX_INVOCATION_BYTES, MODULE_API_VERSION,
 };
 use std::{
     ffi::c_void,
@@ -46,7 +47,16 @@ impl<T: Module> Export<T> {
 }
 
 unsafe fn decode<T: serde::de::DeserializeOwned>(data: *const u8, len: usize) -> Result<T, String> {
-    if data.is_null() || len == 0 || len > MAX_INVOCATION_BYTES {
+    // SAFETY: forwarded unchanged from the caller's contract.
+    unsafe { decode_bounded(data, len, MAX_INVOCATION_BYTES) }
+}
+
+unsafe fn decode_bounded<T: serde::de::DeserializeOwned>(
+    data: *const u8,
+    len: usize,
+    max: usize,
+) -> Result<T, String> {
+    if data.is_null() || len == 0 || len > max {
         return Err("Invalid module input.".into());
     }
     // SAFETY: ABI callers provide a readable borrowed buffer for the duration of this call.
@@ -88,6 +98,10 @@ unsafe extern "C" fn invoke<T: Module>(
         },
         Err(error) => (1, error.into_bytes().into_iter().take(4096).collect()),
     };
+    owned_reply(status, bytes)
+}
+
+fn owned_reply(status: u32, bytes: Vec<u8>) -> NativeReply {
     let bytes = bytes.into_boxed_slice();
     let len = bytes.len();
     NativeReply {
@@ -96,6 +110,30 @@ unsafe extern "C" fn invoke<T: Module>(
             data: Box::into_raw(bytes).cast(),
             len,
         },
+    }
+}
+
+/// Body of the optional `copypaste_module_deliver_v1` export. The reply is
+/// released through `NativeApi::release`, like an invocation reply.
+///
+/// # Safety
+/// `context` must come from this module's create function, calls must be
+/// serialized with `invoke`, and the input is borrowed for this call only.
+pub unsafe fn deliver<T: Module>(context: *mut c_void, data: *const u8, len: usize) -> NativeReply {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        if context.is_null() {
+            return Err("The module is not initialized.".into());
+        }
+        // SAFETY: the host serializes calls and retains the context returned by create.
+        let module = unsafe { &mut *context.cast::<T>() };
+        // SAFETY: input is borrowed only for this delivery.
+        let delivery: ModuleDelivery = unsafe { decode_bounded(data, len, MAX_DELIVERY_BYTES) }?;
+        module.deliver(delivery)
+    }))
+    .unwrap_or_else(|_| Err("The module delivery failed.".into()));
+    match result {
+        Ok(()) => owned_reply(0, b"null".to_vec()),
+        Err(error) => owned_reply(1, error.into_bytes().into_iter().take(4096).collect()),
     }
 }
 
@@ -199,24 +237,68 @@ impl HostClient {
         &self,
         input: &I,
     ) -> Result<O, String> {
-        let mut bytes = to_exact_vec(input, MAX_HOST_BYTES).map_err(|error| match error {
+        let bytes = to_exact_vec(input, MAX_HOST_BYTES).map_err(|error| match error {
             EncodeError::Invalid => "Invalid host request.",
             EncodeError::TooLarge => "The host request exceeds its limit.",
         })?;
+        self.exchange(bytes, |reply| match reply {
+            Some(Ok(bytes)) => {
+                serde_json::from_slice(bytes).map_err(|_| "Invalid host response.".into())
+            }
+            Some(Err(_)) => Err("The sync host service is unavailable.".into()),
+            None => Err("Invalid host response.".into()),
+        })
+    }
+
+    /// A typed host service request (manifest schema 6). Error replies carry
+    /// a `HostError`; any other failure reads as `Unavailable`.
+    pub fn call<O: serde::de::DeserializeOwned>(
+        &self,
+        request: &ModuleHostRequest,
+    ) -> Result<O, HostError> {
+        request.validate()?;
+        let unavailable = || {
+            HostError::new(
+                HostErrorCode::Unavailable,
+                "The host service is unavailable.",
+            )
+        };
+        let bytes = to_exact_vec(request, MAX_HOST_BYTES).map_err(|_| {
+            HostError::new(
+                HostErrorCode::Invalid,
+                "The host request exceeds its limit.",
+            )
+        })?;
+        self.exchange(bytes, |reply| match reply {
+            Some(Ok(bytes)) => serde_json::from_slice(bytes).map_err(|_| unavailable()),
+            Some(Err(bytes)) => {
+                Err(serde_json::from_slice(bytes).unwrap_or_else(|_| unavailable()))
+            }
+            None => Err(unavailable()),
+        })
+    }
+
+    /// Sends `bytes`, wipes them, and reads the borrowed reply (`Ok` on
+    /// success status, `None` when malformed) before releasing it.
+    fn exchange<T>(
+        &self,
+        mut bytes: Vec<u8>,
+        read: impl FnOnce(Option<Result<&[u8], &[u8]>>) -> T,
+    ) -> T {
         // SAFETY: callback ownership is established by create_with_host.
         unsafe {
             let reply = (self.api.request)(self.api.context, bytes.as_ptr(), bytes.len());
             bytes.fill(0);
-            let result = if reply.buffer.data.is_null() || reply.buffer.len > MAX_HOST_BYTES {
-                Err("Invalid host response.".into())
-            } else {
-                let bytes = std::slice::from_raw_parts(reply.buffer.data, reply.buffer.len);
-                if reply.status == 0 {
-                    serde_json::from_slice(bytes).map_err(|_| "Invalid host response.".into())
-                } else {
-                    Err("The sync host service is unavailable.".into())
-                }
-            };
+            let result = read(
+                (!reply.buffer.data.is_null() && reply.buffer.len <= MAX_HOST_BYTES).then(|| {
+                    let bytes = std::slice::from_raw_parts(reply.buffer.data, reply.buffer.len);
+                    if reply.status == 0 {
+                        Ok(bytes)
+                    } else {
+                        Err(bytes)
+                    }
+                }),
+            );
             (self.api.release)(reply.buffer);
             result
         }
@@ -479,5 +561,63 @@ mod host_tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         drop(handle);
         assert_eq!(UNSUBSCRIBES.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use crate::{HostErrorCode, ModuleOutput};
+
+    struct Endpoint(Vec<ModuleDelivery>);
+    impl Module for Endpoint {
+        fn create(_: ModuleEnvironment) -> Result<Self, String> {
+            Ok(Self(Vec::new()))
+        }
+        fn invoke(&mut self, _: ModuleInvocation) -> Result<ModuleOutput, String> {
+            Err("unused".into())
+        }
+        fn deliver(&mut self, delivery: ModuleDelivery) -> Result<(), String> {
+            self.0.push(delivery);
+            Ok(())
+        }
+    }
+
+    unsafe extern "C" fn unsupported(_: *mut c_void, _: *const u8, _: usize) -> NativeReply {
+        let error = HostError::new(HostErrorCode::Unsupported, "Not available.");
+        owned_reply(1, serde_json::to_vec(&error).unwrap())
+    }
+
+    #[test]
+    fn deliveries_reach_the_module_and_host_errors_stay_typed() {
+        let mut module = Endpoint(Vec::new());
+        let context = (&mut module as *mut Endpoint).cast();
+        let frame = serde_json::to_vec(&ModuleDelivery::EndpointFrame {
+            connection: "c1".into(),
+            data: "{\"jsonrpc\":\"2.0\"}".into(),
+        })
+        .unwrap();
+        let reply = unsafe { deliver::<Endpoint>(context, frame.as_ptr(), frame.len()) };
+        assert_eq!(reply.status, 0);
+        unsafe { release(reply.buffer) };
+        let reply = unsafe { deliver::<Endpoint>(context, b"{}".as_ptr(), 2) };
+        assert_eq!(reply.status, 1);
+        unsafe { release(reply.buffer) };
+        assert_eq!(module.0.len(), 1);
+
+        let client = HostClient {
+            api: NativeHostApi {
+                api_version: MODULE_API_VERSION,
+                struct_size: std::mem::size_of::<NativeHostApi>(),
+                context: std::ptr::dangling_mut(),
+                request: unsupported,
+                release,
+            },
+            lifetime: None,
+        };
+        let error = client
+            .call::<crate::ModuleHostContext>(&ModuleHostRequest::Context)
+            .unwrap_err();
+        assert_eq!(error.code, HostErrorCode::Unsupported);
     }
 }

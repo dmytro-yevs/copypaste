@@ -29,6 +29,10 @@ pub struct InstalledModule {
     pub enabled: bool,
     pub size_bytes: u64,
     pub commands: Vec<copypaste_module_sdk::ModuleCommand>,
+    #[serde(default)]
+    pub capabilities: Vec<copypaste_module_sdk::ModuleCapability>,
+    #[serde(default)]
+    pub endpoints: Vec<copypaste_module_sdk::ModuleEndpoint>,
     pub preference_fields: Vec<copypaste_module_sdk::ModuleField>,
     pub preferences: BTreeMap<String, Value>,
     pub error: Option<String>,
@@ -365,6 +369,32 @@ impl ModuleManager {
         drop(state);
         if let Some(previous) = previous {
             previous.instance.stop();
+        }
+        Ok(())
+    }
+
+    /// Enabling grants every declared capability, so the caller must echo
+    /// all of them as confirmed by the user.
+    pub fn require_confirmed(
+        &self,
+        id: &str,
+        confirmed: &[copypaste_module_sdk::ModuleCapability],
+    ) -> Result<(), ModuleError> {
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let record = state
+            .registry
+            .modules
+            .get(id)
+            .ok_or(ModuleError::NotInstalled)?;
+        if self
+            .manifest(id, record)?
+            .capabilities
+            .iter()
+            .any(|capability| !confirmed.contains(capability))
+        {
+            return Err(ModuleError::Invalid(
+                "Confirm the module permissions before enabling it.".into(),
+            ));
         }
         Ok(())
     }
@@ -892,6 +922,7 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
                     .event_handlers
                     .iter()
                     .any(|handler| handler.command == command.id)
+                && !command.hidden
         })
         .collect();
     InstalledModule {
@@ -918,6 +949,8 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
         enabled: record.enabled,
         size_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
         commands,
+        capabilities: manifest.capabilities,
+        endpoints: manifest.endpoints,
         preference_fields: manifest.preferences,
         preferences: record.preferences.clone(),
         error: None,
@@ -938,6 +971,8 @@ fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
         enabled: false,
         size_bytes: 0,
         commands: Vec::new(),
+        capabilities: Vec::new(),
+        endpoints: Vec::new(),
         preference_fields: Vec::new(),
         preferences: BTreeMap::new(),
         error: Some(error),
