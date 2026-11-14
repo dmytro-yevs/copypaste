@@ -302,21 +302,20 @@ class _SnippetEditorDrawerState extends State<SnippetEditorDrawer> {
 
   Widget _footer(BuildContext context) {
     final l10n = context.l10n;
-    final block = _editor.saveBlock;
+    // Other blocks are visible already: an empty body, or a problem shown
+    // next to its field.
+    final tooLarge = _editor.saveBlock == SnippetSaveBlock.bodyTooLarge;
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (block != null && (_editor.dirty || _editor.isNew)) ...[
+          if (tooLarge) ...[
             Semantics(
               liveRegion: true,
               child: Text(
-                l10n.snippetSaveBlock(
-                  block,
-                  owner: _editor.takenBy?.title ?? '',
-                ),
+                l10n.snippetsSaveBlockTooLarge,
                 key: const ValueKey('snippet-editor-save-reason'),
               ).small().muted(),
             ),

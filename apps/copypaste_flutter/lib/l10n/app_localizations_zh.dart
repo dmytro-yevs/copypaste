@@ -785,7 +785,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueMixed => '“全部粘贴”仅适用于纯文本或纯文件的队列';
 
   @override
-  String get pasteQueueSeveralFiles => '暂不支持一次粘贴多个文件，请逐个粘贴。';
+  String get pasteQueueSeveralFiles => '请逐个粘贴文件。';
 
   @override
   String pasteQueueUnavailable(int count) {
@@ -801,17 +801,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueCopyOnlyTitle => '“粘贴下一项”仅复制';
 
   @override
-  String get pasteQueueAccessibilityMessage =>
-      '允许“辅助功能”即可自动粘贴。在此之前，该项已在剪贴板中，请手动粘贴。';
+  String get pasteQueueAccessibilityMessage => '已复制项目。允许“辅助功能”即可自动粘贴。';
 
   @override
-  String get pasteQueuePasteUnsupported => '无法自动粘贴。该项已在剪贴板中，请用常用快捷键粘贴。';
+  String get pasteQueuePasteUnsupported => '无法自动粘贴，已改为复制项目。';
 
   @override
-  String get pasteQueueTargetElevated => '无法粘贴到以管理员身份运行的应用。该项仍在队列中，也在剪贴板中。';
+  String get pasteQueueTargetElevated => '无法粘贴到管理员应用，已改为复制项目。';
 
   @override
-  String get pasteQueueNoTarget => '没有可粘贴的目标应用。该项仍在队列中，也在剪贴板中。';
+  String get pasteQueueNoTarget => '没有可粘贴的应用，已改为复制项目。';
 
   @override
   String get pasteQueueCollectingStarted => '正在收集复制内容';
@@ -854,13 +853,13 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get pasteQueueFullMessage => '不再添加新的复制内容。未移除任何内容。';
+  String get pasteQueueFullMessage => '不再添加新的复制内容。';
 
   @override
   String get pasteQueueEmptyTitle => 'Paste Queue 为空';
 
   @override
-  String get pasteQueueEmptyMessage => '收集复制内容以按顺序粘贴，或从历史记录中添加项目。';
+  String get pasteQueueEmptyMessage => '收集复制内容，或从历史记录添加项目。';
 
   @override
   String get pasteQueueCollectingEmptyTitle => '复制内容即可添加';
@@ -997,13 +996,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueEditTitle => '编辑队列中的文本';
 
   @override
-  String get pasteQueueEditMessage => '更改仅适用于此队列，历史记录保留原始内容。';
+  String get pasteQueueEditMessage => '更改仅应用于此队列。';
 
   @override
   String get pasteQueueShortcutPromptTitle => '设置快捷键';
 
   @override
-  String get pasteQueueShortcutPromptMessage => '选择快捷键，无需打开 CopyPaste 即可收集和粘贴。';
+  String get pasteQueueShortcutPromptMessage => '无需打开 CopyPaste 即可收集和粘贴。';
 
   @override
   String get pasteQueueShortcutToggleCollecting => '开始或停止收集';
@@ -1019,18 +1018,16 @@ class AppLocalizationsZh extends AppLocalizations {
       '另一个 CopyPaste 快捷键已使用此组合。已保留之前的快捷键。';
 
   @override
-  String get pasteQueueShortcutInUse => '另一个应用正在使用此组合。已保留之前的快捷键，请选择其他组合。';
+  String get pasteQueueShortcutInUse => '其他应用正在使用此组合键。';
 
   @override
   String get pasteQueueShortcutRejected => '系统拒绝了此组合。已保留之前的快捷键。';
 
   @override
-  String get pasteQueueShortcutAltGr =>
-      '在许多键盘布局中 Ctrl+Alt 用于输入字符（AltGr）。请选择其他组合。';
+  String get pasteQueueShortcutAltGr => 'Ctrl+Alt 在许多键盘布局中用于输入字符。请另选组合。';
 
   @override
-  String get pasteQueueShortcutUnavailable =>
-      '此会话不支持全局快捷键。请在窗口或 Quick Paste 中使用队列。';
+  String get pasteQueueShortcutUnavailable => '此会话中无法使用全局快捷键。';
 
   @override
   String get pasteQueueShortcutFailed => '无法设置此快捷键。';
@@ -1039,14 +1036,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueEnableTitle => '启用 Paste Queue';
 
   @override
-  String get pasteQueueEnableDescription => '关闭后，队列快捷键将被释放，也不会收集任何内容。';
+  String get pasteQueueEnableDescription => '关闭后，快捷键和收集都会停止。';
 
   @override
   String get pasteQueuePasteNextStyleTitle => '“粘贴下一项”的操作';
 
   @override
-  String get pasteQueuePasteNextStyleDescription =>
-      '粘贴到前台应用需要发送按键的权限。“仅剪贴板”则由您自行粘贴。';
+  String get pasteQueuePasteNextStyleDescription => '自动粘贴，或仅复制到剪贴板。';
 
   @override
   String get pasteQueuePasteIntoApp => '粘贴到前台应用';
@@ -1124,7 +1120,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueIdleStopTitle => '停止收集的时间';
 
   @override
-  String get pasteQueueIdleStopDescription => '若在此时长内没有复制，将停止收集。项目会保留。';
+  String get pasteQueueIdleStopDescription => '在此时间内没有复制时停止收集。';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1138,13 +1134,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pasteQueueMaxEntriesTitle => '队列大小上限';
 
   @override
-  String get pasteQueueMaxEntriesDescription => '队列满后不再添加项目，也不会丢弃任何内容。';
+  String get pasteQueueMaxEntriesDescription => '队列已满时不再添加新的复制内容。';
 
   @override
   String get pasteQueueRestoreTitle => '完成后恢复之前的剪贴板';
 
   @override
-  String get pasteQueueRestoreDescription => '恢复队列开始粘贴之前您复制的内容。';
+  String get pasteQueueRestoreDescription => '恢复粘贴前复制的内容。';
 
   @override
   String get pasteQueueSettingsKeywords => 'paste queue 队列 收集 顺序 快捷键 分隔符';
@@ -1227,7 +1223,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStartupUnavailable => '此安装不支持自动启动。';
 
   @override
-  String get settingsStartupAndroidDescription => '重新启动设备后恢复已启用的后台服务。';
+  String get settingsStartupAndroidDescription => '重启后恢复后台服务。';
 
   @override
   String get settingsStartupDesktopDescription => '登录时自动打开 CopyPaste。';
@@ -1280,7 +1276,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      '选择“完整”或“受限”模式，并管理一次性的 Shizuku 或 ADB 设置。';
+      '完整或受限模式，以及 Shizuku 或 ADB 一次性设置。';
 
   @override
   String get settingsOpenSetup => '打开设置向导';
@@ -1303,7 +1299,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsScreenshotAccessTitle => '截屏访问权限';
 
   @override
-  String get settingsScreenshotAccessDescription => '允许访问所有照片和通知，以便在后台保存新截屏。';
+  String get settingsScreenshotAccessDescription => '用于在后台保存屏幕截图。';
 
   @override
   String get settingsAllowAccess => '允许访问';
@@ -1361,8 +1357,7 @@ class AppLocalizationsZh extends AppLocalizations {
       '导入 下载 传输 大小 限制 import download transfer size limit';
 
   @override
-  String get settingsMaxFileSizeDescription =>
-      '添加和下载文件的大小限制。仅当你选择“下载”时才会传输文件内容。';
+  String get settingsMaxFileSizeDescription => '可添加或下载的最大文件。';
 
   @override
   String get settingsHistoryFilesTitle => '历史记录文件';
@@ -1405,8 +1400,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRestoreDialogTitle => '替换本地历史记录？';
 
   @override
-  String get settingsRestoreDialogMessage =>
-      '所选加密备份将替换此设备上的剪贴板历史记录。当前设置和设备身份将保留。';
+  String get settingsRestoreDialogMessage => '备份将替换此设备上的历史记录。设置会保留。';
 
   @override
   String get settingsRestoreFailed => '无法恢复备份。';
@@ -1415,7 +1409,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSyncSwitchTitle => '同步';
 
   @override
-  String get settingsSyncSwitchDescription => '已配对设备同步的总开关。';
+  String get settingsSyncSwitchDescription => '与已配对设备同步历史记录。';
 
   @override
   String get settingsSyncSearchDescription => '已配对设备同步。';
@@ -1431,7 +1425,7 @@ class AppLocalizationsZh extends AppLocalizations {
       '自动 复制 粘贴 同步 接收 automatic copy paste sync received';
 
   @override
-  String get settingsInstantClipboardDescription => '自动将其他设备上较新的剪贴项复制到此设备的剪贴板。';
+  String get settingsInstantClipboardDescription => '将其他设备的新剪贴项复制到此剪贴板。';
 
   @override
   String get settingsLanVisibilityTitle => '局域网可见性';
@@ -1454,16 +1448,10 @@ class AppLocalizationsZh extends AppLocalizations {
       '隐私 应用 标识符 privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      '这些应用处于活动状态时跳过自动捕获。后台复制可能会绕过排除规则。';
+  String get settingsExcludedAppsDesktopDescription => '不自动捕获来自这些应用的内容。';
 
   @override
-  String get settingsExcludedAppsDesktopDescription =>
-      '根据可识别的剪贴板所有者跳过自动捕获。设置了排除规则但无法识别来源时，将暂停捕获。';
-
-  @override
-  String get settingsExcludedAppsAndroidDescription =>
-      '由于 Android 无法识别来源应用，设置排除规则后将跳过自动捕获。';
+  String get settingsExcludedAppsAndroidDescription => '存在排除的应用时，自动捕获会暂停。';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1496,7 +1484,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkipSecretTitle => '跳过机密剪贴板内容';
 
   @override
-  String get settingsSkipSecretDescription => '不将来源应用标记为机密的内容存入历史记录。';
+  String get settingsSkipSecretDescription => '不保存应用标记为机密的复制内容。';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1506,7 +1494,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkipTransientTitle => '跳过临时剪贴板内容';
 
   @override
-  String get settingsSkipTransientDescription => '不将来源应用标记为临时的副本存入历史记录。';
+  String get settingsSkipTransientDescription => '不保存应用标记为临时的复制内容。';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1691,8 +1679,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsQuickPasteShortcutKeywords => '键盘 快捷键 热键 keyboard hotkey';
 
   @override
-  String get settingsQuickPasteShortcutDescription =>
-      'CopyPaste 在后台运行时，即可使用该快捷键。';
+  String get settingsQuickPasteShortcutDescription => 'CopyPaste 在后台运行时可用。';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -3651,8 +3638,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get devicesEmptyTitle => '尚未配对其他设备';
 
   @override
-  String get devicesEmptyMessage =>
-      '配对另一台设备，即可在设备之间同步剪贴板历史记录。两台设备必须处于同一网络，且每次配对都需要在两台设备上确认。';
+  String get devicesEmptyMessage => '与同一网络中的设备配对以同步历史记录。';
 
   @override
   String get pairingStateNotCompleted => '配对未完成';
@@ -3756,7 +3742,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return '新的期限：$limit。更早的未置顶剪贴项将立即从此设备移除，且无法恢复。已置顶的剪贴项会保留。';
+    return '新上限：$limit。较早的未置顶项目将被永久删除。';
   }
 
   @override
@@ -3764,7 +3750,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return '新的配额：$size。如果未置顶的历史记录占用更多空间，最早的剪贴项将立即被移除，且无法恢复。已置顶的剪贴项会保留。';
+    return '新的配额：$size。超出部分将从最早的未置顶项目开始永久删除。';
   }
 
   @override
@@ -3775,11 +3761,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请重新启动 CopyPaste。';
+      '两项都关闭后将没有图标。要打开，请再次启动 CopyPaste。';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请按 $shortcut 或重新启动 CopyPaste。';
+    return '两项都关闭后将没有图标。要打开，请按 $shortcut 或再次启动 CopyPaste。';
   }
 
   @override
@@ -3877,7 +3863,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return '新的配额：$size。未置顶的历史记录占用 $used，因此最早的剪贴项将立即被移除，直到符合配额。移除后无法恢复。已置顶的剪贴项会保留。';
+    return '新的配额：$size。当前已用 $used，将从最早的未置顶项目开始永久删除。';
   }
 
   @override
@@ -3996,8 +3982,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trayRecentPreviewTitle => '最近剪贴预览';
 
   @override
-  String get trayRecentPreviewDescription =>
-      '系统会在 CopyPaste 加密之外保存菜单文本。减少显示可避免剪贴内容出现在其中。机密内容始终会被遮盖。';
+  String get trayRecentPreviewDescription => '菜单显示的剪贴文本量。';
 
   @override
   String get trayRecentPreviewFull => '完整预览';
@@ -4226,7 +4211,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsSavedTitle => '已保存';
 
   @override
-  String get transformsSavedMessage => '结果已成为新的历史项目，剪贴板未改变。';
+  String get transformsSavedMessage => '已保存为新的历史记录项目。';
 
   @override
   String get transformsPasteFailedTitle => '无法粘贴';
@@ -4336,14 +4321,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsRestoreTitle => '粘贴后恢复剪贴板';
 
   @override
-  String get transformsRestoreDescription => '转换粘贴后，如果期间未复制其他内容，将恢复之前的剪贴板。';
+  String get transformsRestoreDescription => '粘贴后恢复之前的剪贴板内容。';
 
   @override
   String get transformsDefaultTitle => '默认粘贴转换';
 
   @override
-  String get transformsDefaultDescription =>
-      'Quick Paste 会对文本应用此流水线，并在粘贴前显示。若失败则粘贴原文。';
+  String get transformsDefaultDescription => '应用于从 Quick Paste 粘贴的文本。';
 
   @override
   String get transformsNoDefault => '无';
@@ -4352,8 +4336,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsAppDefaultsTitle => '按应用设置默认值';
 
   @override
-  String get transformsAppDefaultsDescription =>
-      '通过包 ID、可执行文件或软件包名称为单个应用覆盖默认值。在其他平台创建的条目会同步，但在此处无效。';
+  String get transformsAppDefaultsDescription => '为特定应用使用不同的默认设置。';
 
   @override
   String get transformsAppIdentifierPlaceholder => '应用标识符';
@@ -4373,8 +4356,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsFavoritesTitle => '收藏';
 
   @override
-  String get transformsFavoritesDescription =>
-      '收藏会在每个面板中优先显示。前九个可用 Mod+1 至 Mod+9 运行。';
+  String get transformsFavoritesDescription => '在每个面板中优先显示。';
 
   @override
   String transformsFavoriteShortcut(int number) {
@@ -4388,7 +4370,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsPipelinesTitle => '流水线';
 
   @override
-  String get transformsPipelinesDescription => '已保存的转换链及其设置，会同步到您的其他设备。';
+  String get transformsPipelinesDescription => '已保存的转换组合。';
 
   @override
   String get transformsNewPipeline => '新建流水线';
@@ -4408,7 +4390,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get transformsDeletePipelineMessage => '使用它的收藏和粘贴默认值将在所有设备上恢复为无。';
+  String get transformsDeletePipelineMessage => '使用它的收藏和粘贴默认设置将被清除。';
 
   @override
   String get transformsDeletePipelineFailed => '无法删除流水线。';
@@ -4420,7 +4402,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsHiddenTitle => '隐藏的转换';
 
   @override
-  String get transformsHiddenDescription => '隐藏的转换不会出现在面板和建议中，使用它们的流水线仍可运行。';
+  String get transformsHiddenDescription => '不在面板和建议中显示。';
 
   @override
   String get transformsHideTransform => '隐藏转换';
@@ -4432,8 +4414,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsSuggestionsTitle => '建议';
 
   @override
-  String get transformsSuggestionsDescription =>
-      '打开面板时，会检查其文本的前 64 KiB 是否属于以下类型，并建议最多三个转换。不会在后台运行任何内容。';
+  String get transformsSuggestionsDescription => '推荐适合文本的转换。';
 
   @override
   String get transformsDetectorJson => 'JSON';
@@ -4460,8 +4441,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get transformsTrackingTitle => '跟踪参数';
 
   @override
-  String get transformsTrackingDescription =>
-      '内置列表随应用提供，仅随更新而变化。添加要移除或保留的名称；写成 名称@域名 可限定到某个域名。';
+  String get transformsTrackingDescription => '额外移除或始终保留的链接参数。';
 
   @override
   String get transformsTrackingRemoveLabel => '额外移除';
@@ -4488,8 +4468,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessKeyboardTitle => '剪贴项键盘';
 
   @override
-  String get quickAccessKeyboardDescription =>
-      '在系统键盘设置中开启“CopyPaste 剪贴项”。Android 会提示键盘可以看到你输入的内容：剪贴项面板从不记录按键，没有用于在其他应用中输入的按键，只插入你点按的项目。';
+  String get quickAccessKeyboardDescription => '在键盘设置中开启“CopyPaste 剪贴项”。';
 
   @override
   String get quickAccessKeyboardOn => '已开启';
@@ -4510,8 +4489,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessSwitchKeyboardTitle => '切换到剪贴项键盘';
 
   @override
-  String get quickAccessSwitchKeyboardDescription =>
-      '将“CopyPaste 剪贴项”选为当前键盘。保持选中期间，每次复制都会被保存。';
+  String get quickAccessSwitchKeyboardDescription => '将“CopyPaste 剪贴项”设为当前键盘。';
 
   @override
   String get quickAccessSwitchKeyboardAction => '选择键盘';
@@ -4523,8 +4501,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessCaptureTierTitle => '捕获模式';
 
   @override
-  String get quickAccessCaptureTierDescription =>
-      '没有通过 Shizuku 或 ADB 授予的权限时，只有在剪贴项面板打开时、保持选中期间，或通过 CopyPaste 应用、图块、小组件或分享操作时才会保存复制内容。';
+  String get quickAccessCaptureTierDescription => '其他应用中的复制内容如何保存。';
 
   @override
   String get quickAccessCaptureTierSearchDescription => '查看如何保存来自其他应用的复制内容。';
@@ -4551,8 +4528,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessAutoReturnTitle => '插入后返回上一个键盘';
 
   @override
-  String get quickAccessAutoReturnDescription =>
-      '单次插入后切换回去。使用“队列”标签页或项目操作时面板保持打开。关闭此项可继续收集复制内容。';
+  String get quickAccessAutoReturnDescription => '插入一个剪贴项后切换回来。';
 
   @override
   String get quickAccessAutoReturnKeywords => '返回 上一个键盘 自动 插入';
@@ -4561,8 +4537,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessFocusSearchTitle => '打开面板时聚焦搜索';
 
   @override
-  String get quickAccessFocusSearchDescription =>
-      '打开面板时定位到搜索框。关闭时，点按一次即可使用剪贴项。';
+  String get quickAccessFocusSearchDescription => '打开面板时聚焦搜索。';
 
   @override
   String get quickAccessTilesTitle => '快捷设置图块';
@@ -4574,8 +4549,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessTilesKeywords => '快捷设置 图块 通知栏 保存 暂停';
 
   @override
-  String get quickAccessTileInstructions =>
-      '从屏幕顶部向下滑动两次，点按“编辑”，然后将 CopyPaste 图块拖到快捷设置中。';
+  String get quickAccessTileInstructions => '向下滑动两次，点按“编辑”，然后添加 CopyPaste 图块。';
 
   @override
   String get quickAccessSaveTileTitle => '“保存剪贴板”图块';
@@ -4599,11 +4573,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickAccessWidgetTitle => '“最近的剪贴项”小组件';
 
   @override
-  String get quickAccessWidgetDescription => '在主屏幕上显示最新的剪贴项。点按即可复制。';
+  String get quickAccessWidgetDescription => '主屏幕上的最近剪贴项，轻点即可复制。';
 
   @override
-  String get quickAccessWidgetInstructions =>
-      '长按主屏幕，点按“小组件”，然后拖动 CopyPaste 的“最近的剪贴项”。';
+  String get quickAccessWidgetInstructions => '长按主屏幕，点按“小组件”，然后添加“最近的剪贴项”。';
 
   @override
   String quickAccessWidgetCount(int count) {
@@ -4709,8 +4682,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsConcealedConfirmAction => '继续';
 
   @override
-  String get snippetsConcealedConfirmMessage =>
-      '此设备没有可用于验证身份的密码、PIN 或生物识别。仅当这是你的设备时才继续。';
+  String get snippetsConcealedConfirmMessage => '此设备无法验证你的身份。仅在你自己的设备上继续。';
 
   @override
   String get snippetsConcealedConfirmTitle => '确认是你本人';
@@ -4793,7 +4765,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get snippetsDuplicateAbbreviation => '同步后另一个片段使用了相同的缩写。请修改其中一个。';
+  String get snippetsDuplicateAbbreviation => '另一个片段使用了相同的缩写。请修改其中一个。';
 
   @override
   String get snippetsDuplicateBadge => '缩写重复';
@@ -4820,7 +4792,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsEnableTemplate => '开启';
 
   @override
-  String get snippetsEnableTemplateMessage => '占位符仅在模板中有效。已经像占位符的文本也会被填充。';
+  String get snippetsEnableTemplateMessage => '看起来像占位符的文本也会被填充。';
 
   @override
   String get snippetsEnableTemplateTitle => '开启“模板”？';
@@ -5189,7 +5161,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsRecentlyDeletedEmpty => '“最近删除”为空';
 
   @override
-  String get snippetsRecordPastedDescription => '将粘贴的片段文本添加到历史记录。隐藏的片段永远不会被记录。';
+  String get snippetsRecordPastedDescription => '将粘贴的片段添加到历史记录。';
 
   @override
   String get snippetsRecordPastedKeywords => '历史记录 记录 粘贴 片段';
@@ -5201,10 +5173,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsReplaceOriginal => '替换原剪贴项';
 
   @override
-  String get snippetsReplaceOriginalHint => '保存后在所有设备上删除原剪贴项。关闭时两者都保留。';
+  String get snippetsReplaceOriginalHint => '保存后删除原始剪贴项。';
 
   @override
-  String get snippetsRequireAuthDescription => '在使用或显示隐藏的片段前验证身份。每台设备分别验证。';
+  String get snippetsRequireAuthDescription => '先要求输入密码或使用生物识别。';
 
   @override
   String get snippetsRequireAuthKeywords => '隐藏 密码 生物识别 指纹 面容 锁定 验证';
@@ -5214,14 +5186,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get snippetsRestore => '恢复';
-
-  @override
-  String get snippetsSaveBlockEmpty => '添加文本后才能保存。';
-
-  @override
-  String snippetsSaveBlockTitle(int max) {
-    return '标题超过 $max 个字符。';
-  }
 
   @override
   String get snippetsSaveBlockTooLarge => '文本超过 64 KB。';
@@ -5281,7 +5245,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsTitlePlaceholder => '可选';
 
   @override
-  String get snippetsTransferDescription => '在应用之间迁移片段或保留备份。导出内容默认加密。';
+  String get snippetsTransferDescription => '备份片段，或在应用之间迁移。';
 
   @override
   String get snippetsTransferKeywords => '导入 导出 备份 包 json csv 密码短语';
@@ -5684,27 +5648,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesPrivacyDefaultsTitle => '隐私默认设置';
 
   @override
-  String get rulesPrivacyDefaultsDescription =>
-      '这些隐私设置会在任何规则运行之前保护此设备上的每次复制。下方的内置规则会同步到你的设备。';
+  String get rulesPrivacyDefaultsDescription => '隐私设置先于所有规则生效。';
 
   @override
   String get rulesPrivacyDefaultsKeywords => '隐私 隐藏 临时 排除的应用 内置 凭据 密码 银行卡';
-
-  @override
-  String rulesPrivacyState(String setting, String state) {
-    return '$setting：$state';
-  }
-
-  @override
-  String rulesExcludedApps(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count 个应用',
-      zero: '无',
-    );
-    return '$_temp0';
-  }
 
   @override
   String get rulesOpenPrivacy => '打开隐私';
@@ -5713,7 +5660,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesMyRulesTitle => '我的规则';
 
   @override
-  String get rulesMyRulesDescription => '它们在内置规则之后按从上到下的顺序作用于新的复制内容，并同步到你的设备。';
+  String get rulesMyRulesDescription => '按顺序作用于新的复制内容。';
 
   @override
   String get rulesMyRulesKeywords => '规则 自动化 标签 跳过 机密 过期 删除 模式 正则';
@@ -5722,13 +5669,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesEmptyTitle => '还没有规则';
 
   @override
-  String get rulesEmptyMessage => '规则可以自动为新复制的内容添加标签、加以保护、设置过期或跳过。';
+  String get rulesEmptyMessage => '规则可为新复制内容加标签、保护、设置过期或跳过。';
 
   @override
   String get rulesDeletedTitle => '最近删除';
 
   @override
-  String get rulesDeletedDescription => '已删除的规则可在 30 天内恢复。';
+  String get rulesDeletedDescription => '可在 30 天内恢复。';
 
   @override
   String rulesDeletedAt(String time) {
@@ -5762,8 +5709,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesSkipLogTitle => '最近跳过';
 
   @override
-  String get rulesSkipLogDescription =>
-      '自 CopyPaste 启动以来，你的规则在此设备上未保存的复制内容。只保留时间、应用和规则。';
+  String get rulesSkipLogDescription => '你的规则在此设备上未保存的复制内容。';
 
   @override
   String get rulesSkipLogKeywords => '跳过 忽略 未保存 日志';
@@ -5782,7 +5728,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String rulesSummary(String conditions, String actions) {
-    return '当 $conditions → $actions';
+    return '$conditions → $actions';
   }
 
   @override
@@ -5816,24 +5762,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get rulesRunsOnAll => '在所有设备上运行';
-
-  @override
-  String rulesMatchCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '在此设备上匹配 $count 次',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesLastMatched(String time) {
-    return '最近 $time';
-  }
-
-  @override
   String rulesNewFromDevice(String device) {
     return '来自 $device 的新规则';
   }
@@ -5849,7 +5777,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem 在修复之前，此规则可能匹配的复制内容会保存为机密并对 AI 工具隐藏。';
+    return '$problem 修复前，匹配的内容会受到保护。';
   }
 
   @override
@@ -6053,7 +5981,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesPatternPlaceholder => '模式，例如 ^ticket-[0-9]+';
 
   @override
-  String get rulesPatternHint => '模式会检查文本的前 1 MiB。不支持前瞻、后顾和反向引用。';
+  String get rulesPatternHint => '不支持环视和反向引用。';
 
   @override
   String get rulesCaseSensitive => '区分大小写';
@@ -6065,11 +5993,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesUnknownConditionNotice => '此条件来自较新版本的 CopyPaste。';
 
   @override
-  String get rulesSourceAppNotice =>
-      'Android 仅能识别通过 CopyPaste 键盘复制内容的来源应用。Android 上的其他复制内容永远不会匹配此条件。';
+  String get rulesSourceAppNotice => '在 Android 上，仅匹配通过剪贴项键盘复制的内容。';
 
   @override
-  String get rulesPrivacyMarkerNotice => '每个系统报告的标记不同。系统不报告的标记永远不会匹配。';
+  String get rulesPrivacyMarkerNotice => '并非所有系统都会报告所有标记。';
 
   @override
   String get rulesThenTitle => '操作';
@@ -6144,8 +6071,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get rulesClearClipboardAtExpiry =>
-      '届时如果剪贴板仍包含此复制内容，也清空剪贴板。在 Android 上，这会在 CopyPaste 下次运行时进行。';
+  String get rulesClearClipboardAtExpiry => '如果剪贴板仍是此内容，也一并清除。';
 
   @override
   String get rulesNoTags => '在历史记录中创建标签后即可在此使用。';
@@ -6178,7 +6104,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesTestTitle => '测试';
 
   @override
-  String get rulesTestDescription => '用示例文本试用此规则。示例不会被保存或同步。';
+  String get rulesTestDescription => '用示例文本试用规则。';
 
   @override
   String get rulesSamplePlaceholder => '粘贴或输入示例文本';
@@ -6196,23 +6122,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesPreviewHistory => '在历史记录上预览';
 
   @override
-  String rulesSaveBlock(String reason) {
-    String _temp0 = intl.Intl.selectLogic(reason, {
-      'read_only': '更新 CopyPaste 以编辑此规则。',
-      'name_missing': '请为规则命名。',
-      'name_too_long': '名称最多 128 个字符。',
-      'no_actions': '请至少添加一个操作。',
-      'other': '请修正标记的字段。',
-    });
-    return '$_temp0';
-  }
-
-  @override
   String get rulesSaveFailed => '无法保存规则。';
 
   @override
-  String get rulesReadOnlyNotice =>
-      '此规则由较新版本的 CopyPaste 写入。更新 CopyPaste 以编辑或运行它。';
+  String get rulesReadOnlyNotice => '由较新版本的 CopyPaste 创建。请更新后再编辑或运行。';
 
   @override
   String rulesProblem(String code) {
@@ -6273,10 +6186,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesTraceStopped => '后续规则未运行。';
 
   @override
-  String get rulesTraceUnknownReason => '此复制内容的该属性未知，因此条件在任何情况下都不匹配。';
+  String get rulesTraceUnknownReason => '此复制内容的该项未知，因此不匹配。';
 
   @override
-  String get rulesTraceRuleError => '此规则无法在此运行，因此匹配的复制内容会改为受到保护。';
+  String get rulesTraceRuleError => '此规则无法运行，因此匹配内容会受到保护。';
 
   @override
   String get rulesTraceOutcomeTitle => '结果';
@@ -6393,7 +6306,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get rulesPreviewNote => '在你应用之前不会有任何更改。更改会像普通编辑一样同步到你的其他设备。';
+  String get rulesPreviewNote => '应用之前不会有任何更改。';
 
   @override
   String get rulesSecretItem => '机密项目';
@@ -6420,8 +6333,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get rulesApplyDeleteMessage =>
-      '将“不保存”应用到现有项目会从你所有设备的历史记录中删除匹配的剪贴项。此操作无法撤销。';
+  String get rulesApplyDeleteMessage => '匹配的剪贴项将从你的所有设备中删除。此操作无法撤销。';
 
   @override
   String get rulesApplyDeleteConfirm => '删除并应用';
@@ -6462,7 +6374,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get rulesApplyCancelled => '已停止。停止前已更改的剪贴项将保持更改。';
+  String get rulesApplyCancelled => '已停止。已完成的更改会保留。';
 
   @override
   String get historyActionEdit => '编辑';
@@ -6505,7 +6417,7 @@ class AppLocalizationsZh extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '已按你选择的顺序将 $count 个剪贴项加入队列。',
+      other: '已将 $count 个剪贴项加入队列。',
     );
     return '$_temp0';
   }

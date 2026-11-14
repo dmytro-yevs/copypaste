@@ -1385,9 +1385,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(context.l10n.settingsExcludedAppsTitle).medium(),
                         const Gap(AppSpacing.xs),
                         Text(switch (defaultTargetPlatform) {
-                          TargetPlatform.macOS =>
-                            context.l10n.settingsExcludedAppsMacDescription,
-                          TargetPlatform.windows || TargetPlatform.linux =>
+                          TargetPlatform.macOS ||
+                          TargetPlatform.windows ||
+                          TargetPlatform.linux =>
                             context.l10n.settingsExcludedAppsDesktopDescription,
                           TargetPlatform.android =>
                             context.l10n.settingsExcludedAppsAndroidDescription,

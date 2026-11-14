@@ -216,8 +216,6 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
 
   Widget _privacyGroup(BuildContext context) {
     final l10n = context.l10n;
-    final defaults = _controller.privacyDefaults;
-    String state(bool on) => on ? l10n.commonOn : l10n.commonOff;
     return SettingsGroup(
       children: [
         SettingRow(
@@ -227,30 +225,6 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
           ),
           title: l10n.rulesPrivacyDefaultsTitle,
           description: l10n.rulesPrivacyDefaultsDescription,
-          status: Column(
-            key: const ValueKey('rules-privacy-status'),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.rulesPrivacyState(
-                  l10n.settingsSkipSecretTitle,
-                  state(defaults.skipSecret),
-                ),
-              ).xSmall(),
-              Text(
-                l10n.rulesPrivacyState(
-                  l10n.settingsSkipTransientTitle,
-                  state(defaults.skipTransient),
-                ),
-              ).xSmall(),
-              Text(
-                l10n.rulesPrivacyState(
-                  l10n.settingsExcludedAppsTitle,
-                  l10n.rulesExcludedApps(defaults.excludedAppCount),
-                ),
-              ).xSmall(),
-            ],
-          ),
           trailing: widget.onOpenPrivacy == null
               ? null
               : Button.secondary(
@@ -351,12 +325,7 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
           if (_controller.canMove(rule.id, direction))
             direction: l10n.rulesMove(direction.name),
     };
-    final details = [
-      l10n.ruleDevices(rule.deviceIds, options),
-      if (rule.matchCount > 0) l10n.rulesMatchCount(rule.matchCount),
-      if (rule.lastMatchedAt case final at?)
-        l10n.rulesLastMatched(formatSystemRecentTime(context, at)),
-    ];
+    final devices = l10n.ruleDevices(rule.deviceIds, options);
     final summary = definition == null
         ? l10n.rulesUpdateRequired
         : l10n.ruleSummary(definition, options);
@@ -408,20 +377,21 @@ class _ContentRulesSettingsViewState extends State<ContentRulesSettingsView> {
                   const Gap(AppSpacing.xxs),
                   Text(
                     summary,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ).small().muted(),
                   if (rule.errorCode case final code?)
                     Text(
                       l10n.rulesErrorHint(l10n.rulesProblem(code)),
                     ).xSmall().muted()
-                  else if (rule.unsupported)
+                  else if (rule.unsupported && definition != null)
                     Text(l10n.rulesUpdateRequired).xSmall().muted(),
-                  Text(
-                    details.join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ).xSmall().muted(),
+                  if (devices != null)
+                    Text(
+                      devices,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ).xSmall().muted(),
                 ],
               ),
             ),

@@ -884,8 +884,7 @@ class AppLocalizationsTr extends AppLocalizations {
       'Tümünü yapıştır yalnızca metin ya da yalnızca dosya içeren kuyruklarda çalışır';
 
   @override
-  String get pasteQueueSeveralFiles =>
-      'Birden çok dosyayı aynı anda yapıştırmak henüz kullanılamıyor. Tek tek yapıştırın.';
+  String get pasteQueueSeveralFiles => 'Dosyaları tek tek yapıştırın.';
 
   @override
   String pasteQueueUnavailable(int count) {
@@ -904,19 +903,19 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueAccessibilityMessage =>
-      'Otomatik yapıştırmak için Erişilebilirlik izni verin. O zamana kadar öğe yapıştırmanız için panoda.';
+      'Öğe kopyalandı. Otomatik yapıştırmak için Erişilebilirlik izni verin.';
 
   @override
   String get pasteQueuePasteUnsupported =>
-      'Otomatik yapıştırılamadı. Öğe panoda; her zamanki kısayolla yapıştırın.';
+      'Otomatik yapıştırılamadı. Bunun yerine öğe kopyalandı.';
 
   @override
   String get pasteQueueTargetElevated =>
-      'Yönetici olarak çalışan bir uygulamaya yapıştırılamadı. Öğe kuyrukta kalır ve panodadır.';
+      'Yönetici uygulamasına yapıştırılamaz. Bunun yerine öğe kopyalandı.';
 
   @override
   String get pasteQueueNoTarget =>
-      'Yapıştırılacak uygulama yok. Öğe kuyrukta kalır ve panodadır.';
+      'Yapıştırılacak uygulama yok. Bunun yerine öğe kopyalandı.';
 
   @override
   String get pasteQueueCollectingStarted => 'Kopyalar toplanıyor';
@@ -961,15 +960,14 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get pasteQueueFullMessage =>
-      'Yeni kopyalar artık eklenmiyor. Hiçbir şey kaldırılmadı.';
+  String get pasteQueueFullMessage => 'Yeni kopyalar artık eklenmiyor.';
 
   @override
   String get pasteQueueEmptyTitle => 'Paste Queue boş';
 
   @override
   String get pasteQueueEmptyMessage =>
-      'Kopyaları sırayla yapıştırmak için toplayın ya da geçmişten öğe ekleyin.';
+      'Kopyaları toplayın veya geçmişten öğe ekleyin.';
 
   @override
   String get pasteQueueCollectingEmptyTitle =>
@@ -1110,14 +1108,14 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueEditMessage =>
-      'Değişiklikler yalnızca bu kuyruğa uygulanır. Geçmiş özgün hâli korur.';
+      'Değişiklikler yalnızca bu kuyruğa uygulanır.';
 
   @override
   String get pasteQueueShortcutPromptTitle => 'Kısayolları ayarla';
 
   @override
   String get pasteQueueShortcutPromptMessage =>
-      'CopyPaste\'i açmadan toplamak ve yapıştırmak için kısayollar seçin.';
+      'CopyPaste’i açmadan toplayın ve yapıştırın.';
 
   @override
   String get pasteQueueShortcutToggleCollecting =>
@@ -1137,7 +1135,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueShortcutInUse =>
-      'Başka bir uygulama bu bileşimi kullanıyor. Önceki korunur; başka bir bileşim seçin.';
+      'Bu kombinasyonu başka bir uygulama kullanıyor.';
 
   @override
   String get pasteQueueShortcutRejected =>
@@ -1145,11 +1143,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueShortcutAltGr =>
-      'Ctrl+Alt birçok klavye düzeninde karakter yazar (AltGr). Başka bir bileşim seçin.';
+      'Ctrl+Alt birçok düzende karakter yazar. Başka birini seçin.';
 
   @override
   String get pasteQueueShortcutUnavailable =>
-      'Bu oturumda genel kısayollar kullanılamıyor. Kuyruğu pencereden veya Quick Paste\'ten kullanın.';
+      'Bu oturumda genel kısayollar kullanılamaz.';
 
   @override
   String get pasteQueueShortcutFailed => 'Bu kısayol ayarlanamadı.';
@@ -1159,14 +1157,14 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueEnableDescription =>
-      'Kapalıyken kuyruk kısayolları serbest bırakılır ve hiçbir şey toplanmaz.';
+      'Kapalıyken kısayollar ve toplama durur.';
 
   @override
   String get pasteQueuePasteNextStyleTitle => 'Sonrakini yapıştır şunu yapar';
 
   @override
   String get pasteQueuePasteNextStyleDescription =>
-      'Öndeki uygulamaya yapıştırmak tuş vuruşu gönderme izni gerektirir. Yalnızca pano yapıştırmayı size bırakır.';
+      'Otomatik yapıştır veya yalnızca panoya kopyala.';
 
   @override
   String get pasteQueuePasteIntoApp => 'Öndeki uygulamaya yapıştır';
@@ -1250,7 +1248,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueIdleStopDescription =>
-      'Bu süre boyunca hiçbir şey kopyalanmazsa toplama kapanır. Öğeler kalır.';
+      'Bu süre boyunca kopya olmazsa toplamayı durdur.';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1265,14 +1263,14 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get pasteQueueMaxEntriesDescription =>
-      'Dolduğunda öğe eklenmez. Hiçbir şey atılmaz.';
+      'Dolduğunda yeni kopyalar eklenmez.';
 
   @override
   String get pasteQueueRestoreTitle => 'Bitince önceki panoyu geri yükle';
 
   @override
   String get pasteQueueRestoreDescription =>
-      'Kuyruk yapıştırmaya başlamadan önce kopyaladığınızı geri koyar.';
+      'Yapıştırmadan önce kopyaladığınızı geri getirir.';
 
   @override
   String get pasteQueueSettingsKeywords =>
@@ -1369,7 +1367,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsStartupAndroidDescription =>
-      'Cihaz yeniden başlatıldıktan sonra etkin arka plan hizmetleri sürdürülür.';
+      'Yeniden başlatmadan sonra arka plan hizmetlerini sürdür.';
 
   @override
   String get settingsStartupDesktopDescription =>
@@ -1427,7 +1425,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      'Tam veya Sınırlı modu seçin ve tek seferlik Shizuku ya da ADB kurulumunu yönetin.';
+      'Tam veya Sınırlı mod ve tek seferlik Shizuku ya da ADB kurulumu.';
 
   @override
   String get settingsOpenSetup => 'Kurulumu aç';
@@ -1452,7 +1450,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      'Yeni ekran görüntülerini arka planda kaydetmek için tüm fotoğraflara ve bildirimlere erişime izin verin.';
+      'Ekran görüntülerini arka planda kaydetmek için gerekir.';
 
   @override
   String get settingsAllowAccess => 'Erişime izin ver';
@@ -1518,7 +1516,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsMaxFileSizeDescription =>
-      'Dosya ekleme ve indirme sınırı. Dosya içerikleri yalnızca İndir\'i seçtiğinizde aktarılır.';
+      'Ekleyebileceğiniz veya indirebileceğiniz en büyük dosya.';
 
   @override
   String get settingsHistoryFilesTitle => 'Geçmiş dosyaları';
@@ -1566,7 +1564,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsRestoreDialogMessage =>
-      'Seçilen şifreli yedek, bu cihazdaki pano geçmişinin yerini alacak. Geçerli ayarlar ve cihaz kimliği korunur.';
+      'Yedek, bu cihazın geçmişinin yerini alır. Ayarlar korunur.';
 
   @override
   String get settingsRestoreFailed => 'Yedek geri yüklenemedi.';
@@ -1576,7 +1574,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsSyncSwitchDescription =>
-      'Eşlenmiş cihaz senkronizasyonunun ana anahtarı.';
+      'Geçmişi eşlenen cihazlarla eşitle.';
 
   @override
   String get settingsSyncSearchDescription => 'Eşlenmiş cihaz senkronizasyonu.';
@@ -1594,7 +1592,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      'Diğer cihazlardan gelen daha yeni öğeleri otomatik olarak bu cihazın panosuna kopyalar.';
+      'Diğer cihazlardaki yeni öğeleri bu panoya kopyala.';
 
   @override
   String get settingsLanVisibilityTitle => 'LAN görünürlüğü';
@@ -1619,16 +1617,12 @@ class AppLocalizationsTr extends AppLocalizations {
       'gizlilik uygulama tanımlayıcılar privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      'Bu uygulamalar etkinken otomatik yakalama atlanır. Arka plandaki kopyalamalar hariç tutmaları aşabilir.';
-
-  @override
   String get settingsExcludedAppsDesktopDescription =>
-      'Tanımlanan pano sahiplerinden otomatik yakalama atlanır. Hariç tutmalar ayarlıyken kaynak tanımlanamazsa yakalama duraklatılır.';
+      'Bu uygulamalardan otomatik yakalama yapılmaz.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Android kaynak uygulamaları tanımlayamadığından, hariç tutmalar ayarlıyken otomatik yakalamayı atlar.';
+      'Hariç tutulan uygulama varken otomatik yakalama duraklatılır.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1662,7 +1656,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsSkipSecretDescription =>
-      'Kaynak uygulamanın gizli olarak işaretlediği içerikleri Geçmiş\'in dışında tutar.';
+      'Uygulamaların gizli olarak işaretlediği kopyaları kaydetme.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1673,7 +1667,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsSkipTransientDescription =>
-      'Kaynak uygulamanın geçici olarak işaretlediği kopyaları Geçmiş\'in dışında tutar.';
+      'Uygulamaların geçici olarak işaretlediği kopyaları kaydetme.';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1875,7 +1869,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      'Kısayol, CopyPaste arka planda çalışırken kullanılabilir.';
+      'CopyPaste arka planda çalışırken kullanılabilir.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -3990,7 +3984,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get devicesEmptyMessage =>
-      'Pano geçmişini cihazlar arasında senkronize tutmak için başka bir cihaz eşleyin. Her iki cihaz da aynı ağda olmalıdır ve her eşleme iki cihazda da onaylanır.';
+      'Geçmişi eşitlemek için aynı ağdaki bir cihazı eşleyin.';
 
   @override
   String get pairingStateNotCompleted => 'Eşleme tamamlanmadı';
@@ -4096,7 +4090,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'Yeni sınır: $limit. Daha eski sabitlenmemiş öğeler bu cihazdan şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni sınır: $limit. Sabitlenmemiş eski öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -4105,7 +4099,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'Yeni kota: $size. Sabitlenmemiş geçmiş daha fazla yer kaplıyorsa en eski öğeler şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni kota: $size. Kotayı aşan en eski sabitlenmemiş öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -4116,11 +4110,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için CopyPaste\'i tekrar başlatın.';
+      'İkisi de kapalıyken simge olmaz. Açmak için CopyPaste’i yeniden başlatın.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return 'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için $shortcut tuşlarına basın veya CopyPaste\'i tekrar başlatın.';
+    return 'İkisi de kapalıyken simge olmaz. Açmak için $shortcut tuşlarına basın veya CopyPaste’i yeniden başlatın.';
   }
 
   @override
@@ -4220,7 +4214,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'Yeni kota: $size. Sabitlenmemiş geçmiş $used yer kaplıyor; bu yüzden sığana kadar en eski öğeleri şimdi kaldırılır. Bunlar geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni kota: $size. $used kullanılıyor, bu yüzden en eski sabitlenmemiş öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -4344,7 +4338,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get trayRecentPreviewDescription =>
-      'Sistem, menü metnini CopyPaste şifrelemesinin dışında tutar. Klip içeriğini oradan uzak tutmak için daha az gösterin. Gizli öğeler her zaman maskelenir.';
+      'Menünün gösterdiği klip metni miktarı.';
 
   @override
   String get trayRecentPreviewFull => 'Tam önizleme';
@@ -4579,8 +4573,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get transformsSavedTitle => 'Kaydedildi';
 
   @override
-  String get transformsSavedMessage =>
-      'Sonuç yeni bir geçmiş öğesi oldu. Pano değişmedi.';
+  String get transformsSavedMessage => 'Yeni geçmiş öğesi olarak kaydedildi.';
 
   @override
   String get transformsPasteFailedTitle => 'Yapıştırılamadı';
@@ -4694,14 +4687,14 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsRestoreDescription =>
-      'Dönüştürülmüş yapıştırmadan sonra, arada başka bir şey kopyalanmadıysa önceki pano geri gelir.';
+      'Yapıştırdıktan sonra önceki pano içeriğini geri getir.';
 
   @override
   String get transformsDefaultTitle => 'Varsayılan yapıştırma dönüşümü';
 
   @override
   String get transformsDefaultDescription =>
-      'Quick Paste bu işlem hattını metne uygular ve yapıştırmadan önce gösterir. Başarısız olursa orijinali yapıştırır.';
+      'Quick Paste’ten yapıştırılan metne uygulanır.';
 
   @override
   String get transformsNoDefault => 'Yok';
@@ -4711,7 +4704,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Bir uygulamanın varsayılanını paket kimliği, yürütülebilir dosya veya paket adıyla geçersiz kılın. Başka platformda yapılan girişler eşitlenir ama burada etkisizdir.';
+      'Belirli uygulamalarda farklı bir varsayılan kullan.';
 
   @override
   String get transformsAppIdentifierPlaceholder => 'Uygulama tanımlayıcısı';
@@ -4732,7 +4725,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsFavoritesDescription =>
-      'Favoriler her palette önce görünür. İlk dokuzu Mod+1–Mod+9 ile çalışır.';
+      'Her palette ilk sırada gösterilir.';
 
   @override
   String transformsFavoriteShortcut(int number) {
@@ -4747,7 +4740,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsPipelinesDescription =>
-      'Ayarlarıyla kaydedilmiş dönüşüm zincirleri. Diğer cihazlarınızla eşitlenir.';
+      'Kaydedilmiş dönüşüm zincirleri.';
 
   @override
   String get transformsNewPipeline => 'Yeni işlem hattı';
@@ -4768,7 +4761,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsDeletePipelineMessage =>
-      'Bunu kullanan favoriler ve yapıştırma varsayılanları tüm cihazlarda yok olarak döner.';
+      'Bunu kullanan favoriler ve yapıştırma varsayılanları temizlenir.';
 
   @override
   String get transformsDeletePipelineFailed => 'İşlem hattı silinemedi.';
@@ -4781,7 +4774,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsHiddenDescription =>
-      'Gizli dönüşümler paletlerde ve önerilerde görünmez. Onları kullanan işlem hatları çalışmaya devam eder.';
+      'Paletlerde ve önerilerde gösterilmez.';
 
   @override
   String get transformsHideTransform => 'Bir dönüşümü gizle';
@@ -4793,8 +4786,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get transformsSuggestionsTitle => 'Öneriler';
 
   @override
-  String get transformsSuggestionsDescription =>
-      'Bir palet açıldığında, metnin ilk 64 KiB\'ı aşağıdaki türler için denetlenir ve en fazla üç dönüşüm önerilir. Arka planda hiçbir şey çalışmaz.';
+  String get transformsSuggestionsDescription => 'Metne uygun dönüşümler öner.';
 
   @override
   String get transformsDetectorJson => 'JSON';
@@ -4822,7 +4814,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get transformsTrackingDescription =>
-      'Yerleşik liste uygulamayla gelir ve yalnızca güncellemelerle değişir. Kaldırılacak veya tutulacak adlar ekleyin; bir alan adıyla sınırlamak için ad@alanadı yazın.';
+      'Ayrıca kaldırılacak veya her zaman korunacak bağlantı parametreleri.';
 
   @override
   String get transformsTrackingRemoveLabel => 'Ayrıca kaldır';
@@ -4854,7 +4846,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessKeyboardDescription =>
-      'Sistem klavye ayarlarında CopyPaste öğeleri\'ni açın. Android, bir klavyenin yazdıklarınızı görebileceği konusunda uyarır: öğe paneli tuş vuruşlarını asla kaydetmez, diğer uygulamalara yazma tuşu yoktur ve yalnızca dokunduğunuz öğeleri ekler.';
+      'Klavye ayarlarında CopyPaste öğeleri\'ni açın.';
 
   @override
   String get quickAccessKeyboardOn => 'Açık';
@@ -4878,7 +4870,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessSwitchKeyboardDescription =>
-      'CopyPaste öğeleri\'ni geçerli klavye olarak seçin. Seçili kaldığı sürece her kopya kaydedilir.';
+      'CopyPaste öğeleri\'ni geçerli klavye yapın.';
 
   @override
   String get quickAccessSwitchKeyboardAction => 'Klavye seç';
@@ -4891,7 +4883,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierDescription =>
-      'Shizuku veya ADB erişimi olmadan kopyalar yalnızca öğe paneli açıldığında, panel seçili kaldığı sürece veya CopyPaste uygulaması, bir kutucuk, widget ya da Paylaş üzerinden kaydedilir.';
+      'Diğer uygulamalardaki kopyaların nasıl kaydedildiği.';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -4923,7 +4915,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessAutoReturnDescription =>
-      'Tek bir eklemeden sonra geri döner. Kuyruk sekmesini veya öğe işlemlerini kullanırken panel açık kalır. Kopya toplamaya devam etmek için kapatın.';
+      'Bir öğe ekledikten sonra geri dön.';
 
   @override
   String get quickAccessAutoReturnKeywords =>
@@ -4934,7 +4926,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessFocusSearchDescription =>
-      'Paneli arama alanında açar. Kapalıyken öğeleriniz tek dokunuş uzaklıktadır.';
+      'Paneli arama hazır olarak aç.';
 
   @override
   String get quickAccessTilesTitle => 'Hızlı Ayarlar kutucukları';
@@ -4949,7 +4941,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessTileInstructions =>
-      'Ekranın üstünden iki kez aşağı kaydırın, Düzenle\'ye dokunun ve bir CopyPaste kutucuğunu Hızlı Ayarlar\'a sürükleyin.';
+      'İki kez aşağı kaydırın, Düzenle’ye dokunun ve bir CopyPaste kutucuğu ekleyin.';
 
   @override
   String get quickAccessSaveTileTitle => 'Panoyu kaydet kutucuğu';
@@ -4976,11 +4968,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get quickAccessWidgetDescription =>
-      'En son öğelerinizi ana ekranda gösterir. Kopyalamak için birine dokunun.';
+      'Ana ekranda son öğeler, tek dokunuşla kopyalanır.';
 
   @override
   String get quickAccessWidgetInstructions =>
-      'Ana ekrana dokunup basılı tutun, Widget\'lar\'a dokunun ve CopyPaste\'teki Son öğeler\'i sürükleyin.';
+      'Ana ekranı basılı tutun, Widget’lar’a dokunun ve Son öğeler’i ekleyin.';
 
   @override
   String quickAccessWidgetCount(int count) {
@@ -5089,7 +5081,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsConcealedConfirmMessage =>
-      'Bu cihazda sizi doğrulayacak parola, PIN veya biyometri yok. Yalnızca cihaz sizinse devam edin.';
+      'Bu cihaz kimliğinizi doğrulayamaz. Yalnızca kendi cihazınızsa devam edin.';
 
   @override
   String get snippetsConcealedConfirmTitle => 'Siz olduğunuzu onaylayın';
@@ -5174,7 +5166,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsDuplicateAbbreviation =>
-      'Başka bir parçacık eşitleme sırasında aynı kısaltmayı aldı. Birini değiştirin.';
+      'Başka bir parçacık bu kısaltmayı kullanıyor. Birini değiştirin.';
 
   @override
   String get snippetsDuplicateBadge => 'Yinelenen kısaltma';
@@ -5203,7 +5195,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsEnableTemplateMessage =>
-      'Yer tutucular yalnızca şablonlarda çalışır. Zaten yer tutucuya benzeyen metin de doldurulur.';
+      'Yer tutucuya benzeyen metin doldurulur.';
 
   @override
   String get snippetsEnableTemplateTitle => 'Şablon açılsın mı?';
@@ -5584,7 +5576,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsRecordPastedDescription =>
-      'Yapıştırılan parçacık metnini Geçmiş\'e ekler. Gizli parçacıklar asla kaydedilmez.';
+      'Yapıştırılan parçacıkları geçmişe ekle.';
 
   @override
   String get snippetsRecordPastedKeywords =>
@@ -5599,11 +5591,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsReplaceOriginalHint =>
-      'Kaydettikten sonra orijinal öğeyi tüm cihazlardan siler. Kapalıyken ikisi de kalır.';
+      'Kaydettikten sonra orijinal öğeyi siler.';
 
   @override
   String get snippetsRequireAuthDescription =>
-      'Gizli bir parçacık kullanılmadan veya gösterilmeden önce siz olduğunuzu doğrulayın. Her cihaz ayrı sorar.';
+      'Önce parola veya biyometri iste.';
 
   @override
   String get snippetsRequireAuthKeywords =>
@@ -5615,14 +5607,6 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsRestore => 'Geri yükle';
-
-  @override
-  String get snippetsSaveBlockEmpty => 'Kaydetmek için metin ekleyin.';
-
-  @override
-  String snippetsSaveBlockTitle(int max) {
-    return 'Başlık $max karakterden uzun.';
-  }
 
   @override
   String get snippetsSaveBlockTooLarge => 'Metin 64 KB\'tan büyük.';
@@ -5683,7 +5667,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get snippetsTransferDescription =>
-      'Parçacıkları uygulamalar arasında taşıyın veya yedek tutun. Dışa aktarmalar varsayılan olarak şifrelenir.';
+      'Parçacıkları yedekleyin veya uygulamalar arasında taşıyın.';
 
   @override
   String get snippetsTransferKeywords =>
@@ -6111,27 +6095,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesPrivacyDefaultsDescription =>
-      'Bu gizlilik ayarları, herhangi bir kural çalışmadan önce bu cihazdaki her kopyayı korur. Aşağıdaki yerleşik kurallar cihazlarınızla eşitlenir.';
+      'Gizlilik ayarları her kuraldan önce uygulanır.';
 
   @override
   String get rulesPrivacyDefaultsKeywords =>
       'gizlilik gizlenmiş geçici hariç uygulamalar yerleşik kimlik bilgileri parolalar kartlar';
-
-  @override
-  String rulesPrivacyState(String setting, String state) {
-    return '$setting: $state';
-  }
-
-  @override
-  String rulesExcludedApps(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count uygulama',
-      zero: 'yok',
-    );
-    return '$_temp0';
-  }
 
   @override
   String get rulesOpenPrivacy => 'Gizliliği aç';
@@ -6140,8 +6108,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesMyRulesTitle => 'Kurallarım';
 
   @override
-  String get rulesMyRulesDescription =>
-      'Yeni kopyalarda, yerleşik kurallardan sonra yukarıdan aşağıya çalışır ve cihazlarınızla eşitlenir.';
+  String get rulesMyRulesDescription => 'Yeni kopyalarda sırayla çalışır.';
 
   @override
   String get rulesMyRulesKeywords =>
@@ -6152,14 +6119,13 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesEmptyMessage =>
-      'Bir kural yeni kopyaları otomatik olarak etiketleyebilir, koruyabilir, süresini doldurabilir veya atlayabilir.';
+      'Kurallar yeni kopyaları etiketler, korur, süresini doldurur veya atlar.';
 
   @override
   String get rulesDeletedTitle => 'Son silinenler';
 
   @override
-  String get rulesDeletedDescription =>
-      'Silinen kurallar 30 gün boyunca geri yüklenebilir.';
+  String get rulesDeletedDescription => '30 gün içinde geri yüklenebilir.';
 
   @override
   String rulesDeletedAt(String time) {
@@ -6195,7 +6161,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesSkipLogDescription =>
-      'CopyPaste başladığından beri kurallarınızın bu cihazda kaydetmediği kopyalar. Yalnızca zaman, uygulama ve kural saklanır.';
+      'Kurallarınızın bu cihazda kaydetmediği kopyalar.';
 
   @override
   String get rulesSkipLogKeywords => 'atlanan yok sayılan kaydedilmeyen günlük';
@@ -6210,11 +6176,11 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesUnknownApp => 'Bilinmeyen uygulama';
 
   @override
-  String get rulesMatchesEverything => 'herhangi bir kopya';
+  String get rulesMatchesEverything => 'Herhangi bir kopya';
 
   @override
   String rulesSummary(String conditions, String actions) {
-    return '$conditions ise → $actions';
+    return '$conditions → $actions';
   }
 
   @override
@@ -6251,24 +6217,6 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get rulesRunsOnAll => 'Tüm cihazlarda çalışır';
-
-  @override
-  String rulesMatchCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'Burada $count kez eşleşti',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesLastMatched(String time) {
-    return 'son $time';
-  }
-
-  @override
   String rulesNewFromDevice(String device) {
     return '$device cihazından yeni';
   }
@@ -6285,7 +6233,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Düzeltilene kadar bu kuralın eşleşebileceği kopyalar gizli olarak kaydedilir ve yapay zekâ araçlarından gizlenir.';
+    return '$problem Düzeltilene kadar eşleşmeler korunur.';
   }
 
   @override
@@ -6493,7 +6441,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesPatternHint =>
-      'Desenler metnin ilk 1 MiB’ını denetler. İleriye bakma, geriye bakma ve geri başvurular desteklenmez.';
+      'Çevre denetimi ve geri başvurular desteklenmez.';
 
   @override
   String get rulesCaseSensitive => 'Büyük/küçük harf duyarlı';
@@ -6507,11 +6455,10 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesSourceAppNotice =>
-      'Android kaynak uygulamayı yalnızca CopyPaste klavyesiyle yapılan kopyalarda bilir. Android’deki diğer kopyalar bu koşulla hiçbir zaman eşleşmez.';
+      'Android’de yalnızca öğe klavyesiyle yapılan kopyalar eşleşir.';
 
   @override
-  String get rulesPrivacyMarkerNotice =>
-      'Her sistem farklı işaretler bildirir. Sistemin bildirmediği bir işaret hiçbir zaman eşleşmez.';
+  String get rulesPrivacyMarkerNotice => 'Her sistem her işaretçiyi bildirmez.';
 
   @override
   String get rulesThenTitle => 'O zaman';
@@ -6589,7 +6536,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesClearClipboardAtExpiry =>
-      'O sırada pano hâlâ bu kopyayı içeriyorsa panoyu da temizle. Android’de bu, CopyPaste bir sonraki çalıştığında olur.';
+      'Pano hâlâ bu kopyayı içeriyorsa onu da temizle.';
 
   @override
   String get rulesNoTags => 'Burada kullanmak için Geçmiş’te etiket oluşturun.';
@@ -6623,8 +6570,7 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesTestTitle => 'Test';
 
   @override
-  String get rulesTestDescription =>
-      'Kuralı örnek metinle deneyin. Örnek hiçbir zaman kaydedilmez veya eşitlenmez.';
+  String get rulesTestDescription => 'Kuralı örnek metinle deneyin.';
 
   @override
   String get rulesSamplePlaceholder => 'Örnek metni yapıştırın veya yazın';
@@ -6642,23 +6588,11 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesPreviewHistory => 'Geçmişte önizle';
 
   @override
-  String rulesSaveBlock(String reason) {
-    String _temp0 = intl.Intl.selectLogic(reason, {
-      'read_only': 'Bu kuralı düzenlemek için CopyPaste’i güncelleyin.',
-      'name_missing': 'Kurala bir ad verin.',
-      'name_too_long': 'En fazla 128 karakterlik bir ad kullanın.',
-      'no_actions': 'En az bir işlem ekleyin.',
-      'other': 'İşaretli alanları düzeltin.',
-    });
-    return '$_temp0';
-  }
-
-  @override
   String get rulesSaveFailed => 'Kural kaydedilemedi.';
 
   @override
   String get rulesReadOnlyNotice =>
-      'Bu kuralı CopyPaste’in daha yeni bir sürümü yazdı. Düzenlemek veya çalıştırmak için CopyPaste’i güncelleyin.';
+      'Daha yeni bir CopyPaste ile oluşturuldu. Düzenlemek veya çalıştırmak için güncelleyin.';
 
   @override
   String rulesProblem(String code) {
@@ -6724,11 +6658,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesTraceUnknownReason =>
-      'Bu kopya için bilinmiyor; bu yüzden koşul hiçbir durumda eşleşmez.';
+      'Bu kopya için bilinmiyor, bu yüzden eşleşmez.';
 
   @override
   String get rulesTraceRuleError =>
-      'Bu kural burada çalışamadı; bu yüzden eşleşen kopyalar bunun yerine korunur.';
+      'Bu kural çalışamadı, bu yüzden eşleşmeler korunur.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Sonuç';
@@ -6845,8 +6779,7 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get rulesPreviewNote =>
-      'Uygulayana kadar hiçbir şey değişmez. Değişiklikler diğer cihazlarınızla normal düzenlemeler gibi eşitlenir.';
+  String get rulesPreviewNote => 'Uygulayana kadar hiçbir şey değişmez.';
 
   @override
   String get rulesSecretItem => 'Gizli öğe';
@@ -6875,7 +6808,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesApplyDeleteMessage =>
-      '“Kaydetme” işlemini mevcut öğelere uygulamak, eşleşen öğeleri tüm cihazlarınızdaki Geçmiş’ten siler. Bu işlem geri alınamaz.';
+      'Eşleşen klipler tüm cihazlarınızda silinir. Bu işlem geri alınamaz.';
 
   @override
   String get rulesApplyDeleteConfirm => 'Sil ve uygula';
@@ -6917,7 +6850,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get rulesApplyCancelled =>
-      'Durduruldu. Durdurmadan önce değiştirilen öğeler değişmiş olarak kalır.';
+      'Durduruldu. Şimdiye kadarki değişiklikler kalır.';
 
   @override
   String get historyActionEdit => 'Düzenle';
@@ -6962,7 +6895,7 @@ class AppLocalizationsTr extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count öğe seçtiğiniz sırayla kuyruğa eklendi.',
+      other: '$count öğe kuyruğa eklendi.',
       one: '1 öğe kuyruğa eklendi.',
     );
     return '$_temp0';

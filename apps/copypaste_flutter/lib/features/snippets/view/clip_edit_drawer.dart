@@ -224,46 +224,33 @@ class _ClipEditDrawerState extends State<ClipEditDrawer> {
                   const Divider(),
                   Padding(
                     padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    child: Row(
                       children: [
-                        if (_empty && !_readOnly) ...[
-                          Text(
-                            l10n.snippetsSaveBlockEmpty,
-                            key: const ValueKey('clip-edit-save-reason'),
-                          ).small().muted(),
-                          const Gap(AppSpacing.sm),
-                        ],
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Button.secondary(
-                                style: AppTheme.actionButtonStyle(
-                                  const ButtonStyle.secondary(),
-                                ),
-                                alignment: Alignment.center,
-                                onPressed: _saving
-                                    ? null
-                                    : () => unawaited(_close()),
-                                child: Text(l10n.commonCancel),
-                              ),
+                        Expanded(
+                          child: Button.secondary(
+                            style: AppTheme.actionButtonStyle(
+                              const ButtonStyle.secondary(),
                             ),
-                            const Gap(AppSpacing.md),
-                            Expanded(
-                              child: Button.primary(
-                                key: const ValueKey('clip-edit-save'),
-                                style: AppTheme.actionButtonStyle(
-                                  const ButtonStyle.primary(),
-                                ),
-                                alignment: Alignment.center,
-                                onPressed: canSave
-                                    ? () => unawaited(_save())
-                                    : null,
-                                child: Text(l10n.commonSave),
-                              ),
+                            alignment: Alignment.center,
+                            onPressed: _saving
+                                ? null
+                                : () => unawaited(_close()),
+                            child: Text(l10n.commonCancel),
+                          ),
+                        ),
+                        const Gap(AppSpacing.md),
+                        Expanded(
+                          child: Button.primary(
+                            key: const ValueKey('clip-edit-save'),
+                            style: AppTheme.actionButtonStyle(
+                              const ButtonStyle.primary(),
                             ),
-                          ],
+                            alignment: Alignment.center,
+                            onPressed: canSave
+                                ? () => unawaited(_save())
+                                : null,
+                            child: Text(l10n.commonSave),
+                          ),
                         ),
                       ],
                     ),

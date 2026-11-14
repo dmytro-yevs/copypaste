@@ -3,7 +3,6 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
-import '../controller/snippet_editor_controller.dart';
 import '../models/snippet_models.dart';
 
 extension SnippetMessages on AppLocalizations {
@@ -15,21 +14,6 @@ extension SnippetMessages on AppLocalizations {
     ),
     lint.detail ?? '',
   );
-
-  String snippetSaveBlock(SnippetSaveBlock block, {String owner = ''}) =>
-      switch (block) {
-        SnippetSaveBlock.emptyBody => snippetsSaveBlockEmpty,
-        SnippetSaveBlock.bodyTooLarge => snippetsSaveBlockTooLarge,
-        SnippetSaveBlock.titleTooLong => snippetsSaveBlockTitle(
-          SnippetLimits.maxTitle,
-        ),
-        SnippetSaveBlock.abbreviationTooLong => snippetsAbbreviationTooLong(
-          SnippetLimits.maxAbbreviationGraphemes,
-        ),
-        SnippetSaveBlock.abbreviationWhitespace =>
-          snippetsAbbreviationWhitespace,
-        SnippetSaveBlock.abbreviationTaken => snippetsAbbreviationTaken(owner),
-      };
 
   /// The list title of [snippet]; concealed ones never show their body.
   String snippetTitle(SnippetSummary snippet) => snippet.title.trim().isNotEmpty

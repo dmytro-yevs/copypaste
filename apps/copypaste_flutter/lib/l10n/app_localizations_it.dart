@@ -905,8 +905,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Incolla tutto funziona con code di solo testo o solo file';
 
   @override
-  String get pasteQueueSeveralFiles =>
-      'Non è ancora possibile incollare più file insieme. Incollali uno alla volta.';
+  String get pasteQueueSeveralFiles => 'Incolla i file uno alla volta.';
 
   @override
   String pasteQueueUnavailable(int count) {
@@ -924,19 +923,19 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueAccessibilityMessage =>
-      'Consenti Accessibilità per incollare automaticamente. Nel frattempo l\'elemento è negli appunti.';
+      'Elemento copiato. Consenti Accessibilità per incollare automaticamente.';
 
   @override
   String get pasteQueuePasteUnsupported =>
-      'Impossibile incollare automaticamente. L\'elemento è negli appunti; incollalo con la scorciatoia abituale.';
+      'Impossibile incollare automaticamente. Elemento copiato.';
 
   @override
   String get pasteQueueTargetElevated =>
-      'Impossibile incollare in un\'app eseguita come amministratore. L\'elemento resta in coda ed è negli appunti.';
+      'Impossibile incollare in un’app amministratore. Elemento copiato.';
 
   @override
   String get pasteQueueNoTarget =>
-      'Nessuna app in cui incollare. L\'elemento resta in coda ed è negli appunti.';
+      'Nessuna app in cui incollare. Elemento copiato.';
 
   @override
   String get pasteQueueCollectingStarted => 'Raccolta delle copie in corso';
@@ -983,14 +982,14 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueFullMessage =>
-      'Le nuove copie non vengono più aggiunte. Non è stato rimosso nulla.';
+      'Le nuove copie non vengono più aggiunte.';
 
   @override
   String get pasteQueueEmptyTitle => 'Paste Queue è vuota';
 
   @override
   String get pasteQueueEmptyMessage =>
-      'Raccogli le copie per incollarle in ordine, oppure aggiungi elementi dalla cronologia.';
+      'Raccogli copie o aggiungi elementi dalla cronologia.';
 
   @override
   String get pasteQueueCollectingEmptyTitle => 'Copia elementi per aggiungerli';
@@ -1130,14 +1129,14 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueEditMessage =>
-      'Le modifiche valgono solo per questa coda. La cronologia mantiene l\'originale.';
+      'Le modifiche valgono solo per questa coda.';
 
   @override
   String get pasteQueueShortcutPromptTitle => 'Imposta scorciatoie';
 
   @override
   String get pasteQueueShortcutPromptMessage =>
-      'Scegli le scorciatoie per raccogliere e incollare senza aprire CopyPaste.';
+      'Raccogli e incolla senza aprire CopyPaste.';
 
   @override
   String get pasteQueueShortcutToggleCollecting =>
@@ -1156,8 +1155,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Un\'altra scorciatoia di CopyPaste usa questa combinazione. Resta quella precedente.';
 
   @override
-  String get pasteQueueShortcutInUse =>
-      'Un\'altra app usa questa combinazione. Resta quella precedente; scegline un\'altra.';
+  String get pasteQueueShortcutInUse => 'Un’altra app usa questa combinazione.';
 
   @override
   String get pasteQueueShortcutRejected =>
@@ -1165,11 +1163,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueShortcutAltGr =>
-      'Ctrl+Alt digita caratteri in molti layout di tastiera (AltGr). Scegli un\'altra combinazione.';
+      'Ctrl+Alt digita caratteri in molti layout. Scegline un’altra.';
 
   @override
   String get pasteQueueShortcutUnavailable =>
-      'Le scorciatoie globali non sono disponibili in questa sessione. Usa la coda dalla finestra o da Quick Paste.';
+      'Le scorciatoie globali non sono disponibili in questa sessione.';
 
   @override
   String get pasteQueueShortcutFailed =>
@@ -1180,14 +1178,14 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueEnableDescription =>
-      'Se disattivata, le scorciatoie della coda vengono rilasciate e non si raccoglie nulla.';
+      'Se disattivata, scorciatoie e raccolta si fermano.';
 
   @override
   String get pasteQueuePasteNextStyleTitle => 'Incolla successivo esegue';
 
   @override
   String get pasteQueuePasteNextStyleDescription =>
-      'Incollare nell\'app in primo piano richiede il permesso di inviare tasti. Solo appunti lascia a te l\'incolla.';
+      'Incolla automaticamente o copia solo negli appunti.';
 
   @override
   String get pasteQueuePasteIntoApp => 'Incolla nell\'app in primo piano';
@@ -1271,7 +1269,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueIdleStopDescription =>
-      'La raccolta si interrompe se non copi nulla per questo tempo. Gli elementi restano.';
+      'Interrompi la raccolta dopo questo tempo senza copie.';
 
   @override
   String pasteQueueIdleMinutes(int minutes) {
@@ -1286,7 +1284,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueMaxEntriesDescription =>
-      'Quando è piena, non si aggiungono altri elementi. Nulla viene scartato.';
+      'Quando è piena, le nuove copie non vengono aggiunte.';
 
   @override
   String get pasteQueueRestoreTitle =>
@@ -1294,7 +1292,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pasteQueueRestoreDescription =>
-      'Rimette ciò che avevi copiato prima che la coda iniziasse a incollare.';
+      'Ripristina ciò che avevi copiato prima di incollare.';
 
   @override
   String get pasteQueueSettingsKeywords =>
@@ -1392,7 +1390,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsStartupAndroidDescription =>
-      'Riprendi i servizi in background attivati dopo il riavvio del dispositivo.';
+      'Riprendi i servizi in background dopo il riavvio.';
 
   @override
   String get settingsStartupDesktopDescription =>
@@ -1452,7 +1450,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      'Scegli la modalità Completa o Limitata e gestisci la configurazione una tantum di Shizuku o ADB.';
+      'Modalità Completa o Limitata e configurazione unica con Shizuku o ADB.';
 
   @override
   String get settingsOpenSetup => 'Apri configurazione';
@@ -1477,7 +1475,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      'Consenti l\'accesso a tutte le foto e alle notifiche per salvare i nuovi screenshot in background.';
+      'Necessario per salvare gli screenshot in background.';
 
   @override
   String get settingsAllowAccess => 'Consenti accesso';
@@ -1545,7 +1543,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsMaxFileSizeDescription =>
-      'Limite per l\'aggiunta e il download di file. Il contenuto dei file viene trasferito solo quando scegli Scarica.';
+      'File più grande che puoi aggiungere o scaricare.';
 
   @override
   String get settingsHistoryFilesTitle => 'File della cronologia';
@@ -1593,7 +1591,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsRestoreDialogMessage =>
-      'Il backup crittografato selezionato sostituirà la cronologia degli appunti su questo dispositivo. Le impostazioni attuali e l\'identità del dispositivo verranno mantenute.';
+      'Il backup sostituisce la cronologia di questo dispositivo. Le impostazioni restano.';
 
   @override
   String get settingsRestoreFailed => 'Impossibile ripristinare il backup.';
@@ -1603,7 +1601,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsSyncSwitchDescription =>
-      'Interruttore principale della sincronizzazione con i dispositivi abbinati.';
+      'Sincronizza la cronologia con i dispositivi associati.';
 
   @override
   String get settingsSyncSearchDescription =>
@@ -1622,7 +1620,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      'Copia automaticamente negli appunti di questo dispositivo gli elementi più recenti degli altri dispositivi.';
+      'Copia qui i nuovi elementi dagli altri dispositivi.';
 
   @override
   String get settingsLanVisibilityTitle => 'Visibilità LAN';
@@ -1647,16 +1645,12 @@ class AppLocalizationsIt extends AppLocalizations {
       'privacy app identificatori privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      'Ignora l\'acquisizione automatica durante l\'attività di queste app. Le copie in background potrebbero aggirare le esclusioni.';
-
-  @override
   String get settingsExcludedAppsDesktopDescription =>
-      'Ignora l\'acquisizione automatica dai proprietari degli appunti identificati. Se sono impostate esclusioni e l\'origine non può essere identificata, l\'acquisizione viene sospesa.';
+      'Salta l’acquisizione automatica da queste app.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Android ignora l\'acquisizione automatica quando sono impostate esclusioni, perché non può identificare le app di origine.';
+      'L’acquisizione automatica si sospende finché ci sono app escluse.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1690,7 +1684,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsSkipSecretDescription =>
-      'Tieni fuori dalla Cronologia i segreti contrassegnati dall\'app di origine.';
+      'Non salvare le copie che le app segnano come segrete.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1701,7 +1695,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsSkipTransientDescription =>
-      'Tieni fuori dalla Cronologia le copie temporanee contrassegnate dall\'app di origine.';
+      'Non salvare le copie che le app segnano come temporanee.';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1906,7 +1900,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      'La scorciatoia funziona mentre CopyPaste è in esecuzione in background.';
+      'Funziona mentre CopyPaste è in esecuzione in background.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -4086,7 +4080,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get devicesEmptyMessage =>
-      'Abbina un altro dispositivo per mantenere sincronizzata la cronologia degli appunti tra i due. Entrambi i dispositivi devono essere sulla stessa rete e ogni abbinamento viene confermato su entrambi.';
+      'Associa un dispositivo sulla stessa rete per sincronizzare la cronologia.';
 
   @override
   String get pairingStateNotCompleted => 'Abbinamento non completato';
@@ -4195,7 +4189,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'Nuovo limite: $limit. Gli elementi non fissati meno recenti vengono rimossi ora da questo dispositivo e non possono essere recuperati. Gli elementi fissati vengono conservati.';
+    return 'Nuovo limite: $limit. Gli elementi non fissati più vecchi vengono eliminati definitivamente.';
   }
 
   @override
@@ -4204,7 +4198,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'Nuova quota: $size. Se la cronologia non fissata occupa più spazio, gli elementi meno recenti vengono rimossi ora e non possono essere recuperati. Gli elementi fissati vengono conservati.';
+    return 'Nuova quota: $size. Gli elementi non fissati più vecchi oltre la quota vengono eliminati definitivamente.';
   }
 
   @override
@@ -4216,11 +4210,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      'Con entrambe le opzioni disattivate, CopyPaste non ha alcuna icona visibile. Per riaprirlo, avvia di nuovo CopyPaste.';
+      'Con entrambe disattivate non c’è alcuna icona. Riavvia CopyPaste per aprirlo.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return 'Con entrambe le opzioni disattivate, CopyPaste non ha alcuna icona visibile. Per riaprirlo, premi $shortcut o avvia di nuovo CopyPaste.';
+    return 'Con entrambe disattivate non c’è alcuna icona. Per aprirlo, premi $shortcut o riavvia CopyPaste.';
   }
 
   @override
@@ -4323,7 +4317,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'Nuova quota: $size. La cronologia non fissata occupa $used, quindi i suoi elementi meno recenti vengono rimossi ora finché non rientra. Non possono essere recuperati. Gli elementi fissati vengono conservati.';
+    return 'Nuova quota: $size. Sono in uso $used, quindi gli elementi non fissati più vecchi vengono eliminati definitivamente.';
   }
 
   @override
@@ -4451,7 +4445,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get trayRecentPreviewDescription =>
-      'Il sistema conserva il testo dei menu fuori dalla cifratura di CopyPaste. Mostra meno per tenerne fuori il contenuto dei clip. I segreti sono sempre mascherati.';
+      'Quanto testo dei clip mostra il menu.';
 
   @override
   String get trayRecentPreviewFull => 'Anteprima completa';
@@ -4690,7 +4684,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsSavedMessage =>
-      'Il risultato è un nuovo elemento della cronologia. Gli appunti non cambiano.';
+      'Salvato come nuovo elemento della cronologia.';
 
   @override
   String get transformsPasteFailedTitle => 'Impossibile incollare';
@@ -4810,7 +4804,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsRestoreDescription =>
-      'Dopo un incolla trasformato, tornano gli appunti precedenti, a meno che nel frattempo non sia stato copiato altro.';
+      'Ripristina gli appunti precedenti dopo aver incollato.';
 
   @override
   String get transformsDefaultTitle =>
@@ -4818,7 +4812,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsDefaultDescription =>
-      'Quick Paste applica questa pipeline al testo e la mostra prima di incollare. Se fallisce, viene incollato l\'originale.';
+      'Applicata al testo incollato da Quick Paste.';
 
   @override
   String get transformsNoDefault => 'Nessuna';
@@ -4828,7 +4822,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsAppDefaultsDescription =>
-      'Sostituisci il predefinito di un\'app tramite bundle ID, eseguibile o nome del pacchetto. Le voci di un\'altra piattaforma si sincronizzano ma qui non hanno effetto.';
+      'Usa un’impostazione predefinita diversa in app specifiche.';
 
   @override
   String get transformsAppIdentifierPlaceholder => 'Identificativo dell\'app';
@@ -4849,7 +4843,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsFavoritesDescription =>
-      'Le preferite compaiono per prime in ogni palette. Le prime nove si eseguono con Mod+1–Mod+9.';
+      'Compaiono per prime in ogni palette.';
 
   @override
   String transformsFavoriteShortcut(int number) {
@@ -4864,7 +4858,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsPipelinesDescription =>
-      'Catene di trasformazioni salvate con le loro impostazioni. Si sincronizzano con gli altri dispositivi.';
+      'Catene di trasformazioni salvate.';
 
   @override
   String get transformsNewPipeline => 'Nuova pipeline';
@@ -4885,7 +4879,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsDeletePipelineMessage =>
-      'Preferite e predefiniti che la usano tornano a nessuno su ogni dispositivo.';
+      'Le preferite e i predefiniti che la usano vengono rimossi.';
 
   @override
   String get transformsDeletePipelineFailed =>
@@ -4899,7 +4893,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsHiddenDescription =>
-      'Le trasformazioni nascoste non compaiono in palette e suggerimenti. Le pipeline che le usano funzionano comunque.';
+      'Escluse da palette e suggerimenti.';
 
   @override
   String get transformsHideTransform => 'Nascondi una trasformazione';
@@ -4912,7 +4906,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsSuggestionsDescription =>
-      'All\'apertura di una palette, i primi 64 KiB del testo vengono controllati per i tipi seguenti per suggerire fino a tre trasformazioni. Nulla viene eseguito in background.';
+      'Suggerisci trasformazioni adatte al testo.';
 
   @override
   String get transformsDetectorJson => 'JSON';
@@ -4941,7 +4935,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get transformsTrackingDescription =>
-      'L\'elenco integrato è incluso nell\'app e cambia solo con gli aggiornamenti. Aggiungi nomi da rimuovere o mantenere; scrivi nome@dominio per limitarlo a un dominio.';
+      'Parametri dei link da rimuovere anche o da mantenere sempre.';
 
   @override
   String get transformsTrackingRemoveLabel => 'Rimuovi anche';
@@ -4972,7 +4966,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessKeyboardDescription =>
-      'Attiva Elementi CopyPaste nelle impostazioni della tastiera di sistema. Android avvisa che una tastiera può vedere ciò che digiti: il pannello degli elementi non registra mai i tasti premuti, non ha tasti di digitazione per altre app e inserisce solo gli elementi che tocchi.';
+      'Attiva Elementi CopyPaste nelle impostazioni della tastiera.';
 
   @override
   String get quickAccessKeyboardOn => 'Attivata';
@@ -4997,7 +4991,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessSwitchKeyboardDescription =>
-      'Scegli Elementi CopyPaste come tastiera attuale. Finché resta selezionata, ogni copia viene salvata.';
+      'Imposta Elementi CopyPaste come tastiera attuale.';
 
   @override
   String get quickAccessSwitchKeyboardAction => 'Scegli tastiera';
@@ -5010,7 +5004,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessCaptureTierDescription =>
-      'Senza accesso tramite Shizuku o ADB, le copie vengono salvate solo quando si apre il pannello degli elementi, finché resta selezionato, oppure dall\'app CopyPaste, da un riquadro, dal widget o da Condividi.';
+      'Come vengono salvate le copie dalle altre app.';
 
   @override
   String get quickAccessCaptureTierSearchDescription =>
@@ -5045,7 +5039,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessAutoReturnDescription =>
-      'Torna indietro dopo un singolo inserimento. Il pannello resta aperto mentre usi la scheda Coda o le azioni di un elemento. Disattiva per continuare a raccogliere copie.';
+      'Torna indietro dopo aver inserito un elemento.';
 
   @override
   String get quickAccessAutoReturnKeywords =>
@@ -5057,7 +5051,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessFocusSearchDescription =>
-      'Apre il pannello sul campo di ricerca. Se disattivata, i tuoi elementi sono a un tocco di distanza.';
+      'Apri il pannello con la ricerca pronta.';
 
   @override
   String get quickAccessTilesTitle => 'Riquadri delle Impostazioni rapide';
@@ -5072,7 +5066,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessTileInstructions =>
-      'Scorri due volte verso il basso dalla parte superiore dello schermo, tocca Modifica e trascina un riquadro di CopyPaste nelle Impostazioni rapide.';
+      'Scorri due volte verso il basso, tocca Modifica e aggiungi un riquadro di CopyPaste.';
 
   @override
   String get quickAccessSaveTileTitle => 'Riquadro Salva appunti';
@@ -5100,11 +5094,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get quickAccessWidgetDescription =>
-      'Mostra gli elementi più recenti nella schermata Home. Toccane uno per copiarlo.';
+      'Elementi recenti nella schermata Home, copiati con un tocco.';
 
   @override
   String get quickAccessWidgetInstructions =>
-      'Tocca e tieni premuta la schermata Home, tocca Widget e trascina Elementi recenti di CopyPaste.';
+      'Tieni premuta la schermata Home, tocca Widget e aggiungi Elementi recenti.';
 
   @override
   String quickAccessWidgetCount(int count) {
@@ -5217,7 +5211,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsConcealedConfirmMessage =>
-      'Questo dispositivo non ha password, PIN o biometria per verificarti. Continua solo se è il tuo dispositivo.';
+      'Questo dispositivo non può verificarti. Continua solo se è il tuo.';
 
   @override
   String get snippetsConcealedConfirmTitle => 'Conferma che sei tu';
@@ -5304,7 +5298,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsDuplicateAbbreviation =>
-      'Un altro frammento ha ricevuto la stessa abbreviazione durante una sincronizzazione. Cambiane una.';
+      'Un altro frammento ha questa abbreviazione. Modificane una.';
 
   @override
   String get snippetsDuplicateBadge => 'Abbreviazione duplicata';
@@ -5333,7 +5327,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsEnableTemplateMessage =>
-      'I segnaposto funzionano solo nei modelli. Anche il testo che sembra già un segnaposto verrà compilato.';
+      'Il testo che sembra un segnaposto verrà compilato.';
 
   @override
   String get snippetsEnableTemplateTitle => 'Attivare Modello?';
@@ -5718,7 +5712,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsRecordPastedDescription =>
-      'Aggiunge alla cronologia il testo dei frammenti incollati. I frammenti nascosti non vengono mai registrati.';
+      'Aggiungi i frammenti incollati alla cronologia.';
 
   @override
   String get snippetsRecordPastedKeywords =>
@@ -5733,11 +5727,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsReplaceOriginalHint =>
-      'Elimina l\'elemento originale su tutti i dispositivi dopo il salvataggio. Se disattivato, restano entrambi.';
+      'Elimina l’elemento originale dopo il salvataggio.';
 
   @override
   String get snippetsRequireAuthDescription =>
-      'Verifica la tua identità prima di usare o mostrare un frammento nascosto. Ogni dispositivo lo chiede separatamente.';
+      'Chiedi prima la password o la biometria.';
 
   @override
   String get snippetsRequireAuthKeywords =>
@@ -5749,14 +5743,6 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsRestore => 'Ripristina';
-
-  @override
-  String get snippetsSaveBlockEmpty => 'Aggiungi del testo per salvare.';
-
-  @override
-  String snippetsSaveBlockTitle(int max) {
-    return 'Il titolo supera i $max caratteri.';
-  }
 
   @override
   String get snippetsSaveBlockTooLarge => 'Il testo supera i 64 KB.';
@@ -5818,7 +5804,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get snippetsTransferDescription =>
-      'Sposta frammenti tra app o conserva un backup. Le esportazioni sono cifrate per impostazione predefinita.';
+      'Esegui il backup dei frammenti o spostali tra app.';
 
   @override
   String get snippetsTransferKeywords =>
@@ -6250,28 +6236,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesPrivacyDefaultsDescription =>
-      'Queste impostazioni privacy proteggono ogni copia su questo dispositivo prima che venga eseguita qualsiasi regola. Le regole integrate qui sotto si sincronizzano sui tuoi dispositivi.';
+      'Le impostazioni di privacy si applicano prima di ogni regola.';
 
   @override
   String get rulesPrivacyDefaultsKeywords =>
       'privacy nascosto temporaneo app escluse integrate credenziali password carte';
-
-  @override
-  String rulesPrivacyState(String setting, String state) {
-    return '$setting: $state';
-  }
-
-  @override
-  String rulesExcludedApps(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count app',
-      one: '1 app',
-      zero: 'nessuna',
-    );
-    return '$_temp0';
-  }
 
   @override
   String get rulesOpenPrivacy => 'Apri Privacy';
@@ -6281,7 +6250,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesMyRulesDescription =>
-      'Vengono eseguite dall’alto in basso sulle nuove copie, dopo le regole integrate, e si sincronizzano sui tuoi dispositivi.';
+      'Vengono eseguite in ordine sulle nuove copie.';
 
   @override
   String get rulesMyRulesKeywords =>
@@ -6292,14 +6261,13 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesEmptyMessage =>
-      'Una regola può etichettare, proteggere, far scadere o saltare automaticamente le nuove copie.';
+      'Le regole etichettano, proteggono, fanno scadere o saltano le nuove copie.';
 
   @override
   String get rulesDeletedTitle => 'Eliminate di recente';
 
   @override
-  String get rulesDeletedDescription =>
-      'Le regole eliminate possono essere ripristinate per 30 giorni.';
+  String get rulesDeletedDescription => 'Ripristinabili entro 30 giorni.';
 
   @override
   String rulesDeletedAt(String time) {
@@ -6334,7 +6302,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesSkipLogDescription =>
-      'Copie che le tue regole non hanno salvato su questo dispositivo dall’avvio di CopyPaste. Vengono conservati solo ora, app e regola.';
+      'Copie che le tue regole non hanno salvato su questo dispositivo.';
 
   @override
   String get rulesSkipLogKeywords => 'saltati ignorati non salvati registro';
@@ -6349,11 +6317,11 @@ class AppLocalizationsIt extends AppLocalizations {
   String get rulesUnknownApp => 'App sconosciuta';
 
   @override
-  String get rulesMatchesEverything => 'qualsiasi copia';
+  String get rulesMatchesEverything => 'Qualsiasi copia';
 
   @override
   String rulesSummary(String conditions, String actions) {
-    return 'Se $conditions → $actions';
+    return '$conditions → $actions';
   }
 
   @override
@@ -6387,25 +6355,6 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get rulesRunsOnAll => 'Eseguita su tutti i dispositivi';
-
-  @override
-  String rulesMatchCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: 'Applicata $count volte qui',
-      one: 'Applicata una volta qui',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesLastMatched(String time) {
-    return 'ultima volta $time';
-  }
-
-  @override
   String rulesNewFromDevice(String device) {
     return 'Nuova da $device';
   }
@@ -6422,7 +6371,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String rulesErrorHint(String problem) {
-    return '$problem Finché non viene corretta, le copie a cui questa regola potrebbe applicarsi vengono salvate come segrete e nascoste agli strumenti di IA.';
+    return '$problem Finché non è corretta, le corrispondenze sono protette.';
   }
 
   @override
@@ -6631,7 +6580,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesPatternHint =>
-      'I modelli controllano il primo MiB di testo. Lookahead, lookbehind e riferimenti all’indietro non sono supportati.';
+      'Lookaround e riferimenti all’indietro non sono supportati.';
 
   @override
   String get rulesCaseSensitive => 'Maiuscole/minuscole';
@@ -6645,11 +6594,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesSourceAppNotice =>
-      'Android conosce l’app di origine solo per le copie fatte con la tastiera di CopyPaste. Le altre copie su Android non soddisfano mai questa condizione.';
+      'Su Android corrispondono solo le copie fatte con la tastiera degli elementi.';
 
   @override
   String get rulesPrivacyMarkerNotice =>
-      'Ogni sistema segnala indicatori diversi. Un indicatore che il sistema non segnala non corrisponde mai.';
+      'Non tutti i sistemi segnalano ogni indicatore.';
 
   @override
   String get rulesThenTitle => 'Allora';
@@ -6731,7 +6680,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesClearClipboardAtExpiry =>
-      'Svuota anche gli appunti in quel momento se contengono ancora questa copia. Su Android avviene alla successiva esecuzione di CopyPaste.';
+      'Svuota anche gli appunti se contengono ancora questa copia.';
 
   @override
   String get rulesNoTags => 'Crea etichette nella Cronologia per usarle qui.';
@@ -6766,8 +6715,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get rulesTestTitle => 'Prova';
 
   @override
-  String get rulesTestDescription =>
-      'Prova la regola su un testo di esempio. L’esempio non viene mai salvato né sincronizzato.';
+  String get rulesTestDescription => 'Prova la regola su un testo di esempio.';
 
   @override
   String get rulesSamplePlaceholder => 'Incolla o digita un testo di esempio';
@@ -6785,23 +6733,11 @@ class AppLocalizationsIt extends AppLocalizations {
   String get rulesPreviewHistory => 'Anteprima sulla cronologia';
 
   @override
-  String rulesSaveBlock(String reason) {
-    String _temp0 = intl.Intl.selectLogic(reason, {
-      'read_only': 'Aggiorna CopyPaste per modificare questa regola.',
-      'name_missing': 'Dai un nome alla regola.',
-      'name_too_long': 'Usa un nome di massimo 128 caratteri.',
-      'no_actions': 'Aggiungi almeno un’azione.',
-      'other': 'Correggi i campi segnalati.',
-    });
-    return '$_temp0';
-  }
-
-  @override
   String get rulesSaveFailed => 'Impossibile salvare la regola.';
 
   @override
   String get rulesReadOnlyNotice =>
-      'Una versione più recente di CopyPaste ha scritto questa regola. Aggiorna CopyPaste per modificarla o eseguirla.';
+      'Creata da una versione più recente di CopyPaste. Aggiorna per modificarla o eseguirla.';
 
   @override
   String rulesProblem(String code) {
@@ -6871,11 +6807,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesTraceUnknownReason =>
-      'Sconosciuto per questa copia, quindi la condizione non corrisponde in nessun caso.';
+      'Sconosciuto per questa copia, quindi non corrisponde.';
 
   @override
   String get rulesTraceRuleError =>
-      'Questa regola non può essere eseguita qui, quindi le copie corrispondenti vengono protette.';
+      'Questa regola non è stata eseguita, quindi le corrispondenze sono protette.';
 
   @override
   String get rulesTraceOutcomeTitle => 'Risultato';
@@ -6999,8 +6935,7 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get rulesPreviewNote =>
-      'Non cambia nulla finché non applichi. Le modifiche si sincronizzano sugli altri dispositivi come normali modifiche.';
+  String get rulesPreviewNote => 'Nulla cambia finché non applichi.';
 
   @override
   String get rulesSecretItem => 'Elemento segreto';
@@ -7030,7 +6965,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesApplyDeleteMessage =>
-      'Applicare «Non salvare» agli elementi esistenti elimina gli elementi corrispondenti dalla Cronologia su tutti i tuoi dispositivi. L’operazione non può essere annullata.';
+      'I clip corrispondenti vengono eliminati su tutti i tuoi dispositivi. L’azione è irreversibile.';
 
   @override
   String get rulesApplyDeleteConfirm => 'Elimina e applica';
@@ -7075,7 +7010,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get rulesApplyCancelled =>
-      'Interrotto. Gli elementi modificati prima dell’interruzione restano modificati.';
+      'Interrotto. Le modifiche già fatte restano.';
 
   @override
   String get historyActionEdit => 'Modifica';
@@ -7121,8 +7056,7 @@ class AppLocalizationsIt extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other:
-          '$count elementi aggiunti alla coda nell’ordine in cui li hai selezionati.',
+      other: '$count elementi aggiunti alla coda.',
       one: '1 elemento aggiunto alla coda.',
     );
     return '$_temp0';

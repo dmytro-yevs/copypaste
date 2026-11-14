@@ -1056,7 +1056,7 @@
   "@pasteQueueMixed": {
     "description": "Why Paste all is unavailable: the queue mixes kinds of content."
   },
-  "pasteQueueSeveralFiles": "Pasting several files at once isn't available yet. Paste them one at a time.",
+  "pasteQueueSeveralFiles": "Paste files one at a time.",
   "@pasteQueueSeveralFiles": {
     "description": "Why Paste all is unavailable for a queue of several files."
   },
@@ -1073,19 +1073,19 @@
   "@pasteQueueCopyOnlyTitle": {
     "description": "Title of the notice that Paste next only puts items on the clipboard."
   },
-  "pasteQueueAccessibilityMessage": "Allow Accessibility to paste automatically. Until then, the item is on the clipboard for you to paste.",
+  "pasteQueueAccessibilityMessage": "Item copied. Allow Accessibility to paste automatically.",
   "@pasteQueueAccessibilityMessage": {
     "description": "macOS notice: without the Accessibility permission the item is only put on the clipboard."
   },
-  "pasteQueuePasteUnsupported": "Couldn't paste automatically. The item is on the clipboard; paste it with the usual shortcut.",
+  "pasteQueuePasteUnsupported": "Couldn't paste automatically. Item copied instead.",
   "@pasteQueuePasteUnsupported": {
     "description": "Notice that automatic pasting is not possible here, so the item is only on the clipboard."
   },
-  "pasteQueueTargetElevated": "Couldn't paste into an app running as administrator. The item is kept in the queue and is on the clipboard.",
+  "pasteQueueTargetElevated": "Can't paste into an admin app. Item copied instead.",
   "@pasteQueueTargetElevated": {
     "description": "Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue."
   },
-  "pasteQueueNoTarget": "No app to paste into. The item is kept in the queue and is on the clipboard.",
+  "pasteQueueNoTarget": "No app to paste into. Item copied instead.",
   "@pasteQueueNoTarget": {
     "description": "Notice that no app could receive the paste, so the item stays in the queue."
   },
@@ -1136,7 +1136,7 @@
       }
     }
   },
-  "pasteQueueFullMessage": "New copies are no longer added. Nothing was removed.",
+  "pasteQueueFullMessage": "New copies are no longer added.",
   "@pasteQueueFullMessage": {
     "description": "Explains what happens while the queue is full."
   },
@@ -1144,7 +1144,7 @@
   "@pasteQueueEmptyTitle": {
     "description": "Empty state title of the queue drawer."
   },
-  "pasteQueueEmptyMessage": "Collect copies to paste them in order, or add items from history.",
+  "pasteQueueEmptyMessage": "Collect copies or add items from history.",
   "@pasteQueueEmptyMessage": {
     "description": "Empty state message of the queue drawer."
   },
@@ -1339,7 +1339,7 @@
   "@pasteQueueEditTitle": {
     "description": "Title of the dialog that edits a queued text item."
   },
-  "pasteQueueEditMessage": "Changes apply only to this queue. History keeps the original.",
+  "pasteQueueEditMessage": "Edits apply only to this queue.",
   "@pasteQueueEditMessage": {
     "description": "Explains that a queue edit does not change history."
   },
@@ -1347,7 +1347,7 @@
   "@pasteQueueShortcutPromptTitle": {
     "description": "Prompt title and button that leads to setting queue shortcuts."
   },
-  "pasteQueueShortcutPromptMessage": "Choose shortcuts to collect and paste without opening CopyPaste.",
+  "pasteQueueShortcutPromptMessage": "Collect and paste without opening CopyPaste.",
   "@pasteQueueShortcutPromptMessage": {
     "description": "Explains why to set queue shortcuts; they start unbound on Windows and Linux."
   },
@@ -1367,7 +1367,7 @@
   "@pasteQueueShortcutHeldByApp": {
     "description": "Shortcut refused because another CopyPaste shortcut uses it."
   },
-  "pasteQueueShortcutInUse": "Another app uses this combination. The previous one is kept; choose another.",
+  "pasteQueueShortcutInUse": "Another app uses this combination.",
   "@pasteQueueShortcutInUse": {
     "description": "Shortcut refused because another app holds it."
   },
@@ -1375,11 +1375,11 @@
   "@pasteQueueShortcutRejected": {
     "description": "Shortcut refused by the operating system."
   },
-  "pasteQueueShortcutAltGr": "Ctrl+Alt types characters on many keyboard layouts (AltGr). Choose another combination.",
+  "pasteQueueShortcutAltGr": "Ctrl+Alt types characters on many layouts. Choose another.",
   "@pasteQueueShortcutAltGr": {
     "description": "Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts."
   },
-  "pasteQueueShortcutUnavailable": "Global shortcuts aren't available in this session. Use the queue from the window or Quick Paste.",
+  "pasteQueueShortcutUnavailable": "Global shortcuts aren't available in this session.",
   "@pasteQueueShortcutUnavailable": {
     "description": "This desktop session offers no global shortcuts (for example some Wayland sessions)."
   },
@@ -1391,7 +1391,7 @@
   "@pasteQueueEnableTitle": {
     "description": "Settings switch that turns the Paste Queue feature on or off."
   },
-  "pasteQueueEnableDescription": "When off, queue shortcuts are released and nothing is collected.",
+  "pasteQueueEnableDescription": "When off, shortcuts and collecting stop.",
   "@pasteQueueEnableDescription": {
     "description": "Description of the Paste Queue switch."
   },
@@ -1399,7 +1399,7 @@
   "@pasteQueuePasteNextStyleTitle": {
     "description": "Setting: what Paste next does on this device."
   },
-  "pasteQueuePasteNextStyleDescription": "Pasting into the front app needs permission to send keystrokes. Clipboard only leaves the paste to you.",
+  "pasteQueuePasteNextStyleDescription": "Paste automatically or only copy to the clipboard.",
   "@pasteQueuePasteNextStyleDescription": {
     "description": "Description of the Paste next delivery style."
   },
@@ -1503,7 +1503,7 @@
   "@pasteQueueIdleStopTitle": {
     "description": "Setting: stop collecting after a period without copies."
   },
-  "pasteQueueIdleStopDescription": "Collecting turns off when nothing was copied for this long. Items stay.",
+  "pasteQueueIdleStopDescription": "Stop collecting after this long without copies.",
   "@pasteQueueIdleStopDescription": {
     "description": "Description of the idle stop setting."
   },
@@ -1524,7 +1524,7 @@
   "@pasteQueueMaxEntriesTitle": {
     "description": "Setting: the queue size limit."
   },
-  "pasteQueueMaxEntriesDescription": "When full, collecting stops adding items. Nothing is dropped.",
+  "pasteQueueMaxEntriesDescription": "When full, new copies aren't added.",
   "@pasteQueueMaxEntriesDescription": {
     "description": "Description of the size limit setting."
   },
@@ -1532,7 +1532,7 @@
   "@pasteQueueRestoreTitle": {
     "description": "Setting: restore the clipboard from before the queue started pasting."
   },
-  "pasteQueueRestoreDescription": "Puts back what you had copied before the queue started pasting.",
+  "pasteQueueRestoreDescription": "Bring back what you copied before pasting.",
   "@pasteQueueRestoreDescription": {
     "description": "Description of the restore clipboard setting."
   },
@@ -1640,7 +1640,7 @@
   "@settingsStartupUnavailable": {
     "description": "Startup setting description when automatic startup cannot be configured."
   },
-  "settingsStartupAndroidDescription": "Resume enabled background services after restarting the device.",
+  "settingsStartupAndroidDescription": "Resume background services after a restart.",
   "@settingsStartupAndroidDescription": {
     "description": "Android startup setting description."
   },
@@ -1704,7 +1704,7 @@
   "@settingsAndroidCaptureKeywords": {
     "description": "Space-separated search keywords that find the Android background capture setting. Translate each word and keep the English words too."
   },
-  "settingsAndroidCaptureDescription": "Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.",
+  "settingsAndroidCaptureDescription": "Full or Limited mode and one-time Shizuku or ADB setup.",
   "@settingsAndroidCaptureDescription": {
     "description": "Description of the Android background capture row. Full and Limited are capture mode names; Shizuku and ADB are tool names."
   },
@@ -1732,7 +1732,7 @@
   "@settingsScreenshotAccessTitle": {
     "description": "Settings row title asking for permissions needed to save screenshots."
   },
-  "settingsScreenshotAccessDescription": "Allow access to all photos and notifications to save new screenshots in the background.",
+  "settingsScreenshotAccessDescription": "Needed to save screenshots in the background.",
   "@settingsScreenshotAccessDescription": {
     "description": "Description of the permission row needed to save screenshots."
   },
@@ -1808,7 +1808,7 @@
   "@settingsMaxFileSizeKeywords": {
     "description": "Space-separated search keywords that find the maximum file size setting. Translate each word and keep the English words too."
   },
-  "settingsMaxFileSizeDescription": "Limit for adding and downloading files. File contents transfer only when you choose Download.",
+  "settingsMaxFileSizeDescription": "Largest file you can add or download.",
   "@settingsMaxFileSizeDescription": {
     "description": "Description of the maximum file size setting. Download is the name of the History action that transfers a file."
   },
@@ -1864,7 +1864,7 @@
   "@settingsRestoreDialogTitle": {
     "description": "Title of the dialog confirming a backup restore."
   },
-  "settingsRestoreDialogMessage": "The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.",
+  "settingsRestoreDialogMessage": "The backup replaces this device's history. Settings are kept.",
   "@settingsRestoreDialogMessage": {
     "description": "Message of the dialog confirming a backup restore."
   },
@@ -1876,7 +1876,7 @@
   "@settingsSyncSwitchTitle": {
     "description": "Settings row title for the master synchronization switch. Noun, short for synchronization."
   },
-  "settingsSyncSwitchDescription": "Master switch for paired-device synchronization.",
+  "settingsSyncSwitchDescription": "Sync history with paired devices.",
   "@settingsSyncSwitchDescription": {
     "description": "Description of the master synchronization switch."
   },
@@ -1896,7 +1896,7 @@
   "@settingsInstantClipboardKeywords": {
     "description": "Space-separated search keywords that find the instant clipboard setting. Translate each word and keep the English words too."
   },
-  "settingsInstantClipboardDescription": "Automatically copy newer clips from other devices to this clipboard.",
+  "settingsInstantClipboardDescription": "Copy new clips from other devices to this clipboard.",
   "@settingsInstantClipboardDescription": {
     "description": "Description of the instant clipboard setting."
   },
@@ -1924,15 +1924,11 @@
   "@settingsExcludedAppsKeywords": {
     "description": "Space-separated search keywords that find the excluded applications setting. Translate each word and keep the English words too."
   },
-  "settingsExcludedAppsMacDescription": "Skip automatic capture during activity from these apps. Background copies may bypass exclusions.",
-  "@settingsExcludedAppsMacDescription": {
-    "description": "macOS description of excluded applications."
-  },
-  "settingsExcludedAppsDesktopDescription": "Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.",
+  "settingsExcludedAppsDesktopDescription": "Skip automatic capture from these apps.",
   "@settingsExcludedAppsDesktopDescription": {
     "description": "Windows and Linux description of excluded applications."
   },
-  "settingsExcludedAppsAndroidDescription": "Android skips automatic capture while exclusions are set because it cannot identify source apps.",
+  "settingsExcludedAppsAndroidDescription": "Automatic capture pauses while any app is excluded.",
   "@settingsExcludedAppsAndroidDescription": {
     "description": "Android description of excluded applications."
   },
@@ -1978,7 +1974,7 @@
   "@settingsSkipSecretTitle": {
     "description": "Settings row title for not capturing clipboard content that the source app marked as confidential."
   },
-  "settingsSkipSecretDescription": "Keep producer-marked secrets out of History.",
+  "settingsSkipSecretDescription": "Don't save copies that apps mark as secret.",
   "@settingsSkipSecretDescription": {
     "description": "Description of the confidential clipboard setting. History is the clipboard history screen."
   },
@@ -1990,7 +1986,7 @@
   "@settingsSkipTransientTitle": {
     "description": "Settings row title for not capturing clipboard content that the source app marked as temporary."
   },
-  "settingsSkipTransientDescription": "Keep producer-marked temporary copies out of History.",
+  "settingsSkipTransientDescription": "Don't save copies that apps mark as temporary.",
   "@settingsSkipTransientDescription": {
     "description": "Description of the temporary clipboard setting. History is the clipboard history screen."
   },
@@ -2258,7 +2254,7 @@
   "@settingsQuickPasteShortcutKeywords": {
     "description": "Space-separated search keywords that find the Quick Paste shortcut setting. Translate each word and keep the English words too."
   },
-  "settingsQuickPasteShortcutDescription": "The shortcut works while CopyPaste is running in the background.",
+  "settingsQuickPasteShortcutDescription": "Works while CopyPaste runs in the background.",
   "@settingsQuickPasteShortcutDescription": {
     "description": "Description of the Quick Paste shortcut row. CopyPaste is the product name."
   },
@@ -4876,7 +4872,7 @@
   "@devicesEmptyTitle": {
     "description": "Empty state title on the Devices screen when no other device has been paired yet."
   },
-  "devicesEmptyMessage": "Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.",
+  "devicesEmptyMessage": "Pair a device on the same network to sync history.",
   "@devicesEmptyMessage": {
     "description": "Empty state message on the Devices screen explaining what pairing another device gives and requires."
   },
@@ -5032,7 +5028,7 @@
   "@settingsRetentionConfirmTitle": {
     "description": "Title of the confirmation shown before a shorter retention period deletes history."
   },
-  "settingsRetentionConfirmMessage": "New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.",
+  "settingsRetentionConfirmMessage": "New limit: {limit}. Older unpinned items are deleted permanently.",
   "@settingsRetentionConfirmMessage": {
     "description": "Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.",
     "placeholders": {
@@ -5046,7 +5042,7 @@
   "@settingsStorageQuotaConfirmTitle": {
     "description": "Title of the confirmation shown before a smaller storage quota deletes history."
   },
-  "settingsStorageQuotaConfirmMessage": "New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.",
+  "settingsStorageQuotaConfirmMessage": "New quota: {size}. The oldest unpinned items over it are deleted permanently.",
   "@settingsStorageQuotaConfirmMessage": {
     "description": "Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.",
     "placeholders": {
@@ -5064,11 +5060,11 @@
   "@settingsHideEverywhereTitle": {
     "description": "Title of the confirmation shown before the last visible entry point of the application (Dock or taskbar icon, menu bar or tray icon) is turned off."
   },
-  "settingsHideEverywhereMessage": "With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.",
+  "settingsHideEverywhereMessage": "With both off, there's no icon. To open it, start CopyPaste again.",
   "@settingsHideEverywhereMessage": {
     "description": "Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice."
   },
-  "settingsHideEverywhereShortcutMessage": "With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.",
+  "settingsHideEverywhereShortcutMessage": "With both off, there's no icon. To open it, press {shortcut} or start CopyPaste again.",
   "@settingsHideEverywhereShortcutMessage": {
     "description": "Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.",
     "placeholders": {
@@ -5246,7 +5242,7 @@
       }
     }
   },
-  "settingsStorageQuotaConfirmRemovesMessage": "New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.",
+  "settingsStorageQuotaConfirmRemovesMessage": "New quota: {size}. {used} is in use, so the oldest unpinned items are deleted permanently.",
   "@settingsStorageQuotaConfirmRemovesMessage": {
     "description": "Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.",
     "placeholders": {
@@ -5405,7 +5401,7 @@
   "@trayRecentPreviewTitle": {
     "description": "Setting title: how much of each clip the Recent submenu shows."
   },
-  "trayRecentPreviewDescription": "The system keeps menu text outside CopyPaste's encryption. Show less to keep clip content out of it. Secrets are always masked.",
+  "trayRecentPreviewDescription": "How much clip text the menu shows.",
   "@trayRecentPreviewDescription": {
     "description": "Description of trayRecentPreviewTitle: menu text leaves the encrypted store."
   },
@@ -5761,7 +5757,7 @@
   "@transformsSavedTitle": {
     "description": "Toast title after saving a transform result as a new item."
   },
-  "transformsSavedMessage": "The result is a new history item. The clipboard is unchanged.",
+  "transformsSavedMessage": "Saved as a new history item.",
   "@transformsSavedMessage": {
     "description": "Toast message after saving a transform result as a new item."
   },
@@ -5919,7 +5915,7 @@
   "@transformsRestoreTitle": {
     "description": "Settings row title: put the previous clipboard back after a transformed paste."
   },
-  "transformsRestoreDescription": "After a transformed paste, the previous clipboard comes back unless something else was copied meanwhile.",
+  "transformsRestoreDescription": "Bring back the previous clipboard after pasting.",
   "@transformsRestoreDescription": {
     "description": "Settings row description."
   },
@@ -5927,7 +5923,7 @@
   "@transformsDefaultTitle": {
     "description": "Settings row title: a pipeline applied when pasting from Quick Paste."
   },
-  "transformsDefaultDescription": "Quick Paste applies this pipeline to text and shows it before pasting. A failing pipeline pastes the original.",
+  "transformsDefaultDescription": "Applied to text you paste from Quick Paste.",
   "@transformsDefaultDescription": {
     "description": "Settings row description."
   },
@@ -5939,7 +5935,7 @@
   "@transformsAppDefaultsTitle": {
     "description": "Settings row title: default paste transforms for specific apps."
   },
-  "transformsAppDefaultsDescription": "Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.",
+  "transformsAppDefaultsDescription": "Use a different default in specific apps.",
   "@transformsAppDefaultsDescription": {
     "description": "Settings row description."
   },
@@ -5969,7 +5965,7 @@
   "@transformsFavoritesTitle": {
     "description": "Settings row title: favorite transforms and pipelines."
   },
-  "transformsFavoritesDescription": "Favorites appear first in every palette. The first nine run with Mod+1 to Mod+9.",
+  "transformsFavoritesDescription": "Shown first in every palette.",
   "@transformsFavoritesDescription": {
     "description": "Settings row description; Mod is Command on macOS and Ctrl elsewhere."
   },
@@ -5991,7 +5987,7 @@
   "@transformsPipelinesTitle": {
     "description": "Settings row title: saved chains of transforms."
   },
-  "transformsPipelinesDescription": "Saved chains of transforms with their settings. They sync to your other devices.",
+  "transformsPipelinesDescription": "Saved chains of transforms.",
   "@transformsPipelinesDescription": {
     "description": "Settings row description."
   },
@@ -6021,7 +6017,7 @@
       }
     }
   },
-  "transformsDeletePipelineMessage": "Favorites and paste defaults that use it fall back to none on every device.",
+  "transformsDeletePipelineMessage": "Favorites and paste defaults using it are cleared.",
   "@transformsDeletePipelineMessage": {
     "description": "Explanation in the delete pipeline dialog."
   },
@@ -6037,7 +6033,7 @@
   "@transformsHiddenTitle": {
     "description": "Settings row title: transforms hidden from the palette."
   },
-  "transformsHiddenDescription": "Hidden transforms are left out of palettes and suggestions. Pipelines that use them still run.",
+  "transformsHiddenDescription": "Left out of palettes and suggestions.",
   "@transformsHiddenDescription": {
     "description": "Settings row description."
   },
@@ -6053,7 +6049,7 @@
   "@transformsSuggestionsTitle": {
     "description": "Settings row title: suggested transforms in the palette."
   },
-  "transformsSuggestionsDescription": "When a palette opens, the first 64 KiB of its text is checked for the kinds below to suggest up to three transforms. Nothing runs in the background.",
+  "transformsSuggestionsDescription": "Suggest transforms that fit the text.",
   "@transformsSuggestionsDescription": {
     "description": "Settings row description."
   },
@@ -6089,7 +6085,7 @@
   "@transformsTrackingTitle": {
     "description": "Settings row title: URL parameters removed by the Remove tracking parameters transform."
   },
-  "transformsTrackingDescription": "The built-in list ships with the app and changes only with updates. Add names to remove or to keep; write name@domain to limit one to a domain.",
+  "transformsTrackingDescription": "Link parameters to also remove or always keep.",
   "@transformsTrackingDescription": {
     "description": "Settings row description."
   },
@@ -6125,7 +6121,7 @@
   "@quickAccessKeyboardTitle": {
     "description": "Setting row title: the CopyPaste clips keyboard panel (an Android input method that inserts saved clips)."
   },
-  "quickAccessKeyboardDescription": "Turn on CopyPaste clips in the system keyboard settings. Android warns that a keyboard can see what you type: the clips panel never records keystrokes, has no typing keys for other apps, and inserts only the items you tap.",
+  "quickAccessKeyboardDescription": "Turn on CopyPaste clips in keyboard settings.",
   "@quickAccessKeyboardDescription": {
     "description": "Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes."
   },
@@ -6153,7 +6149,7 @@
   "@quickAccessSwitchKeyboardTitle": {
     "description": "Setting row title: make the clips keyboard the current keyboard."
   },
-  "quickAccessSwitchKeyboardDescription": "Choose CopyPaste clips as the current keyboard. While it stays selected, each copy is saved.",
+  "quickAccessSwitchKeyboardDescription": "Make CopyPaste clips the current keyboard.",
   "@quickAccessSwitchKeyboardDescription": {
     "description": "Setting row description for switching to the clips keyboard."
   },
@@ -6169,7 +6165,7 @@
   "@quickAccessCaptureTierTitle": {
     "description": "Setting row title: how copies made in other apps are saved on this device."
   },
-  "quickAccessCaptureTierDescription": "Without Shizuku or ADB access, copies are saved only when the clips panel opens, while it stays selected, or from the CopyPaste app, a tile, the widget, or Share.",
+  "quickAccessCaptureTierDescription": "How copies from other apps are saved.",
   "@quickAccessCaptureTierDescription": {
     "description": "Setting row description explaining capture without Shizuku or ADB access."
   },
@@ -6205,7 +6201,7 @@
   "@quickAccessAutoReturnTitle": {
     "description": "Switch title: after inserting a clip, the panel switches back to the keyboard used before."
   },
-  "quickAccessAutoReturnDescription": "Switches back after a single insert. The panel stays open while you use the Queue tab or item actions. Turn off to keep collecting copies.",
+  "quickAccessAutoReturnDescription": "Switch back after inserting one clip.",
   "@quickAccessAutoReturnDescription": {
     "description": "Switch description for returning to the previous keyboard after inserting."
   },
@@ -6217,7 +6213,7 @@
   "@quickAccessFocusSearchTitle": {
     "description": "Switch title: the clips panel opens with its search field focused."
   },
-  "quickAccessFocusSearchDescription": "Opens the panel on its search field. When off, your clips are one tap away.",
+  "quickAccessFocusSearchDescription": "Open the panel with search ready.",
   "@quickAccessFocusSearchDescription": {
     "description": "Switch description for focusing search when the clips panel opens."
   },
@@ -6233,7 +6229,7 @@
   "@quickAccessTilesKeywords": {
     "description": "Space-separated search keywords for the Quick Settings tile rows; translate and add local synonyms."
   },
-  "quickAccessTileInstructions": "Swipe down twice from the top of the screen, tap Edit, and drag a CopyPaste tile into Quick Settings.",
+  "quickAccessTileInstructions": "Swipe down twice, tap Edit, and add a CopyPaste tile.",
   "@quickAccessTileInstructions": {
     "description": "How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt."
   },
@@ -6265,11 +6261,11 @@
   "@quickAccessWidgetTitle": {
     "description": "Setting row title for the Recent clips home-screen widget."
   },
-  "quickAccessWidgetDescription": "Shows your latest clips on the home screen. Tap one to copy it.",
+  "quickAccessWidgetDescription": "Recent clips on your home screen, one tap to copy.",
   "@quickAccessWidgetDescription": {
     "description": "Setting row description for the Recent clips widget."
   },
-  "quickAccessWidgetInstructions": "Touch and hold the home screen, tap Widgets, and drag Recent clips from CopyPaste.",
+  "quickAccessWidgetInstructions": "Hold the home screen, tap Widgets, and add Recent clips.",
   "@quickAccessWidgetInstructions": {
     "description": "How to add the widget by hand, shown when the launcher cannot pin widgets."
   },
@@ -6400,7 +6396,7 @@
   "@snippetsConcealedConfirmAction": {
     "description": "Confirms the in-app owner check on devices without device authentication."
   },
-  "snippetsConcealedConfirmMessage": "This device has no password, PIN or biometrics to verify you. Continue only if this is your device.",
+  "snippetsConcealedConfirmMessage": "This device can't verify you. Continue only on your own device.",
   "@snippetsConcealedConfirmMessage": {
     "description": "In-app owner check shown when the system cannot verify the device owner."
   },
@@ -6501,7 +6497,7 @@
       }
     }
   },
-  "snippetsDuplicateAbbreviation": "Another snippet got the same abbreviation in a sync. Change one of them.",
+  "snippetsDuplicateAbbreviation": "Another snippet has this abbreviation. Change one.",
   "@snippetsDuplicateAbbreviation": {
     "description": "Hint under the abbreviation of a snippet marked duplicate."
   },
@@ -6537,7 +6533,7 @@
   "@snippetsEnableTemplate": {
     "description": "Confirms turning on Template before inserting a placeholder."
   },
-  "snippetsEnableTemplateMessage": "Placeholders work only in templates. Text that already looks like a placeholder will be filled in too.",
+  "snippetsEnableTemplateMessage": "Text that looks like a placeholder will be filled in.",
   "@snippetsEnableTemplateMessage": {
     "description": "Asked before inserting a placeholder into a literal snippet whose text already contains double braces."
   },
@@ -6951,7 +6947,7 @@
   "@snippetsRecentlyDeletedEmpty": {
     "description": "Empty state of Recently Deleted."
   },
-  "snippetsRecordPastedDescription": "Adds pasted snippet text to History. Concealed snippets are never recorded.",
+  "snippetsRecordPastedDescription": "Add pasted snippets to History.",
   "@snippetsRecordPastedDescription": {
     "description": "Description of the record pasted snippets setting."
   },
@@ -6967,11 +6963,11 @@
   "@snippetsReplaceOriginal": {
     "description": "Clip editor switch that deletes the original clip after saving."
   },
-  "snippetsReplaceOriginalHint": "Deletes the original clip on all devices after saving. When off, both stay.",
+  "snippetsReplaceOriginalHint": "Deletes the original clip after saving.",
   "@snippetsReplaceOriginalHint": {
     "description": "Hint under the Replace original switch."
   },
-  "snippetsRequireAuthDescription": "Verify it's you before a concealed snippet is used or shown. Each device asks on its own.",
+  "snippetsRequireAuthDescription": "Ask for your password or biometrics first.",
   "@snippetsRequireAuthDescription": {
     "description": "Description of the device authentication setting for concealed snippets."
   },
@@ -6986,19 +6982,6 @@
   "snippetsRestore": "Restore",
   "@snippetsRestore": {
     "description": "Restores snippets from Recently Deleted."
-  },
-  "snippetsSaveBlockEmpty": "Add some text to save.",
-  "@snippetsSaveBlockEmpty": {
-    "description": "Why Save is disabled: the body is empty."
-  },
-  "snippetsSaveBlockTitle": "The title is longer than {max} characters.",
-  "@snippetsSaveBlockTitle": {
-    "description": "Why Save is disabled: the title is too long.",
-    "placeholders": {
-      "max": {
-        "type": "int"
-      }
-    }
   },
   "snippetsSaveBlockTooLarge": "The text is longer than 64 KB.",
   "@snippetsSaveBlockTooLarge": {
@@ -7074,7 +7057,7 @@
   "@snippetsTitlePlaceholder": {
     "description": "Placeholder of the snippet title field."
   },
-  "snippetsTransferDescription": "Move snippets between apps or keep a backup. Exports are encrypted by default.",
+  "snippetsTransferDescription": "Back up snippets or move them between apps.",
   "@snippetsTransferDescription": {
     "description": "Description of the import and export row."
   },
@@ -7655,34 +7638,13 @@
   "@rulesPrivacyDefaultsTitle": {
     "description": "Heading of the device Privacy settings that guard capture before any content rule."
   },
-  "rulesPrivacyDefaultsDescription": "These Privacy settings guard every copy on this device before any rule runs. The built-in rules below sync to your devices.",
+  "rulesPrivacyDefaultsDescription": "Privacy settings apply before any rule.",
   "@rulesPrivacyDefaultsDescription": {
     "description": "Description of the Privacy defaults row. The built-in rules are listed below it."
   },
   "rulesPrivacyDefaultsKeywords": "privacy concealed temporary excluded apps built-in credentials passwords payment cards",
   "@rulesPrivacyDefaultsKeywords": {
     "description": "Search keywords for the Privacy defaults row of Content rules."
-  },
-  "rulesPrivacyState": "{setting}: {state}",
-  "@rulesPrivacyState": {
-    "description": "One line of the Privacy defaults status: a Privacy setting name and its current value.",
-    "placeholders": {
-      "setting": {
-        "type": "String"
-      },
-      "state": {
-        "type": "String"
-      }
-    }
-  },
-  "rulesExcludedApps": "{count, plural, =0{none} =1{1 app} other{{count} apps}}",
-  "@rulesExcludedApps": {
-    "description": "Number of excluded applications in the Privacy defaults status.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
   },
   "rulesOpenPrivacy": "Open Privacy",
   "@rulesOpenPrivacy": {
@@ -7692,7 +7654,7 @@
   "@rulesMyRulesTitle": {
     "description": "Heading of the list of rules the user created."
   },
-  "rulesMyRulesDescription": "They run from top to bottom on new copies, after the built-in rules, and sync to your devices.",
+  "rulesMyRulesDescription": "Run in order on new copies.",
   "@rulesMyRulesDescription": {
     "description": "Description of the user rules list."
   },
@@ -7704,7 +7666,7 @@
   "@rulesEmptyTitle": {
     "description": "Empty state title when the user has no rules."
   },
-  "rulesEmptyMessage": "A rule can tag, protect, expire or skip new copies automatically.",
+  "rulesEmptyMessage": "Rules tag, protect, expire or skip new copies.",
   "@rulesEmptyMessage": {
     "description": "Empty state message when the user has no rules."
   },
@@ -7712,7 +7674,7 @@
   "@rulesDeletedTitle": {
     "description": "Heading of the rules deleted within 30 days."
   },
-  "rulesDeletedDescription": "Deleted rules can be restored for 30 days.",
+  "rulesDeletedDescription": "Restore within 30 days.",
   "@rulesDeletedDescription": {
     "description": "Description of the recently deleted rules."
   },
@@ -7765,7 +7727,7 @@
   "@rulesSkipLogTitle": {
     "description": "Title of the list of copies content rules did not save."
   },
-  "rulesSkipLogDescription": "Copies your rules did not save on this device since CopyPaste started. Only the time, app and rule are kept.",
+  "rulesSkipLogDescription": "Copies your rules didn't save on this device.",
   "@rulesSkipLogDescription": {
     "description": "Description of the skip log row."
   },
@@ -7785,11 +7747,11 @@
   "@rulesUnknownApp": {
     "description": "Skip log entry when the source app is not known."
   },
-  "rulesMatchesEverything": "any copy",
+  "rulesMatchesEverything": "Any copy",
   "@rulesMatchesEverything": {
     "description": "Condition part of a rule summary when the rule has no conditions."
   },
-  "rulesSummary": "When {conditions} → {actions}",
+  "rulesSummary": "{conditions} → {actions}",
   "@rulesSummary": {
     "description": "One-line rule summary: its conditions, an arrow, its actions.",
     "placeholders": {
@@ -7855,28 +7817,6 @@
       }
     }
   },
-  "rulesRunsOnAll": "Runs on all devices",
-  "@rulesRunsOnAll": {
-    "description": "A rule runs on every device."
-  },
-  "rulesMatchCount": "{count, plural, =1{Matched once here} other{Matched {count} times here}}",
-  "@rulesMatchCount": {
-    "description": "How often a rule matched on this device.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "rulesLastMatched": "last {time}",
-  "@rulesLastMatched": {
-    "description": "When a rule last matched on this device.",
-    "placeholders": {
-      "time": {
-        "type": "String"
-      }
-    }
-  },
   "rulesNewFromDevice": "New from {device}",
   "@rulesNewFromDevice": {
     "description": "Badge on a rule another device added or changed in the last 7 days.",
@@ -7898,7 +7838,7 @@
   "@rulesErrorBadge": {
     "description": "Badge on a rule that cannot run on this device."
   },
-  "rulesErrorHint": "{problem} Until it is fixed, copies this rule could match are saved as secret and hidden from AI tools.",
+  "rulesErrorHint": "{problem} Until fixed, matches are protected.",
   "@rulesErrorHint": {
     "description": "Explains the error badge. problem is the reason, a full sentence.",
     "placeholders": {
@@ -8088,7 +8028,7 @@
   "@rulesPatternPlaceholder": {
     "description": "Placeholder of a pattern (regular expression) value. Keep the example pattern unchanged."
   },
-  "rulesPatternHint": "Patterns check the first 1 MiB of text. Look-ahead, look-behind and backreferences are not supported.",
+  "rulesPatternHint": "Look-around and backreferences aren't supported.",
   "@rulesPatternHint": {
     "description": "Hint under a pattern value."
   },
@@ -8104,11 +8044,11 @@
   "@rulesUnknownConditionNotice": {
     "description": "Shown on a condition from a newer version, which this version keeps unchanged."
   },
-  "rulesSourceAppNotice": "Android knows the source app only for copies made with the CopyPaste keyboard. Other copies on Android never match this condition.",
+  "rulesSourceAppNotice": "On Android, only copies made with the clips keyboard match.",
   "@rulesSourceAppNotice": {
     "description": "Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard."
   },
-  "rulesPrivacyMarkerNotice": "Each system reports different markers. A marker the system does not report never matches.",
+  "rulesPrivacyMarkerNotice": "Not every system reports every marker.",
   "@rulesPrivacyMarkerNotice": {
     "description": "Inline notice on a privacy marker condition."
   },
@@ -8181,7 +8121,7 @@
       }
     }
   },
-  "rulesClearClipboardAtExpiry": "Also clear the clipboard at that time if it still holds this copy. On Android this happens the next time CopyPaste runs.",
+  "rulesClearClipboardAtExpiry": "Also clear the clipboard if it still holds this copy.",
   "@rulesClearClipboardAtExpiry": {
     "description": "Option of the Delete after action."
   },
@@ -8225,7 +8165,7 @@
   "@rulesTestTitle": {
     "description": "Editor section that tests the rule on a sample."
   },
-  "rulesTestDescription": "Try the rule on sample text. The sample is never saved or synced.",
+  "rulesTestDescription": "Try the rule on sample text.",
   "@rulesTestDescription": {
     "description": "Description of the rule test."
   },
@@ -8249,20 +8189,11 @@
   "@rulesPreviewHistory": {
     "description": "Button that previews the rule against recent history."
   },
-  "rulesSaveBlock": "{reason, select, read_only{Update CopyPaste to edit this rule.} name_missing{Give the rule a name.} name_too_long{Use a name of up to 128 characters.} no_actions{Add at least one action.} other{Fix the marked fields.}}",
-  "@rulesSaveBlock": {
-    "description": "Why the rule cannot be saved yet.",
-    "placeholders": {
-      "reason": {
-        "type": "String"
-      }
-    }
-  },
   "rulesSaveFailed": "The rule could not be saved.",
   "@rulesSaveFailed": {
     "description": "Alert title when saving a rule fails."
   },
-  "rulesReadOnlyNotice": "A newer version of CopyPaste wrote this rule. Update CopyPaste to edit or run it.",
+  "rulesReadOnlyNotice": "Made by a newer CopyPaste. Update to edit or run it.",
   "@rulesReadOnlyNotice": {
     "description": "Editor notice for a rule a newer version wrote."
   },
@@ -8313,11 +8244,11 @@
   "@rulesTraceStopped": {
     "description": "Trace note under a rule that stopped later rules."
   },
-  "rulesTraceUnknownReason": "Not known for this copy, so the condition does not match either way.",
+  "rulesTraceUnknownReason": "Unknown for this copy, so it doesn't match.",
   "@rulesTraceUnknownReason": {
     "description": "Trace note under a condition whose attribute is unknown for the copy."
   },
-  "rulesTraceRuleError": "This rule could not run here, so matching copies are protected instead.",
+  "rulesTraceRuleError": "This rule couldn't run, so matches are protected.",
   "@rulesTraceRuleError": {
     "description": "Trace note under a rule that could not run on this device."
   },
@@ -8461,7 +8392,7 @@
       }
     }
   },
-  "rulesPreviewNote": "Nothing changes until you apply. Changes sync to your other devices as ordinary edits.",
+  "rulesPreviewNote": "Nothing changes until you apply.",
   "@rulesPreviewNote": {
     "description": "Preview note about when changes happen."
   },
@@ -8495,7 +8426,7 @@
       }
     }
   },
-  "rulesApplyDeleteMessage": "Applying “Don't save” to existing items deletes the matching clips from History on all your devices. This can't be undone.",
+  "rulesApplyDeleteMessage": "Matching clips are deleted on all your devices. This can't be undone.",
   "@rulesApplyDeleteMessage": {
     "description": "Explains that applying a Don't save rule deletes matching clips everywhere."
   },
@@ -8542,7 +8473,7 @@
       }
     }
   },
-  "rulesApplyCancelled": "Stopped. Clips changed before you stopped stay changed.",
+  "rulesApplyCancelled": "Stopped. Changes made so far stay.",
   "@rulesApplyCancelled": {
     "description": "Shown after applying was stopped."
   },
@@ -8594,7 +8525,7 @@
   "@historySnippetSaveFailed": {
     "description": "Error toast when a clip could not be saved as a snippet."
   },
-  "historyQueueAddedInOrder": "{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue in the order you selected them.}}",
+  "historyQueueAddedInOrder": "{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue.}}",
   "@historyQueueAddedInOrder": {
     "description": "Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.",
     "placeholders": {

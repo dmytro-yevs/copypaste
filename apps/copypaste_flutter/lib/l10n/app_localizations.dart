@@ -1531,7 +1531,7 @@ abstract class AppLocalizations {
   /// Why Paste all is unavailable for a queue of several files.
   ///
   /// In en, this message translates to:
-  /// **'Pasting several files at once isn\'t available yet. Paste them one at a time.'**
+  /// **'Paste files one at a time.'**
   String get pasteQueueSeveralFiles;
 
   /// Notice that queued items were skipped because their history item no longer exists.
@@ -1549,25 +1549,25 @@ abstract class AppLocalizations {
   /// macOS notice: without the Accessibility permission the item is only put on the clipboard.
   ///
   /// In en, this message translates to:
-  /// **'Allow Accessibility to paste automatically. Until then, the item is on the clipboard for you to paste.'**
+  /// **'Item copied. Allow Accessibility to paste automatically.'**
   String get pasteQueueAccessibilityMessage;
 
   /// Notice that automatic pasting is not possible here, so the item is only on the clipboard.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t paste automatically. The item is on the clipboard; paste it with the usual shortcut.'**
+  /// **'Couldn\'t paste automatically. Item copied instead.'**
   String get pasteQueuePasteUnsupported;
 
   /// Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t paste into an app running as administrator. The item is kept in the queue and is on the clipboard.'**
+  /// **'Can\'t paste into an admin app. Item copied instead.'**
   String get pasteQueueTargetElevated;
 
   /// Notice that no app could receive the paste, so the item stays in the queue.
   ///
   /// In en, this message translates to:
-  /// **'No app to paste into. The item is kept in the queue and is on the clipboard.'**
+  /// **'No app to paste into. Item copied instead.'**
   String get pasteQueueNoTarget;
 
   /// Announcement and notification when the queue starts collecting copies.
@@ -1621,7 +1621,7 @@ abstract class AppLocalizations {
   /// Explains what happens while the queue is full.
   ///
   /// In en, this message translates to:
-  /// **'New copies are no longer added. Nothing was removed.'**
+  /// **'New copies are no longer added.'**
   String get pasteQueueFullMessage;
 
   /// Empty state title of the queue drawer.
@@ -1633,7 +1633,7 @@ abstract class AppLocalizations {
   /// Empty state message of the queue drawer.
   ///
   /// In en, this message translates to:
-  /// **'Collect copies to paste them in order, or add items from history.'**
+  /// **'Collect copies or add items from history.'**
   String get pasteQueueEmptyMessage;
 
   /// Empty state title while collecting and nothing was copied yet.
@@ -1891,7 +1891,7 @@ abstract class AppLocalizations {
   /// Explains that a queue edit does not change history.
   ///
   /// In en, this message translates to:
-  /// **'Changes apply only to this queue. History keeps the original.'**
+  /// **'Edits apply only to this queue.'**
   String get pasteQueueEditMessage;
 
   /// Prompt title and button that leads to setting queue shortcuts.
@@ -1903,7 +1903,7 @@ abstract class AppLocalizations {
   /// Explains why to set queue shortcuts; they start unbound on Windows and Linux.
   ///
   /// In en, this message translates to:
-  /// **'Choose shortcuts to collect and paste without opening CopyPaste.'**
+  /// **'Collect and paste without opening CopyPaste.'**
   String get pasteQueueShortcutPromptMessage;
 
   /// Shortcut name: start or stop collecting copies.
@@ -1933,7 +1933,7 @@ abstract class AppLocalizations {
   /// Shortcut refused because another app holds it.
   ///
   /// In en, this message translates to:
-  /// **'Another app uses this combination. The previous one is kept; choose another.'**
+  /// **'Another app uses this combination.'**
   String get pasteQueueShortcutInUse;
 
   /// Shortcut refused by the operating system.
@@ -1945,13 +1945,13 @@ abstract class AppLocalizations {
   /// Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts.
   ///
   /// In en, this message translates to:
-  /// **'Ctrl+Alt types characters on many keyboard layouts (AltGr). Choose another combination.'**
+  /// **'Ctrl+Alt types characters on many layouts. Choose another.'**
   String get pasteQueueShortcutAltGr;
 
   /// This desktop session offers no global shortcuts (for example some Wayland sessions).
   ///
   /// In en, this message translates to:
-  /// **'Global shortcuts aren\'t available in this session. Use the queue from the window or Quick Paste.'**
+  /// **'Global shortcuts aren\'t available in this session.'**
   String get pasteQueueShortcutUnavailable;
 
   /// Generic failure when a queue shortcut could not be set.
@@ -1969,7 +1969,7 @@ abstract class AppLocalizations {
   /// Description of the Paste Queue switch.
   ///
   /// In en, this message translates to:
-  /// **'When off, queue shortcuts are released and nothing is collected.'**
+  /// **'When off, shortcuts and collecting stop.'**
   String get pasteQueueEnableDescription;
 
   /// Setting: what Paste next does on this device.
@@ -1981,7 +1981,7 @@ abstract class AppLocalizations {
   /// Description of the Paste next delivery style.
   ///
   /// In en, this message translates to:
-  /// **'Pasting into the front app needs permission to send keystrokes. Clipboard only leaves the paste to you.'**
+  /// **'Paste automatically or only copy to the clipboard.'**
   String get pasteQueuePasteNextStyleDescription;
 
   /// Delivery style: paste into the front app.
@@ -2137,7 +2137,7 @@ abstract class AppLocalizations {
   /// Description of the idle stop setting.
   ///
   /// In en, this message translates to:
-  /// **'Collecting turns off when nothing was copied for this long. Items stay.'**
+  /// **'Stop collecting after this long without copies.'**
   String get pasteQueueIdleStopDescription;
 
   /// Idle stop choice in minutes.
@@ -2161,7 +2161,7 @@ abstract class AppLocalizations {
   /// Description of the size limit setting.
   ///
   /// In en, this message translates to:
-  /// **'When full, collecting stops adding items. Nothing is dropped.'**
+  /// **'When full, new copies aren\'t added.'**
   String get pasteQueueMaxEntriesDescription;
 
   /// Setting: restore the clipboard from before the queue started pasting.
@@ -2173,7 +2173,7 @@ abstract class AppLocalizations {
   /// Description of the restore clipboard setting.
   ///
   /// In en, this message translates to:
-  /// **'Puts back what you had copied before the queue started pasting.'**
+  /// **'Bring back what you copied before pasting.'**
   String get pasteQueueRestoreDescription;
 
   /// Search keywords for the Paste Queue settings, space separated.
@@ -2335,7 +2335,7 @@ abstract class AppLocalizations {
   /// Android startup setting description.
   ///
   /// In en, this message translates to:
-  /// **'Resume enabled background services after restarting the device.'**
+  /// **'Resume background services after a restart.'**
   String get settingsStartupAndroidDescription;
 
   /// Desktop startup setting description. CopyPaste is the product name.
@@ -2431,7 +2431,7 @@ abstract class AppLocalizations {
   /// Description of the Android background capture row. Full and Limited are capture mode names; Shizuku and ADB are tool names.
   ///
   /// In en, this message translates to:
-  /// **'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.'**
+  /// **'Full or Limited mode and one-time Shizuku or ADB setup.'**
   String get settingsAndroidCaptureDescription;
 
   /// Button that opens the Android background capture setup flow.
@@ -2473,7 +2473,7 @@ abstract class AppLocalizations {
   /// Description of the permission row needed to save screenshots.
   ///
   /// In en, this message translates to:
-  /// **'Allow access to all photos and notifications to save new screenshots in the background.'**
+  /// **'Needed to save screenshots in the background.'**
   String get settingsScreenshotAccessDescription;
 
   /// Button that requests the photo and notification permissions for screenshot saving.
@@ -2587,7 +2587,7 @@ abstract class AppLocalizations {
   /// Description of the maximum file size setting. Download is the name of the History action that transfers a file.
   ///
   /// In en, this message translates to:
-  /// **'Limit for adding and downloading files. File contents transfer only when you choose Download.'**
+  /// **'Largest file you can add or download.'**
   String get settingsMaxFileSizeDescription;
 
   /// Search result title for exporting, backing up, and restoring history.
@@ -2671,7 +2671,7 @@ abstract class AppLocalizations {
   /// Message of the dialog confirming a backup restore.
   ///
   /// In en, this message translates to:
-  /// **'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.'**
+  /// **'The backup replaces this device\'s history. Settings are kept.'**
   String get settingsRestoreDialogMessage;
 
   /// Error shown in the restore dialog when restoring fails.
@@ -2689,7 +2689,7 @@ abstract class AppLocalizations {
   /// Description of the master synchronization switch.
   ///
   /// In en, this message translates to:
-  /// **'Master switch for paired-device synchronization.'**
+  /// **'Sync history with paired devices.'**
   String get settingsSyncSwitchDescription;
 
   /// Search result description for the master synchronization switch.
@@ -2719,7 +2719,7 @@ abstract class AppLocalizations {
   /// Description of the instant clipboard setting.
   ///
   /// In en, this message translates to:
-  /// **'Automatically copy newer clips from other devices to this clipboard.'**
+  /// **'Copy new clips from other devices to this clipboard.'**
   String get settingsInstantClipboardDescription;
 
   /// Settings row title for being discoverable on the local network. LAN means local area network.
@@ -2758,22 +2758,16 @@ abstract class AppLocalizations {
   /// **'privacy app identifiers'**
   String get settingsExcludedAppsKeywords;
 
-  /// macOS description of excluded applications.
-  ///
-  /// In en, this message translates to:
-  /// **'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.'**
-  String get settingsExcludedAppsMacDescription;
-
   /// Windows and Linux description of excluded applications.
   ///
   /// In en, this message translates to:
-  /// **'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.'**
+  /// **'Skip automatic capture from these apps.'**
   String get settingsExcludedAppsDesktopDescription;
 
   /// Android description of excluded applications.
   ///
   /// In en, this message translates to:
-  /// **'Android skips automatic capture while exclusions are set because it cannot identify source apps.'**
+  /// **'Automatic capture pauses while any app is excluded.'**
   String get settingsExcludedAppsAndroidDescription;
 
   /// Description of excluded applications on platforms without support.
@@ -2833,7 +2827,7 @@ abstract class AppLocalizations {
   /// Description of the confidential clipboard setting. History is the clipboard history screen.
   ///
   /// In en, this message translates to:
-  /// **'Keep producer-marked secrets out of History.'**
+  /// **'Don\'t save copies that apps mark as secret.'**
   String get settingsSkipSecretDescription;
 
   /// Space-separated search keywords that find the confidential clipboard setting. Translate each word and keep the English words too.
@@ -2851,7 +2845,7 @@ abstract class AppLocalizations {
   /// Description of the temporary clipboard setting. History is the clipboard history screen.
   ///
   /// In en, this message translates to:
-  /// **'Keep producer-marked temporary copies out of History.'**
+  /// **'Don\'t save copies that apps mark as temporary.'**
   String get settingsSkipTransientDescription;
 
   /// Space-separated search keywords that find the temporary clipboard setting. Translate each word and keep the English words too.
@@ -3187,7 +3181,7 @@ abstract class AppLocalizations {
   /// Description of the Quick Paste shortcut row. CopyPaste is the product name.
   ///
   /// In en, this message translates to:
-  /// **'The shortcut works while CopyPaste is running in the background.'**
+  /// **'Works while CopyPaste runs in the background.'**
   String get settingsQuickPasteShortcutDescription;
 
   /// Description of the Quick Paste shortcut row showing the shortcut registered with the system.
@@ -6708,7 +6702,7 @@ abstract class AppLocalizations {
   /// Empty state message on the Devices screen explaining what pairing another device gives and requires.
   ///
   /// In en, this message translates to:
-  /// **'Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.'**
+  /// **'Pair a device on the same network to sync history.'**
   String get devicesEmptyMessage;
 
   /// Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it.
@@ -6870,7 +6864,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.
   ///
   /// In en, this message translates to:
-  /// **'New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.'**
+  /// **'New limit: {limit}. Older unpinned items are deleted permanently.'**
   String settingsRetentionConfirmMessage(String limit);
 
   /// Title of the confirmation shown before a smaller storage quota deletes history.
@@ -6882,7 +6876,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.'**
+  /// **'New quota: {size}. The oldest unpinned items over it are deleted permanently.'**
   String settingsStorageQuotaConfirmMessage(String size);
 
   /// Button that confirms a stricter history limit which deletes history.
@@ -6900,13 +6894,13 @@ abstract class AppLocalizations {
   /// Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice.
   ///
   /// In en, this message translates to:
-  /// **'With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.'**
+  /// **'With both off, there\'s no icon. To open it, start CopyPaste again.'**
   String get settingsHideEverywhereMessage;
 
   /// Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.
   ///
   /// In en, this message translates to:
-  /// **'With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.'**
+  /// **'With both off, there\'s no icon. To open it, press {shortcut} or start CopyPaste again.'**
   String settingsHideEverywhereShortcutMessage(String shortcut);
 
   /// Verb. Button that confirms hiding the application's last visible icon.
@@ -7026,7 +7020,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.'**
+  /// **'New quota: {size}. {used} is in use, so the oldest unpinned items are deleted permanently.'**
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used);
 
   /// Number of clips in a History group, shown after the group name and date, such as: Today · Wednesday, November 11 · 14 clips.
@@ -7194,7 +7188,7 @@ abstract class AppLocalizations {
   /// Description of trayRecentPreviewTitle: menu text leaves the encrypted store.
   ///
   /// In en, this message translates to:
-  /// **'The system keeps menu text outside CopyPaste\'s encryption. Show less to keep clip content out of it. Secrets are always masked.'**
+  /// **'How much clip text the menu shows.'**
   String get trayRecentPreviewDescription;
 
   /// Option of trayRecentPreviewTitle: the beginning of the clip text.
@@ -7620,7 +7614,7 @@ abstract class AppLocalizations {
   /// Toast message after saving a transform result as a new item.
   ///
   /// In en, this message translates to:
-  /// **'The result is a new history item. The clipboard is unchanged.'**
+  /// **'Saved as a new history item.'**
   String get transformsSavedMessage;
 
   /// Toast title when a transformed paste cannot reach the target app.
@@ -7836,7 +7830,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'After a transformed paste, the previous clipboard comes back unless something else was copied meanwhile.'**
+  /// **'Bring back the previous clipboard after pasting.'**
   String get transformsRestoreDescription;
 
   /// Settings row title: a pipeline applied when pasting from Quick Paste.
@@ -7848,7 +7842,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Quick Paste applies this pipeline to text and shows it before pasting. A failing pipeline pastes the original.'**
+  /// **'Applied to text you paste from Quick Paste.'**
   String get transformsDefaultDescription;
 
   /// Option meaning no default paste transform.
@@ -7866,7 +7860,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Override the default for one app by its bundle ID, executable or package name. Entries made on another platform sync but have no effect here.'**
+  /// **'Use a different default in specific apps.'**
   String get transformsAppDefaultsDescription;
 
   /// Placeholder of the app identifier field for a per-app default.
@@ -7902,7 +7896,7 @@ abstract class AppLocalizations {
   /// Settings row description; Mod is Command on macOS and Ctrl elsewhere.
   ///
   /// In en, this message translates to:
-  /// **'Favorites appear first in every palette. The first nine run with Mod+1 to Mod+9.'**
+  /// **'Shown first in every palette.'**
   String get transformsFavoritesDescription;
 
   /// Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.
@@ -7926,7 +7920,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Saved chains of transforms with their settings. They sync to your other devices.'**
+  /// **'Saved chains of transforms.'**
   String get transformsPipelinesDescription;
 
   /// Button and drawer title for creating a pipeline.
@@ -7962,7 +7956,7 @@ abstract class AppLocalizations {
   /// Explanation in the delete pipeline dialog.
   ///
   /// In en, this message translates to:
-  /// **'Favorites and paste defaults that use it fall back to none on every device.'**
+  /// **'Favorites and paste defaults using it are cleared.'**
   String get transformsDeletePipelineMessage;
 
   /// Error when deleting a pipeline fails.
@@ -7986,7 +7980,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'Hidden transforms are left out of palettes and suggestions. Pipelines that use them still run.'**
+  /// **'Left out of palettes and suggestions.'**
   String get transformsHiddenDescription;
 
   /// Placeholder of the selector that hides a transform.
@@ -8010,7 +8004,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'When a palette opens, the first 64 KiB of its text is checked for the kinds below to suggest up to three transforms. Nothing runs in the background.'**
+  /// **'Suggest transforms that fit the text.'**
   String get transformsSuggestionsDescription;
 
   /// Content detector name.
@@ -8064,7 +8058,7 @@ abstract class AppLocalizations {
   /// Settings row description.
   ///
   /// In en, this message translates to:
-  /// **'The built-in list ships with the app and changes only with updates. Add names to remove or to keep; write name@domain to limit one to a domain.'**
+  /// **'Link parameters to also remove or always keep.'**
   String get transformsTrackingDescription;
 
   /// Label of the custom list of tracking parameters to remove.
@@ -8118,7 +8112,7 @@ abstract class AppLocalizations {
   /// Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes.
   ///
   /// In en, this message translates to:
-  /// **'Turn on CopyPaste clips in the system keyboard settings. Android warns that a keyboard can see what you type: the clips panel never records keystrokes, has no typing keys for other apps, and inserts only the items you tap.'**
+  /// **'Turn on CopyPaste clips in keyboard settings.'**
   String get quickAccessKeyboardDescription;
 
   /// Status under the clips keyboard row: the keyboard is turned on in system settings.
@@ -8160,7 +8154,7 @@ abstract class AppLocalizations {
   /// Setting row description for switching to the clips keyboard.
   ///
   /// In en, this message translates to:
-  /// **'Choose CopyPaste clips as the current keyboard. While it stays selected, each copy is saved.'**
+  /// **'Make CopyPaste clips the current keyboard.'**
   String get quickAccessSwitchKeyboardDescription;
 
   /// Button that shows the Android keyboard picker.
@@ -8184,7 +8178,7 @@ abstract class AppLocalizations {
   /// Setting row description explaining capture without Shizuku or ADB access.
   ///
   /// In en, this message translates to:
-  /// **'Without Shizuku or ADB access, copies are saved only when the clips panel opens, while it stays selected, or from the CopyPaste app, a tile, the widget, or Share.'**
+  /// **'How copies from other apps are saved.'**
   String get quickAccessCaptureTierDescription;
 
   /// Settings search result description for the capture mode row.
@@ -8238,7 +8232,7 @@ abstract class AppLocalizations {
   /// Switch description for returning to the previous keyboard after inserting.
   ///
   /// In en, this message translates to:
-  /// **'Switches back after a single insert. The panel stays open while you use the Queue tab or item actions. Turn off to keep collecting copies.'**
+  /// **'Switch back after inserting one clip.'**
   String get quickAccessAutoReturnDescription;
 
   /// Space-separated search keywords for the return-to-previous-keyboard switch; translate and add local synonyms.
@@ -8256,7 +8250,7 @@ abstract class AppLocalizations {
   /// Switch description for focusing search when the clips panel opens.
   ///
   /// In en, this message translates to:
-  /// **'Opens the panel on its search field. When off, your clips are one tap away.'**
+  /// **'Open the panel with search ready.'**
   String get quickAccessFocusSearchDescription;
 
   /// Setting row title for the Android Quick Settings tiles; also the search result label.
@@ -8280,7 +8274,7 @@ abstract class AppLocalizations {
   /// How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt.
   ///
   /// In en, this message translates to:
-  /// **'Swipe down twice from the top of the screen, tap Edit, and drag a CopyPaste tile into Quick Settings.'**
+  /// **'Swipe down twice, tap Edit, and add a CopyPaste tile.'**
   String get quickAccessTileInstructions;
 
   /// Setting row title for the Save clipboard Quick Settings tile.
@@ -8328,13 +8322,13 @@ abstract class AppLocalizations {
   /// Setting row description for the Recent clips widget.
   ///
   /// In en, this message translates to:
-  /// **'Shows your latest clips on the home screen. Tap one to copy it.'**
+  /// **'Recent clips on your home screen, one tap to copy.'**
   String get quickAccessWidgetDescription;
 
   /// How to add the widget by hand, shown when the launcher cannot pin widgets.
   ///
   /// In en, this message translates to:
-  /// **'Touch and hold the home screen, tap Widgets, and drag Recent clips from CopyPaste.'**
+  /// **'Hold the home screen, tap Widgets, and add Recent clips.'**
   String get quickAccessWidgetInstructions;
 
   /// Status: how many Recent clips widgets are on the home screen.
@@ -8478,7 +8472,7 @@ abstract class AppLocalizations {
   /// In-app owner check shown when the system cannot verify the device owner.
   ///
   /// In en, this message translates to:
-  /// **'This device has no password, PIN or biometrics to verify you. Continue only if this is your device.'**
+  /// **'This device can\'t verify you. Continue only on your own device.'**
   String get snippetsConcealedConfirmMessage;
 
   /// Title of the in-app owner check.
@@ -8592,7 +8586,7 @@ abstract class AppLocalizations {
   /// Hint under the abbreviation of a snippet marked duplicate.
   ///
   /// In en, this message translates to:
-  /// **'Another snippet got the same abbreviation in a sync. Change one of them.'**
+  /// **'Another snippet has this abbreviation. Change one.'**
   String get snippetsDuplicateAbbreviation;
 
   /// Badge on a snippet whose abbreviation is also used by another snippet after sync.
@@ -8646,7 +8640,7 @@ abstract class AppLocalizations {
   /// Asked before inserting a placeholder into a literal snippet whose text already contains double braces.
   ///
   /// In en, this message translates to:
-  /// **'Placeholders work only in templates. Text that already looks like a placeholder will be filled in too.'**
+  /// **'Text that looks like a placeholder will be filled in.'**
   String get snippetsEnableTemplateMessage;
 
   /// Title of the question before turning on Template.
@@ -9102,7 +9096,7 @@ abstract class AppLocalizations {
   /// Description of the record pasted snippets setting.
   ///
   /// In en, this message translates to:
-  /// **'Adds pasted snippet text to History. Concealed snippets are never recorded.'**
+  /// **'Add pasted snippets to History.'**
   String get snippetsRecordPastedDescription;
 
   /// Space-separated search keywords for the record pasted snippets setting; translate and add local synonyms.
@@ -9126,13 +9120,13 @@ abstract class AppLocalizations {
   /// Hint under the Replace original switch.
   ///
   /// In en, this message translates to:
-  /// **'Deletes the original clip on all devices after saving. When off, both stay.'**
+  /// **'Deletes the original clip after saving.'**
   String get snippetsReplaceOriginalHint;
 
   /// Description of the device authentication setting for concealed snippets.
   ///
   /// In en, this message translates to:
-  /// **'Verify it\'s you before a concealed snippet is used or shown. Each device asks on its own.'**
+  /// **'Ask for your password or biometrics first.'**
   String get snippetsRequireAuthDescription;
 
   /// Space-separated search keywords for the device authentication setting; translate and add local synonyms.
@@ -9152,18 +9146,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Restore'**
   String get snippetsRestore;
-
-  /// Why Save is disabled: the body is empty.
-  ///
-  /// In en, this message translates to:
-  /// **'Add some text to save.'**
-  String get snippetsSaveBlockEmpty;
-
-  /// Why Save is disabled: the title is too long.
-  ///
-  /// In en, this message translates to:
-  /// **'The title is longer than {max} characters.'**
-  String snippetsSaveBlockTitle(int max);
 
   /// Why Save is disabled: the body is too large.
   ///
@@ -9264,7 +9246,7 @@ abstract class AppLocalizations {
   /// Description of the import and export row.
   ///
   /// In en, this message translates to:
-  /// **'Move snippets between apps or keep a backup. Exports are encrypted by default.'**
+  /// **'Back up snippets or move them between apps.'**
   String get snippetsTransferDescription;
 
   /// Space-separated search keywords for import and export; translate and add local synonyms.
@@ -9972,7 +9954,7 @@ abstract class AppLocalizations {
   /// Description of the Privacy defaults row. The built-in rules are listed below it.
   ///
   /// In en, this message translates to:
-  /// **'These Privacy settings guard every copy on this device before any rule runs. The built-in rules below sync to your devices.'**
+  /// **'Privacy settings apply before any rule.'**
   String get rulesPrivacyDefaultsDescription;
 
   /// Search keywords for the Privacy defaults row of Content rules.
@@ -9980,18 +9962,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'privacy concealed temporary excluded apps built-in credentials passwords payment cards'**
   String get rulesPrivacyDefaultsKeywords;
-
-  /// One line of the Privacy defaults status: a Privacy setting name and its current value.
-  ///
-  /// In en, this message translates to:
-  /// **'{setting}: {state}'**
-  String rulesPrivacyState(String setting, String state);
-
-  /// Number of excluded applications in the Privacy defaults status.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =0{none} =1{1 app} other{{count} apps}}'**
-  String rulesExcludedApps(int count);
 
   /// Button that opens the Privacy settings section.
   ///
@@ -10008,7 +9978,7 @@ abstract class AppLocalizations {
   /// Description of the user rules list.
   ///
   /// In en, this message translates to:
-  /// **'They run from top to bottom on new copies, after the built-in rules, and sync to your devices.'**
+  /// **'Run in order on new copies.'**
   String get rulesMyRulesDescription;
 
   /// Search keywords for the user rules list.
@@ -10026,7 +9996,7 @@ abstract class AppLocalizations {
   /// Empty state message when the user has no rules.
   ///
   /// In en, this message translates to:
-  /// **'A rule can tag, protect, expire or skip new copies automatically.'**
+  /// **'Rules tag, protect, expire or skip new copies.'**
   String get rulesEmptyMessage;
 
   /// Heading of the rules deleted within 30 days.
@@ -10038,7 +10008,7 @@ abstract class AppLocalizations {
   /// Description of the recently deleted rules.
   ///
   /// In en, this message translates to:
-  /// **'Deleted rules can be restored for 30 days.'**
+  /// **'Restore within 30 days.'**
   String get rulesDeletedDescription;
 
   /// When a recently deleted rule was deleted.
@@ -10098,7 +10068,7 @@ abstract class AppLocalizations {
   /// Description of the skip log row.
   ///
   /// In en, this message translates to:
-  /// **'Copies your rules did not save on this device since CopyPaste started. Only the time, app and rule are kept.'**
+  /// **'Copies your rules didn\'t save on this device.'**
   String get rulesSkipLogDescription;
 
   /// Search keywords for the skip log row.
@@ -10128,13 +10098,13 @@ abstract class AppLocalizations {
   /// Condition part of a rule summary when the rule has no conditions.
   ///
   /// In en, this message translates to:
-  /// **'any copy'**
+  /// **'Any copy'**
   String get rulesMatchesEverything;
 
   /// One-line rule summary: its conditions, an arrow, its actions.
   ///
   /// In en, this message translates to:
-  /// **'When {conditions} → {actions}'**
+  /// **'{conditions} → {actions}'**
   String rulesSummary(String conditions, String actions);
 
   /// A rule summary for a rule that stops later rules.
@@ -10167,24 +10137,6 @@ abstract class AppLocalizations {
   /// **'Runs on {devices}'**
   String rulesRunsOn(String devices);
 
-  /// A rule runs on every device.
-  ///
-  /// In en, this message translates to:
-  /// **'Runs on all devices'**
-  String get rulesRunsOnAll;
-
-  /// How often a rule matched on this device.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{Matched once here} other{Matched {count} times here}}'**
-  String rulesMatchCount(int count);
-
-  /// When a rule last matched on this device.
-  ///
-  /// In en, this message translates to:
-  /// **'last {time}'**
-  String rulesLastMatched(String time);
-
   /// Badge on a rule another device added or changed in the last 7 days.
   ///
   /// In en, this message translates to:
@@ -10212,7 +10164,7 @@ abstract class AppLocalizations {
   /// Explains the error badge. problem is the reason, a full sentence.
   ///
   /// In en, this message translates to:
-  /// **'{problem} Until it is fixed, copies this rule could match are saved as secret and hidden from AI tools.'**
+  /// **'{problem} Until fixed, matches are protected.'**
   String rulesErrorHint(String problem);
 
   /// Drag handle of a rule row.
@@ -10380,7 +10332,7 @@ abstract class AppLocalizations {
   /// Hint under a pattern value.
   ///
   /// In en, this message translates to:
-  /// **'Patterns check the first 1 MiB of text. Look-ahead, look-behind and backreferences are not supported.'**
+  /// **'Look-around and backreferences aren\'t supported.'**
   String get rulesPatternHint;
 
   /// Switch that makes a text condition case-sensitive.
@@ -10404,13 +10356,13 @@ abstract class AppLocalizations {
   /// Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard.
   ///
   /// In en, this message translates to:
-  /// **'Android knows the source app only for copies made with the CopyPaste keyboard. Other copies on Android never match this condition.'**
+  /// **'On Android, only copies made with the clips keyboard match.'**
   String get rulesSourceAppNotice;
 
   /// Inline notice on a privacy marker condition.
   ///
   /// In en, this message translates to:
-  /// **'Each system reports different markers. A marker the system does not report never matches.'**
+  /// **'Not every system reports every marker.'**
   String get rulesPrivacyMarkerNotice;
 
   /// Editor section with the rule actions.
@@ -10482,7 +10434,7 @@ abstract class AppLocalizations {
   /// Option of the Delete after action.
   ///
   /// In en, this message translates to:
-  /// **'Also clear the clipboard at that time if it still holds this copy. On Android this happens the next time CopyPaste runs.'**
+  /// **'Also clear the clipboard if it still holds this copy.'**
   String get rulesClearClipboardAtExpiry;
 
   /// Shown in the Add tags action when no tags exist.
@@ -10548,7 +10500,7 @@ abstract class AppLocalizations {
   /// Description of the rule test.
   ///
   /// In en, this message translates to:
-  /// **'Try the rule on sample text. The sample is never saved or synced.'**
+  /// **'Try the rule on sample text.'**
   String get rulesTestDescription;
 
   /// Placeholder of the test sample field.
@@ -10581,12 +10533,6 @@ abstract class AppLocalizations {
   /// **'Preview against history'**
   String get rulesPreviewHistory;
 
-  /// Why the rule cannot be saved yet.
-  ///
-  /// In en, this message translates to:
-  /// **'{reason, select, read_only{Update CopyPaste to edit this rule.} name_missing{Give the rule a name.} name_too_long{Use a name of up to 128 characters.} no_actions{Add at least one action.} other{Fix the marked fields.}}'**
-  String rulesSaveBlock(String reason);
-
   /// Alert title when saving a rule fails.
   ///
   /// In en, this message translates to:
@@ -10596,7 +10542,7 @@ abstract class AppLocalizations {
   /// Editor notice for a rule a newer version wrote.
   ///
   /// In en, this message translates to:
-  /// **'A newer version of CopyPaste wrote this rule. Update CopyPaste to edit or run it.'**
+  /// **'Made by a newer CopyPaste. Update to edit or run it.'**
   String get rulesReadOnlyNotice;
 
   /// A problem the runtime found in a rule, by error code.
@@ -10638,13 +10584,13 @@ abstract class AppLocalizations {
   /// Trace note under a condition whose attribute is unknown for the copy.
   ///
   /// In en, this message translates to:
-  /// **'Not known for this copy, so the condition does not match either way.'**
+  /// **'Unknown for this copy, so it doesn\'t match.'**
   String get rulesTraceUnknownReason;
 
   /// Trace note under a rule that could not run on this device.
   ///
   /// In en, this message translates to:
-  /// **'This rule could not run here, so matching copies are protected instead.'**
+  /// **'This rule couldn\'t run, so matches are protected.'**
   String get rulesTraceRuleError;
 
   /// Heading of the combined result in a trace.
@@ -10770,7 +10716,7 @@ abstract class AppLocalizations {
   /// Preview note about when changes happen.
   ///
   /// In en, this message translates to:
-  /// **'Nothing changes until you apply. Changes sync to your other devices as ordinary edits.'**
+  /// **'Nothing changes until you apply.'**
   String get rulesPreviewNote;
 
   /// A secret clip in the preview list; its content is never shown.
@@ -10806,7 +10752,7 @@ abstract class AppLocalizations {
   /// Explains that applying a Don't save rule deletes matching clips everywhere.
   ///
   /// In en, this message translates to:
-  /// **'Applying “Don\'t save” to existing items deletes the matching clips from History on all your devices. This can\'t be undone.'**
+  /// **'Matching clips are deleted on all your devices. This can\'t be undone.'**
   String get rulesApplyDeleteMessage;
 
   /// Confirmation button that deletes clips and applies the rule.
@@ -10842,7 +10788,7 @@ abstract class AppLocalizations {
   /// Shown after applying was stopped.
   ///
   /// In en, this message translates to:
-  /// **'Stopped. Clips changed before you stopped stay changed.'**
+  /// **'Stopped. Changes made so far stay.'**
   String get rulesApplyCancelled;
 
   /// History clip action that opens the text editor; saving creates a new clip.
@@ -10920,7 +10866,7 @@ abstract class AppLocalizations {
   /// Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue in the order you selected them.}}'**
+  /// **'{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue.}}'**
   String historyQueueAddedInOrder(int count);
 
   /// Error toast when clips could not be added to the paste queue. Paste Queue is the feature name.

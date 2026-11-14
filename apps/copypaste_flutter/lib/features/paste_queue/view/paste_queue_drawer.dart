@@ -816,13 +816,6 @@ class _PasteQueueDrawerState extends State<PasteQueueDrawer> {
               ),
             ],
           ),
-          if (block != null && block != PasteAllBlock.nothingPending) ...[
-            const Gap(AppSpacing.xs),
-            Text(
-              l10n.pasteQueueBlock(block),
-              key: const ValueKey('paste-queue-paste-all-reason'),
-            ).small().muted(),
-          ],
           const Gap(AppSpacing.md),
           Row(
             children: [
