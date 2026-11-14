@@ -1,6 +1,6 @@
-//! `App Paths`: an executable image name back to its transient path.
+//! `App Paths` and uninstall registrations: image names, their executables
+//! and installed programs.
 
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use winreg::enums::{
@@ -10,87 +10,88 @@ use winreg::enums::{
 use winreg::types::FromRegValue;
 use winreg::{RegKey, RegValue, HKEY};
 
+use crate::windows_programs::Program;
+
 const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 const MAX_UNINSTALL_ENTRIES: usize = 4096;
 
-pub fn image_names() -> Option<BTreeSet<String>> {
-    image_names_at(APP_PATHS)
+/// Registered `App Paths` image names with the executable each names.
+pub fn app_paths() -> Vec<(String, Option<String>)> {
+    app_paths_at(APP_PATHS)
 }
 
-fn image_names_at(base: &str) -> Option<BTreeSet<String>> {
-    let mut names = BTreeSet::new();
-    let mut readable = false;
+fn app_paths_at(base: &str) -> Vec<(String, Option<String>)> {
+    let mut entries = Vec::new();
     for (root, access) in search_order() {
         let Ok(paths) = RegKey::predef(root).open_subkey_with_flags(base, access) else {
             continue;
         };
-        readable = true;
-        names.extend(paths.enum_keys().filter_map(Result::ok));
-    }
-    readable.then_some(names)
-}
-
-/// `(DisplayIcon, DisplayName)` of installed programs that are not system
-/// components.
-pub fn uninstall_entries() -> Vec<(String, String)> {
-    let mut entries = Vec::new();
-    for (root, access) in search_order() {
-        let Ok(programs) = RegKey::predef(root).open_subkey_with_flags(UNINSTALL, access) else {
-            continue;
-        };
-        for key in programs
-            .enum_keys()
-            .filter_map(Result::ok)
-            .take(MAX_UNINSTALL_ENTRIES)
-        {
-            let Ok(program) = programs.open_subkey_with_flags(&key, access) else {
-                continue;
-            };
-            if program
-                .get_value::<u32, _>("SystemComponent")
-                .is_ok_and(|value| value == 1)
-            {
-                continue;
-            }
-            let icon = program.get_value::<String, _>("DisplayIcon");
-            let name = program.get_value::<String, _>("DisplayName");
-            if let (Ok(icon), Ok(name)) = (icon, name) {
-                entries.push((icon, name.trim().to_owned()));
-            }
+        for name in paths.enum_keys().filter_map(Result::ok) {
+            let path = paths
+                .open_subkey_with_flags(&name, access)
+                .ok()
+                .and_then(|key| key.get_raw_value("").ok())
+                .and_then(|value| executable_path(&value));
+            entries.push((name, path));
         }
     }
     entries
 }
 
+/// Installed programs that are not system components.
+pub(crate) fn uninstall_programs() -> Vec<Program> {
+    let mut programs = Vec::new();
+    for (root, access) in search_order() {
+        let Ok(registrations) = RegKey::predef(root).open_subkey_with_flags(UNINSTALL, access)
+        else {
+            continue;
+        };
+        for key in registrations
+            .enum_keys()
+            .filter_map(Result::ok)
+            .take(MAX_UNINSTALL_ENTRIES)
+        {
+            let Ok(registration) = registrations.open_subkey_with_flags(&key, access) else {
+                continue;
+            };
+            if registration
+                .get_value::<u32, _>("SystemComponent")
+                .is_ok_and(|value| value == 1)
+            {
+                continue;
+            }
+            let Some(name) = string(&registration, "DisplayName") else {
+                continue;
+            };
+            programs.push(Program {
+                name: name.trim().to_owned(),
+                display_icon: string(&registration, "DisplayIcon"),
+                install_location: string(&registration, "InstallLocation"),
+            });
+        }
+    }
+    programs
+}
+
+/// A registered or shipped executable for an image name; capture resolves
+/// icons through this, so it never scans installed programs.
 pub fn executable(image_name: &str) -> Option<PathBuf> {
     if let Some(path) = lookup(APP_PATHS, image_name) {
         return Some(path);
     }
-    if let Ok(root) = std::env::var("SystemRoot") {
-        let path = PathBuf::from(root).join("System32").join(image_name);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    uninstall_entries().into_iter().find_map(|(icon, _)| {
-        let path = PathBuf::from(crate::installed::display_icon_path(&icon));
-        let matches = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case(image_name));
-        (matches && path.is_file()).then_some(path)
-    })
+    let root = std::env::var("SystemRoot").ok()?;
+    let path = PathBuf::from(root).join("System32").join(image_name);
+    path.is_file().then_some(path)
 }
 
-fn search_order() -> [(HKEY, u32); 6] {
+/// Per-user keys are shared between the 32- and 64-bit views, so they are
+/// read once; machine keys are read in both views.
+fn search_order() -> [(HKEY, u32); 3] {
     [
         (HKEY_CURRENT_USER, KEY_READ),
-        (HKEY_CURRENT_USER, KEY_READ | KEY_WOW64_32KEY),
-        (HKEY_CURRENT_USER, KEY_READ | KEY_WOW64_64KEY),
-        (HKEY_LOCAL_MACHINE, KEY_READ),
-        (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY),
         (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
+        (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY),
     ]
 }
 
@@ -111,14 +112,26 @@ fn read_app_path(root: HKEY, subkey: &str, access: u32) -> Option<PathBuf> {
 }
 
 fn executable_path(value: &RegValue) -> Option<String> {
+    let expanded = expanded(value)?;
+    let path = expanded.trim().trim_matches('"').trim();
+    (!path.is_empty()).then(|| path.to_owned())
+}
+
+/// A string value with `REG_EXPAND_SZ` references such as `%ProgramFiles%`
+/// expanded.
+fn expanded(value: &RegValue) -> Option<String> {
     let decoded = String::from_reg_value(value).ok()?;
-    let expanded = if value.vtype == REG_EXPAND_SZ {
+    Some(if value.vtype == REG_EXPAND_SZ {
         winsafe::ExpandEnvironmentStrings(&decoded).unwrap_or(decoded)
     } else {
         decoded
-    };
-    let path = expanded.trim().trim_matches('"').trim();
-    (!path.is_empty()).then(|| path.to_owned())
+    })
+}
+
+fn string(key: &RegKey, name: &str) -> Option<String> {
+    let value = expanded(&key.get_raw_value(name).ok()?)?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 #[cfg(test)]
@@ -194,8 +207,8 @@ mod tests {
             lookup(&self.base, image_name)
         }
 
-        fn names(&self) -> Option<BTreeSet<String>> {
-            image_names_at(&self.base)
+        fn entries(&self) -> Vec<(String, Option<String>)> {
+            app_paths_at(&self.base)
         }
 
         fn exists(&self) -> bool {
@@ -212,28 +225,15 @@ mod tests {
     }
 
     #[test]
-    fn per_user_registry_views_precede_machine_views() {
-        let order = search_order();
-        assert!(order[..3]
-            .iter()
-            .all(|&(root, _)| root == HKEY_CURRENT_USER));
-        assert!(order[3..]
-            .iter()
-            .all(|&(root, _)| root == HKEY_LOCAL_MACHINE));
-        for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
-            assert_eq!(
-                order
-                    .iter()
-                    .filter(|&&(candidate, _)| candidate == root)
-                    .map(|&(_, access)| access)
-                    .collect::<Vec<_>>(),
-                vec![
-                    KEY_READ,
-                    KEY_READ | KEY_WOW64_32KEY,
-                    KEY_READ | KEY_WOW64_64KEY
-                ]
-            );
-        }
+    fn per_user_keys_are_read_once_before_both_machine_views() {
+        assert_eq!(
+            search_order(),
+            [
+                (HKEY_CURRENT_USER, KEY_READ),
+                (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_64KEY),
+                (HKEY_LOCAL_MACHINE, KEY_READ | KEY_WOW64_32KEY),
+            ]
+        );
     }
 
     #[test]
@@ -241,9 +241,9 @@ mod tests {
         let hive = Hive::new("catalogue");
         hive.set("Writer.exe", REG_SZ, &system32("cmd.exe"));
         hive.set("Reader.exe", REG_SZ, &system32("notepad.exe"));
-        let names = hive.names().expect("the catalogue is readable");
-        assert!(names.contains("Writer.exe"));
-        assert!(names.contains("Reader.exe"));
+        let entries = hive.entries();
+        assert!(entries.contains(&("Writer.exe".into(), Some(system32("cmd.exe")))));
+        assert!(entries.contains(&("Reader.exe".into(), Some(system32("notepad.exe")))));
         assert_eq!(
             hive.find("Writer.exe"),
             Some(PathBuf::from(system32("cmd.exe")))

@@ -11,6 +11,8 @@ mod linux;
 pub mod registry;
 #[cfg(target_os = "windows")]
 mod win_icon;
+#[cfg(any(target_os = "windows", test))]
+mod windows_programs;
 
 use std::collections::VecDeque;
 use std::io::Cursor;
