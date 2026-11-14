@@ -70,11 +70,25 @@ abstract final class AppOverlays {
       surfaceOpacity: 1,
       surfaceBlur: 0,
       barrierColor: scrimColor,
-      borderRadius: side
-          ? const BorderRadius.horizontal(left: Radius.circular(AppRadius.xl))
-          : const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      // A side drawer sits flush under the header, so only its free bottom
+      // corner is rounded.
+      borderRadius: side ? _sideDrawerRadius : _bottomDrawerRadius,
+      // Content is clipped to the corners it reaches; a drag handle keeps it
+      // clear of a bottom drawer's corners.
+      contentRadius: side
+          ? _sideDrawerRadius
+          : guarded
+          ? _bottomDrawerRadius
+          : BorderRadius.zero,
     );
   }
+
+  static const _sideDrawerRadius = BorderRadius.only(
+    bottomLeft: Radius.circular(AppRadius.xl),
+  );
+  static const _bottomDrawerRadius = BorderRadius.vertical(
+    top: Radius.circular(AppRadius.xl),
+  );
 
   static BoxConstraints drawerContentConstraints(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
@@ -516,7 +530,11 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
     super.surfaceBlur,
     super.barrierColor,
     super.borderRadius,
+    this.contentRadius = BorderRadius.zero,
   });
+
+  /// The library paints square content over the drawer's rounded corners.
+  final BorderRadius contentRadius;
 
   static final _sessions = Expando<_DrawerSession>();
 
@@ -544,10 +562,15 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
         : focused;
     if (previous != null && !previous.isCompleted) previous.remove();
     final scope = GlobalKey<_DrawerFocusScopeState>();
-    final drawer = super.show<T>(
-      context,
-      (context) => _DrawerFocusScope(key: scope, child: builder(context)),
-    );
+    final drawer = super.show<T>(context, (context) {
+      final content = builder(context);
+      return _DrawerFocusScope(
+        key: scope,
+        child: contentRadius == BorderRadius.zero
+            ? content
+            : ClipRRect(borderRadius: contentRadius, child: content),
+      );
+    });
     session.active = drawer;
     session.scope = scope;
     session.opener = opener;

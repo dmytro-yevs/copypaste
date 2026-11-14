@@ -282,9 +282,16 @@ abstract final class AppTheme {
     return height < AppControlSize.touch ? AppControlSize.touch : height;
   }
 
+  /// The header's bottom border; a side drawer's top border hides under it
+  /// instead of doubling it.
+  static const double headerDividerWidth = 1;
+
   static BoxDecoration headerDecoration(BuildContext context) => BoxDecoration(
     border: Border(
-      bottom: BorderSide(color: Theme.of(context).colorScheme.border),
+      bottom: BorderSide(
+        color: Theme.of(context).colorScheme.border,
+        width: headerDividerWidth,
+      ),
     ),
   );
 

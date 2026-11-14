@@ -823,12 +823,27 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       await tester.pump();
       expect(find.text('Close test drawer'), findsOneWidget);
-      expect(
-        tester
-            .getRect(find.byKey(const ValueKey('app-body-drawer-overlay')))
-            .top,
-        greaterThan(headerRect.bottom),
+      final overlay = tester.getRect(
+        find.byKey(const ValueKey('app-body-drawer-overlay')),
       );
+      expect(overlay.top, greaterThan(headerRect.bottom));
+      if (layout.name != 'mobile') {
+        // A side drawer starts on the header divider, where the body clip
+        // hides its own top border, and its content follows its corners.
+        Finder drawer(Type type) => find.ancestor(
+          of: find.text('Close test drawer'),
+          matching: find.byType(type),
+        );
+        expect(tester.getRect(drawer(DrawerRawContainer)).top, overlay.top);
+        expect(
+          tester.getRect(find.byType(AppHeader)).bottom,
+          overlay.top + AppTheme.headerDividerWidth,
+        );
+        expect(
+          tester.widget<ClipRRect>(drawer(ClipRRect).first).borderRadius,
+          const BorderRadius.only(bottomLeft: Radius.circular(AppRadius.xl)),
+        );
+      }
       expect(tester.getRect(action), headerRect);
       expect(action.hitTestable(), findsOneWidget);
       await tester.tap(action);
