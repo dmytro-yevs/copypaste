@@ -179,8 +179,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.textContaining(
-          'New quota: 1 GiB. Unpinned history uses 2.1 GiB, so its oldest '
-          'clips are removed now',
+          'New quota: 1 GiB. 2.1 GiB is in use, so the oldest unpinned '
+          'items are deleted permanently.',
         ),
         findsOneWidget,
       );

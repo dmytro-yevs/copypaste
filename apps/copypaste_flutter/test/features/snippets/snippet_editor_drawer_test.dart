@@ -58,23 +58,20 @@ bool _saveEnabled(WidgetTester tester) =>
     tester.widget<Button>(find.byKey(_save)).onPressed != null;
 
 void main() {
-  testWidgets('Save stays disabled with a blank body and says why', (
+  testWidgets('Save stays disabled with a blank body without a hint', (
     tester,
   ) async {
+    final reason = find.byKey(const ValueKey('snippet-editor-save-reason'));
     await _open(tester);
     expect(_saveEnabled(tester), isFalse);
-    expect(find.text('Add some text to save.'), findsOne);
+    expect(reason, findsNothing);
 
     await _type(tester, '  \n\t ');
     expect(_saveEnabled(tester), isFalse);
-    expect(find.text('Add some text to save.'), findsOne);
+    expect(reason, findsNothing);
 
     await _type(tester, 'Kind regards');
     expect(_saveEnabled(tester), isTrue);
-    expect(
-      find.byKey(const ValueKey('snippet-editor-save-reason')),
-      findsNothing,
-    );
   });
 
   testWidgets('closing with unsaved changes asks first, also on system back, '

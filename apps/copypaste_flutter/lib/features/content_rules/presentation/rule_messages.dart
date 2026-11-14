@@ -1,7 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../l10n/l10n.dart';
-import '../controller/rule_editor_controller.dart';
 import '../models/content_rule_models.dart';
 
 /// Rule summaries and labels. Wire names arrive in snake_case and select
@@ -81,12 +80,12 @@ extension RuleMessages on AppLocalizations {
     };
   }
 
-  /// "When … → …", one line per rule in the list.
+  /// "… → …", one line per rule in the list.
   String ruleSummary(RuleDefinition definition, RuleOptions options) {
     final conditions = definition.matchesEverything
         ? rulesMatchesEverything
         : definition.conditions
-              .map((condition) => ruleCondition(condition, options))
+              .map((condition) => _briefCondition(condition, options))
               .join(rulesConditionJoin(definition.matchMode.wire));
     final actions = definition.actions
         .map((action) => ruleAction(action, options))
@@ -95,19 +94,29 @@ extension RuleMessages on AppLocalizations {
     return definition.stopProcessing ? rulesSummaryStop(summary) : summary;
   }
 
-  String ruleDevices(List<String> ids, RuleOptions options) => ids.isEmpty
-      ? rulesRunsOnAll
+  /// A kind condition reads as its values alone; others keep the attribute.
+  String _briefCondition(RuleCondition condition, RuleOptions options) =>
+      switch (condition.type) {
+        final type?
+            when !condition.negate &&
+                const {
+                  RuleConditionType.contentType,
+                  RuleConditionType.detectedKind,
+                  RuleConditionType.privacyMarker,
+                  RuleConditionType.captureOrigin,
+                }.contains(type) =>
+          condition.values
+              .map((wire) => ruleConditionValue(type, wire))
+              .join(', '),
+        _ => ruleCondition(condition, options),
+      };
+
+  /// Null when the rule runs on every device.
+  String? ruleDevices(List<String> ids, RuleOptions options) => ids.isEmpty
+      ? null
       : rulesRunsOn(ids.map((id) => options.deviceName(id) ?? id).join(', '));
 
   String ruleProblem(RuleProblem problem) => rulesProblem(problem.code);
-
-  String ruleSaveBlock(RuleSaveBlock block) => rulesSaveBlock(switch (block) {
-    RuleSaveBlock.readOnly => 'read_only',
-    RuleSaveBlock.nameMissing => 'name_missing',
-    RuleSaveBlock.nameTooLong => 'name_too_long',
-    RuleSaveBlock.noActions => 'no_actions',
-    RuleSaveBlock.invalid => 'invalid',
-  });
 
   String ruleActionBlock(RuleActionBlock block) =>
       rulesActionBlock(switch (block) {

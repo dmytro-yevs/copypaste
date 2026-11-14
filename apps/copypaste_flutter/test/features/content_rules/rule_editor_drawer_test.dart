@@ -138,7 +138,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.textContaining('Android knows the source app only'),
+      find.textContaining('On Android, only copies made with'),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('rule-condition-notice-1')), findsNothing);

@@ -224,61 +224,40 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
 
   Widget _footer(BuildContext context) {
     final l10n = context.l10n;
-    final block = _editor.saveBlock;
     final rule = widget.rule;
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
         children: [
-          if (block != null && (_editor.dirty || _editor.isNew)) ...[
-            Semantics(
-              liveRegion: true,
-              child: Text(
-                l10n.ruleSaveBlock(block),
-                key: const ValueKey('rule-editor-save-reason'),
-              ).small().muted(),
+          if (rule != null && !rule.builtin) ...[
+            Button.destructive(
+              key: const ValueKey('rule-editor-delete'),
+              style: AppTheme.actionButtonStyle(
+                const ButtonStyle.destructive(),
+              ),
+              onPressed: _editor.saving ? null : () => unawaited(_delete()),
+              child: Text(l10n.commonDelete),
             ),
-            const Gap(AppSpacing.sm),
+            const Gap(AppSpacing.md),
           ],
-          Row(
-            children: [
-              if (rule != null && !rule.builtin) ...[
-                Button.destructive(
-                  key: const ValueKey('rule-editor-delete'),
-                  style: AppTheme.actionButtonStyle(
-                    const ButtonStyle.destructive(),
-                  ),
-                  onPressed: _editor.saving ? null : () => unawaited(_delete()),
-                  child: Text(l10n.commonDelete),
-                ),
-                const Gap(AppSpacing.md),
-              ],
-              Expanded(
-                child: Button.secondary(
-                  key: const ValueKey('rule-editor-cancel'),
-                  style: AppTheme.actionButtonStyle(
-                    const ButtonStyle.secondary(),
-                  ),
-                  alignment: Alignment.center,
-                  onPressed: _editor.saving ? null : () => unawaited(_close()),
-                  child: Text(l10n.commonCancel),
-                ),
-              ),
-              const Gap(AppSpacing.md),
-              Expanded(
-                child: Button.primary(
-                  key: const ValueKey('rule-editor-save'),
-                  style: AppTheme.actionButtonStyle(
-                    const ButtonStyle.primary(),
-                  ),
-                  alignment: Alignment.center,
-                  onPressed: _editor.canSave ? () => unawaited(_save()) : null,
-                  child: Text(l10n.commonSave),
-                ),
-              ),
-            ],
+          Expanded(
+            child: Button.secondary(
+              key: const ValueKey('rule-editor-cancel'),
+              style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
+              alignment: Alignment.center,
+              onPressed: _editor.saving ? null : () => unawaited(_close()),
+              child: Text(l10n.commonCancel),
+            ),
+          ),
+          const Gap(AppSpacing.md),
+          Expanded(
+            child: Button.primary(
+              key: const ValueKey('rule-editor-save'),
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+              alignment: Alignment.center,
+              onPressed: _editor.canSave ? () => unawaited(_save()) : null,
+              child: Text(l10n.commonSave),
+            ),
           ),
         ],
       ),
