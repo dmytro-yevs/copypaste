@@ -64,6 +64,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/010_feature_package.sql"),
         transform: |_| Ok(()),
     },
+    Migration {
+        version: 11,
+        sql: include_str!("migrations/011_module_records.sql"),
+        transform: |_| Ok(()),
+    },
 ];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
@@ -299,7 +304,7 @@ mod tests {
     #[test]
     fn version_one_history_survives_upgrade_to_the_current_version() {
         use super::super::{connection::apply_key, Store};
-        assert_eq!(LATEST_VERSION, 10);
+        assert_eq!(LATEST_VERSION, 11);
         let keyring = crate::Keyring::from_secret(&[37; 32]);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");

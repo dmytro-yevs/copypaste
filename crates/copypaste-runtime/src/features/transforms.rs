@@ -258,6 +258,7 @@ impl Runtime {
             from_clip_id: source.clip.as_ref().map(|clip| clip.id.clone()),
             transform_snapshot: Some(snapshot),
             pipeline_name: pipeline_name.map(|name| bounded_name(&name)),
+            module: None,
         });
         match (action, untouched) {
             (TransformAction::Return, _) => Response::ok(

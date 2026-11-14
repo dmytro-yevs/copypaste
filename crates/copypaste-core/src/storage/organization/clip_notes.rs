@@ -18,6 +18,7 @@ pub(super) const NOTE_BYTES: usize = 4 * 1024;
 const ORPHAN_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const MAX_SNAPSHOT_STEPS: usize = 16;
 const PROVENANCE_CHARS: usize = 64;
+const MODULE_LABEL_CHARS: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +42,17 @@ pub struct Provenance {
     pub from_clip_id: Option<String>,
     pub transform_snapshot: Option<Vec<TransformRef>>,
     pub pipeline_name: Option<String>,
+    /// The module that wrote the clip; set exactly for [`ProvenanceKind::Module`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<ModuleOrigin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleOrigin {
+    pub module_id: String,
+    /// What the module says the write was, shown with its name.
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +61,7 @@ pub enum ProvenanceKind {
     Manual,
     Edited,
     Transformed,
+    Module,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +89,12 @@ impl Provenance {
                         .all(|step| identifier(&step.transform_id) && step.transform_id.len() <= 64)
             })
             && short(&self.pipeline_name)
+            && (self.kind == ProvenanceKind::Module) == self.module.is_some()
+            && self.module.as_ref().is_none_or(|module| {
+                identifier(&module.module_id)
+                    && module.module_id.len() <= 96
+                    && super::required_line(&module.label, MODULE_LABEL_CHARS)
+            })
     }
 }
 

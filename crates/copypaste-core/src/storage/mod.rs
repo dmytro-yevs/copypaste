@@ -48,6 +48,7 @@ mod history;
 mod history_counts;
 mod history_preview;
 mod identity;
+mod integration_view;
 mod items;
 pub mod local_state;
 mod merge_page;
@@ -89,10 +90,14 @@ pub use history::{
     HistoryPreviewRow, HistoryQuery, HistorySort, HistorySourceAppFacet,
 };
 pub use identity::DeviceIdentity;
+pub use integration_view::{IntegrationKinds, IntegrationView};
 pub(crate) use merge_page::MergePageError;
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page, PreviewPage};
 pub use retention::{compute_content_hash, QuotaUsage, DEDUP_WINDOW_MS};
+pub use state::{
+    module_state_key, valid_module_state_key, MAX_MODULE_STATE_KEYS, MAX_MODULE_STATE_VALUE_BYTES,
+};
 pub use store::Store;
 pub use versions::{origin_or, IncomingItem, Version};
 

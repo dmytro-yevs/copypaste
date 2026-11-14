@@ -18,12 +18,17 @@ use sha2::{Digest, Sha256};
 use super::{connection::write_tx, IncomingItem, Store, StoreError};
 
 mod clip_notes;
+mod module_records;
 mod preferences;
 mod rules;
 mod snippets;
 mod transforms;
 
-pub use clip_notes::{ClipNoteRecord, Provenance, ProvenanceKind, TransformRef};
+pub use clip_notes::{ClipNoteRecord, ModuleOrigin, Provenance, ProvenanceKind, TransformRef};
+pub use module_records::{
+    ModuleRecord, ModuleRecordPage, MAX_MODULE_RECORDS, MAX_MODULE_RECORD_KEY_BYTES,
+    MAX_MODULE_RECORD_PAGE, MAX_MODULE_RECORD_VALUE_BYTES,
+};
 pub use preferences::{PreferenceRecord, SetMemberRecord};
 pub use rules::{ContentRuleRecord, RuleOrigin, RulePlacementRecord};
 pub use snippets::{SnippetBodyRecord, SnippetCollectionRecord, SnippetRecord};
@@ -37,6 +42,7 @@ const LIBRARY_KIND_CLASS: i64 = 2;
 const LEGACY_RECORD_BYTES: usize = 2048;
 /// The largest kind; each kind's own bound is checked once it is parsed.
 const MAX_RECORD_BYTES: usize = snippets::BODY_BYTES;
+const _: () = assert!(module_records::MODULE_RECORD_BYTES <= MAX_RECORD_BYTES);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -65,6 +71,7 @@ pub enum Record {
     Preference(PreferenceRecord),
     SetMember(SetMemberRecord),
     ClipNote(ClipNoteRecord),
+    ModuleRecord(ModuleRecord),
 }
 
 /// The identity of one library record, for reading its projection back.
@@ -79,6 +86,7 @@ pub enum RecordKey<'a> {
     Preference { namespace: &'a str, key: &'a str },
     SetMember { set: &'a str, member: &'a str },
     ClipNote(&'a str),
+    ModuleRecord { module_id: &'a str, key: &'a str },
 }
 
 impl RecordKey<'_> {
@@ -93,6 +101,9 @@ impl RecordKey<'_> {
             Self::Preference { namespace, key } => preferences::preference_key(namespace, key),
             Self::SetMember { set, member } => preferences::member_key(set, member),
             Self::ClipNote(clip_id) => clip_notes::note_key(clip_id),
+            Self::ModuleRecord { module_id, key } => {
+                module_records::module_record_key(module_id, key)
+            }
         }
     }
 }
@@ -140,6 +151,7 @@ impl Record {
             Self::Preference(r) => preferences::preference_key(&r.namespace, &r.key),
             Self::SetMember(r) => preferences::member_key(&r.set, &r.member),
             Self::ClipNote(r) => clip_notes::note_key(&r.clip_id),
+            Self::ModuleRecord(r) => module_records::module_record_key(&r.module_id, &r.key),
         }
     }
     fn id(&self) -> String {
@@ -163,6 +175,7 @@ impl Record {
             Self::Preference(_) => preferences::PREFERENCE_BYTES,
             Self::SetMember(_) => preferences::MEMBER_BYTES,
             Self::ClipNote(_) => clip_notes::NOTE_BYTES,
+            Self::ModuleRecord(_) => module_records::MODULE_RECORD_BYTES,
         }
     }
     fn valid(&self) -> bool {
@@ -198,6 +211,7 @@ impl Record {
             Self::Preference(r) => r.valid(),
             Self::SetMember(r) => r.valid(),
             Self::ClipNote(r) => r.valid(),
+            Self::ModuleRecord(r) => r.valid(),
         }
     }
     /// Whether the local version holds a value that may only tighten (a purge,
@@ -246,6 +260,7 @@ impl Record {
             Self::Preference(r) => r.project(tx, record_id, stamp)?,
             Self::SetMember(r) => r.project(tx, record_id, stamp)?,
             Self::ClipNote(r) => r.project(tx, record_id)?,
+            Self::ModuleRecord(r) => r.project(tx, record_id, stamp)?,
         }
         Ok(())
     }
@@ -745,6 +760,9 @@ pub(crate) fn read(conn: &Connection, key: RecordKey<'_>) -> Result<Option<Recor
             preferences::member(conn, set, member)?.map(Record::SetMember)
         }
         RecordKey::ClipNote(id) => clip_notes::note(conn, id)?.map(Record::ClipNote),
+        RecordKey::ModuleRecord { module_id, key } => {
+            module_records::module_record(conn, module_id, key)?.map(Record::ModuleRecord)
+        }
     })
 }
 
