@@ -6424,13 +6424,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ClipProvenance dco_decode_clip_provenance(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return ClipProvenance(
       kind: dco_decode_clip_provenance_kind(arr[0]),
       fromClipId: dco_decode_opt_String(arr[1]),
       transformSnapshot: dco_decode_list_clip_transform_stamp(arr[2]),
       pipelineName: dco_decode_opt_String(arr[3]),
+      moduleId: dco_decode_opt_String(arr[4]),
+      label: dco_decode_opt_String(arr[5]),
     );
   }
 
@@ -9375,11 +9377,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_pipelineName = sse_decode_opt_String(deserializer);
+    var var_moduleId = sse_decode_opt_String(deserializer);
+    var var_label = sse_decode_opt_String(deserializer);
     return ClipProvenance(
       kind: var_kind,
       fromClipId: var_fromClipId,
       transformSnapshot: var_transformSnapshot,
       pipelineName: var_pipelineName,
+      moduleId: var_moduleId,
+      label: var_label,
     );
   }
 
@@ -13204,6 +13210,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.fromClipId, serializer);
     sse_encode_list_clip_transform_stamp(self.transformSnapshot, serializer);
     sse_encode_opt_String(self.pipelineName, serializer);
+    sse_encode_opt_String(self.moduleId, serializer);
+    sse_encode_opt_String(self.label, serializer);
   }
 
   @protected

@@ -191,7 +191,7 @@ pub(crate) fn annotations(
         provenance: provenance
             .as_deref()
             .and_then(|json| serde_json::from_str::<Provenance>(json).ok())
-            .and_then(wire_provenance),
+            .map(wire_provenance),
         rule_tag_ids: tags
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok())
@@ -201,15 +201,20 @@ pub(crate) fn annotations(
     Ok((annotations != ItemAnnotations::default()).then(|| annotations.bounded()))
 }
 
-/// `None` for module provenance, which the wire contract does not carry yet.
-fn wire_provenance(provenance: Provenance) -> Option<ClipProvenance> {
-    Some(ClipProvenance {
+fn wire_provenance(provenance: Provenance) -> ClipProvenance {
+    let (module_id, label) = provenance
+        .module
+        .map(|module| (module.module_id, module.label))
+        .unzip();
+    ClipProvenance {
         kind: match provenance.kind {
             ProvenanceKind::Manual => WireKind::Manual,
             ProvenanceKind::Edited => WireKind::Edited,
             ProvenanceKind::Transformed => WireKind::Transformed,
-            ProvenanceKind::Module => return None,
+            ProvenanceKind::Module => WireKind::Module,
         },
+        module_id,
+        label,
         from_clip_id: provenance.from_clip_id,
         transform_snapshot: provenance
             .transform_snapshot
@@ -221,7 +226,7 @@ fn wire_provenance(provenance: Provenance) -> Option<ClipProvenance> {
             })
             .collect(),
         pipeline_name: provenance.pipeline_name,
-    })
+    }
 }
 
 impl Store {

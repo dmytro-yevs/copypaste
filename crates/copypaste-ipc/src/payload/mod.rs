@@ -735,6 +735,10 @@ impl Default for Item {
 pub const MAX_PROVENANCE_TEXT_CHARS: usize = 64;
 /// Most transform steps a provenance snapshot records.
 pub const MAX_PROVENANCE_STEPS: usize = 16;
+/// Longest module id a provenance names, in chars.
+pub const MAX_PROVENANCE_MODULE_CHARS: usize = 96;
+/// Longest label a module gives its write, in chars.
+pub const MAX_PROVENANCE_LABEL_CHARS: usize = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -742,6 +746,8 @@ pub enum ProvenanceKind {
     Manual,
     Edited,
     Transformed,
+    /// Written to the clipboard by an optional module (`module_id`, `label`).
+    Module,
 }
 
 /// One transform identity and version; parameters are never stored.
@@ -760,6 +766,11 @@ pub struct ClipProvenance {
     pub transform_snapshot: Vec<TransformStamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_id: Option<String>,
+    /// What the module says the write was, shown with its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Per-clip state outside the authenticated payload metadata.
@@ -783,9 +794,13 @@ pub struct ItemAnnotations {
 }
 
 fn bound_text(value: &mut Option<String>) {
+    bound_chars(value, MAX_PROVENANCE_TEXT_CHARS);
+}
+
+fn bound_chars(value: &mut Option<String>, max: usize) {
     if let Some((cut, _)) = value
         .as_deref()
-        .and_then(|text| text.char_indices().nth(MAX_PROVENANCE_TEXT_CHARS))
+        .and_then(|text| text.char_indices().nth(max))
     {
         if let Some(text) = value.as_mut() {
             text.truncate(cut);
@@ -807,6 +822,8 @@ impl ItemAnnotations {
             }
             bound_text(&mut provenance.from_clip_id);
             bound_text(&mut provenance.pipeline_name);
+            bound_chars(&mut provenance.module_id, MAX_PROVENANCE_MODULE_CHARS);
+            bound_chars(&mut provenance.label, MAX_PROVENANCE_LABEL_CHARS);
         }
         self
     }

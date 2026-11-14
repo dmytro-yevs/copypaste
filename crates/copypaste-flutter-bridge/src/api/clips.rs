@@ -47,6 +47,7 @@ pub enum ClipProvenanceKind {
     Manual,
     Edited,
     Transformed,
+    Module,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +62,10 @@ pub struct ClipProvenance {
     pub from_clip_id: Option<String>,
     pub transform_snapshot: Vec<ClipTransformStamp>,
     pub pipeline_name: Option<String>,
+    /// The module that wrote the clip, for `Module`.
+    pub module_id: Option<String>,
+    /// What the module says the write was.
+    pub label: Option<String>,
 }
 
 /// Rule, expiry and provenance state of one clip.
@@ -84,6 +89,7 @@ impl From<copypaste_ipc::ItemAnnotations> for ClipAnnotationState {
                     ProvenanceKind::Manual => ClipProvenanceKind::Manual,
                     ProvenanceKind::Edited => ClipProvenanceKind::Edited,
                     ProvenanceKind::Transformed => ClipProvenanceKind::Transformed,
+                    ProvenanceKind::Module => ClipProvenanceKind::Module,
                 },
                 from_clip_id: provenance.from_clip_id,
                 transform_snapshot: provenance
@@ -95,6 +101,8 @@ impl From<copypaste_ipc::ItemAnnotations> for ClipAnnotationState {
                     })
                     .collect(),
                 pipeline_name: provenance.pipeline_name,
+                module_id: provenance.module_id,
+                label: provenance.label,
             }),
             rule_tag_ids: value.rule_tag_ids,
             keep: value.keep,

@@ -48,10 +48,12 @@ fn item() -> Item {
             expires_at: Some(2),
             hidden_from_integrations: true,
             provenance: Some(copypaste_ipc::ClipProvenance {
-                kind: copypaste_ipc::payload::ProvenanceKind::Edited,
-                from_clip_id: Some("item-0".into()),
+                kind: copypaste_ipc::payload::ProvenanceKind::Module,
+                from_clip_id: None,
                 transform_snapshot: Vec::new(),
                 pipeline_name: None,
+                module_id: Some("copypaste.ai-tools".into()),
+                label: Some("Claude".into()),
             }),
             ..Default::default()
         }),
