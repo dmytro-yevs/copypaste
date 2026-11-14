@@ -1,9 +1,8 @@
 //! The module's only path to CopyPaste: typed host requests through one
 //! object-safe trait, so tests can stand in for the native host.
 use copypaste_module_sdk::native::HostClient;
-use copypaste_module_sdk::{HostError, HostErrorCode, ModuleHostRequest};
+use copypaste_module_sdk::{HostError, HostErrorCode, ModuleHostContext, ModuleHostRequest};
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -30,16 +29,7 @@ pub(crate) fn request<T: DeserializeOwned>(
     })
 }
 
-/// The `context` reply. `preferences` is read when a host supplies the
-/// current values there; the SDK reply does not carry them yet.
-#[derive(Deserialize)]
-pub(crate) struct Context {
-    pub(crate) locale: String,
-    #[serde(default)]
-    pub(crate) preferences: Option<BTreeMap<String, Value>>,
-}
-
-pub(crate) fn context(host: &dyn Host) -> Option<Context> {
+pub(crate) fn context(host: &dyn Host) -> Option<ModuleHostContext> {
     request(host, ModuleHostRequest::Context).ok()
 }
 

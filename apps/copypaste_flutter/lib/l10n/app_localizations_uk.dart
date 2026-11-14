@@ -6780,6 +6780,9 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyProvenanceTransformed => 'Перетворено';
 
   @override
+  String get historyProvenanceModule => 'Модуль';
+
+  @override
   String historyRuleTag(String name) {
     return '$name (авто)';
   }

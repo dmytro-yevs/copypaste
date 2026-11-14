@@ -6781,6 +6781,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get historyProvenanceTransformed => 'Transformé';
 
   @override
+  String get historyProvenanceModule => 'Module';
+
+  @override
   String historyRuleTag(String name) {
     return '$name (auto)';
   }

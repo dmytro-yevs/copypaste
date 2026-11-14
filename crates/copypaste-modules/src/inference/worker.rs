@@ -74,6 +74,7 @@ fn invoke(
                 sync: None,
                 sync_provider: false,
                 capabilities: Vec::new(),
+                preference_fields: Vec::new(),
             },
         },
         &request.invocation,

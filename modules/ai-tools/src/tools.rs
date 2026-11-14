@@ -9,9 +9,9 @@ use crate::limits::{
     MAX_RESPONSE_BYTES, PREVIEW_CHARS,
 };
 use copypaste_module_sdk::{
-    ClipboardSource, HistoryContent, HistoryContentKind, HistoryEntry, HistoryFacets, HistoryItem,
-    HistoryPage, HistoryScope, HostError, HostErrorCode, ModuleHostRequest, RenderedSnippet,
-    SavedRecord, Snippet, SnippetSummary,
+    ClipboardSource, ClipboardWritten, HistoryContent, HistoryContentKind, HistoryEntry,
+    HistoryFacets, HistoryItem, HistoryPage, HistoryScope, HostError, HostErrorCode,
+    ModuleHostRequest, RenderedSnippet, SavedRecord, Snippet, SnippetSummary,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -561,25 +561,18 @@ fn copy(call: &Call<'_>, id: Option<String>, text: Option<String>) -> Result<Ans
             ))
         }
     };
-    let item_id = match &source {
-        ClipboardSource::Item { id, .. } => Some(id.clone()),
-        ClipboardSource::Text { .. } => None,
+    let message = match &source {
+        ClipboardSource::Item { .. } => "Copied the item to the clipboard.",
+        ClipboardSource::Text { .. } => "Copied the text to the clipboard.",
     };
     let label: String = call.label.chars().take(MAX_LABEL_CHARS).collect();
-    host::request::<()>(
+    let written: ClipboardWritten = host::request(
         call.host,
         ModuleHostRequest::ClipboardWrite { source, label },
     )?;
     Ok(Answer {
-        ids: item_id.iter().cloned().collect(),
-        ..Answer::message(
-            if item_id.is_some() {
-                "Copied the item to the clipboard."
-            } else {
-                "Copied the text to the clipboard."
-            },
-            json!({ "item_id": item_id }),
-        )
+        ids: written.item_id.iter().cloned().collect(),
+        ..Answer::message(message, json!({ "item_id": written.item_id }))
     })
 }
 

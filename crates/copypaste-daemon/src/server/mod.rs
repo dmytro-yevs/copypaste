@@ -32,6 +32,8 @@ mod halted;
 mod items;
 mod listener;
 pub(crate) mod messages;
+#[cfg(all(test, unix))]
+mod module_endpoint_tests;
 mod peer_identity;
 #[cfg(windows)]
 mod pipe;

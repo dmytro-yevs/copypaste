@@ -79,8 +79,10 @@ impl AppState {
             port: opened.port,
             host: Arc::clone(&host) as _,
         })?;
+        let runtime = Arc::new(runtime);
+        runtime.attach_module_services()?;
         Ok(Self {
-            runtime: Arc::new(runtime),
+            runtime,
             clipboard,
             db_path: opened.db_path,
             shutdown: watch::channel(false).0,

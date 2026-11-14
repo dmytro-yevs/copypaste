@@ -8126,6 +8126,10 @@
   "@historyProvenanceTransformed": {
     "description": "Marker next to the source app of a clip created by a text transform."
   },
+  "historyProvenanceModule": "Module",
+  "@historyProvenanceModule": {
+    "description": "Marker next to the source app for a clip written by an installed module."
+  },
   "historyRuleTag": "{name} (auto)",
   "@historyRuleTag": {
     "description": "A tag that a content rule assigned automatically.",

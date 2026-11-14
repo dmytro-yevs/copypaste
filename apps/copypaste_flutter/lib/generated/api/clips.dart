@@ -118,11 +118,19 @@ class ClipProvenance {
   final List<ClipTransformStamp> transformSnapshot;
   final String? pipelineName;
 
+  /// The module that wrote the clip, for `Module`.
+  final String? moduleId;
+
+  /// What the module says the write was.
+  final String? label;
+
   const ClipProvenance({
     required this.kind,
     this.fromClipId,
     required this.transformSnapshot,
     this.pipelineName,
+    this.moduleId,
+    this.label,
   });
 
   @override
@@ -130,7 +138,9 @@ class ClipProvenance {
       kind.hashCode ^
       fromClipId.hashCode ^
       transformSnapshot.hashCode ^
-      pipelineName.hashCode;
+      pipelineName.hashCode ^
+      moduleId.hashCode ^
+      label.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -140,10 +150,12 @@ class ClipProvenance {
           kind == other.kind &&
           fromClipId == other.fromClipId &&
           transformSnapshot == other.transformSnapshot &&
-          pipelineName == other.pipelineName;
+          pipelineName == other.pipelineName &&
+          moduleId == other.moduleId &&
+          label == other.label;
 }
 
-enum ClipProvenanceKind { manual, edited, transformed }
+enum ClipProvenanceKind { manual, edited, transformed, module }
 
 class ClipTransformStamp {
   final String transformId;

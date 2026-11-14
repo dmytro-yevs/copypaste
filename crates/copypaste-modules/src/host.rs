@@ -18,6 +18,8 @@ pub struct ModuleHost {
     wake: tokio::sync::Notify,
     binding: Mutex<Option<crate::semantic_search::SearchBinding>>,
     search: Mutex<Option<Arc<crate::semantic_search::SemanticSearch>>>,
+    /// A developer key replacing the release key; set only by tests.
+    package_key: Mutex<Option<String>>,
 }
 
 impl ModuleHost {
@@ -30,7 +32,18 @@ impl ModuleHost {
             wake: tokio::sync::Notify::new(),
             binding: Mutex::new(None),
             search: Mutex::new(None),
+            package_key: Mutex::new(None),
         }
+    }
+
+    /// Trusts packages signed by `public_key` instead of the release key.
+    /// Takes effect only before the registry first opens.
+    #[cfg(feature = "test-support")]
+    pub fn trust_package_key(&self, public_key: &str) {
+        *self
+            .package_key
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(public_key.into());
     }
 
     pub(crate) fn manager(&self) -> Result<Arc<ModuleManager>, ModuleError> {
@@ -41,11 +54,16 @@ impl ModuleHost {
         let target = ModuleTarget::current().ok_or_else(|| {
             ModuleError::Invalid("Modules are unavailable on this platform.".into())
         })?;
+        let key = self
+            .package_key
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .clone();
         let manager = Arc::new(ModuleManager::open(
             &self.root,
             env!("CARGO_PKG_VERSION"),
             target,
-            MODULE_RELEASE_PUBLIC_KEY,
+            key.as_deref().unwrap_or(MODULE_RELEASE_PUBLIC_KEY),
         )?);
         if let Some(services) = self
             .sync_services

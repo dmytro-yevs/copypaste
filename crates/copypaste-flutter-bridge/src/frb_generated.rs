@@ -6526,11 +6526,15 @@ impl SseDecode for crate::api::clips::ClipProvenance {
         let mut var_transformSnapshot =
             <Vec<crate::api::clips::ClipTransformStamp>>::sse_decode(deserializer);
         let mut var_pipelineName = <Option<String>>::sse_decode(deserializer);
+        let mut var_moduleId = <Option<String>>::sse_decode(deserializer);
+        let mut var_label = <Option<String>>::sse_decode(deserializer);
         return crate::api::clips::ClipProvenance {
             kind: var_kind,
             from_clip_id: var_fromClipId,
             transform_snapshot: var_transformSnapshot,
             pipeline_name: var_pipelineName,
+            module_id: var_moduleId,
+            label: var_label,
         };
     }
 }
@@ -6543,6 +6547,7 @@ impl SseDecode for crate::api::clips::ClipProvenanceKind {
             0 => crate::api::clips::ClipProvenanceKind::Manual,
             1 => crate::api::clips::ClipProvenanceKind::Edited,
             2 => crate::api::clips::ClipProvenanceKind::Transformed,
+            3 => crate::api::clips::ClipProvenanceKind::Module,
             _ => unreachable!("Invalid variant for ClipProvenanceKind: {}", inner),
         };
     }
@@ -10615,6 +10620,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::clips::ClipProvenance {
             self.from_clip_id.into_into_dart().into_dart(),
             self.transform_snapshot.into_into_dart().into_dart(),
             self.pipeline_name.into_into_dart().into_dart(),
+            self.module_id.into_into_dart().into_dart(),
+            self.label.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10637,6 +10644,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::clips::ClipProvenanceKind {
             Self::Manual => 0.into_dart(),
             Self::Edited => 1.into_dart(),
             Self::Transformed => 2.into_dart(),
+            Self::Module => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13878,6 +13886,8 @@ impl SseEncode for crate::api::clips::ClipProvenance {
             serializer,
         );
         <Option<String>>::sse_encode(self.pipeline_name, serializer);
+        <Option<String>>::sse_encode(self.module_id, serializer);
+        <Option<String>>::sse_encode(self.label, serializer);
     }
 }
 
@@ -13889,6 +13899,7 @@ impl SseEncode for crate::api::clips::ClipProvenanceKind {
                 crate::api::clips::ClipProvenanceKind::Manual => 0,
                 crate::api::clips::ClipProvenanceKind::Edited => 1,
                 crate::api::clips::ClipProvenanceKind::Transformed => 2,
+                crate::api::clips::ClipProvenanceKind::Module => 3,
                 _ => {
                     unimplemented!("");
                 }

@@ -1704,6 +1704,7 @@
   "historyProvenanceManual": "手動",
   "historyProvenanceEdited": "編集済み",
   "historyProvenanceTransformed": "変換済み",
+  "historyProvenanceModule": "モジュール",
   "historyRuleTag": "{name}（自動）",
   "historyMetadataExpiry": "削除",
   "historyMetadataRuleTags": "自動タグ",

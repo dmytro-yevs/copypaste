@@ -11,7 +11,8 @@ use copypaste_core::storage::organization::{
 use copypaste_ipc::snippets::{self as wire, SnippetOp, SnippetSaveOutcome};
 use copypaste_ipc::{ErrorCode, Method, ResponseData};
 use copypaste_module_sdk::{
-    ClipboardSource, HistoryScope, HostError, RenderedSnippet, SavedRecord, Snippet, SnippetSummary,
+    ClipboardSource, ClipboardWritten, HistoryScope, HostError, RenderedSnippet, SavedRecord,
+    Snippet, SnippetSummary,
 };
 
 use super::super::delivery::DeliveryOptions;
@@ -22,7 +23,9 @@ use crate::Runtime;
 /// Characters of one snippet search preview.
 const SNIPPET_PREVIEW_CHARS: usize = 200;
 const MSG_SNIPPET: &str = "The snippet does not exist or is not available to modules.";
-const MSG_CLIPBOARD: &str = "This template reads the clipboard, which modules cannot provide.";
+const MSG_CLIPBOARD: &str =
+    "This snippet inserts clipboard content, which CopyPaste does not share with modules. \
+     Use a snippet without clipboard placeholders.";
 const MSG_ABBREVIATION_TAKEN: &str = "That abbreviation is already used by another snippet.";
 const MSG_EMPTY: &str = "The text must not be empty.";
 
@@ -105,8 +108,9 @@ impl Runtime {
         })
     }
 
-    /// Expands a snippet with `values`. Clipboard placeholders get nothing,
-    /// since rendering never reads history for a module.
+    /// Expands a snippet with `values`. No capability lets a module read the
+    /// clipboard, so a snippet with clipboard placeholders is refused rather
+    /// than rendered with them empty.
     pub fn module_snippet_render(
         &self,
         id: &str,
@@ -131,22 +135,22 @@ impl Runtime {
             .snippet(id)
             .map_err(|error| unavailable(&error))?
             .ok_or_else(snippet_not_found)?;
-        let (rendered, missing, secret) = self
-            .render_snippet_isolated(&detail, values, None)
+        let rendered = self
+            .render_snippet_isolated(&detail, values)
             .map_err(|error| unavailable(&error))?;
-        if secret {
+        if rendered.secret {
             return Err(snippet_not_found());
         }
-        if missing.iter().any(|name| name.starts_with("clipboard:")) {
+        if rendered.reads_clipboard {
             return Err(invalid(MSG_CLIPBOARD));
         }
-        if !missing.is_empty() {
+        if !rendered.missing_fields.is_empty() {
             return Err(invalid(&format!(
-                "Missing required values: {}",
-                missing.join(", ")
+                "Fill in these values: {}.",
+                rendered.missing_fields.join(", ")
             )));
         }
-        let redacted = redact(&rendered);
+        let redacted = redact(&rendered.text);
         if redacted.mostly_secret() {
             return Err(snippet_not_found());
         }
@@ -223,14 +227,14 @@ impl Runtime {
     }
 
     /// Puts text or a visible item on the clipboard. Text becomes a history
-    /// item noted with the module's provenance. Answers the restore token
-    /// of the delivery, which the app offers as undo.
+    /// item noted with the module's provenance. Answers the item now on the
+    /// clipboard; the delivery's restore token stays with the app's undo.
     pub fn module_clipboard_write(
         &self,
         module_id: &str,
         source: &ClipboardSource,
         label: &str,
-    ) -> Result<Option<String>, HostError> {
+    ) -> Result<ClipboardWritten, HostError> {
         match source {
             ClipboardSource::Text { text } => {
                 if text.is_empty() {
@@ -248,7 +252,9 @@ impl Runtime {
                 if let Some(item) = &delivered.item {
                     self.note_module_provenance(&item.id, module_id, label);
                 }
-                Ok(delivered.token)
+                Ok(ClipboardWritten {
+                    item_id: delivered.item.map(|item| item.id),
+                })
             }
             ClipboardSource::Item { id, scope } => {
                 self.visible(scope, id)?;
@@ -259,7 +265,9 @@ impl Runtime {
                         unavailable(&error)
                     }
                 })?;
-                Ok(delivered.token)
+                Ok(ClipboardWritten {
+                    item_id: delivered.item.map(|item| item.id),
+                })
             }
         }
     }

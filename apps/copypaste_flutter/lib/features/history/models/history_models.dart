@@ -204,7 +204,7 @@ class HistoryFacets {
 }
 
 /// How CopyPaste itself created a clip, shown next to its source app.
-enum HistoryProvenance { manual, edited, transformed }
+enum HistoryProvenance { manual, edited, transformed, module }
 
 /// Runtime state attached to a clip beyond its captured payload.
 @immutable

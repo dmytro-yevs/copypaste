@@ -6266,6 +6266,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyProvenanceTransformed => '변환됨';
 
   @override
+  String get historyProvenanceModule => '모듈';
+
+  @override
   String historyRuleTag(String name) {
     return '$name(자동)';
   }

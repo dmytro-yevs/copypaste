@@ -3,12 +3,16 @@
 use crate::{endpoints::Endpoints, prompts::Prompts, ModuleHostServices, SyncServices};
 use copypaste_module_sdk::{
     native::{to_exact_vec, MAX_HOST_BYTES},
-    HostError, HostErrorCode, ModuleCapability, ModuleHostContext, ModuleHostRequest,
+    HostError, HostErrorCode, ModuleCapability, ModuleField, ModuleHostContext, ModuleHostRequest,
 };
 use copypaste_sync::host::SyncHostRequest;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, RwLock,
+use serde_json::Value;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 
 /// Host state every module bridge shares: the UI locale, pending prompts
@@ -56,6 +60,8 @@ pub(crate) struct HostAccess {
     pub(crate) sync: Option<Arc<SyncServices>>,
     pub(crate) sync_provider: bool,
     pub(crate) capabilities: Vec<ModuleCapability>,
+    /// The manifest's preference fields, for `context`.
+    pub(crate) preference_fields: Vec<ModuleField>,
 }
 
 impl HostAccess {
@@ -73,6 +79,7 @@ pub(crate) struct HostBridge {
     pub(crate) accepting: Arc<AtomicBool>,
     pub(crate) lifetime: Arc<crate::host_lifetime::HostLifetime>,
     pub(crate) endpoints: Arc<Endpoints>,
+    pub(crate) preferences: Arc<RwLock<BTreeMap<String, Value>>>,
 }
 
 fn unavailable() -> HostError {
@@ -130,6 +137,7 @@ impl HostBridge {
         match request {
             ModuleHostRequest::Context => reply(&ModuleHostContext {
                 locale: self.shared.locale(),
+                preferences: self.preferences(),
             }),
             ModuleHostRequest::ReadState { keys } => state(SyncHostRequest::ReadState { keys }),
             ModuleHostRequest::WriteState { values } => {
@@ -158,6 +166,28 @@ impl HostBridge {
                 )),
             },
         }
+    }
+}
+
+impl HostBridge {
+    /// Current values, synced ones read from their record each time so a
+    /// change on another device applies without a reload.
+    fn preferences(&self) -> Option<BTreeMap<String, Value>> {
+        let fields = &self.access.preference_fields;
+        if fields.is_empty() {
+            return None;
+        }
+        let local = self
+            .preferences
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        Some(crate::preferences::merged(
+            self.shared.services().as_deref(),
+            &self.id,
+            fields,
+            local,
+        ))
     }
 }
 
@@ -205,11 +235,13 @@ mod tests {
                 sync: None,
                 sync_provider: false,
                 capabilities,
+                preference_fields: Vec::new(),
             },
             shared: Arc::default(),
             accepting: Arc::new(AtomicBool::new(true)),
             lifetime: Arc::default(),
             endpoints: Arc::default(),
+            preferences: Arc::default(),
         };
         let code =
             |bridge: &HostBridge, input: &[u8]| bridge.handle(input).unwrap_err().unwrap().code;
@@ -247,5 +279,58 @@ mod tests {
         );
         granted.accepting.store(false, Ordering::Release);
         assert_eq!(granted.handle(br#"{"operation":"context"}"#), Err(None));
+    }
+
+    #[test]
+    fn context_carries_current_preferences_with_synced_values_from_their_record() {
+        struct Synced;
+        impl ModuleHostServices for Synced {
+            fn record_get(
+                &self,
+                module_id: &str,
+                key: &str,
+            ) -> Result<Option<copypaste_module_sdk::ModuleRecord>, HostError> {
+                Ok(Some(copypaste_module_sdk::ModuleRecord {
+                    module_id: module_id.into(),
+                    key: key.into(),
+                    value_json: r#"{"window":["all"],"local":false}"#.into(),
+                    deleted: false,
+                }))
+            }
+        }
+        let shared = Arc::new(HostShared::default());
+        shared.set_services(Arc::new(Synced));
+        let fields = serde_json::from_value(serde_json::json!([
+            {"id": "window", "title": "Window", "kind": "choices", "synced": true,
+             "options": [{"id": "week", "title": "Week"}, {"id": "all", "title": "All"}],
+             "default": ["week"]},
+            {"id": "local", "title": "Local", "kind": "boolean", "default": false}
+        ]))
+        .unwrap();
+        let bridge = HostBridge {
+            id: "copypaste.ai-tools".into(),
+            owner: 1,
+            access: HostAccess {
+                sync: None,
+                sync_provider: false,
+                capabilities: Vec::new(),
+                preference_fields: fields,
+            },
+            shared,
+            accepting: Arc::new(AtomicBool::new(true)),
+            lifetime: Arc::default(),
+            endpoints: Arc::default(),
+            preferences: Arc::new(RwLock::new(BTreeMap::from([
+                ("window".into(), serde_json::json!(["week"])),
+                ("local".into(), serde_json::json!(true)),
+            ]))),
+        };
+        let reply: serde_json::Value =
+            serde_json::from_slice(&bridge.handle(br#"{"operation":"context"}"#).unwrap()).unwrap();
+        assert_eq!(
+            reply["preferences"],
+            serde_json::json!({"window": ["all"], "local": true}),
+            "only synced fields come from the record"
+        );
     }
 }

@@ -20,6 +20,17 @@ use std::{
 
 mod updates;
 
+/// The last locale the app reported, beside the registry.
+const LOCALE_FILE: &str = "locale";
+
+fn valid_locale(locale: &str) -> bool {
+    !locale.is_empty()
+        && locale.len() <= 35
+        && locale
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModule {
     pub search_language_field: Option<String>,
@@ -146,6 +157,12 @@ impl ModuleManager {
             },
             _staging_owner: staging_owner,
         };
+        if let Some(locale) = fs::read_to_string(manager.root.join(LOCALE_FILE))
+            .ok()
+            .filter(|locale| valid_locale(locale))
+        {
+            manager.shared.set_locale(locale);
+        }
         manager.activate_staged_updates();
         Ok(manager)
     }
@@ -497,6 +514,12 @@ impl ModuleManager {
                 )?,
             )?;
         }
+        crate::preferences::store(
+            self.shared.services().as_deref(),
+            id,
+            &manifest.preferences,
+            &record.preferences,
+        )?;
         self.persist(&registry)?;
         state.registry = registry;
         let previous = if manifest.sync_provider.is_some() {
@@ -504,6 +527,10 @@ impl ModuleManager {
         } else {
             None
         };
+        if let (Some(loaded), Some(record)) = (state.loaded.get(id), state.registry.modules.get(id))
+        {
+            loaded.instance.set_preferences(record.preferences.clone());
+        }
         drop(state);
         if let Some(previous) = previous {
             previous.instance.stop();
@@ -621,19 +648,15 @@ impl ModuleManager {
         Ok(())
     }
 
-    /// Local encrypted state, the derived index and host-kept records.
+    /// Local encrypted state, the derived index and the module's records,
+    /// synced preferences included.
     fn clear_host_state(&self, id: &str) -> bool {
-        let state = match self.sync_services.lock() {
+        match self.sync_services.lock() {
             Ok(services) => services
                 .as_ref()
                 .is_none_or(|services| services.clear(id).is_ok()),
             Err(_) => false,
-        };
-        state
-            && self
-                .shared
-                .services()
-                .is_none_or(|services| services.module_removed(id).is_ok())
+        }
     }
 
     fn finish_pending_removals(&self) -> Result<(), ModuleError> {
@@ -709,8 +732,10 @@ impl ModuleManager {
                     .collect()
             })
             .unwrap_or_default();
+        let preferences = self.preferences(&manifest.id, &manifest, &record.preferences);
         let mut result = summary(manifest, record);
         result.search_models = models;
+        result.preferences = preferences;
         result
     }
 
@@ -889,7 +914,10 @@ impl ModuleManager {
         let mut invocation = ModuleInvocation {
             command: command.id.clone(),
             arguments: resolve_fields(&command.arguments, &arguments)?,
-            preferences: resolve_fields(&manifest.preferences, &record.preferences)?,
+            preferences: resolve_fields(
+                &manifest.preferences,
+                &self.preferences(id, &manifest, &record.preferences),
+            )?,
         };
         if manifest.search_provider.is_some() || crate::inference::is_ocr_command(id, &command.id) {
             let generation = self.inference.generation();
@@ -974,7 +1002,23 @@ impl ModuleManager {
                 .filter(|capability| record.capabilities.contains(capability))
                 .copied()
                 .collect(),
+            preference_fields: manifest.preferences.clone(),
         })
+    }
+
+    /// The registry values of `id` with its synced values applied.
+    fn preferences(
+        &self,
+        id: &str,
+        manifest: &ModuleManifest,
+        values: &BTreeMap<String, Value>,
+    ) -> BTreeMap<String, Value> {
+        crate::preferences::merged(
+            self.shared.services().as_deref(),
+            id,
+            &manifest.preferences,
+            values.clone(),
+        )
     }
 
     /// Opens an endpoint connection. The session keeps the instance loaded
@@ -1008,7 +1052,10 @@ impl ModuleManager {
                 "This module has no such endpoint on this device.".into(),
             ));
         }
-        let preferences = resolve_fields(&manifest.preferences, &record.preferences)?;
+        let preferences = resolve_fields(
+            &manifest.preferences,
+            &self.preferences(id, &manifest, &record.preferences),
+        )?;
         let (instance, evicted) = self.lease(&mut state, id);
         drop(state);
         drop(evicted);
@@ -1033,17 +1080,21 @@ impl ModuleManager {
         Ok(session)
     }
 
-    /// The UI locale for summaries and the `context` host request.
+    /// The UI locale for summaries and the `context` host request. It is
+    /// kept across restarts, so endpoint clients served before the app
+    /// reconnects see it too.
     pub fn set_locale(&self, locale: &str) -> Result<(), ModuleError> {
-        let valid = !locale.is_empty()
-            && locale.len() <= 35
-            && locale
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-        if !valid {
+        if !valid_locale(locale) {
             return Err(ModuleError::Invalid("The locale is invalid.".into()));
         }
-        self.shared.set_locale(locale.into());
+        if self.shared.locale() != locale {
+            copypaste_fs::write_atomically(
+                &self.root.join(LOCALE_FILE),
+                locale.as_bytes(),
+                copypaste_fs::Visibility::OwnerOnly,
+            )?;
+            self.shared.set_locale(locale.into());
+        }
         Ok(())
     }
 

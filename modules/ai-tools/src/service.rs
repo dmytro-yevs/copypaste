@@ -274,8 +274,8 @@ impl Service {
         }
     }
 
-    /// Keeps the preference values of the latest command, the only place a
-    /// host delivers them today, for endpoint calls in between.
+    /// Keeps the preference values of the latest command for hosts whose
+    /// `context` reply does not carry them.
     pub(crate) fn remember_preferences(&self, values: &BTreeMap<String, Value>) {
         let mut cached = lock(&self.preferences);
         if cached.as_ref() == Some(values) {

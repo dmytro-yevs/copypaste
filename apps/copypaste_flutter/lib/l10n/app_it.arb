@@ -1704,6 +1704,7 @@
   "historyProvenanceManual": "Manuale",
   "historyProvenanceEdited": "Modificato",
   "historyProvenanceTransformed": "Trasformato",
+  "historyProvenanceModule": "Modulo",
   "historyRuleTag": "{name} (auto)",
   "historyMetadataExpiry": "Eliminazione",
   "historyMetadataRuleTags": "Tag automatici",

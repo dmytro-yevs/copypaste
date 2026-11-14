@@ -614,6 +614,7 @@ HistoryClipAnnotations _fromRuntimeAnnotations(
       clips.ClipProvenanceKind.manual => HistoryProvenance.manual,
       clips.ClipProvenanceKind.edited => HistoryProvenance.edited,
       clips.ClipProvenanceKind.transformed => HistoryProvenance.transformed,
+      clips.ClipProvenanceKind.module => HistoryProvenance.module,
       null => null,
     },
     ruleTagIds: state.ruleTagIds,

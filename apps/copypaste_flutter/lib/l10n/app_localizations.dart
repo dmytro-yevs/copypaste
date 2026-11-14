@@ -10359,6 +10359,12 @@ abstract class AppLocalizations {
   /// **'Transformed'**
   String get historyProvenanceTransformed;
 
+  /// Marker next to the source app for a clip written by an installed module.
+  ///
+  /// In en, this message translates to:
+  /// **'Module'**
+  String get historyProvenanceModule;
+
   /// A tag that a content rule assigned automatically.
   ///
   /// In en, this message translates to:

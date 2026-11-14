@@ -579,6 +579,117 @@ fn endpoint_connections_need_confirmed_capabilities_and_end_with_the_module() {
         .unwrap();
 }
 
+/// Records kept like the runtime keeps them, so a value written by another
+/// device can be stood in for.
+#[derive(Default)]
+struct Records(std::sync::Mutex<BTreeMap<(String, String), String>>);
+
+impl Records {
+    fn set(&self, module_id: &str, key: &str, value_json: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert((module_id.into(), key.into()), value_json.into());
+    }
+    fn get(&self, module_id: &str, key: &str) -> Option<serde_json::Value> {
+        let records = self.0.lock().unwrap();
+        let json = records.get(&(module_id.to_owned(), key.to_owned()))?;
+        Some(serde_json::from_str(json).unwrap())
+    }
+}
+
+impl copypaste_modules::ModuleHostServices for Records {
+    fn record_get(
+        &self,
+        module_id: &str,
+        key: &str,
+    ) -> Result<Option<copypaste_module_sdk::ModuleRecord>, copypaste_module_sdk::HostError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .get(&(module_id.to_owned(), key.to_owned()))
+            .map(|value_json| copypaste_module_sdk::ModuleRecord {
+                module_id: module_id.into(),
+                key: key.into(),
+                value_json: value_json.clone(),
+                deleted: false,
+            }))
+    }
+    fn record_put(
+        &self,
+        module_id: &str,
+        key: String,
+        value_json: String,
+    ) -> Result<(), copypaste_module_sdk::HostError> {
+        self.set(module_id, &key, &value_json);
+        Ok(())
+    }
+}
+
+#[test]
+fn synced_preferences_follow_their_record_and_the_locale_survives_a_restart() {
+    use copypaste_module_sdk::HOST_PREFERENCES_RECORD;
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let records = std::sync::Arc::new(Records::default());
+    manager.set_host_services(records.clone());
+    let library = fs::read(native_library()).unwrap();
+    let id = "copypaste.text-tools";
+    manager
+        .install(&fixture.package(
+            "1.0.0",
+            &library,
+            |manifest| {
+                manifest["schema_version"] = json!(6);
+                manifest["supported_platforms"] = json!([target().platform]);
+                manifest["preferences"][0]["synced"] = json!(true);
+                manifest["localizations"] = json!({"uk": {"title": "Текстові інструменти"}});
+            },
+            None,
+        ))
+        .unwrap();
+    manager
+        .set_preferences(id, BTreeMap::from([("uppercase".into(), json!(true))]))
+        .unwrap();
+    assert_eq!(
+        records.get(id, HOST_PREFERENCES_RECORD),
+        Some(json!({"uppercase": true}))
+    );
+
+    records.set(
+        id,
+        HOST_PREFERENCES_RECORD,
+        r#"{"uppercase":false,"later":1}"#,
+    );
+    assert_eq!(
+        manager.list().unwrap()[0].preferences["uppercase"],
+        json!(false)
+    );
+    let input = BTreeMap::from([("text".into(), json!(" quiet "))]);
+    assert_eq!(
+        manager.invoke(id, "transform", input).unwrap(),
+        ModuleOutput::Text {
+            text: "quiet".into()
+        }
+    );
+    manager
+        .set_preferences(id, BTreeMap::from([("uppercase".into(), json!(true))]))
+        .unwrap();
+    assert_eq!(
+        records.get(id, HOST_PREFERENCES_RECORD),
+        Some(json!({"uppercase": true, "later": 1})),
+        "values of fields this version lacks are kept"
+    );
+
+    manager.set_locale("uk").unwrap();
+    drop(manager);
+    assert_eq!(
+        fixture.manager().list().unwrap()[0].title,
+        "Текстові інструменти"
+    );
+}
+
 #[test]
 fn unsigned_wrong_target_and_tampered_packages_cannot_replace_an_installed_version() {
     let fixture = Fixture::new();

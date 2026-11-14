@@ -6147,6 +6147,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyProvenanceTransformed => '已转换';
 
   @override
+  String get historyProvenanceModule => '模块';
+
+  @override
   String historyRuleTag(String name) {
     return '$name（自动）';
   }

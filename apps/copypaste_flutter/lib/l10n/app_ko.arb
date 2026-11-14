@@ -1704,6 +1704,7 @@
   "historyProvenanceManual": "직접 입력",
   "historyProvenanceEdited": "편집됨",
   "historyProvenanceTransformed": "변환됨",
+  "historyProvenanceModule": "모듈",
   "historyRuleTag": "{name}(자동)",
   "historyMetadataExpiry": "삭제",
   "historyMetadataRuleTags": "자동 태그",

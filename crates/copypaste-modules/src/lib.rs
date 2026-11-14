@@ -13,12 +13,15 @@ mod manager;
 #[allow(unsafe_code)]
 mod native;
 mod package;
+mod preferences;
 mod prompts;
 mod resources;
 mod semantic_search;
 mod services;
 mod staging_cleanup;
 mod sync;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub use copypaste_module_sdk::{
     ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,
 };

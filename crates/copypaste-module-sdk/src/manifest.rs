@@ -845,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn first_party_schema_five_manifests_still_validate_without_new_keys() {
+    fn first_party_manifests_validate_and_schema_five_ones_omit_new_keys() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut templates: Vec<_> = std::fs::read_dir(root.join("modules"))
             .unwrap()
@@ -862,8 +862,10 @@ mod tests {
             value["entrypoint"] = entrypoint.clone().into();
             value["files"] = serde_json::json!([{"path": entrypoint, "sha256": "0".repeat(64), "size_bytes": 1}]);
             let module: ModuleManifest = serde_json::from_value(value).unwrap();
-            assert!(module.schema_version <= 5, "{}", path.display());
             module.validate("1.3.0", module.target).unwrap();
+            if module.schema_version > 5 {
+                continue;
+            }
             let encoded = serde_json::to_string(&module).unwrap();
             for key in [
                 "capabilities",

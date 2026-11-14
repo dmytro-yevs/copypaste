@@ -1704,6 +1704,7 @@
   "historyProvenanceManual": "手动",
   "historyProvenanceEdited": "已编辑",
   "historyProvenanceTransformed": "已转换",
+  "historyProvenanceModule": "模块",
   "historyRuleTag": "{name}（自动）",
   "historyMetadataExpiry": "删除",
   "historyMetadataRuleTags": "自动标签",

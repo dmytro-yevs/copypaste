@@ -19,5 +19,9 @@ serde_json.workspace = true
 sha2.workspace = true
 hex.workspace = true
 
+[dev-dependencies]
+copypaste-modules = { path = "../copypaste-modules", features = ["test-support"] }
+tempfile.workspace = true
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
