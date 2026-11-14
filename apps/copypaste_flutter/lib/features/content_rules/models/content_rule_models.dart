@@ -276,7 +276,6 @@ class RuleCondition {
 enum RuleActionType implements RuleWireValue {
   dontSave('dont_save'),
   markSecret('mark_secret'),
-  hideFromAi('hide_from_ai'),
   deleteAfter('delete_after'),
   addTags('add_tags'),
   transform('transform');
@@ -357,8 +356,7 @@ class RuleAction {
       'type': type!.wire,
       'clear_clipboard_after_secs': ?clearClipboardAfterSecs,
     },
-    RuleActionType.markSecret ||
-    RuleActionType.hideFromAi => {'type': type!.wire},
+    RuleActionType.markSecret => {'type': type!.wire},
     RuleActionType.deleteAfter => {
       'type': type!.wire,
       'duration_ms': expiry.inMilliseconds,
@@ -498,7 +496,7 @@ class ContentRule {
   final List<String> deviceIds;
 
   /// A validation code when the rule cannot run here; captures it could
-  /// match are stored as secret and hidden from AI meanwhile (R-20).
+  /// match are stored as secret meanwhile (R-20).
   final String? errorCode;
 
   /// The device that wrote this rule within the last 7 days.
@@ -625,7 +623,6 @@ class RuleTrace {
     this.steps = const [],
     this.skipped = false,
     this.secret = false,
-    this.hiddenFromAi = false,
     this.expiresAfter,
     this.tagIds = const [],
     this.transformIds = const [],
@@ -634,7 +631,6 @@ class RuleTrace {
   final List<RuleTraceStep> steps;
   final bool skipped;
   final bool secret;
-  final bool hiddenFromAi;
   final Duration? expiresAfter;
   final List<String> tagIds;
   final List<String> transformIds;
@@ -642,7 +638,6 @@ class RuleTrace {
   bool get noEffect =>
       !skipped &&
       !secret &&
-      !hiddenFromAi &&
       expiresAfter == null &&
       tagIds.isEmpty &&
       transformIds.isEmpty;
@@ -653,7 +648,6 @@ class RulePreviewCounts {
     this.matched = 0,
     this.deleted = 0,
     this.secret = 0,
-    this.hiddenFromAi = 0,
     this.expiring = 0,
     this.tagged = 0,
   });
@@ -661,7 +655,6 @@ class RulePreviewCounts {
   final int matched;
   final int deleted;
   final int secret;
-  final int hiddenFromAi;
   final int expiring;
   final int tagged;
 }

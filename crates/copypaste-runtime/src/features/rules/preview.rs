@@ -40,7 +40,7 @@ pub(super) struct Planned {
     /// "Don't save" applied to an existing clip deletes it.
     pub(super) delete: bool,
     pub(super) secret: bool,
-    pub(super) hide_from_ai: bool,
+    pub(super) hide_from_integrations: bool,
     pub(super) expiry: Option<Expiry>,
     pub(super) tag_ids: Vec<String>,
     pub(super) applied_rules: Vec<String>,
@@ -58,12 +58,13 @@ impl Planned {
                 .any(|rule_id| set.rule_acts(rule_id, wanted))
         };
         let secret = outcome.secret && acted(|a| matches!(a, Action::MarkSecret {}));
-        let hide_from_ai = outcome.hide_from_ai && acted(|a| matches!(a, Action::HideFromAi {}));
+        let hide_from_integrations = outcome.hide_from_integrations
+            && acted(|a| matches!(a, Action::HideFromIntegrations {}));
         Self {
             id: subject.id.clone(),
             delete: outcome.dont_save.is_some() && !subject.pinned,
             secret: secret && !subject.secret,
-            hide_from_ai,
+            hide_from_integrations,
             expiry: outcome.expiry.filter(|_| !subject.pinned),
             tag_ids: outcome.tag_ids,
             applied_rules: outcome.applied_rules,
@@ -73,7 +74,7 @@ impl Planned {
     fn is_noop(&self) -> bool {
         !self.delete
             && !self.secret
-            && !self.hide_from_ai
+            && !self.hide_from_integrations
             && self.expiry.is_none()
             && self.tag_ids.is_empty()
     }
@@ -265,7 +266,7 @@ fn count(counts: &mut RulePreviewCounts, planned: &Planned) {
         return;
     }
     counts.secret += u32::from(planned.secret);
-    counts.hidden_from_ai += u32::from(planned.hide_from_ai);
+    counts.hidden_from_integrations += u32::from(planned.hide_from_integrations);
     counts.expiring += u32::from(planned.expiry.is_some());
     counts.tagged += u32::from(!planned.tag_ids.is_empty());
 }

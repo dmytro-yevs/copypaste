@@ -51,8 +51,6 @@ pub enum EventKind {
     PasteQueue,
     /// Synced library records changed; [`EventData::library`] says which.
     Library,
-    /// An AI tool approval is pending or a session's authorization changed.
-    AiApproval,
     /// A long operation advanced; [`EventData::operation`] carries the counts.
     Progress,
 }
@@ -69,11 +67,10 @@ impl LibraryKinds {
     pub const PIPELINES: Self = Self(1 << 3);
     pub const PREFERENCES: Self = Self(1 << 4);
     pub const SET_MEMBERS: Self = Self(1 << 5);
-    pub const GRANTS: Self = Self(1 << 6);
 
     #[must_use]
     pub const fn all() -> Self {
-        Self((1 << 7) - 1)
+        Self((1 << 6) - 1)
     }
 
     #[must_use]
@@ -107,7 +104,6 @@ pub enum EventKindFilter {
         #[serde(default = "LibraryKinds::all")]
         kinds: LibraryKinds,
     },
-    AiApproval,
     Progress,
     /// Capture-state snapshots, including the one sent on subscription.
     Status,
@@ -130,7 +126,6 @@ impl EventKindFilter {
                         .library
                         .is_none_or(|changed| changed.intersects(kinds))
             }
-            Self::AiApproval => change.event == EventKind::AiApproval,
             Self::Progress => change.event == EventKind::Progress,
             Self::Status | Self::Transfers => false,
         }
@@ -504,15 +499,6 @@ pub enum ResponseData {
     RuleApplyReport(crate::rules::RuleApplyReport),
     OperationProgress(Option<OperationProgress>),
     SkipLog(Vec<crate::rules::SkipEvent>),
-    AiPolicy(crate::ai::AiPolicy),
-    AiGrants(Vec<crate::ai::AiGrant>),
-    AiGrant(crate::ai::AiGrant),
-    AiGrantCreated(crate::ai::AiGrantCreated),
-    AiApprovals(Vec<crate::ai::AiApprovalRequest>),
-    AiAccessLog(Vec<crate::ai::AiAccessEntry>),
-    AiStatus(crate::ai::AiStatus),
-    AiSession(crate::ai::AiSession),
-    AiToolResult(crate::ai::AiToolResult),
     Empty {},
 }
 
@@ -540,17 +526,17 @@ mod tests {
         };
         let items = RuntimeEventData {
             change: Some(EventData::change(EventKind::Items, 1)),
-            ..library(LibraryKinds::GRANTS)
+            ..library(LibraryKinds::RULES)
         };
         let filters = [
-            EventKindFilter::AiApproval,
+            EventKindFilter::PasteQueue,
             EventKindFilter::Library {
-                kinds: LibraryKinds::GRANTS,
+                kinds: LibraryKinds::RULES,
             },
         ];
         assert!(EventKindFilter::admits(
             &filters,
-            &library(LibraryKinds::GRANTS)
+            &library(LibraryKinds::RULES)
         ));
         assert!(!EventKindFilter::admits(
             &filters,

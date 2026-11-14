@@ -30,15 +30,6 @@ Future<List<ClipAnnotationEntry>> clipAnnotations({
   required List<String> ids,
 }) => RustLib.instance.api.crateApiClipsClipAnnotations(ids: ids);
 
-/// Un-hiding is accepted only from the CopyPaste app.
-Future<void> setClipsHiddenFromAi({
-  required List<String> ids,
-  required bool hidden,
-}) => RustLib.instance.api.crateApiClipsSetClipsHiddenFromAi(
-  ids: ids,
-  hidden: hidden,
-);
-
 /// Clear any expiry and keep the clip.
 Future<Clip> keepClip({required String id}) =>
     RustLib.instance.api.crateApiClipsKeepClip(id: id);
@@ -85,10 +76,9 @@ class ClipAnnotationEntry {
           annotations == other.annotations;
 }
 
-/// Rule, expiry, AI and provenance state of one clip.
+/// Rule, expiry and provenance state of one clip.
 class ClipAnnotationState {
   final PlatformInt64? expiresAtMs;
-  final bool hiddenFromAi;
   final bool ruleSecret;
   final ClipProvenance? provenance;
   final List<String> ruleTagIds;
@@ -96,7 +86,6 @@ class ClipAnnotationState {
 
   const ClipAnnotationState({
     this.expiresAtMs,
-    required this.hiddenFromAi,
     required this.ruleSecret,
     this.provenance,
     required this.ruleTagIds,
@@ -106,7 +95,6 @@ class ClipAnnotationState {
   @override
   int get hashCode =>
       expiresAtMs.hashCode ^
-      hiddenFromAi.hashCode ^
       ruleSecret.hashCode ^
       provenance.hashCode ^
       ruleTagIds.hashCode ^
@@ -118,7 +106,6 @@ class ClipAnnotationState {
       other is ClipAnnotationState &&
           runtimeType == other.runtimeType &&
           expiresAtMs == other.expiresAtMs &&
-          hiddenFromAi == other.hiddenFromAi &&
           ruleSecret == other.ruleSecret &&
           provenance == other.provenance &&
           ruleTagIds == other.ruleTagIds &&
@@ -130,14 +117,12 @@ class ClipProvenance {
   final String? fromClipId;
   final List<ClipTransformStamp> transformSnapshot;
   final String? pipelineName;
-  final String? grantName;
 
   const ClipProvenance({
     required this.kind,
     this.fromClipId,
     required this.transformSnapshot,
     this.pipelineName,
-    this.grantName,
   });
 
   @override
@@ -145,8 +130,7 @@ class ClipProvenance {
       kind.hashCode ^
       fromClipId.hashCode ^
       transformSnapshot.hashCode ^
-      pipelineName.hashCode ^
-      grantName.hashCode;
+      pipelineName.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -156,11 +140,10 @@ class ClipProvenance {
           kind == other.kind &&
           fromClipId == other.fromClipId &&
           transformSnapshot == other.transformSnapshot &&
-          pipelineName == other.pipelineName &&
-          grantName == other.grantName;
+          pipelineName == other.pipelineName;
 }
 
-enum ClipProvenanceKind { manual, edited, transformed, aiTool }
+enum ClipProvenanceKind { manual, edited, transformed }
 
 class ClipTransformStamp {
   final String transformId;

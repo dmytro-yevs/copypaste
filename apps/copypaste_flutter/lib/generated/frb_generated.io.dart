@@ -4,7 +4,6 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
-import 'api/ai.dart';
 import 'api/applications.dart';
 import 'api/clips.dart';
 import 'api/paste_queue.dart';
@@ -47,42 +46,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
-  AiAccessEntryView dco_decode_ai_access_entry_view(dynamic raw);
-
-  @protected
-  AiApprovalKind dco_decode_ai_approval_kind(dynamic raw);
-
-  @protected
-  AiApprovalView dco_decode_ai_approval_view(dynamic raw);
-
-  @protected
-  AiClientConfigSnippet dco_decode_ai_client_config_snippet(dynamic raw);
-
-  @protected
-  AiContentKind dco_decode_ai_content_kind(dynamic raw);
-
-  @protected
-  AiGrantCreatedView dco_decode_ai_grant_created_view(dynamic raw);
-
-  @protected
-  AiGrantView dco_decode_ai_grant_view(dynamic raw);
-
-  @protected
-  AiLookback dco_decode_ai_lookback(dynamic raw);
-
-  @protected
-  AiPolicyView dco_decode_ai_policy_view(dynamic raw);
-
-  @protected
-  AiScope dco_decode_ai_scope(dynamic raw);
-
-  @protected
-  AiSessionState dco_decode_ai_session_state(dynamic raw);
-
-  @protected
-  AiStatusView dco_decode_ai_status_view(dynamic raw);
-
-  @protected
   BackupSummary dco_decode_backup_summary(dynamic raw);
 
   @protected
@@ -90,12 +53,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool dco_decode_bool(dynamic raw);
-
-  @protected
-  AiLookback dco_decode_box_autoadd_ai_lookback(dynamic raw);
-
-  @protected
-  AiSessionState dco_decode_box_autoadd_ai_session_state(dynamic raw);
 
   @protected
   BackupSummary dco_decode_box_autoadd_backup_summary(dynamic raw);
@@ -388,26 +345,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
-  List<AiAccessEntryView> dco_decode_list_ai_access_entry_view(dynamic raw);
-
-  @protected
-  List<AiApprovalView> dco_decode_list_ai_approval_view(dynamic raw);
-
-  @protected
-  List<AiClientConfigSnippet> dco_decode_list_ai_client_config_snippet(
-    dynamic raw,
-  );
-
-  @protected
-  List<AiContentKind> dco_decode_list_ai_content_kind(dynamic raw);
-
-  @protected
-  List<AiGrantView> dco_decode_list_ai_grant_view(dynamic raw);
-
-  @protected
-  List<AiScope> dco_decode_list_ai_scope(dynamic raw);
-
-  @protected
   List<Clip> dco_decode_list_clip(dynamic raw);
 
   @protected
@@ -572,12 +509,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
-  AiLookback? dco_decode_opt_box_autoadd_ai_lookback(dynamic raw);
-
-  @protected
-  AiSessionState? dco_decode_opt_box_autoadd_ai_session_state(dynamic raw);
-
-  @protected
   BackupSummary? dco_decode_opt_box_autoadd_backup_summary(dynamic raw);
 
   @protected
@@ -704,9 +635,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
-
-  @protected
-  List<AiScope>? dco_decode_opt_list_ai_scope(dynamic raw);
 
   @protected
   PairingCeremony dco_decode_pairing_ceremony(dynamic raw);
@@ -1058,48 +986,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
-  AiAccessEntryView sse_decode_ai_access_entry_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  AiApprovalKind sse_decode_ai_approval_kind(SseDeserializer deserializer);
-
-  @protected
-  AiApprovalView sse_decode_ai_approval_view(SseDeserializer deserializer);
-
-  @protected
-  AiClientConfigSnippet sse_decode_ai_client_config_snippet(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  AiContentKind sse_decode_ai_content_kind(SseDeserializer deserializer);
-
-  @protected
-  AiGrantCreatedView sse_decode_ai_grant_created_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  AiGrantView sse_decode_ai_grant_view(SseDeserializer deserializer);
-
-  @protected
-  AiLookback sse_decode_ai_lookback(SseDeserializer deserializer);
-
-  @protected
-  AiPolicyView sse_decode_ai_policy_view(SseDeserializer deserializer);
-
-  @protected
-  AiScope sse_decode_ai_scope(SseDeserializer deserializer);
-
-  @protected
-  AiSessionState sse_decode_ai_session_state(SseDeserializer deserializer);
-
-  @protected
-  AiStatusView sse_decode_ai_status_view(SseDeserializer deserializer);
-
-  @protected
   BackupSummary sse_decode_backup_summary(SseDeserializer deserializer);
 
   @protected
@@ -1107,14 +993,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
-
-  @protected
-  AiLookback sse_decode_box_autoadd_ai_lookback(SseDeserializer deserializer);
-
-  @protected
-  AiSessionState sse_decode_box_autoadd_ai_session_state(
-    SseDeserializer deserializer,
-  );
 
   @protected
   BackupSummary sse_decode_box_autoadd_backup_summary(
@@ -1483,32 +1361,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
-  List<AiAccessEntryView> sse_decode_list_ai_access_entry_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<AiApprovalView> sse_decode_list_ai_approval_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<AiClientConfigSnippet> sse_decode_list_ai_client_config_snippet(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<AiContentKind> sse_decode_list_ai_content_kind(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<AiGrantView> sse_decode_list_ai_grant_view(SseDeserializer deserializer);
-
-  @protected
-  List<AiScope> sse_decode_list_ai_scope(SseDeserializer deserializer);
-
-  @protected
   List<Clip> sse_decode_list_clip(SseDeserializer deserializer);
 
   @protected
@@ -1725,16 +1577,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
-  AiLookback? sse_decode_opt_box_autoadd_ai_lookback(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  AiSessionState? sse_decode_opt_box_autoadd_ai_session_state(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BackupSummary? sse_decode_opt_box_autoadd_backup_summary(
     SseDeserializer deserializer,
   );
@@ -1897,9 +1739,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
-
-  @protected
-  List<AiScope>? sse_decode_opt_list_ai_scope(SseDeserializer deserializer);
 
   @protected
   PairingCeremony sse_decode_pairing_ceremony(SseDeserializer deserializer);
@@ -2391,60 +2230,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
-  void sse_encode_ai_access_entry_view(
-    AiAccessEntryView self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_approval_kind(
-    AiApprovalKind self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_approval_view(
-    AiApprovalView self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_client_config_snippet(
-    AiClientConfigSnippet self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_content_kind(AiContentKind self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_ai_grant_created_view(
-    AiGrantCreatedView self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_grant_view(AiGrantView self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_ai_lookback(AiLookback self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_ai_policy_view(AiPolicyView self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_ai_scope(AiScope self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_ai_session_state(
-    AiSessionState self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ai_status_view(AiStatusView self, SseSerializer serializer);
-
-  @protected
   void sse_encode_backup_summary(BackupSummary self, SseSerializer serializer);
 
   @protected
@@ -2452,18 +2237,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_box_autoadd_ai_lookback(
-    AiLookback self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_ai_session_state(
-    AiSessionState self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_box_autoadd_backup_summary(
@@ -2928,39 +2701,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
-  void sse_encode_list_ai_access_entry_view(
-    List<AiAccessEntryView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_ai_approval_view(
-    List<AiApprovalView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_ai_client_config_snippet(
-    List<AiClientConfigSnippet> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_ai_content_kind(
-    List<AiContentKind> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_ai_grant_view(
-    List<AiGrantView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_ai_scope(List<AiScope> self, SseSerializer serializer);
-
-  @protected
   void sse_encode_list_clip(List<Clip> self, SseSerializer serializer);
 
   @protected
@@ -3228,18 +2968,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
-  void sse_encode_opt_box_autoadd_ai_lookback(
-    AiLookback? self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_opt_box_autoadd_ai_session_state(
-    AiSessionState? self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_opt_box_autoadd_backup_summary(
     BackupSummary? self,
     SseSerializer serializer,
@@ -3433,12 +3161,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_opt_list_ai_scope(
-    List<AiScope>? self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_pairing_ceremony(

@@ -52,7 +52,7 @@ pub enum ClipOp {
     Annotations {
         ids: Vec<String>,
     },
-    SetHiddenFromAi {
+    SetHiddenFromIntegrations {
         ids: Vec<String>,
         hidden: bool,
     },
@@ -108,8 +108,8 @@ impl crate::OpGates for ClipOp {
         false
     }
 
-    /// Un-hiding a clip from AI tools is served only to the CopyPaste app.
+    /// Un-hiding a clip from integrations is served only to the CopyPaste app.
     fn privileged(&self) -> bool {
-        matches!(self, Self::SetHiddenFromAi { hidden: false, .. })
+        matches!(self, Self::SetHiddenFromIntegrations { hidden: false, .. })
     }
 }

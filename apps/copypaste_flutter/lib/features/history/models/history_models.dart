@@ -204,14 +204,13 @@ class HistoryFacets {
 }
 
 /// How CopyPaste itself created a clip, shown next to its source app.
-enum HistoryProvenance { manual, edited, transformed, aiTool }
+enum HistoryProvenance { manual, edited, transformed }
 
 /// Runtime state attached to a clip beyond its captured payload.
 @immutable
 class HistoryClipAnnotations {
   const HistoryClipAnnotations({
     this.expiresAt,
-    this.hiddenFromAi = false,
     this.ruleSecret = false,
     this.provenance,
     this.ruleTagIds = const [],
@@ -222,7 +221,6 @@ class HistoryClipAnnotations {
 
   /// When an expiring clip is deleted; null without expiry.
   final DateTime? expiresAt;
-  final bool hiddenFromAi;
 
   /// A local display mask set by a content rule.
   final bool ruleSecret;
@@ -238,7 +236,6 @@ class HistoryClipAnnotations {
   bool operator ==(Object other) =>
       other is HistoryClipAnnotations &&
       other.expiresAt == expiresAt &&
-      other.hiddenFromAi == hiddenFromAi &&
       other.ruleSecret == ruleSecret &&
       other.provenance == provenance &&
       listEquals(other.ruleTagIds, ruleTagIds) &&
@@ -247,7 +244,6 @@ class HistoryClipAnnotations {
   @override
   int get hashCode => Object.hash(
     expiresAt,
-    hiddenFromAi,
     ruleSecret,
     provenance,
     Object.hashAll(ruleTagIds),
@@ -318,7 +314,6 @@ class HistoryClip {
   ClipVisibility get visibility => ClipVisibility(
     secret: secret,
     ruleSecret: annotations.ruleSecret,
-    hiddenFromAi: annotations.hiddenFromAi,
     expiresAt: annotations.expiresAt,
   );
 

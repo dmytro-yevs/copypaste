@@ -59,7 +59,7 @@ pub struct ClipLocalState {
     pub expiry_duration_ms: Option<i64>,
     pub expiry_mono_ms: Option<i64>,
     pub rule_secret: bool,
-    pub rule_hidden_from_ai: bool,
+    pub rule_hidden_from_integrations: bool,
     pub applied_rules_json: Option<String>,
     pub eval_flags: i64,
     pub capture_channel: Option<String>,
@@ -84,19 +84,18 @@ pub struct LibraryRevision {
     pub pipelines: (i64, i64),
     pub preferences: (i64, i64),
     pub set_members: (i64, i64),
-    pub grants: (i64, i64),
 }
 
 /// Writes `state` in the caller's transaction, only for a live clip.
 pub(crate) fn write(tx: &Connection, state: &ClipLocalState) -> Result<bool, StoreError> {
     Ok(tx.execute(
         "INSERT INTO clip_local_state(clip_id,expires_at,expiry_duration_ms,expiry_mono_ms,\
-         rule_secret,rule_hidden_from_ai,applied_rules_json,eval_flags,capture_channel,\
+         rule_secret,rule_hidden_from_integrations,applied_rules_json,eval_flags,capture_channel,\
          rules_revision) SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10 WHERE EXISTS(SELECT 1 FROM \
          clipboard_items WHERE id=?1 AND deleted=0) ON CONFLICT(clip_id) DO UPDATE SET \
          expires_at=excluded.expires_at,expiry_duration_ms=excluded.expiry_duration_ms,\
          expiry_mono_ms=excluded.expiry_mono_ms,rule_secret=excluded.rule_secret,\
-         rule_hidden_from_ai=excluded.rule_hidden_from_ai,\
+         rule_hidden_from_integrations=excluded.rule_hidden_from_integrations,\
          applied_rules_json=excluded.applied_rules_json,eval_flags=excluded.eval_flags,\
          capture_channel=excluded.capture_channel,rules_revision=excluded.rules_revision",
         params![
@@ -105,7 +104,7 @@ pub(crate) fn write(tx: &Connection, state: &ClipLocalState) -> Result<bool, Sto
             state.expiry_duration_ms,
             state.expiry_mono_ms,
             state.rule_secret,
-            state.rule_hidden_from_ai,
+            state.rule_hidden_from_integrations,
             state.applied_rules_json,
             state.eval_flags,
             state.capture_channel,
@@ -117,7 +116,7 @@ pub(crate) fn write(tx: &Connection, state: &ClipLocalState) -> Result<bool, Sto
 pub(crate) fn read(conn: &Connection, clip_id: &str) -> Result<Option<ClipLocalState>, StoreError> {
     Ok(conn
         .prepare_cached(
-            "SELECT expires_at,expiry_duration_ms,expiry_mono_ms,rule_secret,rule_hidden_from_ai,\
+            "SELECT expires_at,expiry_duration_ms,expiry_mono_ms,rule_secret,rule_hidden_from_integrations,\
              applied_rules_json,eval_flags,capture_channel,rules_revision FROM clip_local_state \
              WHERE clip_id=?1",
         )?
@@ -128,7 +127,7 @@ pub(crate) fn read(conn: &Connection, clip_id: &str) -> Result<Option<ClipLocalS
                 expiry_duration_ms: row.get(1)?,
                 expiry_mono_ms: row.get(2)?,
                 rule_secret: row.get(3)?,
-                rule_hidden_from_ai: row.get(4)?,
+                rule_hidden_from_integrations: row.get(4)?,
                 applied_rules_json: row.get(5)?,
                 eval_flags: row.get(6)?,
                 capture_channel: row.get(7)?,
@@ -156,8 +155,8 @@ pub(crate) fn annotations(
     );
     let row: Row = conn
         .prepare_cached(
-            "SELECT s.expires_at, COALESCE(s.rule_secret,0), COALESCE(s.rule_hidden_from_ai,0), \
-             COALESCE(n.hidden_from_ai,0), COALESCE(n.keep,0), n.expires_at, n.provenance_json, \
+            "SELECT s.expires_at, COALESCE(s.rule_secret,0), COALESCE(s.rule_hidden_from_integrations,0), \
+             COALESCE(n.hidden_from_integrations,0), COALESCE(n.keep,0), n.expires_at, n.provenance_json, \
              (SELECT json_group_array(tag_id) FROM (SELECT r.tag_id FROM clip_rule_tags r \
               JOIN history_tags t ON t.id = r.tag_id AND t.deleted = 0 \
               WHERE r.clip_id = q.id ORDER BY r.tag_id LIMIT ?2)) \
@@ -187,7 +186,7 @@ pub(crate) fn annotations(
         } else {
             local_expiry.into_iter().chain(note_expiry).min()
         },
-        hidden_from_ai: hidden || rule_hidden,
+        hidden_from_integrations: hidden || rule_hidden,
         rule_secret,
         provenance: provenance
             .as_deref()
@@ -208,7 +207,6 @@ fn wire_provenance(provenance: Provenance) -> ClipProvenance {
             ProvenanceKind::Manual => WireKind::Manual,
             ProvenanceKind::Edited => WireKind::Edited,
             ProvenanceKind::Transformed => WireKind::Transformed,
-            ProvenanceKind::AiTool => WireKind::AiTool,
         },
         from_clip_id: provenance.from_clip_id,
         transform_snapshot: provenance
@@ -221,7 +219,6 @@ fn wire_provenance(provenance: Provenance) -> ClipProvenance {
             })
             .collect(),
         pipeline_name: provenance.pipeline_name,
-        grant_name: provenance.grant_name,
     }
 }
 
@@ -324,7 +321,6 @@ impl Store {
             pipelines: marker("transform_pipelines")?,
             preferences: marker("library_preferences")?,
             set_members: marker("library_set_members")?,
-            grants: marker("ai_grants")?,
         })
     }
 }

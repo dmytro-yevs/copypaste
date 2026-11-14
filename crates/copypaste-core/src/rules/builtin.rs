@@ -1,8 +1,8 @@
 //! Built-in rules with well-known ids.
 //!
 //! Stable ids let the same default on two devices merge instead of
-//! duplicating. Shipped defaults only mark and hide: none skips, deletes or
-//! expires content. The credential expiry rule ships disabled for the user to
+//! duplicating. Shipped defaults only mark content secret: none skips,
+//! deletes or expires content. The credential expiry rule ships disabled for the user to
 //! enable.
 
 use super::detect::DetectedKind;
@@ -77,7 +77,6 @@ impl BuiltinRule {
         let mut actions = Vec::new();
         if self.protect {
             actions.push(Action::MarkSecret {});
-            actions.push(Action::HideFromAi {});
         }
         if self.expire {
             actions.push(Action::DeleteAfter {

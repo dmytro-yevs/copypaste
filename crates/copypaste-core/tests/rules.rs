@@ -102,7 +102,7 @@ fn receipt_runs_only_protection_for_items_created_after_effective_from() {
 #[test]
 fn stop_processing_prevents_later_tags_and_hides_later_rules_from_the_trace() {
     let first = format!(
-        r#"{{"match":"all","conditions":[{CONTAINS_ALPHA}],"actions":[{{"type":"hide_from_ai"}}],"stop_processing":true}}"#
+        r#"{{"match":"all","conditions":[{CONTAINS_ALPHA}],"actions":[{{"type":"hide_from_integrations"}}],"stop_processing":true}}"#
     );
     let second = format!(
         r#"{{"match":"all","conditions":[{CONTAINS_ALPHA}],"actions":[{{"type":"add_tags","tag_ids":["t"]}}]}}"#
@@ -115,7 +115,7 @@ fn stop_processing_prevents_later_tags_and_hides_later_rules_from_the_trace() {
         &EvaluationInput::text("alpha", T0),
         EvaluationContext::Capture,
     );
-    assert!(evaluation.outcome.hide_from_ai && evaluation.outcome.tag_ids.is_empty());
+    assert!(evaluation.outcome.hide_from_integrations && evaluation.outcome.tag_ids.is_empty());
     let trace = evaluation.trace.unwrap();
     assert_eq!(trace.rules.len(), 1);
     assert_eq!(trace.rules[0].rule_id, "first");
@@ -172,7 +172,7 @@ fn a_rule_that_cannot_compile_here_fails_closed() {
     let rules = set(vec![rule("synced", "a", synced)]);
     assert_eq!(rules.status("synced").unwrap().health, RuleHealth::Broken);
     let outcome = capture(&rules, "anything");
-    assert!(outcome.secret && outcome.hide_from_ai && outcome.tag_ids.is_empty());
+    assert!(outcome.secret && outcome.hide_from_integrations && outcome.tag_ids.is_empty());
     assert!(outcome.flags.contains(EvalFlags::RULES_INCOMPLETE));
 }
 

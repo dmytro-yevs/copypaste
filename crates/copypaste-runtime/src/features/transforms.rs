@@ -168,7 +168,7 @@ impl Runtime {
             html,
             has_html,
             sensitive: prepared.item.privacy.secret || annotations.rule_secret,
-            hidden_from_ai: annotations.hidden_from_ai,
+            hidden_from_integrations: annotations.hidden_from_integrations,
             clip: Some(clip),
         })
     }
@@ -258,7 +258,6 @@ impl Runtime {
             from_clip_id: source.clip.as_ref().map(|clip| clip.id.clone()),
             transform_snapshot: Some(snapshot),
             pipeline_name: pipeline_name.map(|name| bounded_name(&name)),
-            grant_name: None,
         });
         match (action, untouched) {
             (TransformAction::Return, _) => Response::ok(
@@ -391,11 +390,15 @@ impl Runtime {
         let Ingested::Stored(item) = ingested else {
             return Ok(ingested.into_item());
         };
-        if provenance.is_some() || source.hidden_from_ai {
+        if provenance.is_some() || source.hidden_from_integrations {
             let note = ClipNoteRecord {
                 clip_id: item.id.clone(),
-                hidden_from_ai: source.hidden_from_ai,
-                hidden_changed_at: if source.hidden_from_ai { now_ms() } else { 0 },
+                hidden_from_integrations: source.hidden_from_integrations,
+                hidden_changed_at: if source.hidden_from_integrations {
+                    now_ms()
+                } else {
+                    0
+                },
                 base_stamp: 0,
                 keep: false,
                 expires_at: None,
@@ -424,7 +427,7 @@ struct Source {
     html: Option<String>,
     has_html: bool,
     sensitive: bool,
-    hidden_from_ai: bool,
+    hidden_from_integrations: bool,
     clip: Option<SourceClip>,
 }
 

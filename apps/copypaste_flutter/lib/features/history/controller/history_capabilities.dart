@@ -47,20 +47,6 @@ class HistoryCapabilities {
     return _scope.repository.get(id);
   }
 
-  Future<bool> setHiddenFromAi(HistoryClip clip, bool hidden) =>
-      _annotate(clip.id, (repository) async {
-        await repository.setHiddenFromAi([clip.id], hidden: hidden);
-        final current = clip.annotations;
-        return HistoryClipAnnotations(
-          expiresAt: current.expiresAt,
-          hiddenFromAi: hidden,
-          ruleSecret: current.ruleSecret,
-          provenance: current.provenance,
-          ruleTagIds: current.ruleTagIds,
-          keep: current.keep,
-        );
-      });
-
   /// Keeps an expiring clip; pinning it does the same.
   Future<bool> keep(HistoryClip clip) =>
       _annotate(clip.id, (repository) => repository.keep(clip.id));

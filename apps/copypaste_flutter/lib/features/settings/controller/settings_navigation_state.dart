@@ -36,7 +36,6 @@ enum SettingsSectionId {
   ),
   snippets(slug: 'snippets', icon: LucideIcons.notebookText),
   transforms(slug: 'transforms', icon: LucideIcons.wandSparkles),
-  aiTools(slug: 'ai-tools', icon: LucideIcons.bot),
   sync(slug: 'sync', icon: LucideIcons.refreshCw),
   notifications(slug: 'notifications', icon: LucideIcons.bell),
   data(slug: 'data', icon: LucideIcons.database),
@@ -69,7 +68,6 @@ enum SettingsSectionId {
       SettingsSectionId.quickAccess => strings.settingsSectionQuickAccess,
       SettingsSectionId.snippets => strings.settingsSectionSnippets,
       SettingsSectionId.transforms => strings.settingsSectionTransforms,
-      SettingsSectionId.aiTools => strings.settingsSectionAiTools,
       SettingsSectionId.sync => strings.settingsSectionSync,
       SettingsSectionId.notifications => strings.settingsSectionNotifications,
       SettingsSectionId.data => strings.settingsSectionData,
@@ -90,7 +88,6 @@ enum SettingsSectionId {
         strings.settingsSectionQuickAccessSummary,
       SettingsSectionId.snippets => strings.settingsSectionSnippetsSummary,
       SettingsSectionId.transforms => strings.settingsSectionTransformsSummary,
-      SettingsSectionId.aiTools => strings.settingsSectionAiToolsSummary,
       SettingsSectionId.sync => strings.settingsSectionSyncSummary,
       SettingsSectionId.notifications =>
         strings.settingsSectionNotificationsSummary,

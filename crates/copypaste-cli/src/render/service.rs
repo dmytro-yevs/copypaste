@@ -106,8 +106,7 @@ pub fn event_text(event: &EventData) -> String {
         EventKind::Items => format!("items changed ({} in history)", event.item_count),
         EventKind::Peers => "paired devices changed".to_string(),
         EventKind::PasteQueue => "paste queue changed".to_string(),
-        EventKind::Library => "snippets, rules or AI tool settings changed".to_string(),
-        EventKind::AiApproval => "an AI tool is waiting for approval".to_string(),
+        EventKind::Library => "snippets, rules or transforms changed".to_string(),
         EventKind::Progress => match &event.operation {
             Some(progress) => format!("progress {}/{}", progress.done, progress.total),
             None => "progress".to_string(),

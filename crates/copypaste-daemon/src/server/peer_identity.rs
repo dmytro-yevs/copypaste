@@ -526,8 +526,11 @@ mod tests {
             CHECKS.fetch_add(1, Ordering::SeqCst);
             true
         }
-        let revoke = Method::Ai {
-            op: copypaste_ipc::ai::AiOp::RevokeGrant { id: "g".into() },
+        let unhide = Method::Clips {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
+                ids: vec!["a".into()],
+                hidden: false,
+            },
         };
         let mut peer = PeerIdentity {
             handle: None,
@@ -535,8 +538,8 @@ mod tests {
         };
         assert!(!peer.caller_with(&Method::Status, verify).await.is_app);
         assert_eq!(CHECKS.load(Ordering::SeqCst), 0);
-        assert!(peer.caller_with(&revoke, verify).await.is_app);
-        assert!(peer.caller_with(&revoke, verify).await.is_app);
+        assert!(peer.caller_with(&unhide, verify).await.is_app);
+        assert!(peer.caller_with(&unhide, verify).await.is_app);
         assert!(peer.caller_with(&Method::Status, verify).await.is_app);
         assert_eq!(CHECKS.load(Ordering::SeqCst), 1);
     }
@@ -549,7 +552,7 @@ mod tests {
         let mut peer = PeerIdentity::capture(&server);
         assert!(peer.handle.is_some(), "the peer handle is readable");
         let unhide = Method::Clips {
-            op: copypaste_ipc::clips::ClipOp::SetHiddenFromAi {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
                 ids: vec!["a".into()],
                 hidden: false,
             },

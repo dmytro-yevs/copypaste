@@ -115,10 +115,6 @@ fn expected(method: &Method) -> Expected {
         Method::Clips { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::ClipAnnotations(_)))
         }
-        Method::Ai {
-            op: copypaste_ipc::ai::AiOp::RevokeGrant { .. },
-        } => Expected::Error(ErrorCode::NotFound),
-        Method::Ai { .. } => Expected::Data(|data| matches!(data, ResponseData::AiGrants(_))),
         Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::CopyText { .. }
@@ -321,17 +317,15 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::Rules {
             op: copypaste_ipc::rules::RuleOp::List,
         },
-        Method::Ai {
-            op: copypaste_ipc::ai::AiOp::Grants,
-        },
-        Method::Ai {
-            op: copypaste_ipc::ai::AiOp::RevokeGrant {
-                id: "missing".into(),
+        Method::Clips {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
+                ids: vec!["missing".into()],
+                hidden: false,
             },
         },
         Method::Watch,
         Method::WatchEvents {
-            kinds: vec![copypaste_ipc::EventKindFilter::AiApproval],
+            kinds: vec![copypaste_ipc::EventKindFilter::PasteQueue],
         },
         Method::Shutdown,
     ]
@@ -407,7 +401,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        66,
+        65,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

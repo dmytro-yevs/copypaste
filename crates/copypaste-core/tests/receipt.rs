@@ -160,7 +160,7 @@ fn a_received_clip_gets_local_protection_and_rule_tags_but_keeps_its_content() {
         "protect-alpha",
         &format!(
             r#"{{"match":"all","conditions":[{{"type":"content_text","op":"contains","value":"alpha"}}],
-            "actions":[{{"type":"mark_secret"}},{{"type":"hide_from_ai"}},{{"type":"add_tags","tag_ids":["{tag}"]}},
+            "actions":[{{"type":"mark_secret"}},{{"type":"hide_from_integrations"}},{{"type":"add_tags","tag_ids":["{tag}"]}},
             {{"type":"transform","transform_id":"case.upper"}},{{"type":"delete_after","duration_ms":600000}}]}}"#
         ),
         now - MIN,
@@ -170,7 +170,7 @@ fn a_received_clip_gets_local_protection_and_rule_tags_but_keeps_its_content() {
     send(&laptop, &phone);
 
     let annotations = phone.annotations(&id);
-    assert!(annotations.rule_secret && annotations.hidden_from_ai);
+    assert!(annotations.rule_secret && annotations.hidden_from_integrations);
     assert_eq!(annotations.rule_tag_ids, vec![tag.clone()]);
     let deadline = annotations.expires_at.expect("a local deadline");
     assert!((now + 10 * MIN..=copypaste_core::now_ms() + 10 * MIN).contains(&deadline));

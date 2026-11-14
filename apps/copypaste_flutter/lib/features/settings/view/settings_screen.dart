@@ -393,8 +393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SettingsSectionId.rules ||
                 SettingsSectionId.quickAccess ||
                 SettingsSectionId.snippets ||
-                SettingsSectionId.transforms ||
-                SettingsSectionId.aiTools => _featureSection(
+                SettingsSectionId.transforms => _featureSection(
                   selectedSection,
                   showHeading: showHeading,
                 ),
@@ -545,8 +544,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SettingsSectionId.rules ||
       SettingsSectionId.quickAccess ||
       SettingsSectionId.snippets ||
-      SettingsSectionId.transforms ||
-      SettingsSectionId.aiTools => _contributions(section).isNotEmpty,
+      SettingsSectionId.transforms => _contributions(section).isNotEmpty,
       SettingsSectionId.clipboard ||
       SettingsSectionId.privacy ||
       SettingsSectionId.sync ||
@@ -606,7 +604,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SettingsSectionId.quickAccess,
     SettingsSectionId.snippets,
     SettingsSectionId.transforms,
-    SettingsSectionId.aiTools,
   };
 
   List<SettingsSearchTarget> _navigationTargets() {
@@ -861,8 +858,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SettingsSectionId.rules ||
     SettingsSectionId.quickAccess ||
     SettingsSectionId.snippets ||
-    SettingsSectionId.transforms ||
-    SettingsSectionId.aiTools => _featureSectionKeys.putIfAbsent(
+    SettingsSectionId.transforms => _featureSectionKeys.putIfAbsent(
       section,
       GlobalKey.new,
     ),

@@ -100,12 +100,9 @@ abstract interface class HistoryTransformRepository {
   TransformRecentsStore get transformRecents;
 }
 
-/// Per-clip annotations: hiding from AI tools, keeping an expiring clip and
-/// the content-rule trace that explains a clip's state.
+/// Per-clip annotations: keeping an expiring clip and the content-rule trace
+/// that explains a clip's state.
 abstract interface class HistoryAnnotationsRepository {
-  /// Un-hiding is accepted only from the CopyPaste app.
-  Future<void> setHiddenFromAi(List<String> clipIds, {required bool hidden});
-
   /// Clears any expiry and returns the clip's updated annotations.
   Future<HistoryClipAnnotations> keep(String clipId);
 

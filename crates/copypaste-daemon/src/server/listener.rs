@@ -354,7 +354,7 @@ async fn handle_connection(
             let typed = !matches!(&request.method, Method::Watch);
             let filter = match request.method {
                 Method::WatchEvents { kinds } => {
-                    let Some(filter) = super::watch::WatchFilter::new(kinds, caller) else {
+                    let Some(filter) = super::watch::WatchFilter::new(kinds) else {
                         let invalid =
                             Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_EVENT_FILTER);
                         let _ = send(&mut writer, &invalid).await;
@@ -394,9 +394,6 @@ async fn handle_connection(
                     filter.as_ref(),
                 )
                 .await;
-                if let Some(filter) = &filter {
-                    state.on_watch_closed(filter.connection());
-                }
             } else {
                 super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
             }
@@ -1382,22 +1379,15 @@ mod tests {
 
         let mut client = Client::new(transport::connect(&path).await.expect("connect"));
         let unhide = Method::Clips {
-            op: copypaste_ipc::clips::ClipOp::SetHiddenFromAi {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
                 ids: vec!["clip".into()],
                 hidden: false,
             },
         };
-        let approve = Method::Ai {
-            op: copypaste_ipc::ai::AiOp::Deny {
-                request_id: "request".into(),
-            },
-        };
-        for (id, method) in [(1, unhide), (2, approve)] {
-            let refused = client.call(request(id, method)).await;
-            assert_eq!(refused.id, id);
-            assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
-        }
-        let status = client.call(request(3, Method::Status)).await;
+        let refused = client.call(request(1, unhide)).await;
+        assert_eq!(refused.id, 1);
+        assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
+        let status = client.call(request(2, Method::Status)).await;
         assert!(status.ok, "{:?}", status.error);
 
         shutdown_tx.send(true).unwrap();
@@ -1406,7 +1396,7 @@ mod tests {
     }
 
     /// A filtered subscriber gets only its kinds: no capture snapshot and no
-    /// history change unless asked, and its one allowed request is answered.
+    /// history change unless asked.
     #[tokio::test]
     async fn watch_events_delivers_only_the_requested_kinds() {
         use copypaste_ipc::EventKindFilter;
@@ -1427,7 +1417,7 @@ mod tests {
 
         let (mut items, ack) = subscribe(vec![EventKindFilter::Items]).await;
         assert!(ack.ok, "{:?}", ack.error);
-        let (mut approvals, ack) = subscribe(vec![EventKindFilter::AiApproval]).await;
+        let (mut queue, ack) = subscribe(vec![EventKindFilter::PasteQueue]).await;
         assert!(ack.ok, "{:?}", ack.error);
         crate::server::dispatch::dispatch_store(
             &state,
@@ -1445,19 +1435,12 @@ mod tests {
         assert!(event.capture.is_none(), "the snapshot was not requested");
         assert_eq!(event.change.unwrap().event, copypaste_ipc::EventKind::Items);
 
-        let attach = request(
-            2,
-            Method::Ai {
-                op: copypaste_ipc::ai::AiOp::SessionAttach {
-                    session_id: "s".into(),
-                },
-            },
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), queue.next_frame())
+                .await
+                .is_err(),
+            "the history change was filtered out"
         );
-        let reply = tokio::time::timeout(Duration::from_secs(5), approvals.call(attach))
-            .await
-            .expect("the history change was filtered and the attach is answered");
-        assert_eq!(reply.id, 2);
-        assert_eq!(reply.error_code, Some(ErrorCode::NotFound));
 
         shutdown_tx.send(true).unwrap();
         state.release_drain_listener();

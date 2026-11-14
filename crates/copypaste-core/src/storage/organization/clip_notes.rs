@@ -1,10 +1,10 @@
-//! Synced per-clip notes: hidden from AI, keep, a synced expiry and
+//! Synced per-clip notes: hidden from integrations, keep, a synced expiry and
 //! provenance.
 //!
 //! The only kind that is tombstoned, together with its clip. A note may arrive
 //! before its clip, so a note without a live clip is stored (the sender's
 //! cursor advances) and marked orphan; inserting the clip clears the mark, and
-//! orphans older than [`ORPHAN_TTL_MS`] are pruned. Hiding from AI wins over a
+//! orphans older than [`ORPHAN_TTL_MS`] are pruned. Hiding wins over a
 //! concurrent unhide that was based on an older version, and the earlier of
 //! two synced deadlines wins unless the newer version keeps the clip.
 
@@ -23,8 +23,8 @@ const PROVENANCE_CHARS: usize = 64;
 #[serde(deny_unknown_fields)]
 pub struct ClipNoteRecord {
     pub clip_id: String,
-    pub hidden_from_ai: bool,
-    /// Stamp of the version that last changed `hidden_from_ai`.
+    pub hidden_from_integrations: bool,
+    /// Stamp of the version that last changed `hidden_from_integrations`.
     pub hidden_changed_at: i64,
     /// Stamp of the note version this one was edited from.
     pub base_stamp: i64,
@@ -41,7 +41,6 @@ pub struct Provenance {
     pub from_clip_id: Option<String>,
     pub transform_snapshot: Option<Vec<TransformRef>>,
     pub pipeline_name: Option<String>,
-    pub grant_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +49,6 @@ pub enum ProvenanceKind {
     Manual,
     Edited,
     Transformed,
-    AiTool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +76,6 @@ impl Provenance {
                         .all(|step| identifier(&step.transform_id) && step.transform_id.len() <= 64)
             })
             && short(&self.pipeline_name)
-            && short(&self.grant_name)
     }
 }
 
@@ -119,11 +116,11 @@ impl ClipNoteRecord {
             self.keep,
         );
         tx.execute(
-            "INSERT INTO clip_notes(clip_id,record_id,hidden_from_ai,hidden_changed_at,base_stamp,\
+            "INSERT INTO clip_notes(clip_id,record_id,hidden_from_integrations,hidden_changed_at,base_stamp,\
              keep,expires_at,expiry_duration_ms,provenance_json,orphan_since) \
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,CASE WHEN EXISTS(SELECT 1 FROM clipboard_items \
              WHERE id=?1 AND deleted=0) THEN NULL ELSE ?10 END) ON CONFLICT(clip_id) DO UPDATE SET \
-             record_id=excluded.record_id,hidden_from_ai=excluded.hidden_from_ai,\
+             record_id=excluded.record_id,hidden_from_integrations=excluded.hidden_from_integrations,\
              hidden_changed_at=excluded.hidden_changed_at,base_stamp=excluded.base_stamp,\
              keep=excluded.keep,expires_at=excluded.expires_at,\
              expiry_duration_ms=excluded.expiry_duration_ms,\
@@ -133,7 +130,7 @@ impl ClipNoteRecord {
             params![
                 self.clip_id,
                 record_id,
-                self.hidden_from_ai,
+                self.hidden_from_integrations,
                 self.hidden_changed_at,
                 self.base_stamp,
                 self.keep,
@@ -150,12 +147,12 @@ impl ClipNoteRecord {
 /// An unhide that did not see the local hide is concurrent with it, and the
 /// hide wins.
 pub(super) fn keeps_hidden(tx: &Connection, incoming: &ClipNoteRecord) -> Result<bool, StoreError> {
-    if incoming.hidden_from_ai {
+    if incoming.hidden_from_integrations {
         return Ok(false);
     }
     let local: Option<(bool, i64)> = tx
         .query_row(
-            "SELECT hidden_from_ai,hidden_changed_at FROM clip_notes WHERE clip_id=?1",
+            "SELECT hidden_from_integrations,hidden_changed_at FROM clip_notes WHERE clip_id=?1",
             [&incoming.clip_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -257,7 +254,7 @@ pub(super) fn note(conn: &Connection, clip_id: &str) -> Result<Option<ClipNoteRe
     );
     let row: Option<Row> = conn
         .query_row(
-            "SELECT hidden_from_ai,hidden_changed_at,base_stamp,keep,expires_at,\
+            "SELECT hidden_from_integrations,hidden_changed_at,base_stamp,keep,expires_at,\
              expiry_duration_ms,provenance_json FROM clip_notes WHERE clip_id=?1",
             [clip_id],
             |r| {
@@ -275,7 +272,7 @@ pub(super) fn note(conn: &Connection, clip_id: &str) -> Result<Option<ClipNoteRe
         .optional()?;
     row.map(
         |(
-            hidden_from_ai,
+            hidden_from_integrations,
             hidden_changed_at,
             base_stamp,
             keep,
@@ -285,7 +282,7 @@ pub(super) fn note(conn: &Connection, clip_id: &str) -> Result<Option<ClipNoteRe
         )| {
             Ok(ClipNoteRecord {
                 clip_id: clip_id.to_owned(),
-                hidden_from_ai,
+                hidden_from_integrations,
                 hidden_changed_at,
                 base_stamp,
                 keep,

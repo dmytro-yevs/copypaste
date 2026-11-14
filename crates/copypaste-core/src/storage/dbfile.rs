@@ -40,7 +40,6 @@ const RESTORED_TABLES: &[&str] = &[
     "transform_pipelines",
     "library_preferences",
     "library_set_members",
-    "ai_grants",
     "clip_notes",
     "clip_local_state",
     "clip_rule_tags",
@@ -79,7 +78,6 @@ const RESTORED_PROJECTIONS: &[&str] = &[
     "transform_pipelines",
     "library_preferences",
     "library_set_members",
-    "ai_grants",
     "clip_notes",
 ];
 
@@ -96,11 +94,6 @@ const RESTORED_LOCAL_STATE: &[&str] = &[
     "cloud_withheld",
     "expired_ids",
 ];
-
-/// Grant credentials and their access log never come back from a backup: a
-/// restored grant must be re-issued, so a backup cannot revive a credential
-/// that was revoked after it was taken.
-const CLEARED_ON_RESTORE: &[&str] = &["ai_grant_verifiers", "ai_access_log"];
 
 const FTS_TABLES: &[&str] = &["clipboard_fts", "snippet_fts"];
 
@@ -263,7 +256,7 @@ impl super::Store {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             // Previews are disposable and may have been derived from the replaced history.
             tx.execute("DELETE FROM history_preview_cache", [])?;
-            for table in RESTORED_TABLES.iter().chain(CLEARED_ON_RESTORE) {
+            for table in RESTORED_TABLES {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
             // `content_bytes` is recomputed from ciphertext and metadata that
@@ -773,7 +766,7 @@ mod tests {
         assert!(store.search("restored row", 10).unwrap().is_empty());
     }
 
-    /// One row in every library, per-clip and credential table, the clip-keyed
+    /// One row in every library and per-clip table, the clip-keyed
     /// ones pointing at `clip`.
     fn library_rows(store: &Store, clip: &str) {
         store
@@ -789,7 +782,6 @@ mod tests {
                  INSERT INTO transform_pipelines VALUES ('p', 'r6', 'n', NULL, '[]', NULL, 1);
                  INSERT INTO library_preferences VALUES ('snippets', 'k', 'r7', 'true', 1);
                  INSERT INTO library_set_members VALUES ('snippets.s', 'm', 'r8', 1, 1);
-                 INSERT INTO ai_grants VALUES ('g', 'r9', 'd', 'n', 'c', NULL, '[]', '7d', 1, NULL, 0, NULL, 0);
                  INSERT INTO clip_notes VALUES ('{clip}', 'r10', 1, 1, 0, 0, NULL, NULL, NULL, NULL);
                  INSERT INTO clip_local_state (clip_id, rule_secret) VALUES ('{clip}', 1);
                  INSERT INTO clip_rule_tags VALUES ('{clip}', 'tag');
@@ -800,9 +792,7 @@ mod tests {
                  INSERT INTO paste_queue_entries (entry_id, position, source_kind, clip_id, content_kind, status, added_at, added_via) VALUES ('e', 1, 'clip', '{clip}', 'text', 'pending', 1, 'hotkey');
                  INSERT INTO paste_queue_state (id, revision) VALUES (1, 1);
                  INSERT INTO cloud_withheld VALUES ('{clip}', 1);
-                 INSERT INTO expired_ids VALUES ('gone', 1);
-                 INSERT INTO ai_grant_verifiers VALUES ('g', X'00');
-                 INSERT INTO ai_access_log (at, grant_id, tool, item_ids_json, result_count) VALUES (1, 'g', 'search', '[]', 0);"
+                 INSERT INTO expired_ids VALUES ('gone', 1);"
             ))
             .unwrap();
     }
@@ -837,30 +827,5 @@ mod tests {
             .chain(RESTORED_PROJECTIONS)
             .filter(|table| !table.starts_with("history_") && **table != "organization_records")
             .all(|table| count(&store, table) > 0));
-    }
-
-    #[test]
-    fn restore_never_revives_a_grant_credential() {
-        let dir = tempfile::tempdir().unwrap();
-        let (store, _path) = file_store(&dir);
-        let clip = store.insert(item("described", T0)).unwrap();
-        library_rows(&store, &clip.id);
-        let backup = dir.path().join("grant.backup");
-        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
-        store
-            .conn()
-            .unwrap()
-            .execute_batch(
-                "UPDATE ai_grants SET revoked = 1, revoked_at = 2 WHERE id = 'g';
-                 DELETE FROM ai_grant_verifiers;
-                 INSERT INTO ai_grant_verifiers VALUES ('later', X'01');",
-            )
-            .unwrap();
-
-        store.restore_from(&backup, &KEY).unwrap();
-
-        assert_eq!(count(&store, "ai_grants"), 1, "grant metadata is restored");
-        assert_eq!(count(&store, "ai_grant_verifiers"), 0);
-        assert_eq!(count(&store, "ai_access_log"), 0);
     }
 }

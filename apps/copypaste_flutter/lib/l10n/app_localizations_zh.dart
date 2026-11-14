@@ -724,12 +724,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSectionTransformsSummary => '收藏、流程和粘贴时的默认转换。';
 
   @override
-  String get settingsSectionAiTools => 'AI 工具';
-
-  @override
-  String get settingsSectionAiToolsSummary => '连接 AI 助手并控制它们可以查看的内容。';
-
-  @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
 
   @override
@@ -5287,304 +5281,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get snippetsUseFailed => '无法使用片段';
 
   @override
-  String get aiToolsEnableTitle => '允许 AI 工具访问这台电脑上的 CopyPaste';
-
-  @override
-  String get aiToolsEnableDescription =>
-      '你连接的 AI 工具可以读取你在下方允许的剪贴板项目。你与 AI 工具分享的内容会发送给该工具的提供方。';
-
-  @override
-  String aiToolsStatusOn(int count) {
-    return '已开启 · 共享历史的设备：$count';
-  }
-
-  @override
-  String get aiToolsStatusOff => '已关闭 · 已连接的工具无法访问这台电脑上的 CopyPaste';
-
-  @override
-  String get aiToolsThreatModelTitle => '这些限制能防护什么';
-
-  @override
-  String get aiToolsThreatModel =>
-      '权限、批准和隐去会限制 AI 工具通过其 CopyPaste 连接看到的内容。它们无法防护以你的账户运行的其他程序，这些程序本来就能读取你的剪贴板和历史。';
-
-  @override
-  String get aiToolsGrantsTitle => '已连接的工具';
-
-  @override
-  String get aiToolsGrantsDescription =>
-      '在你任意一台电脑上连接的 AI 工具。更改会在拥有该连接的电脑同步后生效。';
-
-  @override
-  String aiToolsServedThrough(String desktops) {
-    return '提供服务的电脑：$desktops';
-  }
-
-  @override
-  String get aiToolsConnect => '连接 AI 工具';
-
-  @override
-  String get aiToolsEmptyTitle => '尚未连接 AI 工具';
-
-  @override
-  String get aiToolsEmptyMessage => '连接 AI 工具后，它可以搜索你允许的剪贴板项目。';
-
-  @override
-  String get aiToolsEmptyServedTitle => 'AI 工具通过你的电脑连接';
-
-  @override
-  String get aiToolsEmptyServedMessage =>
-      '在 Mac、Windows 或 Linux 电脑上的 CopyPaste 中开启 AI 工具，你手机的历史即可在那里使用。';
-
-  @override
-  String get aiToolsUnknownDevice => '另一台电脑';
-
-  @override
-  String aiToolsGrantOwner(String device) {
-    return '位于 $device';
-  }
-
-  @override
-  String get aiToolsGrantWaiting => '等待首次连接';
-
-  @override
-  String aiToolsGrantUsed(String date) {
-    return '已连接 · 上次使用 $date';
-  }
-
-  @override
-  String get aiToolsGrantRevoked => '已撤销';
-
-  @override
-  String aiToolsGrantRevokedRemote(String device) {
-    return '已撤销 · $device 同步后生效';
-  }
-
-  @override
-  String get aiToolsGrantReissue => '恢复后需要新建连接';
-
-  @override
-  String get aiToolsGrantPaused => '已暂停：这台电脑上的 AI 工具已关闭';
-
-  @override
-  String get aiToolsEdit => '编辑';
-
-  @override
-  String get aiToolsActivity => '查看活动';
-
-  @override
-  String get aiToolsRevoke => '撤销';
-
-  @override
-  String aiToolsRevokeTitle(String name) {
-    return '撤销 $name？';
-  }
-
-  @override
-  String get aiToolsRevokeMessage => '该工具会在下一次请求时失去访问权限。若要重新连接，请新建连接。';
-
-  @override
-  String aiToolsDeleteTitle(String name) {
-    return '删除 $name？';
-  }
-
-  @override
-  String get aiToolsDeleteMessage => '该连接会被撤销，并从你的所有设备中删除。';
-
-  @override
-  String get aiToolsChangeFailed => '无法保存更改。';
-
-  @override
-  String get aiToolsLoadFailed => '无法加载 AI 工具设置';
-
-  @override
-  String get aiToolsEditTitle => '编辑连接';
-
-  @override
-  String get aiToolsNameLabel => '名称';
-
-  @override
-  String get aiToolsScopesLabel => '访问权限';
-
-  @override
-  String get aiToolsScopeReadHistory => '读取历史';
-
-  @override
-  String get aiToolsScopeReadSnippets => '读取片段';
-
-  @override
-  String get aiToolsScopeWriteClipboard => '写入剪贴板';
-
-  @override
-  String get aiToolsScopeOrganize => '整理（置顶、保存片段）';
-
-  @override
-  String get aiToolsLookbackLabel => '历史范围';
-
-  @override
-  String get aiToolsLookbackDay => '过去 24 小时';
-
-  @override
-  String get aiToolsLookbackWeek => '过去 7 天';
-
-  @override
-  String get aiToolsLookbackMonth => '过去 30 天';
-
-  @override
-  String get aiToolsLookbackAll => '全部历史';
-
-  @override
-  String aiToolsActivityTitle(String name) {
-    return '$name 的活动';
-  }
-
-  @override
-  String get aiToolsActivityEmpty => '暂无活动';
-
-  @override
-  String get aiToolsActivityFailed => '无法加载活动';
-
-  @override
-  String aiToolsActivityEntry(String tool, int count) {
-    return '$tool · 结果：$count';
-  }
-
-  @override
-  String get aiToolsClientLabel => 'AI 工具';
-
-  @override
-  String get aiToolsClientOther => '其他';
-
-  @override
-  String get aiToolsCreate => '创建连接';
-
-  @override
-  String aiToolsConfigHint(String client) {
-    return '将此配置添加到 $client。其访问密钥只显示一次。';
-  }
-
-  @override
-  String get aiToolsConfigHintOther => '将此配置添加到你的 AI 工具的 MCP 设置中。其访问密钥只显示一次。';
-
-  @override
-  String aiToolsRestartNote(String client) {
-    return '下一步：重启 $client 或打开新会话。';
-  }
-
-  @override
-  String get aiToolsRestartNoteOther => '下一步：重启你的 AI 工具或打开新会话。';
-
-  @override
-  String get aiToolsCopied => '已复制';
-
-  @override
-  String get aiToolsCopiedMessage => '不会保存到历史，剪贴板将在 60 秒后清除。';
-
-  @override
-  String get aiToolsCopyFailed => '无法复制配置。';
-
-  @override
-  String get aiToolsPolicyTitle => 'AI 工具可以看到的内容';
-
-  @override
-  String get aiToolsPolicyNote => '无论你在这里允许什么，敏感项目和检测到的凭据都不会被分享。';
-
-  @override
-  String get aiToolsOtherDevicesTitle => '包含其他设备的项目';
-
-  @override
-  String get aiToolsOtherDevicesDescription => '从你的其他设备同步的历史。关闭某台设备即可排除它的项目。';
-
-  @override
-  String get aiToolsKindsTitle => '内容类型';
-
-  @override
-  String get aiToolsKindsDescription => 'AI 工具可以读取的剪贴板项目类型。';
-
-  @override
-  String get aiToolsKindText => '文本';
-
-  @override
-  String get aiToolsKindLink => '链接';
-
-  @override
-  String get aiToolsKindRichText => '富文本';
-
-  @override
-  String get aiToolsKindImage => '图片';
-
-  @override
-  String get aiToolsKindFileMetadata => '文件名和大小';
-
-  @override
-  String get aiToolsExcludedAppsTitle => '排除的应用';
-
-  @override
-  String get aiToolsExcludedAppsDescription => '从这些应用复制的项目永远不会被分享。';
-
-  @override
-  String get aiToolsAddApp => '添加应用';
-
-  @override
-  String get aiToolsRemove => '移除';
-
-  @override
-  String get aiToolsDefaultLookbackTitle => '新连接的历史范围';
-
-  @override
-  String get aiToolsDefaultLookbackDescription => '更早的未置顶项目对连接不可见。置顶项目和片段不受限制。';
-
-  @override
-  String get aiToolsKeywords => 'ai 人工智能 mcp 助手 claude codex cursor 模型 智能体';
-
-  @override
-  String aiToolsApprovalTitle(String client) {
-    return '$client 请求访问 CopyPaste';
-  }
-
-  @override
-  String aiToolsReportedName(String name) {
-    return '应用报告的名称：$name';
-  }
-
-  @override
-  String aiToolsReportedExecutable(String path) {
-    return '程序：$path';
-  }
-
-  @override
-  String get aiToolsApprovalNote => '只允许你自己启动的工具。如果不回应，请求将在 2 分钟后被拒绝。';
-
-  @override
-  String get aiToolsDeny => '拒绝';
-
-  @override
-  String get aiToolsAllow => '允许';
-
-  @override
-  String get aiToolsVolumeTitle => '允许继续读取？';
-
-  @override
-  String aiToolsVolumeMessage(String client) {
-    return '$client 在本次会话中读取了大量剪贴板历史。允许更多吗？';
-  }
-
-  @override
-  String get aiToolsNotificationBody => '打开 CopyPaste 以允许或拒绝。';
-
-  @override
-  String get aiToolsDecisionFailed => '无法发送回应。请求将再次显示。';
-
-  @override
-  String get aiToolsHide => '对 AI 工具隐藏';
-
-  @override
-  String get aiToolsShow => '对 AI 工具显示';
-
-  @override
-  String get aiToolsHiddenState => '已对 AI 工具隐藏';
-
-  @override
   String get quickPasteTabQueue => '队列';
 
   @override
@@ -6006,7 +5702,6 @@ class AppLocalizationsZh extends AppLocalizations {
     String _temp0 = intl.Intl.selectLogic(type, {
       'dont_save': '不保存',
       'mark_secret': '标记为机密',
-      'hide_from_ai': '对 AI 工具隐藏',
       'delete_after': '在此时间后删除',
       'add_tags': '添加标签',
       'transform': '转换',
@@ -6195,9 +5890,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rulesTraceSecret => '保存为机密';
 
   @override
-  String get rulesTraceHidden => '对 AI 工具隐藏';
-
-  @override
   String rulesTraceExpires(String duration) {
     return '$duration后删除';
   }
@@ -6252,16 +5944,6 @@ class AppLocalizationsZh extends AppLocalizations {
       count,
       locale: localeName,
       other: '将有 $count 个标记为机密',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesPreviewHidden(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '将有 $count 个对 AI 工具隐藏',
     );
     return '$_temp0';
   }
@@ -6417,9 +6099,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyQueueAddFailed => '无法添加到 Paste Queue。请确认它已开启。';
 
   @override
-  String get historyHideFromAiFailed => '无法更改此剪贴项的 AI 工具设置。';
-
-  @override
   String get historyKeepFailed => '无法保留此剪贴项。';
 
   @override
@@ -6468,9 +6147,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyProvenanceTransformed => '已转换';
 
   @override
-  String get historyProvenanceAiTool => 'AI 工具';
-
-  @override
   String historyRuleTag(String name) {
     return '$name（自动）';
   }
@@ -6480,7 +6156,4 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => '自动标签';
-
-  @override
-  String get historyMetadataAiTools => 'AI 工具';
 }

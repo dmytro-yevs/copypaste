@@ -3,9 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../features/ai_tools/controller/ai_approval_controller.dart';
-import '../features/ai_tools/controller/ai_tools_controller.dart';
-import '../features/ai_tools/view/ai_tools_settings_view.dart';
 import '../features/content_rules/controller/content_rules_controller.dart';
 import '../features/content_rules/view/content_rules_search_targets.dart';
 import '../features/paste_queue/controller/paste_queue_controller.dart';
@@ -25,8 +22,7 @@ import '../features/tray/view/tray_settings_view.dart';
 import '../platform/desktop/global_shortcut.dart';
 
 /// The main window's feature controllers that outlive any one destination:
-/// the paste queue, the settings-backed features, AI tool approvals and the
-/// tray's feature rows. They are created with the runtime connection and
+/// the paste queue, the settings-backed features and the tray's feature rows. They are created with the runtime connection and
 /// released with it; each loads its data only while a view needs it.
 class AppFeatures {
   AppFeatures({
@@ -34,10 +30,8 @@ class AppFeatures {
     required this.snippets,
     required this.transforms,
     required this.contentRules,
-    required this.aiTools,
     required this.openSettings,
     this.pasteQueueShortcuts,
-    this.aiApproval,
     this.quickAccess,
     this.tray,
     bool Function()? capturePaused,
@@ -63,7 +57,6 @@ class AppFeatures {
         ),
       snippetsSettingsSection(snippets),
       transformsSettingsSection(transforms),
-      aiToolsSettingsSection(aiTools),
     ]);
   }
 
@@ -72,10 +65,6 @@ class AppFeatures {
   final SnippetsController snippets;
   final TransformsSettingsController transforms;
   final ContentRulesController contentRules;
-  final AiToolsController aiTools;
-
-  /// Prompts for AI tool requests; desktops only, as they serve the tools.
-  final AiApprovalController? aiApproval;
 
   /// Android only.
   final QuickAccessController? quickAccess;
@@ -107,7 +96,6 @@ class AppFeatures {
       snippets.busy ||
       transforms.busy ||
       contentRules.busy ||
-      aiTools.busy ||
       (quickAccess?.busy ?? false);
 
   /// Loads the queue, registers its shortcuts and feeds the tray's rows.
@@ -179,12 +167,10 @@ class AppFeatures {
     _disposed = true;
     pasteQueue.trayStatus.removeListener(_syncTrayQueue);
     pasteQueueShortcuts?.dispose();
-    aiApproval?.dispose();
     quickAccess?.dispose();
     snippets.dispose();
     transforms.dispose();
     contentRules.dispose();
-    aiTools.dispose();
     final tray = this.tray;
     try {
       if (tray != null) {

@@ -4,7 +4,7 @@
 //! new clip through the ordinary ingest path, attributed to CopyPaste, and a
 //! synced note records its provenance. Replacing the original is the normal
 //! synced delete, run only after the new clip is stored. Text is stored with
-//! LF line endings; the source's secret and hidden-from-AI marks carry over.
+//! LF line endings; the source's secret and hidden-from-integrations marks carry over.
 
 use copypaste_ipc::content_type;
 use copypaste_ipc::ConfigData;
@@ -86,7 +86,7 @@ struct Source {
     row: StoredItem,
     text: zeroize::Zeroizing<String>,
     secret: bool,
-    hidden_from_ai: bool,
+    hidden_from_integrations: bool,
 }
 
 fn open_text(store: &Store, key: &ItemKey, id: &str) -> Result<Source, ClipEditError> {
@@ -106,7 +106,7 @@ fn open_text(store: &Store, key: &ItemKey, id: &str) -> Result<Source, ClipEditE
     Ok(Source {
         secret: row.clipboard_privacy().secret
             || annotations.as_ref().is_some_and(|marks| marks.rule_secret),
-        hidden_from_ai: annotations.is_some_and(|marks| marks.hidden_from_ai),
+        hidden_from_integrations: annotations.is_some_and(|marks| marks.hidden_from_integrations),
         text,
         row,
     })
@@ -118,7 +118,6 @@ fn provenance(kind: ProvenanceKind, from_clip_id: Option<String>) -> Provenance 
         from_clip_id,
         transform_snapshot: None,
         pipeline_name: None,
-        grant_name: None,
     }
 }
 
@@ -163,7 +162,7 @@ impl<F: Fn() -> ConfigData> ClipWriter<'_, F> {
         let item = self.store_new(
             &text,
             source.secret,
-            source.hidden_from_ai,
+            source.hidden_from_integrations,
             provenance(ProvenanceKind::Edited, Some(source.row.id.clone())),
         )?;
         let replaced =
@@ -177,7 +176,7 @@ impl<F: Fn() -> ConfigData> ClipWriter<'_, F> {
         &self,
         text: &str,
         secret: bool,
-        hidden_from_ai: bool,
+        hidden_from_integrations: bool,
         provenance: Provenance,
     ) -> Result<StoredItem, ClipEditError> {
         if text.trim().is_empty() {
@@ -206,8 +205,8 @@ impl<F: Fn() -> ConfigData> ClipWriter<'_, F> {
         let now = crate::now_ms();
         let note = ClipNoteRecord {
             clip_id: item.id.clone(),
-            hidden_from_ai,
-            hidden_changed_at: if hidden_from_ai { now } else { 0 },
+            hidden_from_integrations,
+            hidden_changed_at: if hidden_from_integrations { now } else { 0 },
             base_stamp: 0,
             keep: false,
             expires_at: None,

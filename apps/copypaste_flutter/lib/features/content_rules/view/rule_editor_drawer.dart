@@ -619,7 +619,7 @@ class _RuleEditorDrawerState extends State<RuleEditorDrawer> {
           RuleActionType.dontSave => [
             Text(l10n.rulesDontSaveWarning).small().muted(),
           ],
-          RuleActionType.markSecret || RuleActionType.hideFromAi => [],
+          RuleActionType.markSecret => [],
           RuleActionType.deleteAfter => [
             const Gap(AppSpacing.sm),
             _select<Duration>(

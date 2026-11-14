@@ -73,7 +73,6 @@ fn wire_name(method: &Method) -> &'static str {
         Method::PasteQueue { .. } => "paste_queue",
         Method::Transforms { .. } => "transforms",
         Method::Rules { .. } => "rules",
-        Method::Ai { .. } => "ai",
         Method::Shutdown => "shutdown",
     }
 }
@@ -158,13 +157,12 @@ fn catalog() -> Vec<Value> {
         json!({"method":"get_private_mode"}),
         json!({"method":"watch"}),
         json!({"method":"watch_runtime"}),
-        json!({"method":"watch_events","params":{"kinds":[{"kind":"ai_approval"},{"kind":"library","kinds":64},{"kind":"status"}]}}),
+        json!({"method":"watch_events","params":{"kinds":[{"kind":"paste_queue"},{"kind":"library","kinds":4},{"kind":"status"}]}}),
         json!({"method":"snippets","params":{"op":{"op":"quick_search","query":"sig","include_snippets":true,"limit":10}}}),
-        json!({"method":"clips","params":{"op":{"op":"set_hidden_from_ai","ids":["item"],"hidden":true}}}),
+        json!({"method":"clips","params":{"op":{"op":"set_hidden_from_integrations","ids":["item"],"hidden":true}}}),
         json!({"method":"paste_queue","params":{"op":{"op":"deliver","target":{"kind":"next"},"plain_text":null,"mode":"clipboard"}}}),
         json!({"method":"transforms","params":{"op":{"op":"run","source":{"kind":"clip","id":"item"},"steps_or_pipeline":{"kind":"pipeline","id":"p"},"action":"copy","bypass_default":false}}}),
         json!({"method":"rules","params":{"op":{"op":"apply","preview_token":"t","request_id":"r"}}}),
-        json!({"method":"ai","params":{"op":{"op":"session_attach","session_id":"s"}}}),
         json!({"method":"shutdown"}),
     ]
 }
@@ -183,7 +181,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        70,
+        69,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }
@@ -192,7 +190,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
 /// serde round trip, and the gates the daemon delegates to answer per op.
 #[test]
 fn every_feature_operation_round_trips_and_answers_its_gates() {
-    use copypaste_ipc::{ai, clips, paste_queue, rules, snippets, transforms};
+    use copypaste_ipc::{clips, paste_queue, rules, snippets, transforms};
     let text = || "text".to_string();
     let id = || "id".to_string();
     let snippet_ops = vec![
@@ -243,7 +241,7 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             secret: true,
             delivery: clips::Delivery::Copy,
         },
-        clips::ClipOp::SetHiddenFromAi {
+        clips::ClipOp::SetHiddenFromIntegrations {
             ids: vec![id()],
             hidden: false,
         },
@@ -299,21 +297,6 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
             },
         },
     ];
-    let ai_ops = vec![
-        ai::AiOp::Tool {
-            session_id: id(),
-            call: ai::AiToolCall::RenderSnippet {
-                id: id(),
-                values: Default::default(),
-            },
-        },
-        ai::AiOp::Approve {
-            request_id: id(),
-            scopes: vec![ai::AiScope::ReadHistory],
-            lookback: ai::AiLookback::Week,
-        },
-        ai::AiOp::Status { session_id: None },
-    ];
     let methods: Vec<Method> = snippet_ops
         .into_iter()
         .map(|op| Method::Snippets { op })
@@ -325,7 +308,6 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
                 .map(|op| Method::Transforms { op }),
         )
         .chain(rule_ops.into_iter().map(|op| Method::Rules { op }))
-        .chain(ai_ops.into_iter().map(|op| Method::Ai { op }))
         .collect();
     for method in methods {
         let encoded = serde_json::to_value(&method).unwrap();
@@ -338,18 +320,15 @@ fn every_feature_operation_round_trips_and_answers_its_gates() {
         );
     }
 
-    let privileged = |op| Method::Ai { op }.privileged();
-    assert!(privileged(ai::AiOp::RevokeGrant { id: id() }));
-    assert!(!privileged(ai::AiOp::Grants));
     assert!(Method::Clips {
-        op: clips::ClipOp::SetHiddenFromAi {
+        op: clips::ClipOp::SetHiddenFromIntegrations {
             ids: vec![id()],
             hidden: false
         }
     }
     .privileged());
     assert!(!Method::Clips {
-        op: clips::ClipOp::SetHiddenFromAi {
+        op: clips::ClipOp::SetHiddenFromIntegrations {
             ids: vec![id()],
             hidden: true
         }

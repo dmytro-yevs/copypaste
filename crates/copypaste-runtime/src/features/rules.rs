@@ -368,7 +368,7 @@ impl Runtime {
         let outcome = evaluation.outcome;
         trace.skipped = outcome.dont_save.is_some();
         trace.secret = outcome.secret;
-        trace.hidden_from_ai = outcome.hide_from_ai;
+        trace.hidden_from_integrations = outcome.hide_from_integrations;
         trace.expires_after_ms = outcome
             .expiry
             .and_then(|expiry| u64::try_from(expiry.duration_ms).ok());
@@ -404,7 +404,7 @@ impl Runtime {
         let state = self.store.clip_local_state(clip_id)?;
         let mut trace = set.wire_trace(&evaluation.trace.unwrap_or_default());
         trace.secret = subject.secret;
-        trace.hidden_from_ai = annotations.hidden_from_ai;
+        trace.hidden_from_integrations = annotations.hidden_from_integrations;
         trace.expires_after_ms = state
             .and_then(|state| state.expiry_duration_ms)
             .and_then(|ms| u64::try_from(ms).ok());

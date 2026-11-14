@@ -226,7 +226,7 @@ pub struct RuleOutcome {
     /// Terminal when set: nothing else applies.
     pub dont_save: Option<DontSave>,
     pub secret: bool,
-    pub hide_from_ai: bool,
+    pub hide_from_integrations: bool,
     pub expiry: Option<Expiry>,
     pub tag_ids: Vec<String>,
     pub transforms: Vec<TransformStep>,
@@ -239,7 +239,7 @@ pub struct RuleOutcome {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProtectionOutcome {
     pub secret: bool,
-    pub hide_from_ai: bool,
+    pub hide_from_integrations: bool,
     pub expiry: Option<Expiry>,
     pub flags: EvalFlags,
 }
@@ -249,7 +249,7 @@ impl RuleOutcome {
     pub fn protection_subset(&self) -> ProtectionOutcome {
         ProtectionOutcome {
             secret: self.secret,
-            hide_from_ai: self.hide_from_ai,
+            hide_from_integrations: self.hide_from_integrations,
             expiry: self.expiry,
             flags: self.flags,
         }
@@ -260,7 +260,7 @@ impl RuleOutcome {
     pub fn is_noop(&self) -> bool {
         self.dont_save.is_none()
             && !self.secret
-            && !self.hide_from_ai
+            && !self.hide_from_integrations
             && self.expiry.is_none()
             && self.tag_ids.is_empty()
             && self.transforms.is_empty()
@@ -268,7 +268,7 @@ impl RuleOutcome {
 
     fn fail_closed(&mut self, flags: EvalFlags) {
         self.secret = true;
-        self.hide_from_ai = true;
+        self.hide_from_integrations = true;
         self.flags.insert(EvalFlags::RULES_INCOMPLETE);
         self.flags.insert(flags);
     }
@@ -287,7 +287,7 @@ impl RuleOutcome {
                 return true;
             }
             Action::MarkSecret {} => self.secret = true,
-            Action::HideFromAi {} => self.hide_from_ai = true,
+            Action::HideFromIntegrations {} => self.hide_from_integrations = true,
             Action::DeleteAfter {
                 duration_ms,
                 clear_clipboard,

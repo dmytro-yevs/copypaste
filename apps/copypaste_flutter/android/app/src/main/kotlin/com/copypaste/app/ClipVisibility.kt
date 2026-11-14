@@ -24,7 +24,6 @@ internal data class ClipVisibility(
     val secret: Boolean,
     /** A local display mask applied by a content rule. */
     val ruleSecret: Boolean = false,
-    val hiddenFromAi: Boolean = false,
     val expiresAtMs: Long? = null,
 ) {
     val masked: Boolean get() = secret || ruleSecret
@@ -45,7 +44,6 @@ internal data class ClipVisibility(
             return ClipVisibility(
                 secret = item.optJSONObject("privacy")?.optBoolean("secret") == true,
                 ruleSecret = annotations?.optBoolean("rule_secret") == true,
-                hiddenFromAi = annotations?.optBoolean("hidden_from_ai") == true,
                 expiresAtMs = annotations
                     ?.takeUnless { it.isNull("expires_at") }
                     ?.optLong("expires_at"),

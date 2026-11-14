@@ -83,8 +83,6 @@ void main() {
     }
 
     final inspector = <HistoryClipAction>{
-      if (find.byKey(const ValueKey('hide-from-ai')).evaluate().isNotEmpty)
-        HistoryClipAction.hideFromAi,
       if (find
           .byKey(const ValueKey('history-detail-action-transform'))
           .evaluate()
@@ -127,7 +125,6 @@ void main() {
     );
     expect(historyClipActions(controller, image), [
       HistoryClipAction.addToQueue,
-      HistoryClipAction.hideFromAi,
       HistoryClipAction.explain,
     ]);
     // Keep appears only while a deletion is scheduled.
@@ -233,15 +230,12 @@ void main() {
 
     final plain = await threshold(_PlainRepository([image]));
     final featured = await threshold(_FeatureRepository([image]));
-    // The two capability icons (AI tools and More) join the label budget.
-    expect(featured - plain, greaterThan(2 * AppControlSize.compact));
-    expect(find.byKey(const ValueKey('hide-from-ai')), findsOneWidget);
+    // The More capability icon joins the label budget.
+    expect(featured - plain, greaterThan(AppControlSize.compact));
     expect(find.byKey(const ValueKey('history-detail-more')), findsOneWidget);
   });
 
-  testWidgets('hiding from AI tools and keeping update the selected clip', (
-    tester,
-  ) async {
+  testWidgets('keeping updates the selected clip', (tester) async {
     final repository = _FeatureRepository([
       textClip(
         'a',
@@ -255,14 +249,6 @@ void main() {
     await _settle(tester);
     final l10n = AppStrings.current;
     expect(find.text(l10n.historyDeletesInMinutes(5)), findsWidgets);
-
-    await tester.tap(find.byKey(const ValueKey('hide-from-ai')));
-    await _settle(tester);
-    expect(repository.hidden, hasLength(1));
-    expect(repository.hidden.single.$1, ['a']);
-    expect(repository.hidden.single.$2, isTrue);
-    expect(controller.selection.selectedClip!.annotations.hiddenFromAi, isTrue);
-    expect(find.bySemanticsLabel(l10n.aiToolsShow), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('history-detail-more')));
     await _settle(tester);
@@ -360,10 +346,9 @@ void main() {
         tooLargeToSync: false,
         annotations: clip_api.ClipAnnotationState(
           expiresAtMs: 60000,
-          hiddenFromAi: true,
           ruleSecret: true,
           provenance: const clip_api.ClipProvenance(
-            kind: clip_api.ClipProvenanceKind.aiTool,
+            kind: clip_api.ClipProvenanceKind.transformed,
             transformSnapshot: [],
           ),
           ruleTagIds: const ['t'],
@@ -372,7 +357,7 @@ void main() {
       ),
     );
     expect(clip.annotations.expiresAt, DateTime.utc(1970, 1, 1, 0, 1));
-    expect(clip.annotations.provenance, HistoryProvenance.aiTool);
+    expect(clip.annotations.provenance, HistoryProvenance.transformed);
     expect(clip.annotations.ruleTagIds, ['t']);
     expect(clip.masked, isTrue);
     expect(clip.secret, isFalse);
@@ -484,7 +469,6 @@ class _FeatureRepository extends _PlainRepository
         HistoryAnnotationsRepository {
   _FeatureRepository(super.clips);
 
-  final hidden = <(List<String>, bool)>[];
   final kept = <String>[];
   final queued = <List<String>>[];
 
@@ -520,32 +504,9 @@ class _FeatureRepository extends _PlainRepository
   }
 
   @override
-  Future<void> setHiddenFromAi(
-    List<String> clipIds, {
-    required bool hidden,
-  }) async {
-    this.hidden.add((clipIds, hidden));
-    for (final id in clipIds) {
-      _update(
-        id,
-        (current) => HistoryClipAnnotations(
-          expiresAt: current.expiresAt,
-          hiddenFromAi: hidden,
-        ),
-      );
-    }
-  }
-
-  @override
   Future<HistoryClipAnnotations> keep(String clipId) async {
     kept.add(clipId);
-    _update(
-      clipId,
-      (current) => HistoryClipAnnotations(
-        hiddenFromAi: current.hiddenFromAi,
-        keep: true,
-      ),
-    );
+    _update(clipId, (current) => const HistoryClipAnnotations(keep: true));
     return (await get(clipId)).annotations;
   }
 

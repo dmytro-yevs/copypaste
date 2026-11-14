@@ -360,7 +360,7 @@ fn editable_note(tx: &Connection, clip_id: &str) -> Result<ClipNoteRecord, Store
         base_stamp: stamp.unwrap_or(0),
         ..note.unwrap_or(ClipNoteRecord {
             clip_id: clip_id.to_owned(),
-            hidden_from_ai: false,
+            hidden_from_integrations: false,
             hidden_changed_at: 0,
             base_stamp: 0,
             keep: false,

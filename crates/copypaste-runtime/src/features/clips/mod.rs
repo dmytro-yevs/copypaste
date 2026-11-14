@@ -16,7 +16,7 @@ impl Runtime {
     pub(crate) fn clips(&self, id: u64, op: ClipOp) -> Response {
         match op {
             ClipOp::CreateManual { .. } | ClipOp::SaveEdit { .. } => edit::handle(self, id, op),
-            ClipOp::Annotations { .. } | ClipOp::SetHiddenFromAi { .. } => {
+            ClipOp::Annotations { .. } | ClipOp::SetHiddenFromIntegrations { .. } => {
                 privacy::handle(self, id, op)
             }
             ClipOp::Keep { .. } => expiry::handle(self, id, op),

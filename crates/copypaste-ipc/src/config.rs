@@ -249,9 +249,6 @@ pub struct ConfigData {
 
     /// Paste-queue behavior on this device. **Live.**
     pub paste_queue: PasteQueueSettings,
-
-    /// Serve AI tools (MCP) on this desktop. Off by default. **Live.**
-    pub mcp_enabled: bool,
 }
 
 impl Default for ConfigData {
@@ -277,7 +274,6 @@ impl Default for ConfigData {
             notification_preview: true,
             sound_on_copy: true,
             paste_queue: PasteQueueSettings::default(),
-            mcp_enabled: false,
         }
     }
 }
@@ -373,8 +369,6 @@ pub struct ConfigPatch {
     pub sound_on_copy: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paste_queue: Option<PasteQueueSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_enabled: Option<bool>,
 }
 
 impl ConfigPatch {
@@ -460,9 +454,6 @@ impl ConfigPatch {
             settings.validate()?;
             next.paste_queue = settings.clone();
         }
-        if let Some(v) = self.mcp_enabled {
-            next.mcp_enabled = v;
-        }
         Ok(next)
     }
 }
@@ -490,7 +481,6 @@ impl From<&ConfigData> for ConfigPatch {
             notification_preview: Some(c.notification_preview),
             sound_on_copy: Some(c.sound_on_copy),
             paste_queue: Some(c.paste_queue.clone()),
-            mcp_enabled: Some(c.mcp_enabled),
         }
     }
 }
@@ -535,7 +525,6 @@ impl ConfigData {
             ("notification_preview", Liveness::Live),
             ("sound_on_copy", Liveness::Live),
             ("paste_queue", Liveness::Live),
-            ("mcp_enabled", Liveness::Live),
         ]
     }
 
@@ -586,7 +575,6 @@ mod tests {
     #[test]
     fn feature_settings_default_closed_and_validate_their_bounds() {
         let defaults = ConfigData::default();
-        assert!(!defaults.mcp_enabled);
         assert_eq!(defaults.paste_queue.max_entries, 200);
         assert_eq!(defaults.paste_queue.idle_stop_minutes, 15);
         let decoded: ConfigData = serde_json::from_str("{}").unwrap();

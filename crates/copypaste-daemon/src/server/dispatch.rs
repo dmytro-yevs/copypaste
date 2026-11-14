@@ -132,8 +132,8 @@ pub(super) fn gate(
     None
 }
 
-/// Approvals, grant administration, policy changes and un-hiding are served
-/// only to the CopyPaste app, so an agent cannot approve its own request.
+/// Privileged operations such as un-hiding are served only to the CopyPaste
+/// app, so another local client cannot widen what integrations may see.
 fn privileged_gate(request: &Request, caller: CallerIdentity) -> Option<Response> {
     (request.method.privileged() && !caller.is_app)
         .then(|| Response::err(request.id, ErrorCode::Forbidden, MSG_FORBIDDEN))
@@ -286,8 +286,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Clips { .. }
         | Method::PasteQueue { .. }
         | Method::Transforms { .. }
-        | Method::Rules { .. }
-        | Method::Ai { .. } => method.feature_op().is_some_and(OpGates::requires_ready),
+        | Method::Rules { .. } => method.feature_op().is_some_and(OpGates::requires_ready),
     }
 }
 
@@ -499,17 +498,20 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             method,
         };
-        let revoke = request(Method::Ai {
-            op: copypaste_ipc::ai::AiOp::RevokeGrant { id: "g".into() },
-        });
-        let refused = privileged_gate(&revoke, CallerIdentity::default()).expect("refused");
+        let hidden = |hidden| {
+            request(Method::Clips {
+                op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
+                    ids: vec!["a".into()],
+                    hidden,
+                },
+            })
+        };
+        let unhide = hidden(false);
+        let refused = privileged_gate(&unhide, CallerIdentity::default()).expect("refused");
         assert_eq!(refused.id, 9);
         assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
-        assert!(privileged_gate(&revoke, CallerIdentity { is_app: true }).is_none());
-        let grants = request(Method::Ai {
-            op: copypaste_ipc::ai::AiOp::Grants,
-        });
-        assert!(privileged_gate(&grants, CallerIdentity::default()).is_none());
+        assert!(privileged_gate(&unhide, CallerIdentity { is_app: true }).is_none());
+        assert!(privileged_gate(&hidden(true), CallerIdentity::default()).is_none());
     }
 
     #[test]

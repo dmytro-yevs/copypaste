@@ -38,7 +38,6 @@ const CURRENT_TABLES: &[&str] = &[
     "transform_pipelines",
     "library_preferences",
     "library_set_members",
-    "ai_grants",
     "clip_notes",
     "clip_local_state",
     "clip_rule_tags",
@@ -48,8 +47,6 @@ const CURRENT_TABLES: &[&str] = &[
     "snippet_origin",
     "paste_queue_entries",
     "paste_queue_state",
-    "ai_grant_verifiers",
-    "ai_access_log",
     "cloud_withheld",
     "expired_ids",
 ];

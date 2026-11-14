@@ -147,7 +147,6 @@ abstract final class RuleIcons {
   static IconData action(RuleActionType? type) => switch (type) {
     RuleActionType.dontSave => LucideIcons.ban,
     RuleActionType.markSecret => LucideIcons.lock,
-    RuleActionType.hideFromAi => LucideIcons.eyeOff,
     RuleActionType.deleteAfter => LucideIcons.timer,
     RuleActionType.addTags => LucideIcons.tag,
     RuleActionType.transform => LucideIcons.wandSparkles,

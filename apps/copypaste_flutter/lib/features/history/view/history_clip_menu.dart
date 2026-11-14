@@ -9,7 +9,6 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
-import '../../ai_tools/view/hide_from_ai_action.dart';
 import '../../content_rules/view/rule_trace_panel.dart';
 import '../../snippets/view/clip_edit_drawer.dart';
 import '../../transforms/models/transform_models.dart';
@@ -47,7 +46,6 @@ enum HistoryClipAction {
   saveAsSnippet('save-snippet'),
   transform('transform'),
   addToQueue('add-queue'),
-  hideFromAi('hide-ai'),
   keep('keep'),
   explain('explain');
 
@@ -61,10 +59,6 @@ enum HistoryClipAction {
     saveAsSnippet => context.l10n.historyActionSaveAsSnippet,
     transform => context.l10n.historyActionTransform,
     addToQueue => context.l10n.historyActionAddToQueue,
-    hideFromAi => HideFromAiAction.label(
-      context,
-      hidden: clip.annotations.hiddenFromAi,
-    ),
     keep => context.l10n.historyActionKeep,
     explain => context.l10n.historyActionExplain,
   };
@@ -74,7 +68,6 @@ enum HistoryClipAction {
     saveAsSnippet => LucideIcons.notebookText,
     transform => LucideIcons.wandSparkles,
     addToQueue => LucideIcons.listPlus,
-    hideFromAi => HideFromAiAction.icon(hidden: clip.annotations.hiddenFromAi),
     keep => LucideIcons.timerOff,
     explain => LucideIcons.circleHelp,
   };
@@ -96,7 +89,6 @@ List<HistoryClipAction> historyClipActions(
     ],
     if (capabilities.transforms != null && textual) HistoryClipAction.transform,
     if (capabilities.queue != null) HistoryClipAction.addToQueue,
-    if (annotated) HistoryClipAction.hideFromAi,
     if (annotated &&
         clip.annotations.expiresAt != null &&
         !clip.annotations.keep)
@@ -262,15 +254,6 @@ Future<void> runHistoryClipAction(
         controller: controller,
         clipIds: [clip.id],
       );
-    case HistoryClipAction.hideFromAi:
-      if (capabilities.isAnnotationPending(clip.id)) return;
-      final changed = await capabilities.setHiddenFromAi(
-        clip,
-        !clip.annotations.hiddenFromAi,
-      );
-      if (!changed && context.mounted) {
-        _failure(context, context.l10n.historyHideFromAiFailed);
-      }
     case HistoryClipAction.keep:
       if (capabilities.isAnnotationPending(clip.id)) return;
       final kept = await capabilities.keep(clip);

@@ -479,7 +479,6 @@ impl Runtime {
             Method::PasteQueue { op } => self.paste_queue(id, op),
             Method::Transforms { op } => self.transforms(id, op),
             Method::Rules { op } => self.rules(id, op),
-            Method::Ai { op } => self.ai(id, op),
             Method::Watch
             | Method::WatchRuntime
             | Method::WatchEvents { .. }

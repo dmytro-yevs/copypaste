@@ -1,9 +1,9 @@
 //! Writing rule outcomes in the transaction that stores a clip.
 //!
-//! At capture every action this device decided is written: hide from AI,
-//! rule tags, an owned expiry that syncs, and the sealed pre-transform
-//! original. On receipt only the local projection is: the secret mask, hide
-//! from AI, rule tags and a local-only expiry that never tombstones. Both
+//! At capture every action this device decided is written: hide from
+//! integrations, rule tags, an owned expiry that syncs, and the sealed
+//! pre-transform original. On receipt only the local projection is: the secret
+//! mask, the integration hide, rule tags and a local-only expiry. Both
 //! read one compiled rule set per store and rules revision.
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -62,7 +62,7 @@ impl Original {
 /// What a capture's rules write next to the stored clip.
 #[derive(Debug, Clone, Default)]
 pub struct CaptureEffects {
-    pub hide_from_ai: bool,
+    pub hide_from_integrations: bool,
     pub expiry: Option<Expiry>,
     pub tag_ids: Vec<String>,
     pub applied_rules: Vec<String>,
@@ -77,7 +77,7 @@ impl CaptureEffects {
     #[must_use]
     pub fn from_outcome(outcome: &RuleOutcome, rules_revision: i64) -> Self {
         Self {
-            hide_from_ai: outcome.hide_from_ai,
+            hide_from_integrations: outcome.hide_from_integrations,
             expiry: outcome.expiry,
             tag_ids: outcome.tag_ids.clone(),
             applied_rules: outcome.applied_rules.clone(),
@@ -89,7 +89,7 @@ impl CaptureEffects {
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        !self.hide_from_ai
+        !self.hide_from_integrations
             && self.expiry.is_none()
             && self.tag_ids.is_empty()
             && self.applied_rules.is_empty()
@@ -174,7 +174,7 @@ pub(crate) fn write_capture(
         tx,
         clip_id,
         false,
-        effects.hide_from_ai,
+        effects.hide_from_integrations,
         &effects.applied_rules,
         effects.flags,
         effects.rules_revision,
@@ -259,7 +259,7 @@ pub(crate) fn write_receipt(
         tx,
         incoming.id,
         protection.secret,
-        protection.hide_from_ai,
+        protection.hide_from_integrations,
         &outcome.applied_rules,
         protection.flags,
         Some(rules.revision),
@@ -291,7 +291,7 @@ fn merge_state(
     tx: &Connection,
     clip_id: &str,
     secret: bool,
-    hide_from_ai: bool,
+    hide_from_integrations: bool,
     applied_rules: &[String],
     flags: EvalFlags,
     rules_revision: Option<i64>,
@@ -301,7 +301,7 @@ fn merge_state(
         ..Default::default()
     });
     state.rule_secret |= secret;
-    state.rule_hidden_from_ai |= hide_from_ai;
+    state.rule_hidden_from_integrations |= hide_from_integrations;
     if !applied_rules.is_empty() {
         state.applied_rules_json = serde_json::to_string(applied_rules).ok();
     }

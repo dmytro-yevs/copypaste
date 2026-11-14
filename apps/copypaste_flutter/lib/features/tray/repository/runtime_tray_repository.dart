@@ -55,7 +55,6 @@ TrayClip? trayClipOf(runtime.Clip clip, DateTime now) {
   final visibility = ClipVisibility(
     secret: clip.secret,
     ruleSecret: annotations?.ruleSecret ?? false,
-    hiddenFromAi: annotations?.hiddenFromAi ?? false,
     expiresAt: expiresAt == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(expiresAt),

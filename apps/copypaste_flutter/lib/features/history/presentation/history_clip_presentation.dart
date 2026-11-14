@@ -28,7 +28,6 @@ abstract final class HistoryClipPresentation {
     HistoryProvenance.manual => strings.historyProvenanceManual,
     HistoryProvenance.edited => strings.historyProvenanceEdited,
     HistoryProvenance.transformed => strings.historyProvenanceTransformed,
-    HistoryProvenance.aiTool => strings.historyProvenanceAiTool,
     null => null,
   };
 

@@ -62,7 +62,7 @@ impl CapturePlan {
         Self {
             secret: true,
             effects: CaptureEffects {
-                hide_from_ai: true,
+                hide_from_integrations: true,
                 flags: EvalFlags::RULES_INCOMPLETE,
                 ..CaptureEffects::default()
             },
@@ -312,7 +312,7 @@ mod tests {
         add_rule(
             &runtime,
             "b",
-            r#"{"match":"all","conditions":[{"type":"content_text","op":"contains","value":"shout"}],"actions":[{"type":"transform","transform_id":"case.upper"},{"type":"hide_from_ai"}]}"#,
+            r#"{"match":"all","conditions":[{"type":"content_text","op":"contains","value":"shout"}],"actions":[{"type":"transform","transform_id":"case.upper"},{"type":"hide_from_integrations"}]}"#,
         );
         assert!(matches!(
             runtime.capture_text("please skip me"),
@@ -327,7 +327,7 @@ mod tests {
             .store
             .item_annotations(std::slice::from_ref(&row.id))
             .unwrap();
-        assert!(annotations[&row.id].hidden_from_ai);
+        assert!(annotations[&row.id].hidden_from_integrations);
         let text = copypaste_core::decrypt(
             &row.content_ciphertext,
             &row.nonce,

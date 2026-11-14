@@ -243,7 +243,6 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
             copypaste_ipc::EventKind::Peers => "peers",
             copypaste_ipc::EventKind::PasteQueue => "paste_queue",
             copypaste_ipc::EventKind::Library => "library",
-            copypaste_ipc::EventKind::AiApproval => "ai_approval",
             // `progress` already names file-transfer byte progress.
             copypaste_ipc::EventKind::Progress => "operation_progress",
         }
@@ -378,7 +377,6 @@ mod tests {
             (copypaste_ipc::EventKind::Peers, "peers"),
             (copypaste_ipc::EventKind::PasteQueue, "paste_queue"),
             (copypaste_ipc::EventKind::Library, "library"),
-            (copypaste_ipc::EventKind::AiApproval, "ai_approval"),
             (copypaste_ipc::EventKind::Progress, "operation_progress"),
         ] {
             let mapped = runtime_event(copypaste_ipc::EventData {
@@ -391,10 +389,10 @@ mod tests {
                 }),
                 captured: true,
                 captured_item_id: Some("captured-item".into()),
-                library: Some(copypaste_ipc::LibraryKinds::GRANTS),
+                library: Some(copypaste_ipc::LibraryKinds::SET_MEMBERS),
                 ..copypaste_ipc::EventData::change(event, 3)
             });
-            assert_eq!(mapped.library_kinds, Some(64));
+            assert_eq!(mapped.library_kinds, Some(32));
             assert_eq!(mapped.kind, kind);
             assert_eq!(mapped.item_count, 3);
             assert!(mapped.captured);

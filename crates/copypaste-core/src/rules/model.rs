@@ -206,7 +206,7 @@ pub enum Action {
         clear_clipboard_after_secs: Option<u32>,
     },
     MarkSecret {},
-    HideFromAi {},
+    HideFromIntegrations {},
     DeleteAfter {
         duration_ms: i64,
         #[serde(default)]
@@ -229,7 +229,7 @@ impl Action {
     const TYPES: [&'static str; 6] = [
         "dont_save",
         "mark_secret",
-        "hide_from_ai",
+        "hide_from_integrations",
         "delete_after",
         "add_tags",
         "transform",
@@ -242,7 +242,7 @@ impl Action {
             self,
             Self::DontSave { .. }
                 | Self::MarkSecret {}
-                | Self::HideFromAi {}
+                | Self::HideFromIntegrations {}
                 | Self::DeleteAfter { .. }
         )
     }
@@ -252,7 +252,7 @@ impl Action {
         match self {
             Self::DontSave { .. } => "dont_save",
             Self::MarkSecret {} => "mark_secret",
-            Self::HideFromAi {} => "hide_from_ai",
+            Self::HideFromIntegrations {} => "hide_from_integrations",
             Self::DeleteAfter { .. } => "delete_after",
             Self::AddTags { .. } => "add_tags",
             Self::Transform { .. } => "transform",

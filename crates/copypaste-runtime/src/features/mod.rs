@@ -5,7 +5,6 @@
 //! editing a parent module. Until a feature lands its handler answers
 //! `unsupported`.
 
-mod ai;
 mod clips;
 mod delivery;
 mod paste_queue;
@@ -13,7 +12,6 @@ mod rules;
 mod snippets;
 mod transforms;
 
-pub(crate) use ai::AiState;
 pub(crate) use delivery::ClipboardOwner;
 pub(crate) use paste_queue::PasteQueue;
 

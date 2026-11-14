@@ -171,11 +171,6 @@ class RuleTracePanel extends StatelessWidget {
           RuleIcons.action(RuleActionType.markSecret),
           l10n.rulesTraceSecret,
         ),
-      if (trace.hiddenFromAi)
-        line(
-          RuleIcons.action(RuleActionType.hideFromAi),
-          l10n.rulesTraceHidden,
-        ),
       if (trace.expiresAfter case final expiry?)
         line(
           RuleIcons.action(RuleActionType.deleteAfter),

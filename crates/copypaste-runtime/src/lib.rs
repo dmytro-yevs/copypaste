@@ -89,7 +89,6 @@ pub struct Runtime {
     /// Captures content rules skipped, for "Recently skipped".
     skipped_captures: capture_rules::SkippedCaptures,
     paste_queue: features::PasteQueue,
-    ai: features::AiState,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
@@ -364,7 +363,6 @@ impl Runtime {
             deadlines,
             skipped_captures: Mutex::default(),
             paste_queue: features::PasteQueue::default(),
-            ai: features::AiState::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
@@ -838,11 +836,6 @@ impl Runtime {
         self.changes.send(EventKind::PasteQueue, |data| {
             data.paste_queue_revision = Some(revision);
         });
-    }
-
-    /// An AI tool approval is pending or a session's authorization changed.
-    pub fn note_ai_approval(&self) {
-        self.changes.send(EventKind::AiApproval, |_| {});
     }
 
     /// A long operation advanced. Coalesced per request to one event per
@@ -1384,7 +1377,6 @@ fn library_diff(before: &LibraryRevision, after: &LibraryRevision) -> LibraryKin
             before.set_members != after.set_members,
             LibraryKinds::SET_MEMBERS,
         ),
-        (before.grants != after.grants, LibraryKinds::GRANTS),
     ]
     .into_iter()
     .filter(|(changed, _)| *changed)

@@ -695,7 +695,7 @@ pub struct Item {
     /// `content` is a cut preview. Only textual, non-secret items carry it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_count: Option<u32>,
-    /// Rule, expiry, AI and provenance state. Absent when nothing applies.
+    /// Rule, expiry, integration visibility and provenance state. Absent when nothing applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ItemAnnotations>,
 }
@@ -731,7 +731,7 @@ impl Default for Item {
     }
 }
 
-/// Longest provenance string (pipeline or grant name, clip id), in chars.
+/// Longest provenance string (pipeline name, clip id), in chars.
 pub const MAX_PROVENANCE_TEXT_CHARS: usize = 64;
 /// Most transform steps a provenance snapshot records.
 pub const MAX_PROVENANCE_STEPS: usize = 16;
@@ -742,7 +742,6 @@ pub enum ProvenanceKind {
     Manual,
     Edited,
     Transformed,
-    AiTool,
 }
 
 /// One transform identity and version; parameters are never stored.
@@ -761,8 +760,6 @@ pub struct ClipProvenance {
     pub transform_snapshot: Vec<TransformStamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant_name: Option<String>,
 }
 
 /// Per-clip state outside the authenticated payload metadata.
@@ -772,7 +769,7 @@ pub struct ItemAnnotations {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
     #[serde(default)]
-    pub hidden_from_ai: bool,
+    pub hidden_from_integrations: bool,
     /// A rule masks this clip on this device.
     #[serde(default)]
     pub rule_secret: bool,
@@ -810,7 +807,6 @@ impl ItemAnnotations {
             }
             bound_text(&mut provenance.from_clip_id);
             bound_text(&mut provenance.pipeline_name);
-            bound_text(&mut provenance.grant_name);
         }
         self
     }

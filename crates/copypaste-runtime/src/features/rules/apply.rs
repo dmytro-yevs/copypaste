@@ -2,7 +2,7 @@
 //!
 //! Apply runs on this device only and writes ordinary edits that sync:
 //! "Don't save" deletes the clip, a secret or an expiry is set as the user
-//! would set it, hiding from AI writes the clip's note, and tags stay local
+//! would set it, an integration hide writes the clip's note, and tags stay local
 //! rule tags. It stops before the next clip once cancelled. Progress goes
 //! out as coalesced `Progress` events and is kept for `ApplyProgress`.
 
@@ -83,7 +83,7 @@ fn apply(runtime: &Runtime, id: u64, token: &str, request_id: String) -> Respons
         for planned in batch {
             if registration.cancelled() {
                 report.cancelled = true;
-                hide_from_ai(runtime, id, hide, &mut report);
+                hide_from_integrations(runtime, id, hide, &mut report);
                 break 'batches;
             }
             match apply_one(runtime, planned) {
@@ -95,12 +95,12 @@ fn apply(runtime: &Runtime, id: u64, token: &str, request_id: String) -> Respons
                     report.failed += 1;
                 }
             }
-            if planned.hide_from_ai && !planned.delete {
+            if planned.hide_from_integrations && !planned.delete {
                 hide.push(planned.id.clone());
             }
             done += 1;
         }
-        hide_from_ai(runtime, id, hide, &mut report);
+        hide_from_integrations(runtime, id, hide, &mut report);
         report_progress(runtime, &request_id, done, total);
     }
     if report.changed + report.deleted > 0 {
@@ -151,15 +151,20 @@ fn apply_one(runtime: &Runtime, planned: &Planned) -> Result<Applied, StoreError
     Ok(Applied::Changed)
 }
 
-/// Hides a batch of clips from AI tools through their synced notes.
-fn hide_from_ai(runtime: &Runtime, id: u64, ids: Vec<String>, report: &mut RuleApplyReport) {
+/// Hides a batch of clips from integrations through their synced notes.
+fn hide_from_integrations(
+    runtime: &Runtime,
+    id: u64,
+    ids: Vec<String>,
+    report: &mut RuleApplyReport,
+) {
     if ids.is_empty() {
         return;
     }
     let count = u32::try_from(ids.len()).unwrap_or(u32::MAX);
-    let response = runtime.clips(id, ClipOp::SetHiddenFromAi { ids, hidden: true });
+    let response = runtime.clips(id, ClipOp::SetHiddenFromIntegrations { ids, hidden: true });
     if !response.ok {
-        tracing::warn!("clips could not be hidden from AI tools by a rule");
+        tracing::warn!("clips could not be hidden from integrations by a rule");
         report.failed = report.failed.saturating_add(count);
     }
 }

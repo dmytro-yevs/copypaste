@@ -79,15 +79,6 @@ class RuntimeHistoryRepository
   }
 
   @override
-  Future<void> setHiddenFromAi(
-    List<String> clipIds, {
-    required bool hidden,
-  }) async {
-    _ensureActive();
-    await clips.setClipsHiddenFromAi(ids: clipIds, hidden: hidden);
-  }
-
-  @override
   Future<HistoryClipAnnotations> keep(String clipId) async {
     _ensureActive();
     return _fromRuntimeAnnotations(
@@ -618,13 +609,11 @@ HistoryClipAnnotations _fromRuntimeAnnotations(
     expiresAt: expiresAt == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(expiresAt.toInt(), isUtc: true),
-    hiddenFromAi: state.hiddenFromAi,
     ruleSecret: state.ruleSecret,
     provenance: switch (state.provenance?.kind) {
       clips.ClipProvenanceKind.manual => HistoryProvenance.manual,
       clips.ClipProvenanceKind.edited => HistoryProvenance.edited,
       clips.ClipProvenanceKind.transformed => HistoryProvenance.transformed,
-      clips.ClipProvenanceKind.aiTool => HistoryProvenance.aiTool,
       null => null,
     },
     ruleTagIds: state.ruleTagIds,

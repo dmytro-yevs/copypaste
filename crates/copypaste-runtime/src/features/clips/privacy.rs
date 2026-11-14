@@ -1,4 +1,4 @@
-//! Clip annotations and hiding clips from AI tools.
+//! Clip annotations and hiding clips from integrations.
 //!
 //! Hiding is a synced clip note. Each change records the note version it
 //! was based on, so an unhide made concurrently with a hide elsewhere loses
@@ -42,7 +42,7 @@ pub(super) fn handle(runtime: &Runtime, id: u64, op: ClipOp) -> Response {
                 Err(error) => storage_error(id, "clip_annotations", &error),
             }
         }
-        ClipOp::SetHiddenFromAi { ids, hidden } => {
+        ClipOp::SetHiddenFromIntegrations { ids, hidden } => {
             if ids.len() > MAX_IDS {
                 return Response::err(id, ErrorCode::InvalidRequest, MSG_TOO_MANY);
             }
@@ -51,7 +51,7 @@ pub(super) fn handle(runtime: &Runtime, id: u64, op: ClipOp) -> Response {
             for clip_id in &ids {
                 match set_hidden(runtime, clip_id, hidden) {
                     Ok(written) => changed |= written,
-                    Err(error) => return storage_error(id, "set_hidden_from_ai", &error),
+                    Err(error) => return storage_error(id, "set_hidden_from_integrations", &error),
                 }
             }
             if changed {
@@ -79,13 +79,17 @@ fn set_hidden(runtime: &Runtime, clip_id: &str, hidden: bool) -> Result<bool, St
     let mut changed = false;
     if !hidden {
         if let Some(mut state) = runtime.store.clip_local_state(clip_id)? {
-            if state.rule_hidden_from_ai {
-                state.rule_hidden_from_ai = false;
+            if state.rule_hidden_from_integrations {
+                state.rule_hidden_from_integrations = false;
                 changed |= runtime.store.write_clip_local_state(&state)?;
             }
         }
     }
-    if note.as_ref().is_some_and(|note| note.hidden_from_ai) == hidden {
+    if note
+        .as_ref()
+        .is_some_and(|note| note.hidden_from_integrations)
+        == hidden
+    {
         return Ok(changed);
     }
     let base_stamp = runtime
@@ -93,12 +97,12 @@ fn set_hidden(runtime: &Runtime, clip_id: &str, hidden: bool) -> Result<bool, St
         .organization_record_stamp(RecordKey::ClipNote(clip_id))?
         .unwrap_or(0);
     let note = ClipNoteRecord {
-        hidden_from_ai: hidden,
+        hidden_from_integrations: hidden,
         hidden_changed_at: now_ms(),
         base_stamp,
         ..note.unwrap_or(ClipNoteRecord {
             clip_id: clip_id.to_owned(),
-            hidden_from_ai: false,
+            hidden_from_integrations: false,
             hidden_changed_at: 0,
             base_stamp: 0,
             keep: false,

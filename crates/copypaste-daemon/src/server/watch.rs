@@ -22,39 +22,25 @@
 //! the ordinary methods' — and a push channel cannot quietly become a second,
 //! laxer one.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use copypaste_ipc::transport::OwnedWriteHalf;
 use copypaste_ipc::{
-    EventData, EventKindFilter, Method, Response, ResponseData, RuntimeEventData, MAX_EVENT_FILTERS,
+    EventData, EventKindFilter, Response, ResponseData, RuntimeEventData, MAX_EVENT_FILTERS,
 };
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 use tokio::sync::watch;
 use tracing::debug;
 
-use super::dispatch::{gate, parse, CallerIdentity};
 use super::listener::{send, Reader};
 
-/// What a `watch_events` subscription receives, and which connection it is.
+/// What a `watch_events` subscription receives.
 pub(super) struct WatchFilter {
     kinds: Vec<EventKindFilter>,
-    connection: u64,
-    caller: CallerIdentity,
 }
 
 impl WatchFilter {
     /// `None` when the kind list is empty or longer than the shared cap.
-    pub(super) fn new(kinds: Vec<EventKindFilter>, caller: CallerIdentity) -> Option<Self> {
-        static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
-        (!kinds.is_empty() && kinds.len() <= MAX_EVENT_FILTERS).then(|| Self {
-            kinds,
-            connection: NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed),
-            caller,
-        })
-    }
-
-    pub(super) fn connection(&self) -> u64 {
-        self.connection
+    pub(super) fn new(kinds: Vec<EventKindFilter>) -> Option<Self> {
+        (!kinds.is_empty() && kinds.len() <= MAX_EVENT_FILTERS).then_some(Self { kinds })
     }
 
     fn admits(filter: Option<&Self>, event: &RuntimeEventData) -> bool {
@@ -64,30 +50,6 @@ impl WatchFilter {
     fn wants_transfers(filter: Option<&Self>) -> bool {
         filter.is_none_or(|filter| filter.kinds.contains(&EventKindFilter::Transfers))
     }
-}
-
-/// Answer the one request a filtered subscriber may send: attaching an AI
-/// session to this connection. Anything else stays ignored, as on `watch`.
-async fn answer_attach(
-    state: &std::sync::Arc<crate::AppState>,
-    filter: &WatchFilter,
-    line: &str,
-    writer: &mut OwnedWriteHalf,
-) -> bool {
-    let Ok(request) = parse(line) else {
-        return true;
-    };
-    let Method::Ai {
-        op: copypaste_ipc::ai::AiOp::SessionAttach { session_id },
-    } = &request.method
-    else {
-        return true;
-    };
-    let response = match gate(state, &request, filter.caller) {
-        Some(rejection) => *rejection.response,
-        None => state.attach_ai_session(request.id, filter.connection, session_id),
-    };
-    send(writer, &response).await.is_ok()
 }
 
 /// Send events until the client hangs up or the daemon stops.
@@ -162,12 +124,7 @@ pub(super) async fn pump_runtime(
             _ = shutdown.changed() => break,
             next = reader.next() => match next {
                 None | Some(Err(_)) => break,
-                Some(Ok(line)) => {
-                    if let Some(filter) = filter {
-                        if !answer_attach(&state, filter, &line.text, writer).await { break; }
-                    }
-                    continue;
-                }
+                Some(Ok(_)) => continue,
             },
             received = events.recv() => match received {
                 Ok(change) => copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(change), progress: None, capture: None },

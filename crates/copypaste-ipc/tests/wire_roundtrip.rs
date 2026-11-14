@@ -46,13 +46,12 @@ fn item() -> Item {
         line_count: None,
         annotations: Some(copypaste_ipc::ItemAnnotations {
             expires_at: Some(2),
-            hidden_from_ai: true,
+            hidden_from_integrations: true,
             provenance: Some(copypaste_ipc::ClipProvenance {
                 kind: copypaste_ipc::payload::ProvenanceKind::Edited,
                 from_clip_id: Some("item-0".into()),
                 transform_snapshot: Vec::new(),
                 pipeline_name: None,
-                grant_name: None,
             }),
             ..Default::default()
         }),
@@ -145,15 +144,6 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::RuleApplyReport(_) => "rule_apply_report",
         ResponseData::OperationProgress(_) => "operation_progress",
         ResponseData::SkipLog(_) => "skip_log",
-        ResponseData::AiPolicy(_) => "ai_policy",
-        ResponseData::AiGrants(_) => "ai_grants",
-        ResponseData::AiGrant(_) => "ai_grant",
-        ResponseData::AiGrantCreated(_) => "ai_grant_created",
-        ResponseData::AiApprovals(_) => "ai_approvals",
-        ResponseData::AiAccessLog(_) => "ai_access_log",
-        ResponseData::AiStatus(_) => "ai_status",
-        ResponseData::AiSession(_) => "ai_session",
-        ResponseData::AiToolResult(_) => "ai_tool_result",
         ResponseData::Empty {} => "empty",
     }
 }

@@ -977,14 +977,6 @@
   "@settingsSectionTransformsSummary": {
     "description": "Short summary of the Text transforms settings section, used when searching settings."
   },
-  "settingsSectionAiTools": "AI tools",
-  "@settingsSectionAiTools": {
-    "description": "Settings section name in navigation and as the section heading. External AI assistants that can read clipboard history."
-  },
-  "settingsSectionAiToolsSummary": "Connect AI assistants and control what they can see.",
-  "@settingsSectionAiToolsSummary": {
-    "description": "Short summary of the AI tools settings section, used when searching settings."
-  },
   "pasteQueueSettingsTitle": "Paste Queue",
   "@pasteQueueSettingsTitle": {
     "description": "Heading of the Paste Queue settings group. Paste Queue is the product feature name."
@@ -7114,436 +7106,6 @@
   "@snippetsUseFailed": {
     "description": "Error title of the fill-in form."
   },
-  "aiToolsEnableTitle": "Allow AI tools to access CopyPaste on this computer",
-  "@aiToolsEnableTitle": {
-    "description": "Desktop switch that lets connected AI tools (MCP clients) use this computer's CopyPaste."
-  },
-  "aiToolsEnableDescription": "AI tools you connect can read the clipboard items you allow below. Content you share with an AI tool is sent to that tool's provider.",
-  "@aiToolsEnableDescription": {
-    "description": "Explains the AI tools switch."
-  },
-  "aiToolsStatusOn": "On · devices sharing history: {count}",
-  "@aiToolsStatusOn": {
-    "description": "Status under the AI tools switch when it is on.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "aiToolsStatusOff": "Off · connected tools can't reach CopyPaste on this computer",
-  "@aiToolsStatusOff": {
-    "description": "Status under the AI tools switch when it is off."
-  },
-  "aiToolsThreatModelTitle": "What these limits protect",
-  "@aiToolsThreatModelTitle": {
-    "description": "Heading of the AI tools threat-model note."
-  },
-  "aiToolsThreatModel": "Scopes, approvals and redaction limit what an AI tool can see through its CopyPaste connection. They don't protect against other programs running under your account, which can already read your clipboard and history.",
-  "@aiToolsThreatModel": {
-    "description": "Threat-model note: AI tool limits do not protect against other programs of the same user."
-  },
-  "aiToolsGrantsTitle": "Connected tools",
-  "@aiToolsGrantsTitle": {
-    "description": "Heading of the list of connected AI tools."
-  },
-  "aiToolsGrantsDescription": "AI tools connected on any of your computers. A change applies on the computer that owns the connection once it syncs.",
-  "@aiToolsGrantsDescription": {
-    "description": "Explains the connected AI tools list."
-  },
-  "aiToolsServedThrough": "Served through: {desktops}",
-  "@aiToolsServedThrough": {
-    "description": "Android status: computers that serve AI tool connections.",
-    "placeholders": {
-      "desktops": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsConnect": "Connect AI tool",
-  "@aiToolsConnect": {
-    "description": "Button and dialog title that connects a new AI tool."
-  },
-  "aiToolsEmptyTitle": "No AI tools connected yet",
-  "@aiToolsEmptyTitle": {
-    "description": "Empty state of the connected AI tools list on a computer."
-  },
-  "aiToolsEmptyMessage": "Connect an AI tool to let it search the clipboard items you allow.",
-  "@aiToolsEmptyMessage": {
-    "description": "Empty state message of the connected AI tools list on a computer."
-  },
-  "aiToolsEmptyServedTitle": "AI tools connect through your computer",
-  "@aiToolsEmptyServedTitle": {
-    "description": "Empty state title on Android, where AI tools are served by a computer."
-  },
-  "aiToolsEmptyServedMessage": "Turn on AI tools in CopyPaste on a Mac, Windows or Linux computer, and your phone's history will be available there.",
-  "@aiToolsEmptyServedMessage": {
-    "description": "Empty state message on Android explaining how to set up AI tools."
-  },
-  "aiToolsUnknownDevice": "another computer",
-  "@aiToolsUnknownDevice": {
-    "description": "Name used when the computer that owns a connection is unknown."
-  },
-  "aiToolsGrantOwner": "On {device}",
-  "@aiToolsGrantOwner": {
-    "description": "Which computer owns an AI tool connection.",
-    "placeholders": {
-      "device": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsGrantWaiting": "Waiting for first connection",
-  "@aiToolsGrantWaiting": {
-    "description": "Status of an AI tool connection that was never used."
-  },
-  "aiToolsGrantUsed": "Connected · last used {date}",
-  "@aiToolsGrantUsed": {
-    "description": "Status of an AI tool connection with the day it was last used.",
-    "placeholders": {
-      "date": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsGrantRevoked": "Revoked",
-  "@aiToolsGrantRevoked": {
-    "description": "Status of a revoked AI tool connection."
-  },
-  "aiToolsGrantRevokedRemote": "Revoked · takes effect when {device} syncs",
-  "@aiToolsGrantRevokedRemote": {
-    "description": "Status of a connection revoked here but owned by another computer.",
-    "placeholders": {
-      "device": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsGrantReissue": "Needs a new connection after a restore",
-  "@aiToolsGrantReissue": {
-    "description": "Status of a connection whose access key was not restored from a backup."
-  },
-  "aiToolsGrantPaused": "Paused: AI tools are off on this computer",
-  "@aiToolsGrantPaused": {
-    "description": "Status of a connection while AI tools are turned off."
-  },
-  "aiToolsEdit": "Edit",
-  "@aiToolsEdit": {
-    "description": "Action that edits an AI tool connection."
-  },
-  "aiToolsActivity": "View activity",
-  "@aiToolsActivity": {
-    "description": "Action that shows the access log of an AI tool connection."
-  },
-  "aiToolsRevoke": "Revoke",
-  "@aiToolsRevoke": {
-    "description": "Action that revokes an AI tool connection."
-  },
-  "aiToolsRevokeTitle": "Revoke {name}?",
-  "@aiToolsRevokeTitle": {
-    "description": "Confirmation title before revoking an AI tool connection.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsRevokeMessage": "The tool loses access on its next request. To connect it again, create a new connection.",
-  "@aiToolsRevokeMessage": {
-    "description": "Confirmation message before revoking an AI tool connection."
-  },
-  "aiToolsDeleteTitle": "Delete {name}?",
-  "@aiToolsDeleteTitle": {
-    "description": "Confirmation title before deleting an AI tool connection.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsDeleteMessage": "The connection is revoked and removed from all your devices.",
-  "@aiToolsDeleteMessage": {
-    "description": "Confirmation message before deleting an AI tool connection."
-  },
-  "aiToolsChangeFailed": "The change could not be saved.",
-  "@aiToolsChangeFailed": {
-    "description": "Error when an AI tools setting could not be changed."
-  },
-  "aiToolsLoadFailed": "AI tools settings could not be loaded",
-  "@aiToolsLoadFailed": {
-    "description": "Error title when the AI tools settings fail to load."
-  },
-  "aiToolsEditTitle": "Edit connection",
-  "@aiToolsEditTitle": {
-    "description": "Title of the dialog that edits an AI tool connection."
-  },
-  "aiToolsNameLabel": "Name",
-  "@aiToolsNameLabel": {
-    "description": "Label of the AI tool connection name field."
-  },
-  "aiToolsScopesLabel": "Access",
-  "@aiToolsScopesLabel": {
-    "description": "Label above the access scope checkboxes of an AI tool connection."
-  },
-  "aiToolsScopeReadHistory": "Read history",
-  "@aiToolsScopeReadHistory": {
-    "description": "Scope: the AI tool may search and read clipboard history."
-  },
-  "aiToolsScopeReadSnippets": "Read snippets",
-  "@aiToolsScopeReadSnippets": {
-    "description": "Scope: the AI tool may search, read and render snippets."
-  },
-  "aiToolsScopeWriteClipboard": "Write clipboard",
-  "@aiToolsScopeWriteClipboard": {
-    "description": "Scope: the AI tool may put text on this computer's clipboard."
-  },
-  "aiToolsScopeOrganize": "Organize (pin, save snippets)",
-  "@aiToolsScopeOrganize": {
-    "description": "Scope: the AI tool may pin items and save new snippets."
-  },
-  "aiToolsLookbackLabel": "History window",
-  "@aiToolsLookbackLabel": {
-    "description": "Label of how far back unpinned history is visible to an AI tool."
-  },
-  "aiToolsLookbackDay": "Last 24 hours",
-  "@aiToolsLookbackDay": {
-    "description": "History window option."
-  },
-  "aiToolsLookbackWeek": "Last 7 days",
-  "@aiToolsLookbackWeek": {
-    "description": "History window option."
-  },
-  "aiToolsLookbackMonth": "Last 30 days",
-  "@aiToolsLookbackMonth": {
-    "description": "History window option."
-  },
-  "aiToolsLookbackAll": "All history",
-  "@aiToolsLookbackAll": {
-    "description": "History window option."
-  },
-  "aiToolsActivityTitle": "Activity of {name}",
-  "@aiToolsActivityTitle": {
-    "description": "Title of the access log dialog of an AI tool connection.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsActivityEmpty": "No activity yet",
-  "@aiToolsActivityEmpty": {
-    "description": "Empty access log of an AI tool connection."
-  },
-  "aiToolsActivityFailed": "Activity could not be loaded",
-  "@aiToolsActivityFailed": {
-    "description": "Error when the access log fails to load."
-  },
-  "aiToolsActivityEntry": "{tool} · results: {count}",
-  "@aiToolsActivityEntry": {
-    "description": "One access log entry: the tool name the AI tool called and how many results it got.",
-    "placeholders": {
-      "tool": {
-        "type": "String"
-      },
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "aiToolsClientLabel": "AI tool",
-  "@aiToolsClientLabel": {
-    "description": "Label of the client picker in the Connect AI tool dialog."
-  },
-  "aiToolsClientOther": "Other",
-  "@aiToolsClientOther": {
-    "description": "Client picker option for an AI tool that is not listed."
-  },
-  "aiToolsCreate": "Create connection",
-  "@aiToolsCreate": {
-    "description": "Button that creates an AI tool connection and shows its configuration."
-  },
-  "aiToolsConfigHint": "Add this configuration to {client}. Its access key is shown only once.",
-  "@aiToolsConfigHint": {
-    "description": "Instruction above the configuration of a named AI tool.",
-    "placeholders": {
-      "client": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsConfigHintOther": "Add this configuration to your AI tool's MCP settings. Its access key is shown only once.",
-  "@aiToolsConfigHintOther": {
-    "description": "Instruction above the configuration of an unlisted AI tool."
-  },
-  "aiToolsRestartNote": "Next: restart {client} or open a new session.",
-  "@aiToolsRestartNote": {
-    "description": "Next step after adding the configuration to a named AI tool.",
-    "placeholders": {
-      "client": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsRestartNoteOther": "Next: restart your AI tool or open a new session.",
-  "@aiToolsRestartNoteOther": {
-    "description": "Next step after adding the configuration to an unlisted AI tool."
-  },
-  "aiToolsCopied": "Copied",
-  "@aiToolsCopied": {
-    "description": "Toast title after copying an AI tool configuration."
-  },
-  "aiToolsCopiedMessage": "It isn't saved to history, and the clipboard clears in 60 seconds.",
-  "@aiToolsCopiedMessage": {
-    "description": "Toast message after copying a configuration that contains an access key."
-  },
-  "aiToolsCopyFailed": "The configuration could not be copied.",
-  "@aiToolsCopyFailed": {
-    "description": "Error when copying an AI tool configuration failed."
-  },
-  "aiToolsPolicyTitle": "What AI tools can see",
-  "@aiToolsPolicyTitle": {
-    "description": "Heading of the AI exposure policy."
-  },
-  "aiToolsPolicyNote": "Sensitive items and detected credentials are never shared, whatever you allow here.",
-  "@aiToolsPolicyNote": {
-    "description": "Fixed note of the AI exposure policy."
-  },
-  "aiToolsOtherDevicesTitle": "Include items from other devices",
-  "@aiToolsOtherDevicesTitle": {
-    "description": "Policy switch: share history synced from other devices."
-  },
-  "aiToolsOtherDevicesDescription": "History synced from your other devices. Turn off a device to keep its items out.",
-  "@aiToolsOtherDevicesDescription": {
-    "description": "Explains the other devices policy switch and the per-device switches."
-  },
-  "aiToolsKindsTitle": "Content kinds",
-  "@aiToolsKindsTitle": {
-    "description": "Policy row: kinds of items AI tools can read."
-  },
-  "aiToolsKindsDescription": "Kinds of clipboard items AI tools can read.",
-  "@aiToolsKindsDescription": {
-    "description": "Explains the content kinds policy row."
-  },
-  "aiToolsKindText": "Text",
-  "@aiToolsKindText": {
-    "description": "Content kind."
-  },
-  "aiToolsKindLink": "Links",
-  "@aiToolsKindLink": {
-    "description": "Content kind."
-  },
-  "aiToolsKindRichText": "Rich text",
-  "@aiToolsKindRichText": {
-    "description": "Content kind."
-  },
-  "aiToolsKindImage": "Images",
-  "@aiToolsKindImage": {
-    "description": "Content kind."
-  },
-  "aiToolsKindFileMetadata": "File names and sizes",
-  "@aiToolsKindFileMetadata": {
-    "description": "Content kind: file metadata only, never file contents."
-  },
-  "aiToolsExcludedAppsTitle": "Excluded apps",
-  "@aiToolsExcludedAppsTitle": {
-    "description": "Policy row: apps whose items are never shared with AI tools."
-  },
-  "aiToolsExcludedAppsDescription": "Items copied from these apps are never shared.",
-  "@aiToolsExcludedAppsDescription": {
-    "description": "Explains the excluded apps policy row."
-  },
-  "aiToolsAddApp": "Add app",
-  "@aiToolsAddApp": {
-    "description": "Picker that adds an app to the excluded apps."
-  },
-  "aiToolsRemove": "Remove",
-  "@aiToolsRemove": {
-    "description": "Action that removes an app from the excluded apps."
-  },
-  "aiToolsDefaultLookbackTitle": "History window for new connections",
-  "@aiToolsDefaultLookbackTitle": {
-    "description": "Policy row: default history window of new connections."
-  },
-  "aiToolsDefaultLookbackDescription": "Older unpinned items stay invisible to a connection. Pinned items and snippets are not limited.",
-  "@aiToolsDefaultLookbackDescription": {
-    "description": "Explains the history window."
-  },
-  "aiToolsKeywords": "ai mcp assistant claude codex cursor model agent",
-  "@aiToolsKeywords": {
-    "description": "Space-separated search keywords for the AI tools settings; translate and add local synonyms."
-  },
-  "aiToolsApprovalTitle": "{client} wants to access CopyPaste",
-  "@aiToolsApprovalTitle": {
-    "description": "Title of the prompt and notification when an unknown AI tool asks for access. The name is reported by the tool.",
-    "placeholders": {
-      "client": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsReportedName": "Name reported by the app: {name}",
-  "@aiToolsReportedName": {
-    "description": "Line of the access prompt: the name the AI tool reports, which cannot be verified.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsReportedExecutable": "Program: {path}",
-  "@aiToolsReportedExecutable": {
-    "description": "Line of the access prompt: the program that asks for access.",
-    "placeholders": {
-      "path": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsApprovalNote": "Allow only tools you started yourself. Without an answer, the request is denied in 2 minutes.",
-  "@aiToolsApprovalNote": {
-    "description": "Note of the access prompt."
-  },
-  "aiToolsDeny": "Deny",
-  "@aiToolsDeny": {
-    "description": "Button that refuses an AI tool request."
-  },
-  "aiToolsAllow": "Allow",
-  "@aiToolsAllow": {
-    "description": "Button that allows an AI tool request."
-  },
-  "aiToolsVolumeTitle": "Allow more reading?",
-  "@aiToolsVolumeTitle": {
-    "description": "Title of the prompt when an AI tool read a lot in one session."
-  },
-  "aiToolsVolumeMessage": "{client} has read a lot of clipboard history in this session. Allow more?",
-  "@aiToolsVolumeMessage": {
-    "description": "Message of the read-volume prompt.",
-    "placeholders": {
-      "client": {
-        "type": "String"
-      }
-    }
-  },
-  "aiToolsNotificationBody": "Open CopyPaste to allow or deny.",
-  "@aiToolsNotificationBody": {
-    "description": "System notification body for an AI tool access request."
-  },
-  "aiToolsDecisionFailed": "The answer could not be sent. The request is shown again.",
-  "@aiToolsDecisionFailed": {
-    "description": "Error when an approval decision could not be sent."
-  },
-  "aiToolsHide": "Hide from AI tools",
-  "@aiToolsHide": {
-    "description": "Item action that hides a clipboard item from AI tools."
-  },
-  "aiToolsShow": "Show to AI tools",
-  "@aiToolsShow": {
-    "description": "Item action that makes a hidden clipboard item visible to AI tools again."
-  },
-  "aiToolsHiddenState": "Hidden from AI tools",
-  "@aiToolsHiddenState": {
-    "description": "Accessibility state of an item hidden from AI tools."
-  },
   "quickPasteTabQueue": "Queue",
   "@quickPasteTabQueue": {
     "description": "Quick Paste tab that shows the paste queue."
@@ -8056,7 +7618,7 @@
   "@rulesRemoveAction": {
     "description": "Button that removes an action."
   },
-  "rulesActionType": "{type, select, dont_save{Don't save} mark_secret{Mark as secret} hide_from_ai{Hide from AI tools} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}",
+  "rulesActionType": "{type, select, dont_save{Don't save} mark_secret{Mark as secret} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}",
   "@rulesActionType": {
     "description": "Name of a rule action.",
     "placeholders": {
@@ -8256,10 +7818,6 @@
   "@rulesTraceSecret": {
     "description": "Trace result: the copy is saved as secret."
   },
-  "rulesTraceHidden": "Hidden from AI tools",
-  "@rulesTraceHidden": {
-    "description": "Trace result: the copy is hidden from AI tools."
-  },
   "rulesTraceExpires": "Deleted after {duration}",
   "@rulesTraceExpires": {
     "description": "Trace result: the copy is deleted after a duration.",
@@ -8329,15 +7887,6 @@
   "rulesPreviewSecret": "{count, plural, =1{1 would be marked secret} other{{count} would be marked secret}}",
   "@rulesPreviewSecret": {
     "description": "Preview effect: clips that applying would mark secret.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "rulesPreviewHidden": "{count, plural, =1{1 would be hidden from AI tools} other{{count} would be hidden from AI tools}}",
-  "@rulesPreviewHidden": {
-    "description": "Preview effect: clips that applying would hide from AI tools.",
     "placeholders": {
       "count": {
         "type": "int"
@@ -8526,10 +8075,6 @@
   "@historyQueueAddFailed": {
     "description": "Error toast when clips could not be added to the paste queue. Paste Queue is the feature name."
   },
-  "historyHideFromAiFailed": "The clip's AI tools setting could not be changed.",
-  "@historyHideFromAiFailed": {
-    "description": "Error toast when hiding a clip from AI tools, or showing it again, failed."
-  },
   "historyKeepFailed": "This clip could not be kept.",
   "@historyKeepFailed": {
     "description": "Error toast when an expiring clip could not be kept."
@@ -8581,10 +8126,6 @@
   "@historyProvenanceTransformed": {
     "description": "Marker next to the source app of a clip created by a text transform."
   },
-  "historyProvenanceAiTool": "AI tool",
-  "@historyProvenanceAiTool": {
-    "description": "Marker next to the source app of a clip an AI tool copied through CopyPaste."
-  },
   "historyRuleTag": "{name} (auto)",
   "@historyRuleTag": {
     "description": "A tag that a content rule assigned automatically.",
@@ -8601,9 +8142,5 @@
   "historyMetadataRuleTags": "Automatic tags",
   "@historyMetadataRuleTags": {
     "description": "Clip details label for tags assigned by content rules."
-  },
-  "historyMetadataAiTools": "AI tools",
-  "@historyMetadataAiTools": {
-    "description": "Clip details label for whether AI tools can see the clip."
   }
 }

@@ -1,6 +1,6 @@
--- Library records (snippets, rules, pipelines, preferences, AI grants, clip
--- notes) ride the organization channel; their projections and the local
--- per-clip state never enter the version stream themselves.
+-- Library records (snippets, rules, pipelines, preferences, clip notes) ride
+-- the organization channel; their projections and the local per-clip state
+-- never enter the version stream themselves.
 ALTER TABLE organization_records ADD COLUMN kind_class INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE organization_records ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX idx_organization_kind_versions ON organization_records(kind_class, created_at, id);
@@ -102,25 +102,10 @@ CREATE TABLE library_set_members (
     stamp INTEGER NOT NULL,
     PRIMARY KEY (set_name, member)
 );
-CREATE TABLE ai_grants (
-    id TEXT PRIMARY KEY NOT NULL,
-    record_id TEXT NOT NULL,
-    owner_device TEXT NOT NULL,
-    name TEXT NOT NULL,
-    client_name TEXT NOT NULL,
-    client_executable TEXT,
-    scopes_json TEXT NOT NULL,
-    lookback TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    last_used_day INTEGER,
-    revoked INTEGER NOT NULL,
-    revoked_at INTEGER,
-    deleted INTEGER NOT NULL
-);
 CREATE TABLE clip_notes (
     clip_id TEXT PRIMARY KEY NOT NULL,
     record_id TEXT NOT NULL,
-    hidden_from_ai INTEGER NOT NULL,
+    hidden_from_integrations INTEGER NOT NULL,
     hidden_changed_at INTEGER NOT NULL,
     base_stamp INTEGER NOT NULL,
     keep INTEGER NOT NULL,
@@ -138,7 +123,7 @@ CREATE TABLE clip_local_state (
     expiry_duration_ms INTEGER,
     expiry_mono_ms INTEGER,
     rule_secret INTEGER NOT NULL DEFAULT 0,
-    rule_hidden_from_ai INTEGER NOT NULL DEFAULT 0,
+    rule_hidden_from_integrations INTEGER NOT NULL DEFAULT 0,
     applied_rules_json TEXT,
     eval_flags INTEGER NOT NULL DEFAULT 0,
     capture_channel TEXT,
@@ -197,19 +182,6 @@ CREATE TABLE paste_queue_state (
     id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
     last_activity_at INTEGER,
     revision INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE ai_grant_verifiers (
-    grant_id TEXT PRIMARY KEY NOT NULL,
-    verifier BLOB NOT NULL
-);
-CREATE TABLE ai_access_log (
-    seq INTEGER PRIMARY KEY,
-    at INTEGER NOT NULL,
-    grant_id TEXT NOT NULL,
-    tool TEXT NOT NULL,
-    item_ids_json TEXT NOT NULL,
-    result_count INTEGER NOT NULL,
-    error TEXT
 );
 CREATE TABLE cloud_withheld (
     clip_id TEXT PRIMARY KEY NOT NULL,

@@ -17,14 +17,12 @@ use sha2::{Digest, Sha256};
 
 use super::{connection::write_tx, IncomingItem, Store, StoreError};
 
-mod ai;
 mod clip_notes;
 mod preferences;
 mod rules;
 mod snippets;
 mod transforms;
 
-pub use ai::AiGrantRecord;
 pub use clip_notes::{ClipNoteRecord, Provenance, ProvenanceKind, TransformRef};
 pub use preferences::{PreferenceRecord, SetMemberRecord};
 pub use rules::{ContentRuleRecord, RuleOrigin, RulePlacementRecord};
@@ -66,7 +64,6 @@ pub enum Record {
     Pipeline(PipelineRecord),
     Preference(PreferenceRecord),
     SetMember(SetMemberRecord),
-    AiGrant(AiGrantRecord),
     ClipNote(ClipNoteRecord),
 }
 
@@ -81,7 +78,6 @@ pub enum RecordKey<'a> {
     Pipeline(&'a str),
     Preference { namespace: &'a str, key: &'a str },
     SetMember { set: &'a str, member: &'a str },
-    AiGrant(&'a str),
     ClipNote(&'a str),
 }
 
@@ -96,7 +92,6 @@ impl RecordKey<'_> {
             Self::Pipeline(id) => transforms::pipeline_key(id),
             Self::Preference { namespace, key } => preferences::preference_key(namespace, key),
             Self::SetMember { set, member } => preferences::member_key(set, member),
-            Self::AiGrant(id) => ai::grant_key(id),
             Self::ClipNote(clip_id) => clip_notes::note_key(clip_id),
         }
     }
@@ -144,7 +139,6 @@ impl Record {
             Self::Pipeline(r) => transforms::pipeline_key(&r.id),
             Self::Preference(r) => preferences::preference_key(&r.namespace, &r.key),
             Self::SetMember(r) => preferences::member_key(&r.set, &r.member),
-            Self::AiGrant(r) => ai::grant_key(&r.id),
             Self::ClipNote(r) => clip_notes::note_key(&r.clip_id),
         }
     }
@@ -168,7 +162,6 @@ impl Record {
             Self::Pipeline(_) => transforms::PIPELINE_BYTES,
             Self::Preference(_) => preferences::PREFERENCE_BYTES,
             Self::SetMember(_) => preferences::MEMBER_BYTES,
-            Self::AiGrant(_) => ai::GRANT_BYTES,
             Self::ClipNote(_) => clip_notes::NOTE_BYTES,
         }
     }
@@ -204,7 +197,6 @@ impl Record {
             Self::Pipeline(r) => r.valid(),
             Self::Preference(r) => r.valid(),
             Self::SetMember(r) => r.valid(),
-            Self::AiGrant(r) => r.valid(),
             Self::ClipNote(r) => r.valid(),
         }
     }
@@ -218,7 +210,6 @@ impl Record {
         match self {
             Self::Snippet(r) => snippets::keeps_purge(tx, r),
             Self::SnippetBody(r) => snippets::keeps_purged_body(tx, r),
-            Self::AiGrant(r) => ai::keeps_revocation(tx, r),
             Self::ClipNote(r) => clip_notes::keeps_hidden(tx, r),
             Self::ContentRule(r) => {
                 super::rules::keeps_deletion(tx, r, incoming.origin_device_id, incoming.created_at)
@@ -254,7 +245,6 @@ impl Record {
             Self::Pipeline(r) => r.project(tx, record_id, stamp)?,
             Self::Preference(r) => r.project(tx, record_id, stamp)?,
             Self::SetMember(r) => r.project(tx, record_id, stamp)?,
-            Self::AiGrant(r) => r.project(tx, record_id)?,
             Self::ClipNote(r) => r.project(tx, record_id)?,
         }
         Ok(())
@@ -754,7 +744,6 @@ pub(crate) fn read(conn: &Connection, key: RecordKey<'_>) -> Result<Option<Recor
         RecordKey::SetMember { set, member } => {
             preferences::member(conn, set, member)?.map(Record::SetMember)
         }
-        RecordKey::AiGrant(id) => ai::grant(conn, id)?.map(Record::AiGrant),
         RecordKey::ClipNote(id) => clip_notes::note(conn, id)?.map(Record::ClipNote),
     })
 }

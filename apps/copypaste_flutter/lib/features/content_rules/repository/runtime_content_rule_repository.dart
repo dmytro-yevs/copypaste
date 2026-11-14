@@ -150,7 +150,6 @@ class RuntimeContentRuleRepository implements ContentRuleRepository {
         matched: counts.matched,
         deleted: counts.deleted,
         secret: counts.secret,
-        hiddenFromAi: counts.hiddenFromAi,
         expiring: counts.expiring,
         tagged: counts.tagged,
       ),
@@ -330,7 +329,6 @@ class RuntimeContentRuleRepository implements ContentRuleRepository {
     ],
     skipped: view.skipped,
     secret: view.secret,
-    hiddenFromAi: view.hiddenFromAi,
     expiresAfter: view.expiresAfterMs == null
         ? null
         : Duration(milliseconds: view.expiresAfterMs!.toInt()),

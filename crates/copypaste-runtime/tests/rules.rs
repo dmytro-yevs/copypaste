@@ -160,8 +160,7 @@ fn contains(value: &str, actions: &str) -> String {
     )
 }
 
-const MARK: &str =
-    r#"{"type":"mark_secret"},{"type":"hide_from_ai"},{"type":"add_tags","tag_ids":["t1"]}"#;
+const MARK: &str = r#"{"type":"mark_secret"},{"type":"hide_from_integrations"},{"type":"add_tags","tag_ids":["t1"]}"#;
 
 fn preview(device: &Device, request_id: &str, rule_id: &str) -> Response {
     device.request(RuleOp::Preview {
@@ -224,7 +223,7 @@ fn editing_a_rule_changes_existing_clips_only_once_applied() {
         .unwrap();
     let tag = store.history_tags(&[]).unwrap().tags.remove(0).id;
     let actions = format!(
-        r#"{{"type":"mark_secret"}},{{"type":"hide_from_ai"}},{{"type":"add_tags","tag_ids":["{tag}"]}}"#
+        r#"{{"type":"mark_secret"}},{{"type":"hide_from_integrations"}},{{"type":"add_tags","tag_ids":["{tag}"]}}"#
     );
     let marking = device.save(None, &contains("alpha", &actions));
     let skipping = device.save(None, &contains("obsolete", r#"{"type":"dont_save"}"#));
@@ -253,7 +252,7 @@ fn editing_a_rule_changes_existing_clips_only_once_applied() {
         .unwrap()
         .remove(&target)
         .unwrap();
-    assert!(annotations.hidden_from_ai);
+    assert!(annotations.hidden_from_integrations);
     assert_eq!(annotations.rule_tag_ids, [tag]);
     let ResponseData::OperationProgress(Some(progress)) = device.rules(RuleOp::ApplyProgress {
         request_id: "a1".into(),
@@ -291,7 +290,7 @@ fn editing_a_rule_changes_existing_clips_only_once_applied() {
     else {
         panic!("no trace");
     };
-    assert!(trace.secret && trace.hidden_from_ai);
+    assert!(trace.secret && trace.hidden_from_integrations);
     assert!(trace
         .steps
         .iter()

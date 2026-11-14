@@ -160,7 +160,9 @@ fn validate_actions(actions: &[ActionSlot], errors: &mut Vec<RuleError>) {
             Action::Transform { transform_id, .. } => {
                 (!valid_id(transform_id)).then_some(RuleErrorCode::InvalidTransform)
             }
-            Action::DontSave { .. } | Action::MarkSecret {} | Action::HideFromAi {} => None,
+            Action::DontSave { .. } | Action::MarkSecret {} | Action::HideFromIntegrations {} => {
+                None
+            }
         };
         if let Some(code) = invalid {
             errors.push(RuleError::at(path, code));

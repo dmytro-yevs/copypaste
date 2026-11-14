@@ -9,7 +9,7 @@ use super::{required_line, StoreError};
 
 pub(super) const PREFERENCE_BYTES: usize = 8 * 1024;
 pub(super) const MEMBER_BYTES: usize = 2 * 1024;
-const NAMESPACES: &[&str] = &["snippets", "transforms", "ai_policy", "quick_access"];
+const NAMESPACES: &[&str] = &["snippets", "transforms", "quick_access"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,7 +39,7 @@ pub(super) fn member_key(set: &str, member: &str) -> String {
     )
 }
 
-/// A feature namespace such as `snippets` or `ai_policy.devices`. It never
+/// A feature namespace such as `snippets` or `transforms.hidden`. It never
 /// contains `:`, which keeps the record keys unambiguous.
 fn namespace(name: &str) -> bool {
     name.len() <= 64

@@ -816,13 +816,6 @@ class AppLocalizationsTr extends AppLocalizations {
       'Favoriler, işlem hatları ve yapıştırmada varsayılan dönüşümler.';
 
   @override
-  String get settingsSectionAiTools => 'Yapay zekâ araçları';
-
-  @override
-  String get settingsSectionAiToolsSummary =>
-      'Yapay zekâ asistanlarını bağlayın ve neleri görebileceklerini denetleyin.';
-
-  @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
 
   @override
@@ -5711,325 +5704,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get snippetsUseFailed => 'Parçacık kullanılamadı';
 
   @override
-  String get aiToolsEnableTitle =>
-      'Yapay zekâ araçlarının bu bilgisayardaki CopyPaste\'e erişmesine izin ver';
-
-  @override
-  String get aiToolsEnableDescription =>
-      'Bağladığınız yapay zekâ araçları, aşağıda izin verdiğiniz pano öğelerini okuyabilir. Bir yapay zekâ aracıyla paylaştığınız içerik o aracın sağlayıcısına gönderilir.';
-
-  @override
-  String aiToolsStatusOn(int count) {
-    return 'Açık · geçmişini paylaşan cihazlar: $count';
-  }
-
-  @override
-  String get aiToolsStatusOff =>
-      'Kapalı · bağlı araçlar bu bilgisayardaki CopyPaste\'e erişemez';
-
-  @override
-  String get aiToolsThreatModelTitle => 'Bu sınırlar neye karşı korur';
-
-  @override
-  String get aiToolsThreatModel =>
-      'İzinler, onaylar ve gizleme, bir yapay zekâ aracının CopyPaste bağlantısı üzerinden gördüklerini sınırlar. Hesabınızda çalışan ve panonuzu ile geçmişinizi zaten okuyabilen diğer programlara karşı koruma sağlamaz.';
-
-  @override
-  String get aiToolsGrantsTitle => 'Bağlı araçlar';
-
-  @override
-  String get aiToolsGrantsDescription =>
-      'Bilgisayarlarınızdan herhangi birinde bağlı yapay zekâ araçları. Bir değişiklik, bağlantının sahibi olan bilgisayar eşitlendiğinde uygulanır.';
-
-  @override
-  String aiToolsServedThrough(String desktops) {
-    return 'Sunan: $desktops';
-  }
-
-  @override
-  String get aiToolsConnect => 'Yapay zekâ aracı bağla';
-
-  @override
-  String get aiToolsEmptyTitle => 'Henüz bağlı yapay zekâ aracı yok';
-
-  @override
-  String get aiToolsEmptyMessage =>
-      'İzin verdiğiniz pano öğelerinde arama yapabilmesi için bir yapay zekâ aracı bağlayın.';
-
-  @override
-  String get aiToolsEmptyServedTitle =>
-      'Yapay zekâ araçları bilgisayarınız üzerinden bağlanır';
-
-  @override
-  String get aiToolsEmptyServedMessage =>
-      'Bir Mac, Windows veya Linux bilgisayardaki CopyPaste\'te yapay zekâ araçlarını açın; telefonunuzun geçmişi orada kullanılabilir olur.';
-
-  @override
-  String get aiToolsUnknownDevice => 'başka bir bilgisayar';
-
-  @override
-  String aiToolsGrantOwner(String device) {
-    return 'Cihaz: $device';
-  }
-
-  @override
-  String get aiToolsGrantWaiting => 'İlk bağlantı bekleniyor';
-
-  @override
-  String aiToolsGrantUsed(String date) {
-    return 'Bağlı · son kullanım $date';
-  }
-
-  @override
-  String get aiToolsGrantRevoked => 'İptal edildi';
-
-  @override
-  String aiToolsGrantRevokedRemote(String device) {
-    return 'İptal edildi · $device eşitlendiğinde geçerli olur';
-  }
-
-  @override
-  String get aiToolsGrantReissue =>
-      'Geri yüklemeden sonra yeni bir bağlantı gerekiyor';
-
-  @override
-  String get aiToolsGrantPaused =>
-      'Duraklatıldı: yapay zekâ araçları bu bilgisayarda kapalı';
-
-  @override
-  String get aiToolsEdit => 'Düzenle';
-
-  @override
-  String get aiToolsActivity => 'Etkinliği göster';
-
-  @override
-  String get aiToolsRevoke => 'İptal et';
-
-  @override
-  String aiToolsRevokeTitle(String name) {
-    return '$name iptal edilsin mi?';
-  }
-
-  @override
-  String get aiToolsRevokeMessage =>
-      'Araç bir sonraki isteğinde erişimini kaybeder. Yeniden bağlamak için yeni bir bağlantı oluşturun.';
-
-  @override
-  String aiToolsDeleteTitle(String name) {
-    return '$name silinsin mi?';
-  }
-
-  @override
-  String get aiToolsDeleteMessage =>
-      'Bağlantı iptal edilir ve tüm cihazlarınızdan kaldırılır.';
-
-  @override
-  String get aiToolsChangeFailed => 'Değişiklik kaydedilemedi.';
-
-  @override
-  String get aiToolsLoadFailed => 'Yapay zekâ araçları ayarları yüklenemedi';
-
-  @override
-  String get aiToolsEditTitle => 'Bağlantıyı düzenle';
-
-  @override
-  String get aiToolsNameLabel => 'Ad';
-
-  @override
-  String get aiToolsScopesLabel => 'Erişim';
-
-  @override
-  String get aiToolsScopeReadHistory => 'Geçmişi okuma';
-
-  @override
-  String get aiToolsScopeReadSnippets => 'Parçacıkları okuma';
-
-  @override
-  String get aiToolsScopeWriteClipboard => 'Panoya yazma';
-
-  @override
-  String get aiToolsScopeOrganize => 'Düzenleme (sabitleme, parçacık kaydetme)';
-
-  @override
-  String get aiToolsLookbackLabel => 'Geçmiş aralığı';
-
-  @override
-  String get aiToolsLookbackDay => 'Son 24 saat';
-
-  @override
-  String get aiToolsLookbackWeek => 'Son 7 gün';
-
-  @override
-  String get aiToolsLookbackMonth => 'Son 30 gün';
-
-  @override
-  String get aiToolsLookbackAll => 'Tüm geçmiş';
-
-  @override
-  String aiToolsActivityTitle(String name) {
-    return '$name etkinliği';
-  }
-
-  @override
-  String get aiToolsActivityEmpty => 'Henüz etkinlik yok';
-
-  @override
-  String get aiToolsActivityFailed => 'Etkinlik yüklenemedi';
-
-  @override
-  String aiToolsActivityEntry(String tool, int count) {
-    return '$tool · sonuç: $count';
-  }
-
-  @override
-  String get aiToolsClientLabel => 'Yapay zekâ aracı';
-
-  @override
-  String get aiToolsClientOther => 'Diğer';
-
-  @override
-  String get aiToolsCreate => 'Bağlantı oluştur';
-
-  @override
-  String aiToolsConfigHint(String client) {
-    return 'Bu yapılandırmayı $client uygulamasına ekleyin. Erişim anahtarı yalnızca bir kez gösterilir.';
-  }
-
-  @override
-  String get aiToolsConfigHintOther =>
-      'Bu yapılandırmayı yapay zekâ aracınızın MCP ayarlarına ekleyin. Erişim anahtarı yalnızca bir kez gösterilir.';
-
-  @override
-  String aiToolsRestartNote(String client) {
-    return 'Sonraki adım: $client uygulamasını yeniden başlatın veya yeni bir oturum açın.';
-  }
-
-  @override
-  String get aiToolsRestartNoteOther =>
-      'Sonraki adım: yapay zekâ aracınızı yeniden başlatın veya yeni bir oturum açın.';
-
-  @override
-  String get aiToolsCopied => 'Kopyalandı';
-
-  @override
-  String get aiToolsCopiedMessage =>
-      'Geçmişe kaydedilmez ve pano 60 saniye içinde temizlenir.';
-
-  @override
-  String get aiToolsCopyFailed => 'Yapılandırma kopyalanamadı.';
-
-  @override
-  String get aiToolsPolicyTitle => 'Yapay zekâ araçlarının görebilecekleri';
-
-  @override
-  String get aiToolsPolicyNote =>
-      'Hassas öğeler ve algılanan kimlik bilgileri, burada neye izin verirseniz verin asla paylaşılmaz.';
-
-  @override
-  String get aiToolsOtherDevicesTitle => 'Diğer cihazlardaki öğeleri dahil et';
-
-  @override
-  String get aiToolsOtherDevicesDescription =>
-      'Diğer cihazlarınızdan eşitlenen geçmiş. Bir cihazın öğelerini dışarıda tutmak için onu kapatın.';
-
-  @override
-  String get aiToolsKindsTitle => 'İçerik türleri';
-
-  @override
-  String get aiToolsKindsDescription =>
-      'Yapay zekâ araçlarının okuyabileceği pano öğesi türleri.';
-
-  @override
-  String get aiToolsKindText => 'Metin';
-
-  @override
-  String get aiToolsKindLink => 'Bağlantılar';
-
-  @override
-  String get aiToolsKindRichText => 'Zengin metin';
-
-  @override
-  String get aiToolsKindImage => 'Görseller';
-
-  @override
-  String get aiToolsKindFileMetadata => 'Dosya adları ve boyutları';
-
-  @override
-  String get aiToolsExcludedAppsTitle => 'Hariç tutulan uygulamalar';
-
-  @override
-  String get aiToolsExcludedAppsDescription =>
-      'Bu uygulamalardan kopyalanan öğeler asla paylaşılmaz.';
-
-  @override
-  String get aiToolsAddApp => 'Uygulama ekle';
-
-  @override
-  String get aiToolsRemove => 'Kaldır';
-
-  @override
-  String get aiToolsDefaultLookbackTitle =>
-      'Yeni bağlantılar için geçmiş aralığı';
-
-  @override
-  String get aiToolsDefaultLookbackDescription =>
-      'Daha eski, sabitlenmemiş öğeler bağlantı için görünmez kalır. Sabitlenmiş öğeler ve parçacıklar sınırlanmaz.';
-
-  @override
-  String get aiToolsKeywords =>
-      'yapay zekâ ai mcp asistan claude codex cursor model ajan';
-
-  @override
-  String aiToolsApprovalTitle(String client) {
-    return '$client, CopyPaste\'e erişmek istiyor';
-  }
-
-  @override
-  String aiToolsReportedName(String name) {
-    return 'Uygulamanın bildirdiği ad: $name';
-  }
-
-  @override
-  String aiToolsReportedExecutable(String path) {
-    return 'Program: $path';
-  }
-
-  @override
-  String get aiToolsApprovalNote =>
-      'Yalnızca kendi başlattığınız araçlara izin verin. Yanıt verilmezse istek 2 dakika içinde reddedilir.';
-
-  @override
-  String get aiToolsDeny => 'Reddet';
-
-  @override
-  String get aiToolsAllow => 'İzin ver';
-
-  @override
-  String get aiToolsVolumeTitle => 'Daha fazla okumaya izin verilsin mi?';
-
-  @override
-  String aiToolsVolumeMessage(String client) {
-    return '$client bu oturumda çok fazla pano geçmişi okudu. Daha fazlasına izin verilsin mi?';
-  }
-
-  @override
-  String get aiToolsNotificationBody =>
-      'İzin vermek veya reddetmek için CopyPaste\'i açın.';
-
-  @override
-  String get aiToolsDecisionFailed =>
-      'Yanıt gönderilemedi. İstek yeniden gösterilecek.';
-
-  @override
-  String get aiToolsHide => 'Yapay zekâ araçlarından gizle';
-
-  @override
-  String get aiToolsShow => 'Yapay zekâ araçlarına göster';
-
-  @override
-  String get aiToolsHiddenState => 'Yapay zekâ araçlarından gizli';
-
-  @override
   String get quickPasteTabQueue => 'Kuyruk';
 
   @override
@@ -6468,7 +6142,6 @@ class AppLocalizationsTr extends AppLocalizations {
     String _temp0 = intl.Intl.selectLogic(type, {
       'dont_save': 'Kaydetme',
       'mark_secret': 'Gizli olarak işaretle',
-      'hide_from_ai': 'Yapay zekâ araçlarından gizle',
       'delete_after': 'Şu süre sonra sil',
       'add_tags': 'Etiket ekle',
       'transform': 'Dönüştür',
@@ -6668,9 +6341,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get rulesTraceSecret => 'Gizli olarak kaydedilir';
 
   @override
-  String get rulesTraceHidden => 'Yapay zekâ araçlarından gizlenir';
-
-  @override
   String rulesTraceExpires(String duration) {
     return '$duration sonra silinir';
   }
@@ -6725,16 +6395,6 @@ class AppLocalizationsTr extends AppLocalizations {
       count,
       locale: localeName,
       other: '$count öğe gizli olarak işaretlenir',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesPreviewHidden(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count öğe yapay zekâ araçlarından gizlenir',
     );
     return '$_temp0';
   }
@@ -6897,10 +6557,6 @@ class AppLocalizationsTr extends AppLocalizations {
       'Paste Queue\'ya eklenemedi. Açık olduğunu kontrol edin.';
 
   @override
-  String get historyHideFromAiFailed =>
-      'Bu öğenin yapay zekâ araçları ayarı değiştirilemedi.';
-
-  @override
   String get historyKeepFailed => 'Bu öğe saklanamadı.';
 
   @override
@@ -6952,9 +6608,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get historyProvenanceTransformed => 'Dönüştürüldü';
 
   @override
-  String get historyProvenanceAiTool => 'Yapay zekâ aracı';
-
-  @override
   String historyRuleTag(String name) {
     return '$name (otomatik)';
   }
@@ -6964,7 +6617,4 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => 'Otomatik etiketler';
-
-  @override
-  String get historyMetadataAiTools => 'Yapay zekâ araçları';
 }

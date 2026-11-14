@@ -47,7 +47,6 @@ pub enum ClipProvenanceKind {
     Manual,
     Edited,
     Transformed,
-    AiTool,
 }
 
 #[derive(Debug, Clone)]
@@ -62,14 +61,12 @@ pub struct ClipProvenance {
     pub from_clip_id: Option<String>,
     pub transform_snapshot: Vec<ClipTransformStamp>,
     pub pipeline_name: Option<String>,
-    pub grant_name: Option<String>,
 }
 
-/// Rule, expiry, AI and provenance state of one clip.
+/// Rule, expiry and provenance state of one clip.
 #[derive(Debug, Clone)]
 pub struct ClipAnnotationState {
     pub expires_at_ms: Option<i64>,
-    pub hidden_from_ai: bool,
     pub rule_secret: bool,
     pub provenance: Option<ClipProvenance>,
     pub rule_tag_ids: Vec<String>,
@@ -81,14 +78,12 @@ impl From<copypaste_ipc::ItemAnnotations> for ClipAnnotationState {
         use copypaste_ipc::payload::ProvenanceKind;
         Self {
             expires_at_ms: value.expires_at,
-            hidden_from_ai: value.hidden_from_ai,
             rule_secret: value.rule_secret,
             provenance: value.provenance.map(|provenance| ClipProvenance {
                 kind: match provenance.kind {
                     ProvenanceKind::Manual => ClipProvenanceKind::Manual,
                     ProvenanceKind::Edited => ClipProvenanceKind::Edited,
                     ProvenanceKind::Transformed => ClipProvenanceKind::Transformed,
-                    ProvenanceKind::AiTool => ClipProvenanceKind::AiTool,
                 },
                 from_clip_id: provenance.from_clip_id,
                 transform_snapshot: provenance
@@ -100,7 +95,6 @@ impl From<copypaste_ipc::ItemAnnotations> for ClipAnnotationState {
                     })
                     .collect(),
                 pipeline_name: provenance.pipeline_name,
-                grant_name: provenance.grant_name,
             }),
             rule_tag_ids: value.rule_tag_ids,
             keep: value.keep,
@@ -149,11 +143,6 @@ pub async fn clip_annotations(ids: Vec<String>) -> Result<Vec<ClipAnnotationEntr
             annotations: entry.annotations.into(),
         })
         .collect())
-}
-
-/// Un-hiding is accepted only from the CopyPaste app.
-pub async fn set_clips_hidden_from_ai(ids: Vec<String>, hidden: bool) -> Result<(), RuntimeError> {
-    empty_response(clip_op(ClipOp::SetHiddenFromAi { ids, hidden })).await
 }
 
 /// Clear any expiry and keep the clip.

@@ -278,7 +278,6 @@ class RulePreviewCountsView {
   final int matched;
   final int deleted;
   final int secret;
-  final int hiddenFromAi;
   final int expiring;
   final int tagged;
 
@@ -286,7 +285,6 @@ class RulePreviewCountsView {
     required this.matched,
     required this.deleted,
     required this.secret,
-    required this.hiddenFromAi,
     required this.expiring,
     required this.tagged,
   });
@@ -296,7 +294,6 @@ class RulePreviewCountsView {
       matched.hashCode ^
       deleted.hashCode ^
       secret.hashCode ^
-      hiddenFromAi.hashCode ^
       expiring.hashCode ^
       tagged.hashCode;
 
@@ -308,7 +305,6 @@ class RulePreviewCountsView {
           matched == other.matched &&
           deleted == other.deleted &&
           secret == other.secret &&
-          hiddenFromAi == other.hiddenFromAi &&
           expiring == other.expiring &&
           tagged == other.tagged;
 }
@@ -520,7 +516,6 @@ class RuleTraceView {
   final List<RuleTraceStepView> steps;
   final bool skipped;
   final bool secret;
-  final bool hiddenFromAi;
   final BigInt? expiresAfterMs;
   final List<String> tagIds;
   final List<String> transformIds;
@@ -529,7 +524,6 @@ class RuleTraceView {
     required this.steps,
     required this.skipped,
     required this.secret,
-    required this.hiddenFromAi,
     this.expiresAfterMs,
     required this.tagIds,
     required this.transformIds,
@@ -540,7 +534,6 @@ class RuleTraceView {
       steps.hashCode ^
       skipped.hashCode ^
       secret.hashCode ^
-      hiddenFromAi.hashCode ^
       expiresAfterMs.hashCode ^
       tagIds.hashCode ^
       transformIds.hashCode;
@@ -553,7 +546,6 @@ class RuleTraceView {
           steps == other.steps &&
           skipped == other.skipped &&
           secret == other.secret &&
-          hiddenFromAi == other.hiddenFromAi &&
           expiresAfterMs == other.expiresAfterMs &&
           tagIds == other.tagIds &&
           transformIds == other.transformIds;

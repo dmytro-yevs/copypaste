@@ -33,10 +33,6 @@ import 'app/navigation/settings_presentation_lifecycle.dart';
 import 'app/shell/macos_window_header.dart';
 import 'app/theme/app_motion.dart';
 import 'app/theme/app_theme.dart';
-import 'features/ai_tools/controller/ai_approval_controller.dart';
-import 'features/ai_tools/controller/ai_tools_controller.dart';
-import 'features/ai_tools/repository/ai_approval_notifier.dart';
-import 'features/ai_tools/repository/runtime_ai_tools_repository.dart';
 import 'features/content_rules/controller/content_rules_controller.dart';
 import 'features/content_rules/repository/runtime_content_rule_repository.dart';
 import 'features/devices/devices.dart';
@@ -704,7 +700,6 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   AppFeatures _createFeatures() {
     final desktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
     final authenticator = MethodChannelDeviceAuthenticator();
-    final aiTools = RuntimeAiToolsRepository();
     final host = _quickPasteHost;
     final registrar = _shortcutRegistrar;
     final desktopWindow = _desktopWindow;
@@ -737,15 +732,6 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       contentRules: ContentRulesController(
         repository: RuntimeContentRuleRepository(),
       ),
-      aiTools: AiToolsController(repository: aiTools, serving: desktop),
-      aiApproval: desktop
-          ? AiApprovalController(
-              repository: aiTools,
-              notifier: SystemAiApprovalNotifier(),
-              visible: _visibility,
-              showWindow: () => unawaited(_desktopWindow?.showFromTrayOrDock()),
-            )
-          : null,
       quickAccess: Platform.isAndroid
           ? QuickAccessController(
               const MethodChannelAndroidQuickAccessGateway(),

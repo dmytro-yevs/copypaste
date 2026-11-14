@@ -829,13 +829,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Улюблені, конвеєри й типові перетворення під час вставлення.';
 
   @override
-  String get settingsSectionAiTools => 'Інструменти ШІ';
-
-  @override
-  String get settingsSectionAiToolsSummary =>
-      'Підключайте ШІ-асистентів і керуйте тим, що вони бачать.';
-
-  @override
   String get pasteQueueSettingsTitle => 'Paste Queue';
 
   @override
@@ -5834,327 +5827,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get snippetsUseFailed => 'Не вдалося використати фрагмент';
 
   @override
-  String get aiToolsEnableTitle =>
-      'Дозволити інструментам ШІ доступ до CopyPaste на цьому комп’ютері';
-
-  @override
-  String get aiToolsEnableDescription =>
-      'Підключені інструменти ШІ можуть читати елементи буфера обміну, які ви дозволите нижче. Усе, чим ви ділитеся з інструментом ШІ, надсилається його постачальнику.';
-
-  @override
-  String aiToolsStatusOn(int count) {
-    return 'Увімкнено · пристроїв, що діляться історією: $count';
-  }
-
-  @override
-  String get aiToolsStatusOff =>
-      'Вимкнено · підключені інструменти не мають доступу до CopyPaste на цьому комп’ютері';
-
-  @override
-  String get aiToolsThreatModelTitle => 'Від чого захищають ці обмеження';
-
-  @override
-  String get aiToolsThreatModel =>
-      'Дозволи, підтвердження та приховування обмежують те, що інструмент ШІ бачить через підключення до CopyPaste. Вони не захищають від інших програм, запущених під вашим обліковим записом, які й так можуть читати буфер обміну та історію.';
-
-  @override
-  String get aiToolsGrantsTitle => 'Підключені інструменти';
-
-  @override
-  String get aiToolsGrantsDescription =>
-      'Інструменти ШІ, підключені на будь-якому з ваших комп’ютерів. Зміна набуває чинності на комп’ютері, якому належить підключення, після синхронізації.';
-
-  @override
-  String aiToolsServedThrough(String desktops) {
-    return 'Обслуговується через: $desktops';
-  }
-
-  @override
-  String get aiToolsConnect => 'Підключити інструмент ШІ';
-
-  @override
-  String get aiToolsEmptyTitle => 'Ще немає підключених інструментів ШІ';
-
-  @override
-  String get aiToolsEmptyMessage =>
-      'Підключіть інструмент ШІ, щоб він міг шукати серед дозволених елементів буфера обміну.';
-
-  @override
-  String get aiToolsEmptyServedTitle =>
-      'Інструменти ШІ підключаються через комп’ютер';
-
-  @override
-  String get aiToolsEmptyServedMessage =>
-      'Увімкніть інструменти ШІ в CopyPaste на комп’ютері з Mac, Windows або Linux, і там стане доступною історія вашого телефона.';
-
-  @override
-  String get aiToolsUnknownDevice => 'інший комп’ютер';
-
-  @override
-  String aiToolsGrantOwner(String device) {
-    return 'На $device';
-  }
-
-  @override
-  String get aiToolsGrantWaiting => 'Очікує першого підключення';
-
-  @override
-  String aiToolsGrantUsed(String date) {
-    return 'Підключено · востаннє використано $date';
-  }
-
-  @override
-  String get aiToolsGrantRevoked => 'Відкликано';
-
-  @override
-  String aiToolsGrantRevokedRemote(String device) {
-    return 'Відкликано · набуде чинності після синхронізації $device';
-  }
-
-  @override
-  String get aiToolsGrantReissue =>
-      'Після відновлення потрібне нове підключення';
-
-  @override
-  String get aiToolsGrantPaused =>
-      'Призупинено: інструменти ШІ вимкнено на цьому комп’ютері';
-
-  @override
-  String get aiToolsEdit => 'Змінити';
-
-  @override
-  String get aiToolsActivity => 'Переглянути активність';
-
-  @override
-  String get aiToolsRevoke => 'Відкликати';
-
-  @override
-  String aiToolsRevokeTitle(String name) {
-    return 'Відкликати $name?';
-  }
-
-  @override
-  String get aiToolsRevokeMessage =>
-      'Інструмент втратить доступ під час наступного запиту. Щоб підключити його знову, створіть нове підключення.';
-
-  @override
-  String aiToolsDeleteTitle(String name) {
-    return 'Видалити $name?';
-  }
-
-  @override
-  String get aiToolsDeleteMessage =>
-      'Підключення буде відкликано й видалено з усіх ваших пристроїв.';
-
-  @override
-  String get aiToolsChangeFailed => 'Не вдалося зберегти зміну.';
-
-  @override
-  String get aiToolsLoadFailed =>
-      'Не вдалося завантажити налаштування інструментів ШІ';
-
-  @override
-  String get aiToolsEditTitle => 'Змінити підключення';
-
-  @override
-  String get aiToolsNameLabel => 'Назва';
-
-  @override
-  String get aiToolsScopesLabel => 'Доступ';
-
-  @override
-  String get aiToolsScopeReadHistory => 'Читати історію';
-
-  @override
-  String get aiToolsScopeReadSnippets => 'Читати фрагменти';
-
-  @override
-  String get aiToolsScopeWriteClipboard => 'Записувати в буфер обміну';
-
-  @override
-  String get aiToolsScopeOrganize =>
-      'Упорядковувати (закріплювати, зберігати фрагменти)';
-
-  @override
-  String get aiToolsLookbackLabel => 'Період історії';
-
-  @override
-  String get aiToolsLookbackDay => 'Останні 24 години';
-
-  @override
-  String get aiToolsLookbackWeek => 'Останні 7 днів';
-
-  @override
-  String get aiToolsLookbackMonth => 'Останні 30 днів';
-
-  @override
-  String get aiToolsLookbackAll => 'Уся історія';
-
-  @override
-  String aiToolsActivityTitle(String name) {
-    return 'Активність: $name';
-  }
-
-  @override
-  String get aiToolsActivityEmpty => 'Активності ще немає';
-
-  @override
-  String get aiToolsActivityFailed => 'Не вдалося завантажити активність';
-
-  @override
-  String aiToolsActivityEntry(String tool, int count) {
-    return '$tool · результатів: $count';
-  }
-
-  @override
-  String get aiToolsClientLabel => 'Інструмент ШІ';
-
-  @override
-  String get aiToolsClientOther => 'Інший';
-
-  @override
-  String get aiToolsCreate => 'Створити підключення';
-
-  @override
-  String aiToolsConfigHint(String client) {
-    return 'Додайте цю конфігурацію до $client. Її ключ доступу показується лише один раз.';
-  }
-
-  @override
-  String get aiToolsConfigHintOther =>
-      'Додайте цю конфігурацію до налаштувань MCP вашого інструмента ШІ. Її ключ доступу показується лише один раз.';
-
-  @override
-  String aiToolsRestartNote(String client) {
-    return 'Далі: перезапустіть $client або відкрийте новий сеанс.';
-  }
-
-  @override
-  String get aiToolsRestartNoteOther =>
-      'Далі: перезапустіть інструмент ШІ або відкрийте новий сеанс.';
-
-  @override
-  String get aiToolsCopied => 'Скопійовано';
-
-  @override
-  String get aiToolsCopiedMessage =>
-      'Це не зберігається в історії, а буфер обміну очиститься через 60 секунд.';
-
-  @override
-  String get aiToolsCopyFailed => 'Не вдалося скопіювати конфігурацію.';
-
-  @override
-  String get aiToolsPolicyTitle => 'Що бачать інструменти ШІ';
-
-  @override
-  String get aiToolsPolicyNote =>
-      'Конфіденційні елементи та виявлені облікові дані ніколи не передаються, хоч би що ви тут дозволили.';
-
-  @override
-  String get aiToolsOtherDevicesTitle => 'Включати елементи з інших пристроїв';
-
-  @override
-  String get aiToolsOtherDevicesDescription =>
-      'Історія, синхронізована з інших ваших пристроїв. Вимкніть пристрій, щоб виключити його елементи.';
-
-  @override
-  String get aiToolsKindsTitle => 'Типи вмісту';
-
-  @override
-  String get aiToolsKindsDescription =>
-      'Типи елементів буфера обміну, які можуть читати інструменти ШІ.';
-
-  @override
-  String get aiToolsKindText => 'Текст';
-
-  @override
-  String get aiToolsKindLink => 'Посилання';
-
-  @override
-  String get aiToolsKindRichText => 'Форматований текст';
-
-  @override
-  String get aiToolsKindImage => 'Зображення';
-
-  @override
-  String get aiToolsKindFileMetadata => 'Назви й розміри файлів';
-
-  @override
-  String get aiToolsExcludedAppsTitle => 'Виключені застосунки';
-
-  @override
-  String get aiToolsExcludedAppsDescription =>
-      'Елементи, скопійовані з цих застосунків, ніколи не передаються.';
-
-  @override
-  String get aiToolsAddApp => 'Додати застосунок';
-
-  @override
-  String get aiToolsRemove => 'Вилучити';
-
-  @override
-  String get aiToolsDefaultLookbackTitle =>
-      'Період історії для нових підключень';
-
-  @override
-  String get aiToolsDefaultLookbackDescription =>
-      'Старіші незакріплені елементи залишаються невидимими для підключення. Закріплені елементи та фрагменти не обмежуються.';
-
-  @override
-  String get aiToolsKeywords =>
-      'ші ai mcp асистент помічник claude codex cursor модель агент';
-
-  @override
-  String aiToolsApprovalTitle(String client) {
-    return '$client хоче отримати доступ до CopyPaste';
-  }
-
-  @override
-  String aiToolsReportedName(String name) {
-    return 'Назва, яку повідомляє застосунок: $name';
-  }
-
-  @override
-  String aiToolsReportedExecutable(String path) {
-    return 'Програма: $path';
-  }
-
-  @override
-  String get aiToolsApprovalNote =>
-      'Дозволяйте лише інструменти, які ви запустили самі. Без відповіді запит буде відхилено через 2 хвилини.';
-
-  @override
-  String get aiToolsDeny => 'Відхилити';
-
-  @override
-  String get aiToolsAllow => 'Дозволити';
-
-  @override
-  String get aiToolsVolumeTitle => 'Дозволити читати далі?';
-
-  @override
-  String aiToolsVolumeMessage(String client) {
-    return 'Інструмент $client прочитав багато історії буфера обміну в цьому сеансі. Дозволити більше?';
-  }
-
-  @override
-  String get aiToolsNotificationBody =>
-      'Відкрийте CopyPaste, щоб дозволити або відхилити.';
-
-  @override
-  String get aiToolsDecisionFailed =>
-      'Не вдалося надіслати відповідь. Запит буде показано знову.';
-
-  @override
-  String get aiToolsHide => 'Приховати від інструментів ШІ';
-
-  @override
-  String get aiToolsShow => 'Показувати інструментам ШІ';
-
-  @override
-  String get aiToolsHiddenState => 'Приховано від інструментів ШІ';
-
-  @override
   String get quickPasteTabQueue => 'Черга';
 
   @override
@@ -6598,7 +6270,6 @@ class AppLocalizationsUk extends AppLocalizations {
     String _temp0 = intl.Intl.selectLogic(type, {
       'dont_save': 'Не зберігати',
       'mark_secret': 'Позначити як секрет',
-      'hide_from_ai': 'Приховати від інструментів ШІ',
       'delete_after': 'Видалити через',
       'add_tags': 'Додати теги',
       'transform': 'Перетворити',
@@ -6808,9 +6479,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get rulesTraceSecret => 'Зберігається як секрет';
 
   @override
-  String get rulesTraceHidden => 'Прихована від інструментів ШІ';
-
-  @override
   String rulesTraceExpires(String duration) {
     return 'Видаляється через $duration';
   }
@@ -6875,19 +6543,6 @@ class AppLocalizationsUk extends AppLocalizations {
       many: '$count буде позначено як секрет',
       few: '$count буде позначено як секрет',
       one: '$count буде позначено як секрет',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String rulesPreviewHidden(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count буде приховано від ШІ',
-      many: '$count буде приховано від ШІ',
-      few: '$count буде приховано від ШІ',
-      one: '$count буде приховано від ШІ',
     );
     return '$_temp0';
   }
@@ -7068,10 +6723,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Не вдалося додати до Paste Queue. Перевірте, чи її ввімкнено.';
 
   @override
-  String get historyHideFromAiFailed =>
-      'Не вдалося змінити налаштування інструментів ШІ для цього кліпу.';
-
-  @override
   String get historyKeepFailed => 'Не вдалося залишити цей кліп.';
 
   @override
@@ -7129,9 +6780,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyProvenanceTransformed => 'Перетворено';
 
   @override
-  String get historyProvenanceAiTool => 'Інструмент ШІ';
-
-  @override
   String historyRuleTag(String name) {
     return '$name (авто)';
   }
@@ -7141,7 +6789,4 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => 'Автоматичні теги';
-
-  @override
-  String get historyMetadataAiTools => 'Інструменти ШІ';
 }

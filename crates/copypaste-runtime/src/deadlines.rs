@@ -1,15 +1,15 @@
 //! One wall-clock deadline task for the whole runtime, with no polling.
 //!
 //! Deadlines come from two places: one-shot timers that features schedule in
-//! memory (a clipboard restore, an idle stop, an approval timeout), and rows
-//! the store holds (clip expiry, the purge of sealed originals, 30-day
-//! retention). The task sleeps until the earliest one, but only within the
-//! short horizon of one hour. Anything later holds no timer at all: it is
-//! picked up by a sweep at start, on system resume, on sync receipt and on the
-//! first request after a quiet spell, each of which re-arms the task. With no
-//! deadline the task holds no timer. Tokio sleeps on a clock that may stop
-//! while the system sleeps, so hosts report resume; only when they cannot is
-//! a short-horizon sleep capped at one minute.
+//! memory (a clipboard restore, an idle stop), and rows the store holds (clip
+//! expiry, the purge of sealed originals, 30-day retention). The task sleeps
+//! until the earliest one, but only within the short horizon of one hour.
+//! Anything later holds no timer at all: it is picked up by a sweep at start,
+//! on system resume, on sync receipt and on the first request after a quiet
+//! spell, each of which re-arms the task. With no deadline the task holds no
+//! timer. Tokio sleeps on a clock that may stop while the system sleeps, so
+//! hosts report resume; only when they cannot is a short-horizon sleep capped
+//! at one minute.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};

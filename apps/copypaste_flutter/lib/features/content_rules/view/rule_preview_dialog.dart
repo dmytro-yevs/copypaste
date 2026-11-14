@@ -235,7 +235,6 @@ class _RulePreviewDialogState extends State<RulePreviewDialog> {
     final effects = [
       if (counts.deleted > 0) l10n.rulesPreviewDeleted(counts.deleted),
       if (counts.secret > 0) l10n.rulesPreviewSecret(counts.secret),
-      if (counts.hiddenFromAi > 0) l10n.rulesPreviewHidden(counts.hiddenFromAi),
       if (counts.expiring > 0) l10n.rulesPreviewExpiring(counts.expiring),
       if (counts.tagged > 0) l10n.rulesPreviewTagged(counts.tagged),
     ];

@@ -135,7 +135,7 @@ pub struct RuleTrace {
     pub steps: Vec<TraceStep>,
     pub skipped: bool,
     pub secret: bool,
-    pub hidden_from_ai: bool,
+    pub hidden_from_integrations: bool,
     pub expires_after_ms: Option<u64>,
     pub tag_ids: Vec<String>,
     pub transform_ids: Vec<String>,
@@ -146,7 +146,7 @@ pub struct RulePreviewCounts {
     pub matched: u32,
     pub deleted: u32,
     pub secret: u32,
-    pub hidden_from_ai: u32,
+    pub hidden_from_integrations: u32,
     pub expiring: u32,
     pub tagged: u32,
 }

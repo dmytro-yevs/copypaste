@@ -9,7 +9,6 @@ import '../features/notifications/notifications_view.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../features/ai_tools/view/ai_approval_presenter.dart';
 import '../features/devices/devices.dart';
 import '../features/paste_queue/view/paste_queue_header_action.dart';
 import '../l10n/l10n.dart';
@@ -281,7 +280,7 @@ class CopyPasteApp extends StatelessWidget {
             );
           }
 
-          final content = AnnotatedRegion<SystemUiOverlayStyle>(
+          return AnnotatedRegion<SystemUiOverlayStyle>(
             value: overlay.copyWith(
               statusBarColor: Colors.transparent,
               systemNavigationBarColor: theme.colorScheme.background,
@@ -296,10 +295,6 @@ class CopyPasteApp extends StatelessWidget {
                           buildContent(windowReady),
                     ),
             ),
-          );
-          return AiApprovalPresenter(
-            controller: features?.aiApproval,
-            child: content,
           );
         },
       ),

@@ -2499,7 +2499,7 @@ mod tests {
         assert!(item.clipboard_privacy().secret);
         let annotations = state.store.item_annotations(std::slice::from_ref(&item.id));
         let annotations = annotations.unwrap().remove(&item.id).unwrap();
-        assert!(annotations.hidden_from_ai);
+        assert!(!annotations.hidden_from_integrations);
         assert_eq!(
             annotations.expires_at,
             Some(item.created_at + 15 * 60 * 1000)

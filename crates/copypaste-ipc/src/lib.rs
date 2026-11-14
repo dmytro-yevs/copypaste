@@ -3,7 +3,6 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 #![cfg_attr(windows, deny(unsafe_code))]
 
-pub mod ai;
 mod clipboard_privacy;
 pub mod clips;
 pub mod config;
@@ -482,9 +481,6 @@ pub enum Method {
     Rules {
         op: rules::RuleOp,
     },
-    Ai {
-        op: ai::AiOp,
-    },
 
     /// Stop the daemon.
     ///
@@ -565,7 +561,6 @@ impl Method {
             Self::PasteQueue { op } => Some(op),
             Self::Transforms { op } => Some(op),
             Self::Rules { op } => Some(op),
-            Self::Ai { op } => Some(op),
             _ => None,
         }
     }

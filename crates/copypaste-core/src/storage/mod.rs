@@ -34,7 +34,6 @@
 //! The schema is created only for a newly reserved file. Every existing file
 //! must match it exactly before connection pragmas or application queries run.
 
-pub mod ai_view;
 pub mod clip_edit;
 mod connection;
 mod content_bytes;

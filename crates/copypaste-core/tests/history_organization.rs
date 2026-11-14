@@ -505,7 +505,7 @@ fn encrypted_backup_restores_tag_catalogue_assignments_and_pins() {
 }
 
 use copypaste_core::storage::organization::{
-    AiGrantRecord, ClipNoteRecord, ContentRuleRecord, PipelineRecord, PreferenceRecord, Provenance,
+    ClipNoteRecord, ContentRuleRecord, PipelineRecord, PreferenceRecord, Provenance,
     ProvenanceKind, Record, RecordKey, RuleOrigin, RulePlacementRecord, SetMemberRecord,
     SnippetBodyRecord, SnippetCollectionRecord, SnippetRecord, TransformRef,
 };
@@ -580,27 +580,10 @@ fn body(id: &str, revision: char, text: &str) -> SnippetBodyRecord {
     }
 }
 
-fn grant(revoked: bool, name: &str) -> AiGrantRecord {
-    AiGrantRecord {
-        id: "grant-1".into(),
-        owner_device: "device-a".into(),
-        name: name.into(),
-        client_name: "Editor".into(),
-        client_executable: None,
-        scopes: vec!["read_history".into()],
-        lookback: "7d".into(),
-        created_at: 10,
-        last_used_day: None,
-        revoked,
-        revoked_at: revoked.then_some(20),
-        deleted: false,
-    }
-}
-
 fn note(clip_id: &str, hidden: bool, changed_at: i64, base: i64, keep: bool) -> ClipNoteRecord {
     ClipNoteRecord {
         clip_id: clip_id.into(),
-        hidden_from_ai: hidden,
+        hidden_from_integrations: hidden,
         hidden_changed_at: changed_at,
         base_stamp: base,
         keep,
@@ -657,11 +640,10 @@ fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
             value_json: "true".into(),
         }),
         Record::SetMember(SetMemberRecord {
-            set: "ai_policy.excluded_apps".into(),
-            member: "com.example.vault".into(),
+            set: "transforms.hidden".into(),
+            member: "case.swap".into(),
             present: true,
         }),
-        Record::AiGrant(grant(false, "Editor grant")),
         Record::ClipNote(ClipNoteRecord {
             provenance: Some(Provenance {
                 kind: ProvenanceKind::Transformed,
@@ -671,7 +653,6 @@ fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
                     version: 1,
                 }]),
                 pipeline_name: None,
-                grant_name: None,
             }),
             ..note(&clip_id, true, 5, 0, true)
         }),
@@ -694,10 +675,9 @@ fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
             key: "record_pasted",
         },
         RecordKey::SetMember {
-            set: "ai_policy.excluded_apps",
-            member: "com.example.vault",
+            set: "transforms.hidden",
+            member: "case.swap",
         },
-        RecordKey::AiGrant("grant-1"),
         RecordKey::ClipNote(&clip_id),
     ];
     for (key, expected) in keys.into_iter().zip(&records) {
@@ -741,7 +721,7 @@ fn a_record_of_an_unknown_kind_is_declined_and_never_becomes_a_clip() {
 }
 
 #[test]
-fn a_concurrent_unhide_or_unrevoke_loses_and_is_written_back() {
+fn a_concurrent_unhide_loses_and_is_written_back() {
     let (a, ka) = store(63);
     let (b, kb) = store(64);
     let clip_id = clip(&a, &ka, "private", 100);
@@ -751,7 +731,6 @@ fn a_concurrent_unhide_or_unrevoke_loses_and_is_written_back() {
         &ka,
         Record::ClipNote(note(&clip_id, false, 0, 0, false)),
     );
-    write(&a, &ka, Record::AiGrant(grant(false, "Original")));
     sync(&a, &ka, &b, &kb, "a");
 
     write(
@@ -759,33 +738,23 @@ fn a_concurrent_unhide_or_unrevoke_loses_and_is_written_back() {
         &ka,
         Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)),
     );
-    write(&a, &ka, Record::AiGrant(grant(true, "Original")));
-    // Later on the other device, before it learned of the hide and revocation.
+    // Later on the other device, before it learned of the hide.
     std::thread::sleep(std::time::Duration::from_millis(5));
     write(
         &b,
         &kb,
         Record::ClipNote(note(&clip_id, false, 0, 1_000, true)),
     );
-    write(&b, &kb, Record::AiGrant(grant(false, "Renamed")));
 
     sync(&b, &kb, &a, &ka, "b");
     assert_eq!(
         record(&a, RecordKey::ClipNote(&clip_id)),
         Some(Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)))
     );
-    assert_eq!(
-        record(&a, RecordKey::AiGrant("grant-1")),
-        Some(Record::AiGrant(grant(true, "Original")))
-    );
     sync(&a, &ka, &b, &kb, "a");
     assert_eq!(
         record(&b, RecordKey::ClipNote(&clip_id)),
         Some(Record::ClipNote(note(&clip_id, true, 2_000, 1_000, false)))
-    );
-    assert_eq!(
-        record(&b, RecordKey::AiGrant("grant-1")),
-        Some(Record::AiGrant(grant(true, "Original")))
     );
 }
 

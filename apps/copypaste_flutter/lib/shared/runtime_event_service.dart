@@ -10,7 +10,6 @@ abstract final class RuntimeEventKind {
   static const peers = 'peers';
   static const pasteQueue = 'paste_queue';
   static const library = 'library';
-  static const aiApproval = 'ai_approval';
   static const operationProgress = 'operation_progress';
 }
 
@@ -21,8 +20,7 @@ enum LibraryKind {
   rules(1 << 2),
   pipelines(1 << 3),
   preferences(1 << 4),
-  setMembers(1 << 5),
-  grants(1 << 6);
+  setMembers(1 << 5);
 
   const LibraryKind(this.bit);
 

@@ -29,7 +29,6 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../presentation/secret_spoiler.dart';
 
-import '../../ai_tools/view/hide_from_ai_action.dart';
 import '../presentation/history_color_swatch.dart';
 import '../presentation/history_expiry_text.dart';
 import 'history_clip_menu.dart';
@@ -464,22 +463,6 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         ),
                       ),
                     ),
-                    if (actions.contains(HistoryClipAction.hideFromAi))
-                      HideFromAiAction(
-                        hidden: clip.annotations.hiddenFromAi,
-                        iconOnly: true,
-                        onChanged:
-                            controller.capabilities.isAnnotationPending(clip.id)
-                            ? null
-                            : (_) => unawaited(
-                                runHistoryClipAction(
-                                  context,
-                                  controller: controller,
-                                  clip: clip,
-                                  action: HistoryClipAction.hideFromAi,
-                                ),
-                              ),
-                      ),
                     if (actions.contains(HistoryClipAction.transform))
                       _iconAction(context, clip, HistoryClipAction.transform),
                     if (menuActions.isNotEmpty)
@@ -674,10 +657,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
 
   /// Feature actions shown as their own footer buttons; the rest are in the
   /// footer's More menu.
-  static const _footerActions = {
-    HistoryClipAction.hideFromAi,
-    HistoryClipAction.transform,
-  };
+  static const _footerActions = {HistoryClipAction.transform};
 
   Widget _iconAction(
     BuildContext context,
@@ -1332,12 +1312,6 @@ List<_HistoryMetadataRow> _historyMetadataRows(
       ),
     if (annotations.ruleTagIds.isNotEmpty)
       (label: strings.historyMetadataRuleTags, value: '', warning: false),
-    if (annotations.hiddenFromAi)
-      (
-        label: strings.historyMetadataAiTools,
-        value: strings.aiToolsHiddenState,
-        warning: false,
-      ),
     if (clip.tooLargeToSync)
       (
         label: strings.historyMetadataSync,
