@@ -40,6 +40,7 @@ use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
 pub use capture_rules::{CaptureDecision, CapturePlan, CaptureSubject, MAX_SKIPPED_CAPTURES};
 pub use deadlines::ResumeWaker;
 pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
+pub use features::ModuleHistoryFilters;
 pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost, WriteOptions};
 pub use meta::{Meta, Origin};
 pub use p2p::P2p;

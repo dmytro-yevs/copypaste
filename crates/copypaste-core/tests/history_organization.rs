@@ -653,6 +653,7 @@ fn every_library_kind_round_trips_through_a_p2p_session_into_its_projection() {
                     version: 1,
                 }]),
                 pipeline_name: None,
+                module: None,
             }),
             ..note(&clip_id, true, 5, 0, true)
         }),

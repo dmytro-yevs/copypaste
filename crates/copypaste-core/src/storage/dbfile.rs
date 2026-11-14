@@ -41,6 +41,7 @@ const RESTORED_TABLES: &[&str] = &[
     "library_preferences",
     "library_set_members",
     "clip_notes",
+    "module_records",
     "clip_local_state",
     "clip_rule_tags",
     "rule_originals",
@@ -79,6 +80,7 @@ const RESTORED_PROJECTIONS: &[&str] = &[
     "library_preferences",
     "library_set_members",
     "clip_notes",
+    "module_records",
 ];
 
 /// Local state copied last, once every clip and record it refers to exists.
@@ -783,6 +785,7 @@ mod tests {
                  INSERT INTO library_preferences VALUES ('snippets', 'k', 'r7', 'true', 1);
                  INSERT INTO library_set_members VALUES ('snippets.s', 'm', 'r8', 1, 1);
                  INSERT INTO clip_notes VALUES ('{clip}', 'r10', 1, 1, 0, 0, NULL, NULL, NULL, NULL);
+                 INSERT INTO module_records VALUES ('example.module', 'k', 'r11', '1', 0, 1);
                  INSERT INTO clip_local_state (clip_id, rule_secret) VALUES ('{clip}', 1);
                  INSERT INTO clip_rule_tags VALUES ('{clip}', 'tag');
                  INSERT INTO rule_originals VALUES ('{clip}', X'01', X'02', 'text', 1);

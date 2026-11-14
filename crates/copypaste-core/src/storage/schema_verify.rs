@@ -49,6 +49,7 @@ const CURRENT_TABLES: &[&str] = &[
     "paste_queue_state",
     "cloud_withheld",
     "expired_ids",
+    "module_records",
 ];
 
 #[derive(Debug, PartialEq)]

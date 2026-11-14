@@ -63,13 +63,8 @@ impl SyncServices {
         (self.enabled)()
     }
     fn key(id: &str, key: &str) -> Result<String, ModuleError> {
-        if key.is_empty()
-            || key.len() > 96
-            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        {
-            return Err(ModuleError::Invalid("Invalid sync state key.".into()));
-        }
-        Ok(format!("module:{id}:{key}"))
+        copypaste_core::storage::module_state_key(id, key)
+            .map_err(|_| ModuleError::Invalid("Invalid sync state key.".into()))
     }
     fn floor(&self, id: &str) -> Result<UploadFloor, ModuleError> {
         Ok(UploadFloor {
@@ -152,6 +147,9 @@ impl SyncServices {
             .clear_module_state(id)
             .map_err(|_| ModuleError::State)?;
         self.store
+            .forget_module_records(id)
+            .map_err(|_| ModuleError::State)?;
+        self.store
             .clear_semantic_index(id)
             .map_err(|_| ModuleError::State)?;
         self.progress
@@ -210,50 +208,22 @@ impl SyncServices {
                 .map_or(0, |entry| entry.epoch)
                 .wrapping_add(self.group.as_ref().map_or(0, |group| (group.revision)())))),
             SyncHostRequest::ReadState { keys } => {
-                if keys.len() > 64 {
-                    return Err(ModuleError::State);
-                }
-                let values = keys
-                    .into_iter()
-                    .map(|key| {
-                        let value = self
-                            .store
-                            .state(&Self::key(id, &key)?)
-                            .map_err(|_| ModuleError::State)?;
-                        Ok((key, value))
-                    })
-                    .collect::<Result<BTreeMap<_, _>, ModuleError>>()?;
+                let values = self
+                    .store
+                    .module_state(id, &keys)
+                    .map_err(|_| ModuleError::State)?;
                 serde_json::to_value(values).map_err(|_| ModuleError::State)
             }
             SyncHostRequest::WriteState { values } => {
-                if values.len() > 64 || values.values().any(|v| v.len() > 128 * 1024) {
-                    return Err(ModuleError::State);
-                }
-                let values = values
-                    .into_iter()
-                    .map(|(key, value)| Ok((Self::key(id, &key)?, value)))
-                    .collect::<Result<Vec<_>, ModuleError>>()?;
                 let _progress = self.progress.lock().map_err(|_| ModuleError::State)?;
                 self.store
-                    .set_state_all(
-                        &values
-                            .iter()
-                            .map(|(k, v)| (k.as_str(), v.as_str()))
-                            .collect::<Vec<_>>(),
-                    )
+                    .set_module_state(id, &values)
                     .map_err(|_| ModuleError::State)?;
                 Ok(Value::Null)
             }
             SyncHostRequest::ClearState { keys } => {
-                if keys.len() > 64 {
-                    return Err(ModuleError::State);
-                }
-                let keys = keys
-                    .iter()
-                    .map(|key| Self::key(id, key))
-                    .collect::<Result<Vec<_>, _>>()?;
                 self.store
-                    .clear_state(&keys.iter().map(String::as_str).collect::<Vec<_>>())
+                    .clear_module_state_keys(id, &keys)
                     .map_err(|_| ModuleError::State)?;
                 Ok(Value::Null)
             }

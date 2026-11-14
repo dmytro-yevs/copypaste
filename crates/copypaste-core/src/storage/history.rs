@@ -11,6 +11,7 @@ use rusqlite::{params_from_iter, types::Value};
 use sha2::{Digest, Sha256};
 
 use super::fuzzy_search;
+use super::integration_view::IntegrationView;
 use super::local_state::{self, unexpired};
 use super::model::{
     item_columns_ci, item_columns_preview_ci, row_to_item, ItemColumns, StoreError, StoredItem,
@@ -65,6 +66,19 @@ impl HistoryCursor {
             .then_some(cursor)
             .ok_or(StoreError::InvalidCursor)
     }
+
+    /// [`Self::parse_for`] for a cursor of an integration history read.
+    pub fn parse_scoped(
+        token: &str,
+        query: &HistoryQuery,
+        view: &IntegrationView,
+    ) -> Result<Self, StoreError> {
+        let bytes = hex::decode(token).map_err(|_| StoreError::InvalidCursor)?;
+        let cursor: Self = serde_json::from_slice(&bytes).map_err(|_| StoreError::InvalidCursor)?;
+        (cursor.fingerprint == scoped_fingerprint(query, Some(view)))
+            .then_some(cursor)
+            .ok_or(StoreError::InvalidCursor)
+    }
 }
 
 /// A result page and its query-bound continuation marker.
@@ -112,6 +126,16 @@ struct FingerprintQuery<'a> {
     tag_ids: Vec<String>,
     untagged_only: bool,
     sort: HistorySort,
+}
+
+fn scoped_fingerprint(query: &HistoryQuery, view: Option<&IntegrationView>) -> String {
+    let fingerprint = query_fingerprint(query);
+    match view {
+        None => fingerprint,
+        Some(view) => hex::encode(Sha256::digest(
+            format!("{fingerprint}:{}", view.fingerprint()).as_bytes(),
+        )),
+    }
 }
 
 fn class_key(class: copypaste_ipc::ContentClass) -> &'static str {
@@ -537,8 +561,16 @@ impl Store {
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
     ) -> Result<HistoryPage, StoreError> {
-        let page =
-            self.query_history_inner(query, after, limit, budget, local_device_id, semantic, None)?;
+        let page = self.query_history_inner(
+            query,
+            after,
+            limit,
+            budget,
+            local_device_id,
+            semantic,
+            None,
+            None,
+        )?;
         Ok(HistoryPage {
             items: page.items,
             next: page.next,
@@ -563,6 +595,7 @@ impl Store {
             local_device_id,
             semantic,
             Some(preview_keys),
+            None,
         )?;
         Ok(HistoryPreviewPage {
             items: page
@@ -580,6 +613,44 @@ impl Store {
         })
     }
 
+    /// A page of the history `view` shows, filtered by `query` (never by
+    /// semantic matches), with authenticated previews.
+    pub fn query_integration_history(
+        &self,
+        query: &HistoryQuery,
+        view: &IntegrationView,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        preview_keys: (&crate::ItemKey, &crate::crypto::PreviewKey),
+    ) -> Result<HistoryPreviewPage, StoreError> {
+        let page = self.query_history_inner(
+            query,
+            after,
+            limit,
+            budget,
+            Some(&view.local_device_id),
+            None,
+            Some(preview_keys),
+            Some(view),
+        )?;
+        Ok(HistoryPreviewPage {
+            items: page
+                .items
+                .into_iter()
+                .zip(page.previews)
+                .zip(page.annotations)
+                .map(|((row, preview), annotations)| HistoryPreviewRow {
+                    row,
+                    preview,
+                    annotations,
+                })
+                .collect(),
+            next: page.next,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn query_history_inner(
         &self,
         query: &HistoryQuery,
@@ -589,6 +660,7 @@ impl Store {
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
         preview_keys: Option<(&crate::ItemKey, &crate::crypto::PreviewKey)>,
+        view: Option<&IntegrationView>,
     ) -> Result<QueryPage, StoreError> {
         validate_filters(query)?;
         if limit == 0 {
@@ -600,7 +672,7 @@ impl Store {
             });
         }
         if after.is_some_and(|cursor| {
-            cursor.fingerprint != query_fingerprint(query)
+            cursor.fingerprint != scoped_fingerprint(query, view)
                 || cursor.sort != query.sort
                 || cursor.semantic_scope.as_deref()
                     != semantic.map(|matches| matches.scope.as_str())
@@ -633,7 +705,7 @@ impl Store {
         }
         let classes = normalized_classes(query);
         let semantic_kinds = normalized_semantic_kinds(query);
-        let fingerprint = query_fingerprint(query);
+        let fingerprint = scoped_fingerprint(query, view);
         let mut values = Vec::<Value>::new();
         if query.sort == HistorySort::Relevance {
             if let Some(expression) = &search {
@@ -698,6 +770,9 @@ impl Store {
             filters.push_str(&format!(" AND ci.app_bundle_id = ?{}", values.len()));
         }
 
+        if let Some(view) = view {
+            view.push_filter(&mut filters, &mut values)?;
+        }
         let common_filters = filters.clone();
         if let Some(parameter) = match_parameter {
             if semantic.is_some() && query.sort != HistorySort::Relevance {

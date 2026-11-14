@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 copypaste-sync = { path = "../copypaste-sync" }
 copypaste-modules = { path = "../copypaste-modules" }
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
 base64.workspace = true
 copypaste-core = { path = "../copypaste-core" }
 copypaste-ipc = { path = "../copypaste-ipc" }
@@ -15,6 +16,7 @@ copypaste-p2p = { path = "../copypaste-p2p" }
 copypaste-template = { path = "../copypaste-template" }
 copypaste-transform = { path = "../copypaste-transform" }
 jiff.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

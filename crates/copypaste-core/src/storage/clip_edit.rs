@@ -118,6 +118,7 @@ fn provenance(kind: ProvenanceKind, from_clip_id: Option<String>) -> Provenance 
         from_clip_id,
         transform_snapshot: None,
         pipeline_name: None,
+        module: None,
     }
 }
 
