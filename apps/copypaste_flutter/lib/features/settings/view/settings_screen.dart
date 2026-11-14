@@ -1177,8 +1177,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           highlighted: _isHighlighted(_SettingsTargetId.retention),
           title: l10n.settingsRetentionTitle,
           description: l10n.settingsRetentionDescription,
-          footer: StopScale(
+          scale: (header) => StopScale(
             key: const ValueKey<String>('settings-retention-scale'),
+            header: header,
             label: l10n.settingsRetentionTitle,
             stops: SettingsLimits.retentionStops(settings.retentionDays),
             value: settings.retentionDays,
@@ -1200,8 +1201,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (context, usage, _) => _storageUsage(usage),
                 )
               : _storageUsage(controller.storageUsage.value),
-          footer: StopScale(
+          scale: (header) => StopScale(
             key: const ValueKey<String>('settings-storage-quota-scale'),
+            header: header,
             label: l10n.settingsStorageQuotaTitle,
             stops: SettingsLimits.sizeStops(
               SettingsLimits.storageQuotaPresets,
@@ -1220,8 +1222,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           highlighted: _isHighlighted(_SettingsTargetId.maxFileSize),
           title: l10n.settingsMaxFileSizeTitle,
           description: l10n.settingsMaxFileSizeDescription,
-          footer: StopScale(
+          scale: (header) => StopScale(
             key: const ValueKey<String>('settings-max-file-size-scale'),
+            header: header,
             label: l10n.settingsMaxFileSizeTitle,
             stops: SettingsLimits.sizeStops(
               SettingsLimits.maxFileSizePresets,

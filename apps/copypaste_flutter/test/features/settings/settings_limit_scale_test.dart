@@ -60,6 +60,8 @@ void main() {
   }
 
   Finder scale(String name) => find.byKey(ValueKey<String>('settings-$name'));
+  Finder track(String name) =>
+      find.descendant(of: scale(name), matching: find.byType(Slider));
 
   Future<void> focusScale(WidgetTester tester, String name) async {
     final thumb = find.descendant(
@@ -81,7 +83,7 @@ void main() {
       final retention = scale('retention-scale');
       await tester.ensureVisible(retention);
       expect(
-        tester.getSemantics(retention),
+        tester.getSemantics(track('retention-scale')),
         isSemantics(
           isSlider: true,
           label: 'Retention',
@@ -105,7 +107,7 @@ void main() {
       expect(find.text('Remove older history?'), findsNothing);
       expect(repository.currentSettings.retentionDays, 0);
       expect(
-        tester.getSemantics(retention),
+        tester.getSemantics(track('retention-scale')),
         isSemantics(value: 'Keep forever'),
       );
 
@@ -115,7 +117,10 @@ void main() {
       await tester.tap(find.text('Apply limit'));
       await tester.pumpAndSettle();
       expect(repository.currentSettings.retentionDays, 7);
-      expect(tester.getSemantics(retention), isSemantics(value: '7 days'));
+      expect(
+        tester.getSemantics(track('retention-scale')),
+        isSemantics(value: '7 days'),
+      );
 
       // Loosening a limit deletes nothing and applies without asking.
       await focusScale(tester, 'retention-scale');
@@ -210,9 +215,10 @@ void main() {
     await gesture.moveBy(Offset(tester.getSize(track).width / 2, 0));
     await tester.pump();
     expect(repository.writes, 0);
+    // The value beside the copy follows the thumb; the end stop is named too.
     expect(
       find.descendant(of: size, matching: find.text('20 GiB')),
-      findsWidgets,
+      findsNWidgets(2),
     );
     await gesture.up();
     await tester.pumpAndSettle();
@@ -274,6 +280,32 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('a scale names its value beside the copy and only its ends', (
+    tester,
+  ) async {
+    await pumpSettings(tester);
+    final quota = scale('storage-quota-scale');
+    await tester.ensureVisible(quota);
+    await tester.pumpAndSettle();
+    Rect textRect(String text) =>
+        tester.getRect(find.descendant(of: quota, matching: find.text(text)));
+    final title = textRect('Storage quota');
+    final value = textRect('10 GiB');
+    expect(value.left, greaterThan(title.right));
+    expect(
+      value.bottom,
+      lessThan(tester.getRect(track('storage-quota-scale')).top),
+    );
+    for (final stop in ['1 GiB', '50 GiB']) {
+      expect(find.descendant(of: quota, matching: find.text(stop)), findsOne);
+    }
+    expect(
+      find.descendant(of: quota, matching: find.text('5 GiB')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   testWidgets(
     'scales keep their value text at a narrow width and doubled text',

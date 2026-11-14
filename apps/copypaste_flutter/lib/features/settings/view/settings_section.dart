@@ -100,6 +100,10 @@ class SettingsGroup extends StatelessWidget {
   }
 }
 
+/// Builds a setting's copy with [value] beside it, or under it when text is
+/// scaled up.
+typedef SettingRowHeader = Widget Function(Widget value);
+
 /// A setting title and description with its control.
 ///
 /// A switch stays beside the copy in a narrow row; other controls stack below
@@ -112,9 +116,13 @@ class SettingRow extends StatelessWidget {
     required this.description,
     this.trailing,
     this.footer,
+    this.scale,
     this.status,
     this.highlighted = false,
-  });
+  }) : assert(
+         scale == null || (trailing == null && footer == null),
+         'A scale row names its value beside the copy instead.',
+       );
 
   final String title;
   final String description;
@@ -123,8 +131,12 @@ class SettingRow extends StatelessWidget {
   /// The current state of what the row sets, under its description.
   final Widget? status;
 
-  /// A full-width control under the copy, such as a scale.
+  /// A full-width control under the copy.
   final Widget? footer;
+
+  /// A scale under the copy. It lays out the row header it is given, so its
+  /// current value stays beside the copy.
+  final Widget Function(SettingRowHeader header)? scale;
   final bool highlighted;
 
   @override
@@ -156,10 +168,7 @@ class SettingRow extends StatelessWidget {
                   stacked: narrow && !largeText,
                 )
               : toggle;
-          // A switch stays beside its copy in a narrow row, with the state
-          // word under it; only enlarged text moves it below the copy.
-          final stack = largeText || (control is! SettingSwitch && narrow);
-          final Widget header = control == null
+          Widget header(Widget? beside, {required bool stack}) => beside == null
               ? copy
               : stack
               ? Column(
@@ -167,7 +176,7 @@ class SettingRow extends StatelessWidget {
                   children: [
                     copy,
                     const Gap(AppTheme.settingsBlockSpacing),
-                    Align(alignment: Alignment.centerRight, child: control),
+                    Align(alignment: Alignment.centerRight, child: beside),
                   ],
                 )
               : Row(
@@ -175,20 +184,26 @@ class SettingRow extends StatelessWidget {
                   children: [
                     Expanded(child: copy),
                     const Gap(AppSpacing.lg),
-                    control,
+                    beside,
                   ],
                 );
+          // A switch or a value stays beside its copy in a narrow row, with
+          // a switch's state word under it; only enlarged text moves either
+          // below the copy.
+          if (scale case final scale?) {
+            return scale((value) => header(value, stack: largeText));
+          }
+          final row = header(
+            control,
+            stack: largeText || (control is! SettingSwitch && narrow),
+          );
           if (footer case final footer?) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                header,
-                const Gap(AppTheme.settingsBlockSpacing),
-                footer,
-              ],
+              children: [row, const Gap(AppTheme.settingsBlockSpacing), footer],
             );
           }
-          return header;
+          return row;
         },
       ),
     );
