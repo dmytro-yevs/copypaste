@@ -40,8 +40,9 @@ class ModuleArtifact {
 class MarketplaceModule {
   const MarketplaceModule({
     required this.id,
-    required this.title,
-    required this.description,
+    required String title,
+    required String description,
+    this.localizations = const {},
     required this.version,
     required this.artifact,
     this.supportedPlatforms = const [],
@@ -49,11 +50,36 @@ class MarketplaceModule {
     this.availability = ModuleAvailability.available,
     this.unavailableReason,
     this.systemRequirement,
-  });
+  }) : _title = title,
+       _description = description;
 
   final String id;
-  final String title;
-  final String description;
+  final String _title;
+  final String _description;
+
+  /// `locale -> {title, description}` translations from the catalog.
+  final Map<String, Map<String, String>> localizations;
+
+  String get title => _localized('title') ?? _title;
+  String get description => _localized('description') ?? _description;
+
+  /// The exact interface language tag first, then each shorter prefix, then
+  /// the English catalog strings.
+  String? _localized(String key) {
+    if (localizations.isEmpty) return null;
+    var tag = AppStrings.locale.toLanguageTag().toLowerCase();
+    while (true) {
+      for (final MapEntry(key: locale, value: strings)
+          in localizations.entries) {
+        final value = locale.toLowerCase() == tag ? strings[key] : null;
+        if (value != null) return value;
+      }
+      final end = tag.lastIndexOf('-');
+      if (end < 0) return null;
+      tag = tag.substring(0, end);
+    }
+  }
+
   final Version version;
   final ModuleArtifact? artifact;
   final List<ModulePlatform> supportedPlatforms;

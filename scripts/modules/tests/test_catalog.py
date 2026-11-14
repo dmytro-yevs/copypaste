@@ -37,7 +37,7 @@ class CatalogTest(unittest.TestCase):
                 + "\ntrusted comment: " + comment + "\n" + base64.b64encode(global_signature).decode()).encode()
 
     def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False,
-                 platforms=None, schema=1, distribution=None):
+                 platforms=None, schema=1, distribution=None, localizations=None):
         paths = []
         for platform, architecture in sorted(catalog.REQUIRED_TARGETS):
             if platforms is None and platform not in catalog.LEGACY_PLATFORMS:
@@ -60,6 +60,8 @@ class CatalogTest(unittest.TestCase):
                           for name, data in files],
                 "commands": [], "preferences": [],
             }
+            if localizations is not None:
+                manifest["localizations"] = localizations
             if inconsistent and platform == "windows":
                 manifest["description"] = "Different module contract."
             if platforms is not None:
@@ -80,7 +82,25 @@ class CatalogTest(unittest.TestCase):
         value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
         self.assertEqual(len(value["modules"][0]["artifacts"]), 5)
         with self.assertRaises(ValueError):
-            catalog.read_package(self.packages(schema=6)[0], self.public_key)
+            catalog.read_package(self.packages(schema=7)[0], self.public_key)
+
+    def test_catalog_lists_translated_titles_and_descriptions_only(self):
+        localizations = {
+            "uk": {"title": "Розпізнавання", "description": "Офлайн.", "commands/run/title": "Запуск"},
+            "pt-BR": {"title": "Reconhecimento"},
+            "de": {"commands/run/title": "Start"},
+        }
+        packages = self.packages(schema=6, platforms=["macos", "windows", "android"], localizations=localizations)
+        value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
+        self.assertEqual(value["modules"][0]["localizations"], {
+            "pt-BR": {"title": "Reconhecimento"},
+            "uk": {"title": "Розпізнавання", "description": "Офлайн."},
+        })
+        self.assertNotIn("localizations", catalog.build_catalog(
+            self.packages(), "module-copypaste.ocr-v0.1.0", public_key=self.public_key)["modules"][0])
+        for invalid in [{"UK": {"title": "x"}}, {"uk": {"title": " "}}, {"uk": "x"}]:
+            with self.assertRaises(ValueError):
+                catalog.listed_localizations({"localizations": invalid})
 
     def test_linux_targets_preserve_published_legacy_catalog_entries(self):
         previous = {

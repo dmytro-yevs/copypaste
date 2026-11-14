@@ -204,6 +204,7 @@ class ModuleCatalogParser {
         final id = entry['id'] as String;
         final title = entry['title'] as String;
         final description = entry['description'] as String;
+        final localizations = _localizations(entry['localizations']);
         final version = Version.parse(entry['version'] as String);
         final compatibility = VersionConstraint.parse(
           (entry['app_versions'] as String).replaceAll(',', ' '),
@@ -313,6 +314,7 @@ class ModuleCatalogParser {
             id: id,
             title: title,
             description: description,
+            localizations: localizations,
             version: version,
             artifact: selected,
             supportedPlatforms: supportedPlatforms,
@@ -337,4 +339,24 @@ class ModuleCatalogParser {
       throw ModulesException(AppStrings.current.modulesCatalogInvalid);
     }
   }
+
+  static Map<String, Map<String, String>> _localizations(Object? value) {
+    if (value == null) return const {};
+    final locales = value as Map<String, dynamic>;
+    if (locales.length > 64) throw const FormatException();
+    return Map.unmodifiable({
+      for (final MapEntry(key: locale, value: strings) in locales.entries)
+        locale: Map<String, String>.unmodifiable({
+          for (final MapEntry(:key, :value)
+              in (strings as Map<String, dynamic>).entries)
+            if (key == 'title' || key == 'description')
+              key: _translation(value as String, key == 'title' ? 200 : 4000),
+        }),
+    });
+  }
+
+  static String _translation(String value, int maximum) =>
+      value.trim().isEmpty || value.length > maximum
+      ? throw const FormatException()
+      : value;
 }
