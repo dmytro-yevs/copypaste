@@ -1,0 +1,443 @@
+{
+  "schema_version": 6,
+  "api_version": 1,
+  "id": "copypaste.ai-tools",
+  "title": "AI Tools",
+  "description": "Connect AI assistants and control what they can see.",
+  "version": "0.1.0",
+  "app_versions": ">=1.3.0, <2.0.0",
+  "supported_platforms": [
+    "macos",
+    "windows",
+    "linux",
+    "android"
+  ],
+  "capabilities": [
+    "history_read",
+    "clipboard_write",
+    "library_write",
+    "snippets",
+    "synced_records",
+    "local_state",
+    "prompts",
+    "endpoints"
+  ],
+  "endpoints": [
+    {
+      "id": "mcp",
+      "platforms": [
+        "macos",
+        "windows",
+        "linux"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "id": "connections",
+      "title": "Connected tools",
+      "description": "See, limit and revoke connected AI tools."
+    },
+    {
+      "id": "setup",
+      "title": "Connect AI tool",
+      "description": "Show the MCP settings for your AI tool."
+    },
+    {
+      "id": "activity",
+      "title": "View activity",
+      "description": "Show what a connected AI tool did.",
+      "arguments": [
+        {
+          "id": "grant",
+          "title": "Connection",
+          "kind": "text",
+          "default": "",
+          "required": true
+        }
+      ],
+      "hidden": true
+    },
+    {
+      "id": "set-access",
+      "title": "Change access",
+      "description": "Allow or stop changes by a connected AI tool.",
+      "arguments": [
+        {
+          "id": "grant",
+          "title": "Connection",
+          "kind": "text",
+          "default": "",
+          "required": true
+        },
+        {
+          "id": "write",
+          "title": "Allow changes",
+          "kind": "boolean",
+          "default": false
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "revoke",
+      "title": "Revoke",
+      "description": "Stop a connected AI tool from using CopyPaste.",
+      "arguments": [
+        {
+          "id": "grant",
+          "title": "Connection",
+          "kind": "text",
+          "default": "",
+          "required": true
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    },
+    {
+      "id": "remove",
+      "title": "Remove",
+      "description": "Forget a revoked AI tool.",
+      "arguments": [
+        {
+          "id": "grant",
+          "title": "Connection",
+          "kind": "text",
+          "default": "",
+          "required": true
+        }
+      ],
+      "hidden": true,
+      "app_only": true
+    }
+  ],
+  "preferences": [
+    {
+      "id": "other-devices",
+      "title": "Include items from other devices",
+      "kind": "boolean",
+      "default": true,
+      "synced": true
+    },
+    {
+      "id": "excluded-devices",
+      "title": "Excluded devices",
+      "kind": "device_set",
+      "synced": true
+    },
+    {
+      "id": "content-kinds",
+      "title": "Content kinds",
+      "kind": "choices",
+      "options": [
+        {
+          "id": "text",
+          "title": "Text"
+        },
+        {
+          "id": "link",
+          "title": "Links"
+        },
+        {
+          "id": "rich-text",
+          "title": "Rich text"
+        },
+        {
+          "id": "image",
+          "title": "Images"
+        },
+        {
+          "id": "file",
+          "title": "File names and sizes"
+        }
+      ],
+      "default": [
+        "text",
+        "link",
+        "rich-text",
+        "file"
+      ],
+      "synced": true
+    },
+    {
+      "id": "excluded-apps",
+      "title": "Excluded apps",
+      "kind": "source_app_set",
+      "synced": true
+    },
+    {
+      "id": "lookback",
+      "title": "History window",
+      "kind": "choices",
+      "options": [
+        {
+          "id": "day",
+          "title": "Last 24 hours"
+        },
+        {
+          "id": "week",
+          "title": "Last 7 days"
+        },
+        {
+          "id": "month",
+          "title": "Last 30 days"
+        },
+        {
+          "id": "all",
+          "title": "All history"
+        }
+      ],
+      "default": [
+        "week"
+      ],
+      "required": true,
+      "synced": true
+    }
+  ],
+  "localizations": {
+    "de": {
+      "title": "KI-Tools",
+      "description": "KI-Assistenten verbinden und festlegen, was sie sehen dürfen.",
+      "commands/connections/title": "Verbundene Tools",
+      "commands/connections/description": "Verbundene KI-Tools ansehen, einschränken und widerrufen.",
+      "commands/setup/title": "KI-Tool verbinden",
+      "commands/setup/description": "MCP-Einstellungen für dein KI-Tool anzeigen.",
+      "preferences/other-devices/title": "Einträge von anderen Geräten einbeziehen",
+      "preferences/excluded-devices/title": "Ausgeschlossene Geräte",
+      "preferences/content-kinds/title": "Inhaltsarten",
+      "preferences/content-kinds/options/text/title": "Text",
+      "preferences/content-kinds/options/link/title": "Links",
+      "preferences/content-kinds/options/rich-text/title": "Formatierter Text",
+      "preferences/content-kinds/options/image/title": "Bilder",
+      "preferences/content-kinds/options/file/title": "Dateinamen und -größen",
+      "preferences/excluded-apps/title": "Ausgeschlossene Apps",
+      "preferences/lookback/title": "Verlaufszeitraum",
+      "preferences/lookback/options/day/title": "Letzte 24 Stunden",
+      "preferences/lookback/options/week/title": "Letzte 7 Tage",
+      "preferences/lookback/options/month/title": "Letzte 30 Tage",
+      "preferences/lookback/options/all/title": "Gesamter Verlauf"
+    },
+    "es": {
+      "title": "Herramientas de IA",
+      "description": "Conecta asistentes de IA y controla lo que pueden ver.",
+      "commands/connections/title": "Herramientas conectadas",
+      "commands/connections/description": "Consulta, limita y revoca las herramientas de IA conectadas.",
+      "commands/setup/title": "Conectar herramienta de IA",
+      "commands/setup/description": "Muestra los ajustes MCP para tu herramienta de IA.",
+      "preferences/other-devices/title": "Incluir elementos de otros dispositivos",
+      "preferences/excluded-devices/title": "Dispositivos excluidos",
+      "preferences/content-kinds/title": "Tipos de contenido",
+      "preferences/content-kinds/options/text/title": "Texto",
+      "preferences/content-kinds/options/link/title": "Enlaces",
+      "preferences/content-kinds/options/rich-text/title": "Texto enriquecido",
+      "preferences/content-kinds/options/image/title": "Imágenes",
+      "preferences/content-kinds/options/file/title": "Nombres y tamaños de archivo",
+      "preferences/excluded-apps/title": "Apps excluidas",
+      "preferences/lookback/title": "Periodo del historial",
+      "preferences/lookback/options/day/title": "Últimas 24 horas",
+      "preferences/lookback/options/week/title": "Últimos 7 días",
+      "preferences/lookback/options/month/title": "Últimos 30 días",
+      "preferences/lookback/options/all/title": "Todo el historial"
+    },
+    "fr": {
+      "title": "Outils d’IA",
+      "description": "Connecter des assistants d’IA et contrôler ce qu’ils peuvent voir.",
+      "commands/connections/title": "Outils connectés",
+      "commands/connections/description": "Voir, limiter et révoquer les outils d’IA connectés.",
+      "commands/setup/title": "Connecter un outil d’IA",
+      "commands/setup/description": "Afficher les réglages MCP pour votre outil d’IA.",
+      "preferences/other-devices/title": "Inclure les éléments des autres appareils",
+      "preferences/excluded-devices/title": "Appareils exclus",
+      "preferences/content-kinds/title": "Types de contenu",
+      "preferences/content-kinds/options/text/title": "Texte",
+      "preferences/content-kinds/options/link/title": "Liens",
+      "preferences/content-kinds/options/rich-text/title": "Texte enrichi",
+      "preferences/content-kinds/options/image/title": "Images",
+      "preferences/content-kinds/options/file/title": "Noms et tailles de fichiers",
+      "preferences/excluded-apps/title": "Apps exclues",
+      "preferences/lookback/title": "Période d’historique",
+      "preferences/lookback/options/day/title": "Dernières 24 heures",
+      "preferences/lookback/options/week/title": "7 derniers jours",
+      "preferences/lookback/options/month/title": "30 derniers jours",
+      "preferences/lookback/options/all/title": "Tout l’historique"
+    },
+    "it": {
+      "title": "Strumenti IA",
+      "description": "Collega assistenti IA e controlla cosa possono vedere.",
+      "commands/connections/title": "Strumenti collegati",
+      "commands/connections/description": "Visualizza, limita e revoca gli strumenti IA collegati.",
+      "commands/setup/title": "Collega strumento IA",
+      "commands/setup/description": "Mostra le impostazioni MCP per il tuo strumento IA.",
+      "preferences/other-devices/title": "Includi elementi di altri dispositivi",
+      "preferences/excluded-devices/title": "Dispositivi esclusi",
+      "preferences/content-kinds/title": "Tipi di contenuto",
+      "preferences/content-kinds/options/text/title": "Testo",
+      "preferences/content-kinds/options/link/title": "Link",
+      "preferences/content-kinds/options/rich-text/title": "Testo formattato",
+      "preferences/content-kinds/options/image/title": "Immagini",
+      "preferences/content-kinds/options/file/title": "Nomi e dimensioni dei file",
+      "preferences/excluded-apps/title": "App escluse",
+      "preferences/lookback/title": "Periodo della cronologia",
+      "preferences/lookback/options/day/title": "Ultime 24 ore",
+      "preferences/lookback/options/week/title": "Ultimi 7 giorni",
+      "preferences/lookback/options/month/title": "Ultimi 30 giorni",
+      "preferences/lookback/options/all/title": "Tutta la cronologia"
+    },
+    "ja": {
+      "title": "AI ツール",
+      "description": "AI アシスタントを接続し、参照できる内容を管理します。",
+      "commands/connections/title": "接続済みのツール",
+      "commands/connections/description": "接続された AI ツールを確認、制限、取り消します。",
+      "commands/setup/title": "AI ツールを接続",
+      "commands/setup/description": "AI ツール用の MCP 設定を表示します。",
+      "preferences/other-devices/title": "他のデバイスの項目を含める",
+      "preferences/excluded-devices/title": "除外するデバイス",
+      "preferences/content-kinds/title": "コンテンツの種類",
+      "preferences/content-kinds/options/text/title": "テキスト",
+      "preferences/content-kinds/options/link/title": "リンク",
+      "preferences/content-kinds/options/rich-text/title": "リッチテキスト",
+      "preferences/content-kinds/options/image/title": "画像",
+      "preferences/content-kinds/options/file/title": "ファイル名とサイズ",
+      "preferences/excluded-apps/title": "除外するアプリ",
+      "preferences/lookback/title": "履歴の期間",
+      "preferences/lookback/options/day/title": "過去 24 時間",
+      "preferences/lookback/options/week/title": "過去 7 日間",
+      "preferences/lookback/options/month/title": "過去 30 日間",
+      "preferences/lookback/options/all/title": "すべての履歴"
+    },
+    "ko": {
+      "title": "AI 도구",
+      "description": "AI 어시스턴트를 연결하고 볼 수 있는 내용을 관리합니다.",
+      "commands/connections/title": "연결된 도구",
+      "commands/connections/description": "연결된 AI 도구를 확인, 제한, 취소합니다.",
+      "commands/setup/title": "AI 도구 연결",
+      "commands/setup/description": "AI 도구용 MCP 설정을 표시합니다.",
+      "preferences/other-devices/title": "다른 기기의 항목 포함",
+      "preferences/excluded-devices/title": "제외된 기기",
+      "preferences/content-kinds/title": "콘텐츠 종류",
+      "preferences/content-kinds/options/text/title": "텍스트",
+      "preferences/content-kinds/options/link/title": "링크",
+      "preferences/content-kinds/options/rich-text/title": "서식 있는 텍스트",
+      "preferences/content-kinds/options/image/title": "이미지",
+      "preferences/content-kinds/options/file/title": "파일 이름 및 크기",
+      "preferences/excluded-apps/title": "제외된 앱",
+      "preferences/lookback/title": "기록 기간",
+      "preferences/lookback/options/day/title": "최근 24시간",
+      "preferences/lookback/options/week/title": "최근 7일",
+      "preferences/lookback/options/month/title": "최근 30일",
+      "preferences/lookback/options/all/title": "전체 기록"
+    },
+    "pl": {
+      "title": "Narzędzia AI",
+      "description": "Połącz asystentów AI i decyduj, co mogą zobaczyć.",
+      "commands/connections/title": "Połączone narzędzia",
+      "commands/connections/description": "Przeglądaj, ograniczaj i odwołuj połączone narzędzia AI.",
+      "commands/setup/title": "Połącz narzędzie AI",
+      "commands/setup/description": "Pokaż ustawienia MCP dla narzędzia AI.",
+      "preferences/other-devices/title": "Uwzględniaj wpisy z innych urządzeń",
+      "preferences/excluded-devices/title": "Wykluczone urządzenia",
+      "preferences/content-kinds/title": "Rodzaje treści",
+      "preferences/content-kinds/options/text/title": "Tekst",
+      "preferences/content-kinds/options/link/title": "Linki",
+      "preferences/content-kinds/options/rich-text/title": "Tekst sformatowany",
+      "preferences/content-kinds/options/image/title": "Obrazy",
+      "preferences/content-kinds/options/file/title": "Nazwy i rozmiary plików",
+      "preferences/excluded-apps/title": "Wykluczone aplikacje",
+      "preferences/lookback/title": "Zakres historii",
+      "preferences/lookback/options/day/title": "Ostatnie 24 godziny",
+      "preferences/lookback/options/week/title": "Ostatnie 7 dni",
+      "preferences/lookback/options/month/title": "Ostatnie 30 dni",
+      "preferences/lookback/options/all/title": "Cała historia"
+    },
+    "pt": {
+      "title": "Ferramentas de IA",
+      "description": "Conecte assistentes de IA e controle o que eles podem ver.",
+      "commands/connections/title": "Ferramentas conectadas",
+      "commands/connections/description": "Veja, limite e revogue ferramentas de IA conectadas.",
+      "commands/setup/title": "Conectar ferramenta de IA",
+      "commands/setup/description": "Mostre as configurações MCP da sua ferramenta de IA.",
+      "preferences/other-devices/title": "Incluir itens de outros dispositivos",
+      "preferences/excluded-devices/title": "Dispositivos excluídos",
+      "preferences/content-kinds/title": "Tipos de conteúdo",
+      "preferences/content-kinds/options/text/title": "Texto",
+      "preferences/content-kinds/options/link/title": "Links",
+      "preferences/content-kinds/options/rich-text/title": "Texto formatado",
+      "preferences/content-kinds/options/image/title": "Imagens",
+      "preferences/content-kinds/options/file/title": "Nomes e tamanhos de arquivos",
+      "preferences/excluded-apps/title": "Apps excluídos",
+      "preferences/lookback/title": "Período do histórico",
+      "preferences/lookback/options/day/title": "Últimas 24 horas",
+      "preferences/lookback/options/week/title": "Últimos 7 dias",
+      "preferences/lookback/options/month/title": "Últimos 30 dias",
+      "preferences/lookback/options/all/title": "Todo o histórico"
+    },
+    "tr": {
+      "title": "Yapay zekâ araçları",
+      "description": "Yapay zekâ asistanlarını bağlayın ve neleri görebileceklerini denetleyin.",
+      "commands/connections/title": "Bağlı araçlar",
+      "commands/connections/description": "Bağlı yapay zekâ araçlarını görün, sınırlayın ve iptal edin.",
+      "commands/setup/title": "Yapay zekâ aracı bağla",
+      "commands/setup/description": "Yapay zekâ aracınız için MCP ayarlarını gösterin.",
+      "preferences/other-devices/title": "Diğer cihazlardaki öğeleri dahil et",
+      "preferences/excluded-devices/title": "Hariç tutulan cihazlar",
+      "preferences/content-kinds/title": "İçerik türleri",
+      "preferences/content-kinds/options/text/title": "Metin",
+      "preferences/content-kinds/options/link/title": "Bağlantılar",
+      "preferences/content-kinds/options/rich-text/title": "Zengin metin",
+      "preferences/content-kinds/options/image/title": "Görseller",
+      "preferences/content-kinds/options/file/title": "Dosya adları ve boyutları",
+      "preferences/excluded-apps/title": "Hariç tutulan uygulamalar",
+      "preferences/lookback/title": "Geçmiş aralığı",
+      "preferences/lookback/options/day/title": "Son 24 saat",
+      "preferences/lookback/options/week/title": "Son 7 gün",
+      "preferences/lookback/options/month/title": "Son 30 gün",
+      "preferences/lookback/options/all/title": "Tüm geçmiş"
+    },
+    "uk": {
+      "title": "Інструменти ШІ",
+      "description": "Підключайте ШІ-асистентів і керуйте тим, що вони бачать.",
+      "commands/connections/title": "Підключені інструменти",
+      "commands/connections/description": "Переглядайте, обмежуйте й відкликайте підключені інструменти ШІ.",
+      "commands/setup/title": "Підключити інструмент ШІ",
+      "commands/setup/description": "Показати налаштування MCP для інструмента ШІ.",
+      "preferences/other-devices/title": "Включати елементи з інших пристроїв",
+      "preferences/excluded-devices/title": "Виключені пристрої",
+      "preferences/content-kinds/title": "Типи вмісту",
+      "preferences/content-kinds/options/text/title": "Текст",
+      "preferences/content-kinds/options/link/title": "Посилання",
+      "preferences/content-kinds/options/rich-text/title": "Форматований текст",
+      "preferences/content-kinds/options/image/title": "Зображення",
+      "preferences/content-kinds/options/file/title": "Назви й розміри файлів",
+      "preferences/excluded-apps/title": "Виключені застосунки",
+      "preferences/lookback/title": "Період історії",
+      "preferences/lookback/options/day/title": "Останні 24 години",
+      "preferences/lookback/options/week/title": "Останні 7 днів",
+      "preferences/lookback/options/month/title": "Останні 30 днів",
+      "preferences/lookback/options/all/title": "Уся історія"
+    },
+    "zh": {
+      "title": "AI 工具",
+      "description": "连接 AI 助手并控制它们可以查看的内容。",
+      "commands/connections/title": "已连接的工具",
+      "commands/connections/description": "查看、限制和撤销已连接的 AI 工具。",
+      "commands/setup/title": "连接 AI 工具",
+      "commands/setup/description": "显示 AI 工具的 MCP 设置。",
+      "preferences/other-devices/title": "包含其他设备的项目",
+      "preferences/excluded-devices/title": "排除的设备",
+      "preferences/content-kinds/title": "内容类型",
+      "preferences/content-kinds/options/text/title": "文本",
+      "preferences/content-kinds/options/link/title": "链接",
+      "preferences/content-kinds/options/rich-text/title": "富文本",
+      "preferences/content-kinds/options/image/title": "图片",
+      "preferences/content-kinds/options/file/title": "文件名和大小",
+      "preferences/excluded-apps/title": "排除的应用",
+      "preferences/lookback/title": "历史范围",
+      "preferences/lookback/options/day/title": "过去 24 小时",
+      "preferences/lookback/options/week/title": "过去 7 天",
+      "preferences/lookback/options/month/title": "过去 30 天",
+      "preferences/lookback/options/all/title": "全部历史"
+    }
+  }
+}
