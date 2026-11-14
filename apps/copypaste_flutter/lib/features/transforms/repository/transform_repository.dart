@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/transform_models.dart';
 
 /// Runtime access for transform palettes and transform settings.
@@ -39,6 +41,11 @@ abstract interface class TransformRepository {
 
   Future<TransformPreferences> preferences();
 
+  /// The pipeline a paste into [identifier] on [platform] goes through: that
+  /// application's own default, else the global one. A null [identifier]
+  /// (target unknown) answers the global default.
+  Future<String?> defaultPipelineFor(String platform, String? identifier);
+
   /// Sets one synced preference; `null` clears a keyed override.
   Future<TransformPreferences> setPreference(String key, Object? value);
 
@@ -67,4 +74,14 @@ abstract final class TransformPreferenceKey {
 
   static String appDefault(String platform, String identifier) =>
       'app_default:$platform:$identifier';
+
+  /// The platform name of [target] in per-app default keys.
+  static String platformName(TargetPlatform target) => switch (target) {
+    TargetPlatform.macOS => 'macos',
+    TargetPlatform.windows => 'windows',
+    TargetPlatform.android => 'android',
+    TargetPlatform.iOS => 'ios',
+    TargetPlatform.fuchsia => 'fuchsia',
+    TargetPlatform.linux => 'linux',
+  };
 }

@@ -1227,6 +1227,13 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
     FlValue* opened = fl_value_new_map();
     fl_value_set_string_take(opened, "presentationId", fl_value_new_int(presentation_id));
     fl_value_set_string_take(opened, "inspectorVisible", fl_value_new_bool(false));
+    const gchar* x11_window = static_cast<const gchar*>(g_object_get_data(
+        G_OBJECT(state->application), "copypaste-x11-window"));
+    const std::string target_class = x11_window != nullptr && x11_quick_paste != nullptr
+        ? x11_quick_paste->window_class(x11_window) : std::string();
+    if (!target_class.empty()) {
+      fl_value_set_string_take(opened, "targetApp", fl_value_new_string(target_class.c_str()));
+    }
     fl_method_channel_invoke_method(channel, "opened", opened, nullptr, nullptr, nullptr);
     fl_value_unref(opened);
   } else if (is_method(call, "close")) {

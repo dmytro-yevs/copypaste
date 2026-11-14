@@ -360,9 +360,12 @@ class QuickPasteController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// [targetApp] identifies the application that receives the paste, in the
+  /// form per-app transform defaults are keyed by, when the host knows it.
   Future<void> opened(
     int presentationId, {
     bool inspectorVisible = false,
+    String? targetApp,
   }) async {
     if (_disposed || presentationId <= 0) return;
     final query = history.window.query;
@@ -402,7 +405,7 @@ class QuickPasteController extends ChangeNotifier {
     if (!_isCurrent(presentationId)) return;
     _preferences = preferences;
     // The target is sampled once per presentation, before anything renders.
-    await Future.wait([_detectMaskedMode(), _loadDefaultPipeline()]);
+    await Future.wait([_detectMaskedMode(), _loadDefaultPipeline(targetApp)]);
     if (!_isCurrent(presentationId)) return;
     if (_maskedMode && _inspectorOpen) {
       _inspectorOpen = false;
@@ -1302,12 +1305,15 @@ class QuickPasteController extends ChangeNotifier {
     _maskedMode = secure == true;
   }
 
-  Future<void> _loadDefaultPipeline() async {
+  Future<void> _loadDefaultPipeline(String? targetApp) async {
     final transforms = _transforms;
     _defaultPipeline = null;
     if (transforms == null) return;
     try {
-      final id = (await transforms.preferences()).defaultPastePipelineId;
+      final id = await transforms.defaultPipelineFor(
+        TransformPreferenceKey.platformName(defaultTargetPlatform),
+        targetApp,
+      );
       if (id == null) return;
       _defaultPipeline = (await transforms.pipelines())
           .where((pipeline) => pipeline.id == id)

@@ -73,6 +73,9 @@ class QuickPasteTargetSession {
   void Close(int64_t id, HWND popup);
   bool Paste(int64_t id, HWND popup);
   int64_t id() const { return id_; }
+  std::optional<DWORD> target_pid() const {
+    return target_ ? std::optional<DWORD>(target_->pid) : std::nullopt;
+  }
   bool internally_hiding() const { return internally_hiding_; }
 
  private:

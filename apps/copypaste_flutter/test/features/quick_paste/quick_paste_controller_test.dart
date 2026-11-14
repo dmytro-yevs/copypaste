@@ -3575,6 +3575,40 @@ void main() {
         expect(controller.secretsLocked, isTrue);
       },
     );
+
+    test('the target application picks the default paste transform', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final host = _ContextHost()..permissionGranted = true;
+      final transforms = FakeTransformRepository()
+        ..savedPipelines = const [
+          TransformPipeline(id: 'global', name: 'Global', steps: []),
+          TransformPipeline(id: 'mail', name: 'Mail', steps: []),
+        ]
+        ..defaults = const {null: 'global', 'outlook.exe': 'mail'};
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        transforms: transforms,
+        delivery: _Delivery(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await host.openedHandler!(
+        1,
+        inspectorVisible: false,
+        targetApp: 'outlook.exe',
+      );
+      expect(transforms.defaultQueries.single, ('windows', 'outlook.exe'));
+      expect(controller.defaultPipeline?.name, 'Mail');
+      await controller.activate(controller.items.first);
+      expect(transforms.runPipelineIds.single, 'mail');
+      expect(host.pasteIds, [1]);
+
+      await host.openedHandler!(2, inspectorVisible: false);
+      expect(controller.defaultPipeline?.name, 'Global');
+    });
   });
 }
 

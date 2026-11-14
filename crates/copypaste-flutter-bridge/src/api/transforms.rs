@@ -507,11 +507,14 @@ pub async fn set_transform_set_member(
     .await
 }
 
-/// The default paste pipeline for one application, if any.
+/// The default paste pipeline for one application, if any; an empty
+/// identifier answers the global default. On Linux an X11 window class is
+/// resolved to the desktop entry ID that per-app defaults are keyed by.
 pub async fn default_transform_pipeline_for(
     platform: String,
     identifier: String,
 ) -> Result<Option<String>, RuntimeError> {
+    let identifier = desktop_entry_id(identifier);
     Ok(expect_data!(
         transform_op(TransformOp::DefaultFor {
             app_identity: ipc::AppIdentity {
@@ -521,4 +524,14 @@ pub async fn default_transform_pipeline_for(
         }),
         ResponseData::PipelineDefault
     ))
+}
+
+#[cfg(target_os = "linux")]
+fn desktop_entry_id(identifier: String) -> String {
+    copypaste_source_app::linux_desktop_application(&identifier).map_or(identifier, |(id, _)| id)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn desktop_entry_id(identifier: String) -> String {
+    identifier
 }

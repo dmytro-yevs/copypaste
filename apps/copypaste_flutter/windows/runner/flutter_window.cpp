@@ -163,6 +163,22 @@ bool RunsAboveOwnIntegrity(DWORD pid) {
   return !own || !target || *target > *own;
 }
 
+// The lowercase image name capture attribution and per-app defaults use.
+std::string ProcessImageName(DWORD pid) {
+  const HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (process == nullptr) return {};
+  std::wstring path(32768, L'\0');
+  DWORD length = static_cast<DWORD>(path.size());
+  const bool queried = ::QueryFullProcessImageNameW(process, 0, path.data(), &length) != 0;
+  ::CloseHandle(process);
+  if (!queried || length == 0) return {};
+  path.resize(length);
+  std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+  if (name.empty()) return {};
+  ::CharLowerBuffW(name.data(), static_cast<DWORD>(name.size()));
+  return Utf8FromUtf16(name.c_str());
+}
+
 bool ModifierHeld(const QuickPasteTargetApi& api) {
   for (const int key : {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN}) {
     if (api.get_async_key_state(key) < 0) return true;
@@ -1017,10 +1033,15 @@ void FlutterWindow::NotifyQuickPasteOpened() {
     ::PostMessage(owner, kFailQuickPasteOpen, static_cast<WPARAM>(generation),
                   static_cast<LPARAM>(id));
   };
+  flutter::EncodableMap arguments{
+      {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)},
+      {flutter::EncodableValue("inspectorVisible"), flutter::EncodableValue(quick_paste_inspector_visible_)}};
+  if (const auto pid = quick_paste_session_.target_pid()) {
+    const std::string image = ProcessImageName(*pid);
+    if (!image.empty()) arguments[flutter::EncodableValue("targetApp")] = flutter::EncodableValue(image);
+  }
   quick_paste_channel_->InvokeMethod(
-      "opened", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
-          {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)},
-          {flutter::EncodableValue("inspectorVisible"), flutter::EncodableValue(quick_paste_inspector_visible_)}}),
+      "opened", std::make_unique<flutter::EncodableValue>(std::move(arguments)),
       std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
           nullptr, [failed](const auto&, const auto&, const auto*) { failed(); }, failed));
 }

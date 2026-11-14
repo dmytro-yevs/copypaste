@@ -231,8 +231,14 @@ class MethodChannelQuickPasteWindowHost
   }
 }
 
+/// [targetApp] is the receiving application's identifier (macOS bundle ID,
+/// lowercase Windows image name, X11 window class), or null when unknown.
 typedef QuickPasteOpenedHandler =
-    Future<void> Function(int presentationId, {required bool inspectorVisible});
+    Future<void> Function(
+      int presentationId, {
+      required bool inspectorVisible,
+      String? targetApp,
+    });
 
 abstract interface class QuickPasteContextHost {
   Future<void> signalReady();
@@ -392,13 +398,24 @@ class MethodChannelQuickPasteContextHost
       if (inspectorVisible is! bool) {
         throw PlatformException(code: 'invalid_presentation');
       }
-      await _opened?.call(id, inspectorVisible: inspectorVisible);
+      final target = arguments['targetApp'];
+      await _opened?.call(
+        id,
+        inspectorVisible: inspectorVisible,
+        targetApp: _validTargetApp(target) ? target as String : null,
+      );
       return true;
     }
     throw MissingPluginException(
       'Unsupported quick paste method: ${call.method}',
     );
   }
+
+  static bool _validTargetApp(Object? value) =>
+      value is String &&
+      value.trim().isNotEmpty &&
+      value.length <= 255 &&
+      !value.runes.any((rune) => rune < 0x20 || rune == 0x7f);
 
   @override
   Future<void> dispose() async {

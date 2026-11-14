@@ -37,6 +37,8 @@ class LinuxX11QuickPaste {
   // opened. It is consumed by the child context, never persisted.
   std::string focused_window() const;
   bool restore_focus(const std::string& window) const;
+  // The WM_CLASS class of a decimal XID, or empty when it has none.
+  std::string window_class(const std::string& window) const;
   bool restore_and_paste(const std::string& window) const;
 
   // XTEST input merges with held keys, and a grabbed shortcut keeps the

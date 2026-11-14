@@ -120,6 +120,16 @@ class RuntimeTransformRepository implements TransformRepository {
       _guard(() async => _preferences(await api.transformPreferences()));
 
   @override
+  Future<String?> defaultPipelineFor(String platform, String? identifier) =>
+      _guard(
+        // The runtime answers the global default for an empty identifier.
+        () => api.defaultTransformPipelineFor(
+          platform: platform,
+          identifier: identifier ?? '',
+        ),
+      );
+
+  @override
   Future<TransformPreferences> setPreference(String key, Object? value) =>
       _guard(
         () async => _preferences(

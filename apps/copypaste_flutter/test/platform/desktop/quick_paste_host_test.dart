@@ -379,14 +379,24 @@ void main() {
       'opened carries its positive identity before handler awaits',
       () async {
         int? received;
+        String? target;
         final gate = Completer<void>();
-        context.setOpenedHandler((id, {required bool inspectorVisible}) async {
+        context.setOpenedHandler((
+          id, {
+          required bool inspectorVisible,
+          String? targetApp,
+        }) async {
           received = id;
+          target = targetApp;
           await gate.future;
         });
-        final completion = opened({'presentationId': 42});
+        final completion = opened({
+          'presentationId': 42,
+          'targetApp': 'com.example.mail',
+        });
         await Future<void>.delayed(Duration.zero);
         expect(received, 42);
+        expect(target, 'com.example.mail');
         gate.complete();
         await completion;
       },
@@ -402,7 +412,11 @@ void main() {
     ]) {
       test('invalid opened $value cannot invoke the handler', () async {
         var invoked = false;
-        context.setOpenedHandler((_, {required bool inspectorVisible}) async {
+        context.setOpenedHandler((
+          _, {
+          required bool inspectorVisible,
+          String? targetApp,
+        }) async {
           invoked = true;
         });
         await opened(value);

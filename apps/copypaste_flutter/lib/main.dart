@@ -68,6 +68,7 @@ import 'features/snippets/repository/runtime_snippet_repository.dart';
 import 'features/transforms/controller/transforms_settings_controller.dart';
 import 'features/transforms/repository/runtime_transform_repository.dart';
 import 'features/transforms/repository/transform_recents_store.dart';
+import 'features/transforms/repository/transform_repository.dart';
 import 'features/tray/controller/tray_menu_controller.dart';
 import 'platform/security/device_authenticator.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
@@ -730,9 +731,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       ),
       transforms: TransformsSettingsController(
         repository: RuntimeTransformRepository(),
-        platform: TransformsSettingsController.platformName(
-          defaultTargetPlatform,
-        ),
+        platform: TransformPreferenceKey.platformName(defaultTargetPlatform),
       ),
       contentRules: ContentRulesController(
         repository: RuntimeContentRuleRepository(),

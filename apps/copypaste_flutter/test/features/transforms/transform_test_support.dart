@@ -58,6 +58,13 @@ class FakeTransformRepository implements TransformRepository {
   final previews = <(String, List<TransformStep>)>[];
   final cancelled = <String>[];
   final runs = <(TransformRunAction, List<TransformStep>, bool)>[];
+  final runPipelineIds = <String?>[];
+  final defaultQueries = <(String, String?)>[];
+
+  /// The default each application identifier resolves to; `null` keys the
+  /// global default.
+  Map<String?, String?> defaults = const {};
+  List<TransformPipeline> savedPipelines = const [];
   final restored = <String>[];
   TransformIssue? failPreview;
   TransformException? previewError;
@@ -97,6 +104,7 @@ class FakeTransformRepository implements TransformRepository {
   }) async {
     calls.add('run');
     runs.add((action, steps, bypassDefault));
+    runPipelineIds.add(pipelineId);
     return TransformRunResult(
       restoreToken: action == TransformRunAction.paste ? restoreToken : null,
       clipId: action == TransformRunAction.paste ? null : 'new-clip',
@@ -112,7 +120,7 @@ class FakeTransformRepository implements TransformRepository {
   @override
   Future<List<TransformPipeline>> pipelines() async {
     calls.add('pipelines');
-    return const [];
+    return savedPipelines;
   }
 
   @override
@@ -126,6 +134,18 @@ class FakeTransformRepository implements TransformRepository {
   Future<TransformPreferences> preferences() async {
     calls.add('preferences');
     return const TransformPreferences();
+  }
+
+  @override
+  Future<String?> defaultPipelineFor(
+    String platform,
+    String? identifier,
+  ) async {
+    calls.add('defaultFor');
+    defaultQueries.add((platform, identifier));
+    return defaults.containsKey(identifier)
+        ? defaults[identifier]
+        : defaults[null];
   }
 
   @override

@@ -512,6 +512,7 @@ enum MacosForegroundInput {
 
 protocol QuickPasteApplicationTarget: AnyObject {
   var processIdentifier: pid_t { get }
+  var bundleIdentifier: String? { get }
   var isTerminated: Bool { get }
   func activateForQuickPaste() -> Bool
 }
@@ -893,7 +894,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
 
   private func notifyOpened(_ id: Int64) {
     guard contextReady, pasteSession.matches(id) else { return }
-    contextChannel?.invokeMethod("opened", arguments: ["presentationId": id, "inspectorVisible": inspectorVisible])
+    var arguments: [String: Any] = ["presentationId": id, "inspectorVisible": inspectorVisible]
+    // Per-app paste defaults are keyed by the receiving app's bundle ID.
+    if let bundleID = pasteSession.target?.bundleIdentifier { arguments["targetApp"] = bundleID }
+    contextChannel?.invokeMethod("opened", arguments: arguments)
   }
 
   private func showMainWindow(openSettings: Bool) {

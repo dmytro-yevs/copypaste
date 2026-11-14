@@ -359,6 +359,19 @@ bool LinuxX11QuickPaste::restore_focus(const std::string& window) const {
   return gdk_x11_display_error_trap_pop(gdk_display) == 0 && focused == target;
 }
 
+std::string LinuxX11QuickPaste::window_class(const std::string& window) const {
+  Window target = 0;
+  if (!available() || !parse_xid(window, &target)) return {};
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  gdk_x11_display_error_trap_push(gdk_display);
+  XClassHint hint {};
+  const bool found = XGetClassHint(impl_->display, target, &hint) != 0;
+  std::string value = found && hint.res_class != nullptr ? hint.res_class : "";
+  if (hint.res_name != nullptr) XFree(hint.res_name);
+  if (hint.res_class != nullptr) XFree(hint.res_class);
+  return gdk_x11_display_error_trap_pop(gdk_display) == 0 ? value : std::string();
+}
+
 bool LinuxX11QuickPaste::restore_and_paste(const std::string& window) const {
   return input_available() && restore_focus(window) && impl_->send_ctrl_v();
 }
