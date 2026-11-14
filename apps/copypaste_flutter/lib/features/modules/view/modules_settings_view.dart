@@ -15,9 +15,8 @@ import '../../../l10n/l10n.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/equal_height_grid.dart';
 import '../../../shared/step_progress.dart';
+import '../../applications/repository/application_catalog.dart';
 import '../controller/modules_controller.dart';
-import '../../../shared/forms/dynamic_form_draft.dart';
-import '../../../shared/forms/dynamic_form_fields.dart';
 import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
 import '../models/module_operation.dart';
@@ -26,8 +25,13 @@ import 'module_settings_drawer.dart';
 
 /// Marketplace and installed modules share the host's components and state.
 class ModulesSettingsView extends StatefulWidget {
-  const ModulesSettingsView({super.key, required this.controller});
+  const ModulesSettingsView({
+    super.key,
+    required this.controller,
+    this.applications = const RuntimeApplicationCatalog(),
+  });
   final ModulesController controller;
+  final ApplicationCatalog applications;
 
   @override
   State<ModulesSettingsView> createState() => _ModulesSettingsViewState();
@@ -231,7 +235,8 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                             value: installed.enabled,
                             enabled: toggleable,
                             onChanged: toggleable
-                                ? (value) => controller.setEnabled(id, value)
+                                ? (value) =>
+                                      _setEnabled(context, installed, value)
                                 : null,
                           ),
                         ),
@@ -423,7 +428,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     builder: (context) => ModuleSettingsDrawer(
       controller: controller,
       moduleId: id,
-      onInvoke: (module, command) => _invoke(context, module, command),
+      applications: widget.applications,
       onSmsSetup: () => _smsSetup(context),
     ),
   ).future;
@@ -442,43 +447,57 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     }
   }
 
-  Future<void> _invoke(
+  /// Enabling a module that uses host services first confirms them.
+  Future<void> _setEnabled(
     BuildContext context,
     InstalledModule module,
-    ModuleCommand command,
+    bool enabled,
   ) async {
-    final draft = command.arguments.isEmpty
-        ? controller.form(const [], const {})
-        : await _fieldsDialog(
-            context,
-            controller: controller,
-            title: command.title,
-            fields: command.arguments,
-            values: const {},
-            action: context.l10n.modulesRun,
-          );
-    if (draft == null) return;
-    ModuleResult? result;
-    try {
-      result = await controller.invoke(module.id, command.id, draft.values);
-    } finally {
-      await draft.close();
+    if (!enabled || module.capabilities.isEmpty) {
+      await controller.setEnabled(module.id, enabled);
+      return;
     }
-    if (result == null || !context.mounted) return;
-    await AppOverlays.showDialog<void>(
+    await AppOverlays.showActionDialog(
       context,
-      builder: (dialogContext) => AppOverlays.alertDialog(
-        icon: LucideIcons.puzzle,
-        title: Text(command.title),
-        content: SingleChildScrollView(child: SelectableText(result!.text)),
-        actions: [
-          Button.primary(
-            style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(dialogContext.l10n.commonDone),
-          ),
+      icon: LucideIcons.shieldCheck,
+      title: Text(context.l10n.modulesEnableTitle(module.title)),
+      content: Column(
+        key: ValueKey('module-capabilities-${module.id}'),
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(context.l10n.modulesEnableAccess),
+          for (final capability in module.capabilities) ...[
+            const Gap(AppSpacing.sm),
+            Row(
+              children: [
+                const AppIconFrame(
+                  size: AppIconSize.sm,
+                  child: Icon(LucideIcons.check, size: AppIconSize.sm),
+                ),
+                const Gap(AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    context.l10n.modulesCapability(capability.wireName),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
+      actionLabel: context.l10n.commonEnable,
+      destructive: false,
+      changes: controller,
+      canConfirm: () => !controller.busy,
+      onConfirm: () => controller.setEnabled(
+        module.id,
+        true,
+        confirmed: module.capabilities,
+      ),
+      failureMessage: () =>
+          controller.errorMessage ??
+          AppStrings.current.modulesOperationIncomplete,
     );
   }
 
@@ -496,60 +515,4 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           controller.errorMessage ?? AppStrings.current.modulesRemoveFailed,
     );
   }
-}
-
-Future<DynamicFormDraft?> _fieldsDialog(
-  BuildContext context, {
-  required ModulesController controller,
-  required String title,
-  required List<ModuleField> fields,
-  required Map<String, Object> values,
-  required String action,
-}) async {
-  final draft = controller.form(fields, values);
-  final confirmed = await AppOverlays.showDialog<bool>(
-    context,
-    builder: (_) =>
-        _ModuleFieldsDialog(title: title, draft: draft, action: action),
-  );
-  if (confirmed == true) return draft;
-  await draft.close();
-  return null;
-}
-
-class _ModuleFieldsDialog extends StatelessWidget {
-  const _ModuleFieldsDialog({
-    required this.title,
-    required this.draft,
-    required this.action,
-  });
-  final String title;
-  final DynamicFormDraft draft;
-  final String action;
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: draft,
-    builder: (context, _) => AppOverlays.alertDialog(
-      icon: LucideIcons.puzzle,
-      title: Text(title),
-      content: SingleChildScrollView(
-        clipBehavior: Clip.none,
-        child: DynamicFormFields(draft: draft),
-      ),
-      actions: [
-        Button.ghost(
-          style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(context.l10n.commonCancel),
-        ),
-        Button.primary(
-          style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
-          onPressed: draft.valid && !draft.busy
-              ? () => Navigator.pop(context, true)
-              : null,
-          child: Text(action),
-        ),
-      ],
-    ),
-  );
 }

@@ -3,11 +3,27 @@ import 'dart:convert';
 import '../../../generated/api.dart' as runtime;
 import '../../../l10n/l10n.dart';
 import '../models/module_models.dart';
+import '../models/module_view.dart';
 import 'modules_repository.dart';
 
+/// Sends a `ModuleOperation` as its JSON object and returns the reply JSON.
+typedef ModuleOperationSender =
+    Future<String> Function(Map<String, Object?> operation);
+
+/// The bridge adapter for the schema 6 operations (`SetEnabled` with
+/// capabilities, `SetLocale`, `Prompts`, `AnswerPrompt`). TODO: call the
+/// runtime bridge once it forwards these `ModuleOperation`s.
+Future<String> sendModuleOperation(Map<String, Object?> operation) async =>
+    throw ModulesException(AppStrings.current.modulesUnsupportedOperation);
+
 class RuntimeModulesRepository implements ModulesRepository {
+  RuntimeModulesRepository({ModuleOperationSender send = sendModuleOperation})
+    : _send = send;
+
+  final ModuleOperationSender _send;
+
   @override
-  Future<List<InstalledModule>> list() => _guard(() async {
+  Future<List<InstalledModule>> list() => guardModuleRequest(() async {
     final values = jsonDecode(await runtime.modulesList()) as List<dynamic>;
     return List.unmodifiable(
       values.map((value) {
@@ -53,16 +69,25 @@ class RuntimeModulesRepository implements ModulesRepository {
               },
             ),
           ),
+          capabilities: List.unmodifiable(
+            (module['capabilities'] as List<dynamic>? ?? const []).map(
+              (name) =>
+                  ModuleCapability.fromWire(name as String) ??
+                  (throw const FormatException()),
+            ),
+          ),
           commands: List.unmodifiable(
-            (module['commands'] as List<dynamic>).map((value) {
-              final command = value as Map<String, dynamic>;
-              return ModuleCommand(
-                id: command['id'] as String,
-                title: command['title'] as String,
-                description: command['description'] as String,
-                arguments: _fields(command['arguments']),
-              );
-            }),
+            (module['commands'] as List<dynamic>)
+                .cast<Map<String, dynamic>>()
+                .where((command) => command['hidden'] != true)
+                .map(
+                  (command) => ModuleCommand(
+                    id: command['id'] as String,
+                    title: command['title'] as String,
+                    description: command['description'] as String,
+                    arguments: _fields(command['arguments']),
+                  ),
+                ),
           ),
           preferenceFields: _fields(module['preference_fields']),
           preferences: Map.unmodifiable(
@@ -75,24 +100,48 @@ class RuntimeModulesRepository implements ModulesRepository {
   });
 
   @override
-  Future<void> install(String packagePath) => _guard(() async {
+  Future<void> install(String packagePath) => guardModuleRequest(() async {
     await runtime.moduleInstall(packagePath: packagePath);
   });
   @override
-  Future<void> setEnabled(String id, bool enabled) =>
-      _guard(() => runtime.moduleSetEnabled(id: id, enabled: enabled));
+  Future<void> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> capabilities = const [],
+  }) => guardModuleRequest(
+    () async => capabilities.isEmpty
+        ? runtime.moduleSetEnabled(id: id, enabled: enabled)
+        : await _send({
+            'operation': 'set_enabled',
+            'id': id,
+            'enabled': enabled,
+            'capabilities': [
+              for (final capability in capabilities) capability.wireName,
+            ],
+          }),
+  );
+
   @override
-  Future<void> setPreferences(String id, Map<String, Object> values) => _guard(
-    () => runtime.moduleSetPreferences(id: id, valuesJson: jsonEncode(values)),
+  Future<void> setLocale(String locale) => guardModuleRequest(
+    () => _send({'operation': 'set_locale', 'locale': locale}),
   );
   @override
-  Future<void> remove(String id) => _guard(() => runtime.moduleRemove(id: id));
+  Future<void> setPreferences(String id, Map<String, Object> values) =>
+      guardModuleRequest(
+        () => runtime.moduleSetPreferences(
+          id: id,
+          valuesJson: jsonEncode(values),
+        ),
+      );
+  @override
+  Future<void> remove(String id) =>
+      guardModuleRequest(() => runtime.moduleRemove(id: id));
   @override
   Future<ModuleResult> invoke(
     String id,
     String command,
     Map<String, Object> arguments,
-  ) => _guard(() async {
+  ) => guardModuleRequest(() async {
     final result =
         jsonDecode(
               await runtime.moduleInvoke(
@@ -104,6 +153,9 @@ class RuntimeModulesRepository implements ModulesRepository {
             as Map<String, dynamic>;
     return switch (result['kind']) {
       'text' => ModuleResult(result['text'] as String),
+      'view' => ModuleResult.view(
+        _view(result['view'] as Map<String, dynamic>),
+      ),
       'message' => ModuleResult(result['message'] as String),
       'data'
           when result['data'] is Map &&
@@ -122,6 +174,8 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
       'boolean' => ModuleFieldKind.boolean,
       'file' => ModuleFieldKind.file,
       'choices' => ModuleFieldKind.choices,
+      'device_set' => ModuleFieldKind.devices,
+      'source_app_set' => ModuleFieldKind.applications,
       _ => throw ModulesException(AppStrings.current.modulesUnsupportedField),
     };
     return ModuleField(
@@ -138,9 +192,12 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
       ),
       kind: kind,
       secret: field['secret'] as bool? ?? false,
-      defaultValue: kind == ModuleFieldKind.file
-          ? ''
-          : field['default'] as Object,
+      defaultValue: switch (kind) {
+        ModuleFieldKind.file => '',
+        ModuleFieldKind.devices ||
+        ModuleFieldKind.applications => const <String>[],
+        _ => field['default'] as Object,
+      },
       acceptedExtensions: List.unmodifiable(
         (field['accepted_extensions'] as List<dynamic>? ?? const [])
             .cast<String>(),
@@ -151,7 +208,61 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
   }),
 );
 
-Future<T> _guard<T>(Future<T> Function() operation) async {
+ModuleView _view(Map<String, dynamic> view) => ModuleView(
+  sections: List.unmodifiable(
+    (view['sections'] as List<dynamic>).cast<Map<String, dynamic>>().map(
+      (section) => ModuleViewSection(
+        title: section['title'] as String?,
+        items: List.unmodifiable(
+          (section['items'] as List<dynamic>).cast<Map<String, dynamic>>().map(
+            (item) => switch (item['kind']) {
+              'row' => ModuleViewRow(
+                title: item['title'] as String,
+                subtitle: item['subtitle'] as String?,
+                actions: List.unmodifiable(
+                  (item['actions'] as List<dynamic>? ?? const [])
+                      .cast<Map<String, dynamic>>()
+                      .map(
+                        (action) => ModuleViewAction(
+                          title: action['title'] as String,
+                          command: action['command'] as String,
+                          arguments: Map.unmodifiable(
+                            (action['arguments'] as Map<String, dynamic>? ??
+                                    const {})
+                                .cast<String, Object>(),
+                          ),
+                          destructive: action['destructive'] as bool? ?? false,
+                        ),
+                      ),
+                ),
+              ),
+              'block' => ModuleViewBlock(
+                label: item['label'] as String?,
+                text: item['text'] as String,
+              ),
+              _ => throw const FormatException(),
+            },
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+/// Device names from history, whose ids device-set fields store.
+class RuntimeModuleDeviceCatalog implements ModuleDeviceCatalog {
+  const RuntimeModuleDeviceCatalog();
+
+  @override
+  Future<List<ModuleChoice>> devices() => guardModuleRequest(
+    () async => [
+      for (final device in (await runtime.historyFacets()).originDevices)
+        ModuleChoice(id: device.id, title: device.label),
+    ],
+  );
+}
+
+Future<T> guardModuleRequest<T>(Future<T> Function() operation) async {
   try {
     return await operation();
   } on runtime.RuntimeError catch (error) {

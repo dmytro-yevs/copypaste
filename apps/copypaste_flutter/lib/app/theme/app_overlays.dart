@@ -235,11 +235,14 @@ abstract final class AppOverlays {
       action: onConfirm,
       failureMessage: failureMessage,
     );
+    // One listenable, so a rebuild while the dialog exits does not listen to
+    // the controller again after it is disposed.
+    final animation = Listenable.merge([controller, ?changes]);
     try {
       return await showDialog<bool>(
         context,
         builder: (context) => AnimatedBuilder(
-          animation: Listenable.merge([controller, ?changes]),
+          animation: animation,
           builder: (context, _) {
             final submitting = controller.submitting;
             void cancel() {

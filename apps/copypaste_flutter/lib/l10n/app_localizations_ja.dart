@@ -6305,4 +6305,59 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => '自動タグ';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module を有効にしますか？';
+  }
+
+  @override
+  String get modulesEnableAccess => 'このモジュールでできること:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'クリップボード履歴を読む',
+      'clipboard_write': 'クリップボードにコピーする',
+      'library_write': 'スニペットを保存し項目をピン留めする',
+      'snippets': 'スニペットを読む',
+      'synced_records': 'デバイス間でデータを同期する',
+      'local_state': 'このデバイスにデータを保存する',
+      'prompts': '操作の確認を求める',
+      'endpoints': 'ローカルアプリからの接続を受け付ける',
+      'other': 'CopyPaste のサービスを使う',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation => 'この CopyPaste のバージョンではまだ利用できません。';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return '$module から';
+  }
+
+  @override
+  String get modulesUnknownModule => '不明なモジュール';
+
+  @override
+  String get modulesPromptAnswerFailed => '回答を送信できませんでした。';
+
+  @override
+  String get modulesUnknownDevice => '不明なデバイス';
+
+  @override
+  String get modulesChooseDevices => 'デバイスを選択';
+
+  @override
+  String get modulesAddApp => 'アプリを追加';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app を削除';
+  }
+
+  @override
+  String get modulesNoApps => 'アプリが選択されていません';
 }

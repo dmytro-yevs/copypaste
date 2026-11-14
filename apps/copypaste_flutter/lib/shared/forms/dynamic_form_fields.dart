@@ -20,6 +20,7 @@ class DynamicFormFields extends StatelessWidget {
     this.focusNodes = const {},
     this.errors = const {},
     this.onSubmitted,
+    this.fieldBuilder,
   });
 
   final DynamicFormDraft draft;
@@ -36,6 +37,10 @@ class DynamicFormFields extends StatelessWidget {
 
   /// Owner content after the fields, rebuilt with the draft.
   final Widget? Function(BuildContext context)? footer;
+
+  /// The control of a field the owner renders itself, such as a picker.
+  final Widget? Function(BuildContext context, DynamicFormField field)?
+  fieldBuilder;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -73,7 +78,9 @@ class DynamicFormFields extends StatelessWidget {
           else ...[
             Text(field.title).small(),
             const Gap(AppSpacing.xs),
-            if (field.kind == DynamicFormFieldKind.choices)
+            if (fieldBuilder?.call(context, field) case final control?)
+              control
+            else if (field.kind == DynamicFormFieldKind.choices)
               MultiSelect<String>(
                 key: ValueKey('module-choices-${field.id}'),
                 enabled: enabled,

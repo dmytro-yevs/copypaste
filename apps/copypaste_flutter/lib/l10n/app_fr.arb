@@ -1706,5 +1706,17 @@
   "historyProvenanceTransformed": "Transformé",
   "historyRuleTag": "{name} (auto)",
   "historyMetadataExpiry": "Suppression",
-  "historyMetadataRuleTags": "Étiquettes automatiques"
+  "historyMetadataRuleTags": "Étiquettes automatiques",
+  "modulesEnableTitle": "Activer {module} ?",
+  "modulesEnableAccess": "Il pourra :",
+  "modulesCapability": "{capability, select, history_read{Lire votre historique du presse-papiers} clipboard_write{Copier dans votre presse-papiers} library_write{Enregistrer des extraits et épingler des éléments} snippets{Lire vos extraits} synced_records{Synchroniser ses données entre vos appareils} local_state{Conserver ses données sur cet appareil} prompts{Vous demander de confirmer des actions} endpoints{Accepter les connexions d'apps locales} other{Utiliser un service CopyPaste}}",
+  "modulesUnsupportedOperation": "Cette version de CopyPaste ne le permet pas encore.",
+  "modulesPromptFrom": "De {module}",
+  "modulesUnknownModule": "Module inconnu",
+  "modulesPromptAnswerFailed": "Votre réponse n'a pas été envoyée.",
+  "modulesUnknownDevice": "Appareil inconnu",
+  "modulesChooseDevices": "Choisir des appareils",
+  "modulesAddApp": "Ajouter une app",
+  "modulesRemoveApp": "Retirer {app}",
+  "modulesNoApps": "Aucune app choisie"
 }

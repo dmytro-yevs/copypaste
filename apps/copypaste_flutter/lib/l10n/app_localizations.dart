@@ -10376,6 +10376,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Automatic tags'**
   String get historyMetadataRuleTags;
+
+  /// Title of the dialog confirming what a module may access before it is enabled; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable {module}?'**
+  String modulesEnableTitle(String module);
+
+  /// Lead-in above the list of what a module may access.
+  ///
+  /// In en, this message translates to:
+  /// **'It will be able to:'**
+  String get modulesEnableAccess;
+
+  /// One line naming a host service a module asks for; {capability} is its identifier.
+  ///
+  /// In en, this message translates to:
+  /// **'{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}'**
+  String modulesCapability(String capability);
+
+  /// Error when the app cannot perform a newer module operation yet.
+  ///
+  /// In en, this message translates to:
+  /// **'This CopyPaste version can\'t do this yet.'**
+  String get modulesUnsupportedOperation;
+
+  /// Line naming the module that asks a question; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'From {module}'**
+  String modulesPromptFrom(String module);
+
+  /// Shown instead of a module name that is no longer known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown module'**
+  String get modulesUnknownModule;
+
+  /// Error when an answer to a module question could not be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Your answer was not sent.'**
+  String get modulesPromptAnswerFailed;
+
+  /// Shown instead of a device name that is no longer known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown device'**
+  String get modulesUnknownDevice;
+
+  /// Placeholder of a device picker in module settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose devices'**
+  String get modulesChooseDevices;
+
+  /// Button that adds an application to a module setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Add app'**
+  String get modulesAddApp;
+
+  /// Tooltip of the button that removes an application from a module setting; {app} is the application name.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove {app}'**
+  String modulesRemoveApp(String app);
+
+  /// Shown when a module application list is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No apps chosen'**
+  String get modulesNoApps;
 }
 
 class _AppLocalizationsDelegate

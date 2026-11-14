@@ -1706,5 +1706,17 @@
   "historyProvenanceTransformed": "Dönüştürüldü",
   "historyRuleTag": "{name} (otomatik)",
   "historyMetadataExpiry": "Silinme",
-  "historyMetadataRuleTags": "Otomatik etiketler"
+  "historyMetadataRuleTags": "Otomatik etiketler",
+  "modulesEnableTitle": "{module} etkinleştirilsin mi?",
+  "modulesEnableAccess": "Modül şunları yapabilecek:",
+  "modulesCapability": "{capability, select, history_read{Pano geçmişinizi okuma} clipboard_write{Panonuza kopyalama} library_write{Parçacık kaydetme ve öğe sabitleme} snippets{Parçacıklarınızı okuma} synced_records{Verilerini cihazlarınız arasında eşitleme} local_state{Verilerini bu cihazda saklama} prompts{İşlemleri onaylamanızı isteme} endpoints{Yerel uygulamalardan bağlantı kabul etme} other{Bir CopyPaste hizmetini kullanma}}",
+  "modulesUnsupportedOperation": "Bu CopyPaste sürümü bunu henüz desteklemiyor.",
+  "modulesPromptFrom": "Gönderen: {module}",
+  "modulesUnknownModule": "Bilinmeyen modül",
+  "modulesPromptAnswerFailed": "Yanıtınız gönderilmedi.",
+  "modulesUnknownDevice": "Bilinmeyen cihaz",
+  "modulesChooseDevices": "Cihazları seçin",
+  "modulesAddApp": "Uygulama ekle",
+  "modulesRemoveApp": "{app} uygulamasını kaldır",
+  "modulesNoApps": "Uygulama seçilmedi"
 }

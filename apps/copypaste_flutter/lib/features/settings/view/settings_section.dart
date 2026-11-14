@@ -113,7 +113,7 @@ class SettingRow extends StatelessWidget {
   const SettingRow({
     super.key,
     required this.title,
-    required this.description,
+    this.description,
     this.trailing,
     this.footer,
     this.scale,
@@ -125,7 +125,7 @@ class SettingRow extends StatelessWidget {
        );
 
   final String title;
-  final String description;
+  final String? description;
   final Widget? trailing;
 
   /// The current state of what the row sets, under its description.
@@ -145,8 +145,10 @@ class SettingRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(title).medium(),
-        const Gap(AppSpacing.xs),
-        Text(description).muted().textSmall(),
+        if (description case final description?) ...[
+          const Gap(AppSpacing.xs),
+          Text(description).muted().textSmall(),
+        ],
         if (status case final status?) ...[const Gap(AppSpacing.xs), status],
       ],
     );

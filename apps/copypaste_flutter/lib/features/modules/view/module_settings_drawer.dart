@@ -13,8 +13,15 @@ import '../../../shared/format_bytes.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/forms/dynamic_form_draft.dart';
 import '../../../shared/forms/dynamic_form_fields.dart';
+import '../../../platform/clipboard/clipboard_writer.dart';
+import '../../applications/repository/application_catalog.dart';
+import '../controller/module_view_controller.dart';
 import '../controller/modules_controller.dart';
 import '../models/module_models.dart';
+import '../models/module_view.dart';
+import 'module_command_dialogs.dart';
+import 'module_picker_fields.dart';
+import 'module_view_sections.dart';
 
 /// Shared module management layout for desktop and mobile drawers.
 class ModuleSettingsDrawer extends StatefulWidget {
@@ -22,14 +29,16 @@ class ModuleSettingsDrawer extends StatefulWidget {
     super.key,
     required this.controller,
     required this.moduleId,
-    required this.onInvoke,
     required this.onSmsSetup,
+    this.applications = const RuntimeApplicationCatalog(),
+    this.clipboard = const SystemClipboardWriter(),
   });
 
   final ModulesController controller;
   final String moduleId;
-  final void Function(InstalledModule, ModuleCommand) onInvoke;
   final VoidCallback onSmsSetup;
+  final ApplicationCatalog applications;
+  final ClipboardWriter clipboard;
 
   @override
   State<ModuleSettingsDrawer> createState() => _ModuleSettingsDrawerState();
@@ -37,6 +46,8 @@ class ModuleSettingsDrawer extends StatefulWidget {
 
 class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
   DynamicFormDraft? _draft;
+  late ModuleViewController _views = _createViews();
+  late ModulePickerFields _pickers = _createPickers();
 
   ModulesController get controller => widget.controller;
   String get moduleId => widget.moduleId;
@@ -46,6 +57,14 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
     super.initState();
     _createDraft();
   }
+
+  ModuleViewController _createViews() =>
+      ModuleViewController(modules: controller, moduleId: moduleId);
+
+  ModulePickerFields _createPickers() => ModulePickerFields(
+    controller: controller,
+    applications: widget.applications,
+  );
 
   void _createDraft() {
     final module = controller.installedModule(moduleId);
@@ -65,6 +84,71 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
       unawaited(_draft?.close());
       _draft = null;
       _createDraft();
+      _views.dispose();
+      _views = _createViews();
+    }
+    if (oldWidget.controller != controller ||
+        oldWidget.applications != widget.applications) {
+      _pickers = _createPickers();
+    }
+  }
+
+  Future<void> _invoke(InstalledModule module, ModuleCommand command) async {
+    final arguments = controller.form(command.arguments, const {});
+    final draft = command.arguments.isEmpty
+        ? arguments
+        : await showModuleArgumentsDialog(
+            context,
+            draft: arguments,
+            title: command.title,
+            action: context.l10n.modulesRun,
+            fieldBuilder: (context, field) => _pickers.build(arguments, field),
+          );
+    if (draft == null) return;
+    ModuleResult? result;
+    try {
+      result = await _views.run(command.id, draft.values);
+    } finally {
+      await draft.close();
+    }
+    if (result == null || !mounted) return;
+    await showModuleResultDialog(
+      context,
+      title: command.title,
+      text: result.text,
+    );
+  }
+
+  Future<void> _act(ModuleViewAction action) async {
+    ModuleResult? result;
+    Future<bool> run() async {
+      result = await _views.run(action.command, action.arguments);
+      return controller.errorMessage == null;
+    }
+
+    if (action.destructive) {
+      final done = await AppOverlays.showActionDialog(
+        context,
+        icon: LucideIcons.puzzle,
+        title: Text(action.title),
+        actionLabel: action.title,
+        changes: controller,
+        canConfirm: () => !controller.busy,
+        onConfirm: run,
+        failureMessage: () =>
+            controller.errorMessage ??
+            AppStrings.current.modulesOperationIncomplete,
+      );
+      if (done != true) return;
+    } else {
+      await run();
+    }
+    if (result case final result? when mounted) {
+      await showModuleResultDialog(
+        context,
+        title: action.title,
+        text: result.text,
+      );
     }
   }
 
@@ -88,6 +172,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
   @override
   void dispose() {
     unawaited(_draft?.close());
+    _views.dispose();
     super.dispose();
   }
 
@@ -101,7 +186,7 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
       autofocus: true,
       skipTraversal: true,
       child: AnimatedBuilder(
-        animation: Listenable.merge([controller, _draft]),
+        animation: Listenable.merge([controller, _draft, _views]),
         builder: (context, _) {
           final module = controller.installedModule(moduleId);
           return ConstrainedBox(
@@ -258,6 +343,12 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                             DynamicFormFields(
                               draft: draft,
                               enabled: !controller.busy && module.error == null,
+                              fieldBuilder: (context, field) => _pickers.build(
+                                draft,
+                                field,
+                                enabled:
+                                    !controller.busy && module.error == null,
+                              ),
                               footer: (context) => _searchModelNote(
                                 context,
                                 module.searchModelFor(draft.values),
@@ -305,11 +396,24 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                       !module.enabled ||
                                       module.error != null
                                   ? null
-                                  : () => widget.onInvoke(module, command),
+                                  : () => _invoke(module, command),
                               child: Text(
                                 command.title,
                                 textAlign: TextAlign.center,
                               ),
+                            ),
+                          ],
+                          if (_views.view case final view?) ...[
+                            const Gap(AppSpacing.lg),
+                            ModuleViewSections(
+                              key: ValueKey('module-view-$moduleId'),
+                              view: view,
+                              enabled:
+                                  !controller.busy &&
+                                  module.enabled &&
+                                  module.error == null,
+                              onAction: (action) => unawaited(_act(action)),
+                              onCopy: widget.clipboard.writeText,
                             ),
                           ],
                         ],

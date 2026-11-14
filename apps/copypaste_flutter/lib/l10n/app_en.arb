@@ -8142,5 +8142,73 @@
   "historyMetadataRuleTags": "Automatic tags",
   "@historyMetadataRuleTags": {
     "description": "Clip details label for tags assigned by content rules."
+  },
+  "modulesEnableTitle": "Enable {module}?",
+  "@modulesEnableTitle": {
+    "description": "Title of the dialog confirming what a module may access before it is enabled; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesEnableAccess": "It will be able to:",
+  "@modulesEnableAccess": {
+    "description": "Lead-in above the list of what a module may access."
+  },
+  "modulesCapability": "{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}",
+  "@modulesCapability": {
+    "description": "One line naming a host service a module asks for; {capability} is its identifier.",
+    "placeholders": {
+      "capability": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesUnsupportedOperation": "This CopyPaste version can't do this yet.",
+  "@modulesUnsupportedOperation": {
+    "description": "Error when the app cannot perform a newer module operation yet."
+  },
+  "modulesPromptFrom": "From {module}",
+  "@modulesPromptFrom": {
+    "description": "Line naming the module that asks a question; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesUnknownModule": "Unknown module",
+  "@modulesUnknownModule": {
+    "description": "Shown instead of a module name that is no longer known."
+  },
+  "modulesPromptAnswerFailed": "Your answer was not sent.",
+  "@modulesPromptAnswerFailed": {
+    "description": "Error when an answer to a module question could not be sent."
+  },
+  "modulesUnknownDevice": "Unknown device",
+  "@modulesUnknownDevice": {
+    "description": "Shown instead of a device name that is no longer known."
+  },
+  "modulesChooseDevices": "Choose devices",
+  "@modulesChooseDevices": {
+    "description": "Placeholder of a device picker in module settings."
+  },
+  "modulesAddApp": "Add app",
+  "@modulesAddApp": {
+    "description": "Button that adds an application to a module setting."
+  },
+  "modulesRemoveApp": "Remove {app}",
+  "@modulesRemoveApp": {
+    "description": "Tooltip of the button that removes an application from a module setting; {app} is the application name.",
+    "placeholders": {
+      "app": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesNoApps": "No apps chosen",
+  "@modulesNoApps": {
+    "description": "Shown when a module application list is empty."
   }
 }

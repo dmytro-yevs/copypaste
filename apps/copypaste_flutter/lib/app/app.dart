@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import '../features/modules/controller/module_prompt_controller.dart';
 import '../features/modules/controller/modules_controller.dart';
+import '../features/modules/view/module_prompt_presenter.dart';
 
 import '../features/transfers/file_operations_view.dart';
 import '../features/notifications/notifications_controller.dart';
@@ -45,6 +47,7 @@ class CopyPasteApp extends StatelessWidget {
     this.settingsController,
     this.launchAtLogin,
     this.modulesController,
+    this.modulePrompts,
     this.appUpdateController,
     this.desktopWindow,
     this.runtimeUnavailableMessage,
@@ -63,6 +66,7 @@ class CopyPasteApp extends StatelessWidget {
   final SettingsController? settingsController;
   final LaunchAtLoginController? launchAtLogin;
   final ModulesController? modulesController;
+  final ModulePromptController? modulePrompts;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
   final String? runtimeUnavailableMessage;
@@ -101,7 +105,9 @@ class CopyPasteApp extends StatelessWidget {
       localeListResolutionCallback: AppLocalization.resolve,
       home: Builder(
         builder: (context) {
-          AppStrings.useLocale(Localizations.localeOf(context));
+          final locale = Localizations.localeOf(context);
+          AppStrings.useLocale(locale);
+          modulesController?.useLocale(locale.toLanguageTag());
           final theme = Theme.of(context);
           final overlay = theme.brightness == Brightness.dark
               ? SystemUiOverlayStyle.light
@@ -280,20 +286,23 @@ class CopyPasteApp extends StatelessWidget {
             );
           }
 
-          return AnnotatedRegion<SystemUiOverlayStyle>(
-            value: overlay.copyWith(
-              statusBarColor: Colors.transparent,
-              systemNavigationBarColor: theme.colorScheme.background,
-            ),
-            child: ColoredBox(
-              color: theme.colorScheme.background,
-              child: desktopWindow == null
-                  ? buildContent(false)
-                  : ValueListenableBuilder<bool>(
-                      valueListenable: desktopWindow!.isUnifiedTitleBarReady,
-                      builder: (context, windowReady, child) =>
-                          buildContent(windowReady),
-                    ),
+          return ModulePromptPresenter(
+            controller: modulePrompts,
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: overlay.copyWith(
+                statusBarColor: Colors.transparent,
+                systemNavigationBarColor: theme.colorScheme.background,
+              ),
+              child: ColoredBox(
+                color: theme.colorScheme.background,
+                child: desktopWindow == null
+                    ? buildContent(false)
+                    : ValueListenableBuilder<bool>(
+                        valueListenable: desktopWindow!.isUnifiedTitleBarReady,
+                        builder: (context, windowReady, child) =>
+                            buildContent(windowReady),
+                      ),
+              ),
             ),
           );
         },

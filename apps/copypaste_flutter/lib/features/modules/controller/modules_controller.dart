@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:pub_semver/pub_semver.dart';
 
@@ -18,12 +20,15 @@ class ModulesController extends ChangeNotifier {
     ModuleInputPicker? inputPicker,
     Future<void> Function()? restart,
     ModuleAccessRepository? access,
+    ModuleDeviceCatalog? devices,
   }) : _repository = repository,
        _marketplace = marketplace,
        _inputPicker = inputPicker,
        _restart = restart,
-       _access = access;
+       _access = access,
+       _devices = devices;
   final ModuleAccessRepository? _access;
+  final ModuleDeviceCatalog? _devices;
   final ModulesRepository _repository;
   final ModuleMarketplaceRepository _marketplace;
   final ModuleInputPicker? _inputPicker;
@@ -226,7 +231,24 @@ class ModulesController extends ChangeNotifier {
     }
   }
 
-  Future<void> setEnabled(String id, bool enabled) => _perform(() async {
+  /// Enabling a module that declares capabilities needs them [confirmed].
+  Future<bool> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> confirmed = const [],
+  }) async {
+    final done = await _perform(() async {
+      await _setEnabled(id, enabled, confirmed);
+      return true;
+    });
+    return done == true && _error == null;
+  }
+
+  Future<void> _setEnabled(
+    String id,
+    bool enabled,
+    List<ModuleCapability> confirmed,
+  ) async {
     final sms =
         installedModule(id)?.events.contains(ModuleEventKind.smsReceived) ??
         false;
@@ -236,7 +258,11 @@ class ModulesController extends ChangeNotifier {
         throw ModulesException(AppStrings.current.modulesSmsSetupRequired);
       }
     }
-    await _repository.setEnabled(id, enabled);
+    await _repository.setEnabled(
+      id,
+      enabled,
+      capabilities: enabled ? confirmed : const [],
+    );
     if (sms && _access != null && !await _access.synchronize()) {
       if (enabled) {
         try {
@@ -261,7 +287,40 @@ class ModulesController extends ChangeNotifier {
       }
       throw ModulesException(AppStrings.current.modulesSmsMonitoringFailed);
     }
-  });
+  }
+
+  String? _locale;
+
+  /// Reports the app language, then rereads the summaries it localizes.
+  void useLocale(String locale) {
+    if (_disposed || _locale == locale) return;
+    _locale = locale;
+    unawaited(_sendLocale(locale));
+  }
+
+  Future<void> _sendLocale(String locale) async {
+    try {
+      await _repository.setLocale(locale);
+      if (_disposed || _locale != locale || _state != ModulesLoadState.ready) {
+        return;
+      }
+      final modules = await _repository.list();
+      if (_disposed || _locale != locale || _busy) return;
+      _modules = modules;
+      notifyListeners();
+    } catch (_) {
+      // Summaries keep their English strings.
+    }
+  }
+
+  /// Named devices for device-set fields; none when they cannot be read.
+  Future<List<ModuleChoice>> deviceChoices() async {
+    try {
+      return await _devices?.devices() ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
 
   bool get canSetUpSmsAccess => _access != null;
 

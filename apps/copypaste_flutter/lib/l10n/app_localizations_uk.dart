@@ -6789,4 +6789,60 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => 'Автоматичні теги';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return 'Увімкнути $module?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Модуль зможе:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Читати історію буфера обміну',
+      'clipboard_write': 'Копіювати в буфер обміну',
+      'library_write': 'Зберігати фрагменти й закріплювати записи',
+      'snippets': 'Читати ваші фрагменти',
+      'synced_records': 'Синхронізувати свої дані між пристроями',
+      'local_state': 'Зберігати свої дані на цьому пристрої',
+      'prompts': 'Просити вас підтвердити дії',
+      'endpoints': 'Приймати підключення від локальних програм',
+      'other': 'Використовувати сервіс CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation =>
+      'Ця версія CopyPaste ще не підтримує цю дію.';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Від $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Невідомий модуль';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Вашу відповідь не надіслано.';
+
+  @override
+  String get modulesUnknownDevice => 'Невідомий пристрій';
+
+  @override
+  String get modulesChooseDevices => 'Виберіть пристрої';
+
+  @override
+  String get modulesAddApp => 'Додати програму';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return 'Вилучити $app';
+  }
+
+  @override
+  String get modulesNoApps => 'Програми не вибрано';
 }

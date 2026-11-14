@@ -351,7 +351,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   showHeading: showHeading,
                   groupContent: false,
                   description: context.l10n.settingsModulesDescription,
-                  children: [ModulesSettingsView(controller: widget.modules!)],
+                  children: [
+                    ModulesSettingsView(
+                      controller: widget.modules!,
+                      applications: widget.applications,
+                    ),
+                  ],
                 ),
                 SettingsSectionId.clipboard => _clipboardSection(
                   settings,

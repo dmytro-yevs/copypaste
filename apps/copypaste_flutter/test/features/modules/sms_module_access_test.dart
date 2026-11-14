@@ -596,7 +596,11 @@ void main() {
 
 class _RollbackFailingRepository extends MemoryModulesRepository {
   @override
-  Future<void> setEnabled(String id, bool enabled) async {
+  Future<void> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> capabilities = const [],
+  }) async {
     if (!enabled) {
       calls.add('enabled:false');
       throw const ModulesException('Rollback storage unavailable.');
@@ -607,7 +611,11 @@ class _RollbackFailingRepository extends MemoryModulesRepository {
 
 class _RollbackResponseFailingRepository extends MemoryModulesRepository {
   @override
-  Future<void> setEnabled(String id, bool enabled) async {
+  Future<void> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> capabilities = const [],
+  }) async {
     await super.setEnabled(id, enabled);
     if (!enabled) {
       throw const ModulesException('Rollback response unavailable.');

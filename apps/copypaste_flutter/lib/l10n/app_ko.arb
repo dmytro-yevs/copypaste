@@ -1706,5 +1706,17 @@
   "historyProvenanceTransformed": "변환됨",
   "historyRuleTag": "{name}(자동)",
   "historyMetadataExpiry": "삭제",
-  "historyMetadataRuleTags": "자동 태그"
+  "historyMetadataRuleTags": "자동 태그",
+  "modulesEnableTitle": "{module}을(를) 켜시겠습니까?",
+  "modulesEnableAccess": "이 모듈이 할 수 있는 작업:",
+  "modulesCapability": "{capability, select, history_read{클립보드 기록 읽기} clipboard_write{클립보드에 복사} library_write{스니펫 저장 및 항목 고정} snippets{스니펫 읽기} synced_records{기기 간 데이터 동기화} local_state{이 기기에 데이터 보관} prompts{작업 확인 요청} endpoints{로컬 앱의 연결 수락} other{CopyPaste 서비스 사용}}",
+  "modulesUnsupportedOperation": "이 CopyPaste 버전에서는 아직 지원되지 않습니다.",
+  "modulesPromptFrom": "{module}에서",
+  "modulesUnknownModule": "알 수 없는 모듈",
+  "modulesPromptAnswerFailed": "응답을 보내지 못했습니다.",
+  "modulesUnknownDevice": "알 수 없는 기기",
+  "modulesChooseDevices": "기기 선택",
+  "modulesAddApp": "앱 추가",
+  "modulesRemoveApp": "{app} 제거",
+  "modulesNoApps": "선택한 앱 없음"
 }

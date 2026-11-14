@@ -6617,4 +6617,60 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get historyMetadataRuleTags => 'Otomatik etiketler';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module etkinleştirilsin mi?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Modül şunları yapabilecek:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Pano geçmişinizi okuma',
+      'clipboard_write': 'Panonuza kopyalama',
+      'library_write': 'Parçacık kaydetme ve öğe sabitleme',
+      'snippets': 'Parçacıklarınızı okuma',
+      'synced_records': 'Verilerini cihazlarınız arasında eşitleme',
+      'local_state': 'Verilerini bu cihazda saklama',
+      'prompts': 'İşlemleri onaylamanızı isteme',
+      'endpoints': 'Yerel uygulamalardan bağlantı kabul etme',
+      'other': 'Bir CopyPaste hizmetini kullanma',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get modulesUnsupportedOperation =>
+      'Bu CopyPaste sürümü bunu henüz desteklemiyor.';
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Gönderen: $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Bilinmeyen modül';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Yanıtınız gönderilmedi.';
+
+  @override
+  String get modulesUnknownDevice => 'Bilinmeyen cihaz';
+
+  @override
+  String get modulesChooseDevices => 'Cihazları seçin';
+
+  @override
+  String get modulesAddApp => 'Uygulama ekle';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app uygulamasını kaldır';
+  }
+
+  @override
+  String get modulesNoApps => 'Uygulama seçilmedi';
 }

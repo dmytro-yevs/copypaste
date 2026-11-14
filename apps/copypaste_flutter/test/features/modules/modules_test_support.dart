@@ -43,6 +43,9 @@ class MemoryModulesRepository implements ModulesRepository {
   final calls = <String>[];
   Map<String, Object>? lastArguments;
   Map<String, Object>? lastPreferences;
+  List<ModuleCapability>? lastCapabilities;
+  String? locale;
+  ModuleResult Function(String command, Map<String, Object> arguments)? results;
   void _check() {
     if (failure case final error?) throw error;
   }
@@ -57,9 +60,14 @@ class MemoryModulesRepository implements ModulesRepository {
   }
 
   @override
-  Future<void> setEnabled(String id, bool enabled) async {
+  Future<void> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> capabilities = const [],
+  }) async {
     calls.add('enabled:$enabled');
     _check();
+    lastCapabilities = capabilities;
     final module = modules.single;
     modules = [
       InstalledModule(
@@ -74,8 +82,16 @@ class MemoryModulesRepository implements ModulesRepository {
         preferenceFields: module.preferenceFields,
         preferences: module.preferences,
         events: module.events,
+        capabilities: module.capabilities,
       ),
     ];
+  }
+
+  @override
+  Future<void> setLocale(String locale) async {
+    calls.add('locale:$locale');
+    _check();
+    this.locale = locale;
   }
 
   @override
@@ -98,9 +114,10 @@ class MemoryModulesRepository implements ModulesRepository {
     String command,
     Map<String, Object> arguments,
   ) async {
-    calls.add('invoke');
+    calls.add('invoke:$command');
     _check();
     lastArguments = arguments;
+    if (results case final results?) return results(command, arguments);
     return ModuleResult((arguments['text'] as String).toUpperCase());
   }
 }
