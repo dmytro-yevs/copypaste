@@ -88,6 +88,7 @@ mod tests {
         let fields = [ModuleField {
             id: "image".into(),
             title: "Image".into(),
+            synced: false,
             value: ModuleFieldValue::File {
                 accepted_extensions: vec!["png".into()],
                 required: true,
@@ -115,6 +116,7 @@ mod tests {
         let fields = [ModuleField {
             id: "image".into(),
             title: "Image".into(),
+            synced: false,
             value: ModuleFieldValue::File {
                 accepted_extensions: vec!["png".into()],
                 required: true,

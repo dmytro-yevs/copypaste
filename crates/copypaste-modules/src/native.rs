@@ -5,8 +5,8 @@ use copypaste_module_sdk::{
         to_exact_vec, NativeApi, NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply,
         MAX_HOST_BYTES,
     },
-    ModuleEnvironment, ModuleInvocation, ModuleOutput, ModuleUnloadPolicy, MAX_INVOCATION_BYTES,
-    MODULE_API_VERSION,
+    HostError, HostErrorCode, ModuleEnvironment, ModuleInvocation, ModuleOutput,
+    ModuleUnloadPolicy, MAX_INVOCATION_BYTES, MODULE_API_VERSION,
 };
 use libloading::Library;
 use std::{
@@ -312,29 +312,43 @@ unsafe extern "C" fn host_request(
     data: *const u8,
     len: usize,
 ) -> NativeReply {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if context.is_null() || data.is_null() || len == 0 || len > MAX_HOST_BYTES {
-            return Err(ModuleError::State);
-        }
-        // SAFETY: NativeModule retains the bridge until its module and all workers are destroyed.
-        let bridge = unsafe { &*context.cast::<HostBridge>() };
-        // SAFETY: the caller lends this bounded input for the callback duration.
-        let input = unsafe { std::slice::from_raw_parts(data, len) };
-        // Already admitted token rotations may finish saving encrypted metadata
-        // during teardown. History access and the live lease close immediately.
-        if !bridge.accepting.load(Ordering::Acquire) && !is_state_operation(input) {
-            return Err(ModuleError::Disabled);
-        }
-        // Parsed straight into the typed request: an intermediate JSON tree
-        // would hold another copy of the plaintext outside `Zeroizing`.
-        let request = serde_json::from_slice(input).map_err(|_| ModuleError::State)?;
-        let output = bridge.services.request(&bridge.id, request)?;
-        to_exact_vec(&output, MAX_HOST_BYTES).map_err(|_| ModuleError::State)
-    }))
-    .unwrap_or(Err(ModuleError::State));
+    // `None` is the untyped refusal every SDK version reads as unavailable.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || -> Result<Vec<u8>, Option<HostError>> {
+            if context.is_null() || data.is_null() || len == 0 || len > MAX_HOST_BYTES {
+                return Err(None);
+            }
+            // SAFETY: NativeModule retains the bridge until its module and all workers are destroyed.
+            let bridge = unsafe { &*context.cast::<HostBridge>() };
+            // SAFETY: the caller lends this bounded input for the callback duration.
+            let input = unsafe { std::slice::from_raw_parts(data, len) };
+            // Already admitted token rotations may finish saving encrypted metadata
+            // during teardown. History access and the live lease close immediately.
+            if !bridge.accepting.load(Ordering::Acquire) && !is_state_operation(input) {
+                return Err(None);
+            }
+            // Parsed straight into the typed request: an intermediate JSON tree
+            // would hold another copy of the plaintext outside `Zeroizing`.
+            // Schema 6 host services are not served yet; their callers get a
+            // typed refusal, which earlier SDKs read as an unavailable service.
+            let request = serde_json::from_slice(input).map_err(|_| {
+                Some(HostError::new(
+                    HostErrorCode::Unsupported,
+                    "This host service is not available.",
+                ))
+            })?;
+            let output = bridge
+                .services
+                .request(&bridge.id, request)
+                .map_err(|_| None)?;
+            to_exact_vec(&output, MAX_HOST_BYTES).map_err(|_| None)
+        },
+    ))
+    .unwrap_or(Err(None));
     let (status, bytes) = match result {
         Ok(bytes) => (0, bytes),
-        Err(_) => (1, b"The sync host service is unavailable.".to_vec()),
+        Err(Some(error)) => (1, serde_json::to_vec(&error).unwrap_or_default()),
+        Err(None) => (1, b"The sync host service is unavailable.".to_vec()),
     };
     let bytes = bytes.into_boxed_slice();
     let len = bytes.len();
