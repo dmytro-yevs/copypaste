@@ -140,7 +140,9 @@ fn moving_the_wall_clock_back_does_not_extend_an_expiring_clip() {
     let laptop = device(44, "laptop");
     let id = laptop.capture("short lived");
     let now = copypaste_core::now_ms();
-    let boot = 1_000_000;
+    // The store also reads the real boot clock while projecting the synced
+    // note, so a fake one would race the host's uptime.
+    let boot = copypaste_core::storage::expiry::boot_clock_ms().expect("a boot clock");
     laptop.expire_in(
         &id,
         5 * MIN,
