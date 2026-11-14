@@ -76,15 +76,17 @@
       "snippets_search_ms": null,
       "transforms_palette_open_peak_delta_bytes": null,
       "transforms_16mib_peak_bytes": null,
+      "ai_tools_mcp_steady_delta_bytes": null,
+      "ai_tools_mcp_peak_delta_bytes": null,
       "paste_queue_idle_wakeups_per_hour": null,
       "binary_size_delta_bytes": null
     },
     "notes": [
-      "Feature budgets cover the paste queue, snippets, transforms, content rules and Android quick access. Every threshold is null: unresolved, never passing. check-resource-receipts.py does not read this object.",
-      "\"all\" means macOS, Windows and Android. Each measurement records the application, daemon or runtime, and workers separately and combined.",
+      "Feature budgets cover the paste queue, snippets, transforms, content rules, Android quick access and the optional AI Tools module. Every threshold is null: unresolved, never passing. check-resource-receipts.py does not read this object.",
+      "\"all\" means macOS, Windows and Android; the ai_tools_mcp_* keys apply to the desktops (macOS, Windows, Linux), measured as the daemon's delta while the module serves MCP clients. Each measurement records the application, daemon or runtime, and workers separately and combined.",
       "Spec proposals, not budgets: rules_capture_evaluation_ms 50 ms, snippets_render_64k_ms 50 ms. paste_queue_idle_wakeups_per_hour is compared with the feature disabled (paste-queue AC31).",
       "binary_size_delta_bytes covers ICU4X compiled data, the bundled Windows tzdb and the YAML parser in the daemon, CLI and Android library.",
-      "Optimization registry entries RUN-107 to RUN-122 (except RUN-115, which moved with AI tools to the planned optional module) describe the behavior each key measures."
+      "Optimization registry entries RUN-107 to RUN-122 describe the behavior each key measures; RUN-115 now covers the AI Tools module (modules/ai-tools)."
     ]
   }
 }

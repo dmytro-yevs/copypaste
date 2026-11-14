@@ -29,7 +29,7 @@ def main():
     packages = list(args.directory.glob("*.cpmodule"))
     # Package authentication also checks all file hashes and platform parity.
     module = build_catalog(packages, args.release_tag)["modules"][0]
-    if module["id"] not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
+    if module["id"] not in {"copypaste.ai-tools", "copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
         raise ValueError("No native qualification contract exists for this module")
     verify_receipts(args.directory, module, args.commit, args.run_id)
     print(f"Verified exact signed {module['id']} package receipts for every shipped native platform")

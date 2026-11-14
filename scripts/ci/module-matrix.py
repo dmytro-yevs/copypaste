@@ -24,7 +24,7 @@ def matrix(contract, kind, linux_only, publish):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", required=True, choices=("provider", "ocr"))
+    parser.add_argument("--kind", required=True, choices=("provider", "ocr", "ai-tools"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     rows = matrix(json.loads((root / "config/module-platforms.json").read_text()), args.kind,

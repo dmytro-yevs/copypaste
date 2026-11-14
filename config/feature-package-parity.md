@@ -80,7 +80,15 @@ Every row below still needs native verification on macOS, Windows and Android (p
 
 ### 1.6 AI tools (moved to an optional module)
 
-AI tools are not part of the core app. The MCP server (`copypaste mcp`), Settings → AI tools, first-use approval and "Hide from AI tools" move to the planned optional `ai-tools` module, delivered through the module marketplace. Their parity and acceptance criteria will be tracked with that module.
+AI tools are not part of the core app. They ship as the optional `copypaste.ai-tools` module (`modules/ai-tools`), delivered through the module marketplace and not installed by default:
+
+| Entry point | macOS | Windows | Linux | Android |
+|---|---|---|---|---|
+| Settings → Modules → AI Tools: exposure policy, connected tools, activity, connection instructions | Yes | Yes | Yes | Yes, management only |
+| MCP server (`copypaste module connect copypaste.ai-tools mcp`) | Yes | Yes | Yes | No endpoint; served through a computer |
+| First-use and read-volume approval | Host prompt | Host prompt | Host prompt | — |
+
+MCP acceptance criteria have not been re-established for the module, and native evidence is pending on every platform.
 
 Core keeps only a neutral hook for such a module: the synced per-clip flag `hidden_from_integrations` and the `hide_from_integrations` rule action. The app shows neither while no integration module is installed. Built-in rules only mark detected credentials and payment cards secret; secret clips are excluded from any integration.
 
@@ -267,7 +275,7 @@ The decision also asks for a one-line exception in AGENTS.md. AGENTS.md is no lo
 
 Every entry is `implemented_pending_native_evidence`, and native resource qualification is `not_established` on every listed platform. No native measurement was taken. All feature budgets in `config/runtime-resource-budgets.json` (`feature_budgets`) are null, which means unresolved and never passing.
 
-The plan numbered these entries RUN-104 to RUN-119. Those ids were taken on the branch by entries that landed after the plan's baseline, so the registry uses RUN-107 to RUN-122. RUN-115 (the MCP stdio process) moved with AI tools to the planned optional module:
+The plan numbered these entries RUN-104 to RUN-119. Those ids were taken on the branch by entries that landed after the plan's baseline, so the registry uses RUN-107 to RUN-122. RUN-115 now describes the AI Tools module's MCP endpoint:
 
 | Plan id | Registry id | Behavior |
 |---|---|---|
