@@ -1,7 +1,13 @@
-use crate::{native::ModuleInstance, package::PackageVerifier, ModuleError};
+use crate::{
+    bridge::{HostAccess, HostShared},
+    endpoints::EndpointSession,
+    native::{LoadSpec, ModuleInstance},
+    package::PackageVerifier,
+    ModuleError,
+};
 use copypaste_module_sdk::{
-    resolve_fields, valid_id, ModuleEvent, ModuleInvocation, ModuleManifest, ModuleOutput,
-    ModuleTarget,
+    resolve_fields, valid_id, ModuleCapability, ModuleDelivery, ModuleEvent, ModuleInvocation,
+    ModuleManifest, ModuleOutput, ModuleTarget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +19,17 @@ use std::{
 };
 
 mod updates;
+
+/// The last locale the app reported, beside the registry.
+const LOCALE_FILE: &str = "locale";
+
+fn valid_locale(locale: &str) -> bool {
+    !locale.is_empty()
+        && locale.len() <= 35
+        && locale
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModule {
@@ -29,6 +46,10 @@ pub struct InstalledModule {
     pub enabled: bool,
     pub size_bytes: u64,
     pub commands: Vec<copypaste_module_sdk::ModuleCommand>,
+    #[serde(default)]
+    pub capabilities: Vec<copypaste_module_sdk::ModuleCapability>,
+    #[serde(default)]
+    pub endpoints: Vec<copypaste_module_sdk::ModuleEndpoint>,
     pub preference_fields: Vec<copypaste_module_sdk::ModuleField>,
     pub preferences: BTreeMap<String, Value>,
     pub error: Option<String>,
@@ -42,6 +63,9 @@ struct Record {
     preferences: BTreeMap<String, Value>,
     #[serde(default)]
     removing: bool,
+    /// Declared capabilities the user confirmed when enabling the module.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capabilities: Vec<ModuleCapability>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -74,6 +98,7 @@ pub struct ModuleManager {
     state: Mutex<State>,
     mutation: Mutex<()>,
     sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
+    shared: Arc<HostShared>,
     model_health: Mutex<BTreeMap<String, ResourceHealth>>,
     inference: crate::inference::InferenceClient,
     worker_identity: crate::inference::WorkerIdentity,
@@ -122,6 +147,7 @@ impl ModuleManager {
             }),
             mutation: Mutex::new(()),
             sync_services: Mutex::new(None),
+            shared: Arc::default(),
             model_health: Mutex::new(BTreeMap::new()),
             inference: crate::inference::InferenceClient::new(),
             worker_identity: crate::inference::WorkerIdentity {
@@ -131,6 +157,12 @@ impl ModuleManager {
             },
             _staging_owner: staging_owner,
         };
+        if let Some(locale) = fs::read_to_string(manager.root.join(LOCALE_FILE))
+            .ok()
+            .filter(|locale| valid_locale(locale))
+        {
+            manager.shared.set_locale(locale);
+        }
         manager.activate_staged_updates();
         Ok(manager)
     }
@@ -204,6 +236,7 @@ impl ModuleManager {
     }
 
     fn summaries(&self, registry: &Registry) -> Vec<InstalledModule> {
+        let locale = self.shared.locale();
         registry
             .modules
             .iter()
@@ -227,7 +260,7 @@ impl ModuleManager {
                 match self.manifest(id, record) {
                     Ok(manifest) => {
                         match validate_stored_preferences(&manifest, &record.preferences) {
-                            Ok(_) => self.summary(manifest, record),
+                            Ok(_) => self.summary(manifest.localized(&locale), record),
                             Err(error) => failed_summary(id, record, error),
                         }
                     }
@@ -285,16 +318,35 @@ impl ModuleManager {
                 (field.id.clone(), value)
             })
             .collect();
+        // Kept only while every declared capability stays confirmed: an
+        // update asking for more waits disabled for the user to confirm again.
+        let confirmed = old.as_ref().is_some_and(|old| {
+            manifest
+                .capabilities
+                .iter()
+                .all(|capability| old.capabilities.contains(capability))
+        });
         let record = Record {
             version: manifest.version.clone(),
             enabled: old.as_ref().map_or(
                 manifest.event_handlers.is_empty()
                     && manifest.search_provider.is_none()
-                    && manifest.sync_provider.is_none(),
-                |old| old.enabled,
+                    && manifest.sync_provider.is_none()
+                    && manifest.capabilities.is_empty(),
+                |old| old.enabled && (manifest.capabilities.is_empty() || confirmed),
             ),
             preferences,
             removing: false,
+            capabilities: old
+                .as_ref()
+                .map(|old| {
+                    old.capabilities
+                        .iter()
+                        .filter(|capability| manifest.capabilities.contains(capability))
+                        .copied()
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
         let destination = self.directory(&manifest.id, &manifest.version);
         fs::create_dir_all(destination.parent().ok_or(ModuleError::State)?)?;
@@ -329,7 +381,14 @@ impl ModuleManager {
         Ok(self.summary(manifest, &record))
     }
 
-    pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), ModuleError> {
+    /// Enabling grants every declared capability, so `confirmed` must echo
+    /// all of them as confirmed by the user; the confirmed set is persisted.
+    pub fn set_enabled(
+        &self,
+        id: &str,
+        enabled: bool,
+        confirmed: &[ModuleCapability],
+    ) -> Result<(), ModuleError> {
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let mut registry = state.registry.clone();
@@ -344,12 +403,22 @@ impl ModuleManager {
         }
         if enabled {
             let manifest = self.manifest(id, record)?;
+            if manifest
+                .capabilities
+                .iter()
+                .any(|capability| !confirmed.contains(capability))
+            {
+                return Err(ModuleError::Invalid(
+                    "Confirm the module permissions before enabling it.".into(),
+                ));
+            }
             if let Some(provider) = &manifest.search_provider {
                 let model = selected_model(provider, &record.preferences)?;
                 if !self.model_healthy(id, model) {
                     return Err(ModuleError::Invalid("Choose languages and download their model before enabling semantic search.".into()));
                 }
             }
+            record.capabilities = manifest.capabilities;
         }
         record.enabled = enabled;
         self.persist(&registry)?;
@@ -445,6 +514,12 @@ impl ModuleManager {
                 )?,
             )?;
         }
+        crate::preferences::store(
+            self.shared.services().as_deref(),
+            id,
+            &manifest.preferences,
+            &record.preferences,
+        )?;
         self.persist(&registry)?;
         state.registry = registry;
         let previous = if manifest.sync_provider.is_some() {
@@ -452,6 +527,10 @@ impl ModuleManager {
         } else {
             None
         };
+        if let (Some(loaded), Some(record)) = (state.loaded.get(id), state.registry.modules.get(id))
+        {
+            loaded.instance.set_preferences(record.preferences.clone());
+        }
         drop(state);
         if let Some(previous) = previous {
             previous.instance.stop();
@@ -538,12 +617,7 @@ impl ModuleManager {
         if let Some(previous) = previous {
             previous.instance.stop();
         }
-        let state_cleared = match self.sync_services.lock() {
-            Ok(services) => services
-                .as_ref()
-                .is_none_or(|services| services.clear(id).is_ok()),
-            Err(_) => false,
-        };
+        let state_cleared = self.clear_host_state(id);
         let packages = self.root.join("packages").join(id);
         if crate::native::pinned_under(&packages) {
             let data = self.root.join("data").join(id);
@@ -574,6 +648,17 @@ impl ModuleManager {
         Ok(())
     }
 
+    /// Local encrypted state, the derived index and the module's records,
+    /// synced preferences included.
+    fn clear_host_state(&self, id: &str) -> bool {
+        match self.sync_services.lock() {
+            Ok(services) => services
+                .as_ref()
+                .is_none_or(|services| services.clear(id).is_ok()),
+            Err(_) => false,
+        }
+    }
+
     fn finish_pending_removals(&self) -> Result<(), ModuleError> {
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let pending: Vec<_> = state
@@ -585,13 +670,7 @@ impl ModuleManager {
             .collect();
         let mut registry = state.registry.clone();
         for id in pending {
-            let state_cleared = match self.sync_services.lock() {
-                Ok(services) => services
-                    .as_ref()
-                    .is_none_or(|services| services.clear(&id).is_ok()),
-                Err(_) => false,
-            };
-            if !state_cleared {
+            if !self.clear_host_state(&id) {
                 continue;
             }
             let packages = self.root.join("packages").join(&id);
@@ -653,8 +732,10 @@ impl ModuleManager {
                     .collect()
             })
             .unwrap_or_default();
+        let preferences = self.preferences(&manifest.id, &manifest, &record.preferences);
         let mut result = summary(manifest, record);
         result.search_models = models;
+        result.preferences = preferences;
         result
     }
 
@@ -790,11 +871,24 @@ impl ModuleManager {
         Ok(true)
     }
 
+    /// Invokes on behalf of the host or the app.
     pub fn invoke(
         &self,
         id: &str,
         command: &str,
         arguments: BTreeMap<String, Value>,
+    ) -> Result<ModuleOutput, ModuleError> {
+        self.invoke_as(id, command, arguments, true)
+    }
+
+    /// `app` is false for local clients other than the app; they are refused
+    /// `app_only` commands.
+    pub fn invoke_as(
+        &self,
+        id: &str,
+        command: &str,
+        arguments: BTreeMap<String, Value>,
+        app: bool,
     ) -> Result<ModuleOutput, ModuleError> {
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let record = state
@@ -812,10 +906,18 @@ impl ModuleManager {
             .iter()
             .find(|entry| entry.id == command)
             .ok_or_else(|| ModuleError::Invalid("The module command is not registered.".into()))?;
+        if command.app_only && !app {
+            return Err(ModuleError::Invalid(
+                "Only the CopyPaste app can run this command.".into(),
+            ));
+        }
         let mut invocation = ModuleInvocation {
             command: command.id.clone(),
             arguments: resolve_fields(&command.arguments, &arguments)?,
-            preferences: resolve_fields(&manifest.preferences, &record.preferences)?,
+            preferences: resolve_fields(
+                &manifest.preferences,
+                &self.preferences(id, &manifest, &record.preferences),
+            )?,
         };
         if manifest.search_provider.is_some() || crate::inference::is_ocr_command(id, &command.id) {
             let generation = self.inference.generation();
@@ -831,42 +933,189 @@ impl ModuleManager {
             };
             return self.inference.invoke(request, generation);
         }
-        state.sequence = state.sequence.saturating_add(1);
-        let last_used = state.sequence;
-        let loaded = state.loaded.entry(id.into()).or_insert_with(|| Loaded {
-            instance: Arc::new(ModuleInstance::new()),
-            last_used,
-        });
-        loaded.last_used = last_used;
-        let instance = Arc::clone(&loaded.instance);
-        let evicted = trim_idle_instances(&mut state);
+        let (instance, evicted) = self.lease(&mut state, id);
         drop(state);
         drop(evicted);
         let result = (|| {
             let _inputs =
                 crate::input::snapshot(&self.root, &command.arguments, &mut invocation.arguments)?;
+            let package_dir = self.directory(id, &record.version);
+            let data_dir = self.root.join("data").join(id);
             instance.invoke(
-                &self.verifier,
-                &self.directory(id, &record.version),
-                &self.root.join("data").join(id),
-                &invocation,
-                if manifest.sync_provider.is_some() {
-                    self.sync_services
-                        .lock()
-                        .map_err(|_| ModuleError::State)?
-                        .clone()
-                } else {
-                    None
+                LoadSpec {
+                    verifier: &self.verifier,
+                    package_dir: &package_dir,
+                    data_dir: &data_dir,
+                    preferences: &invocation.preferences,
+                    access: self.access(&manifest, &record)?,
                 },
-                id,
+                &invocation,
             )
         })();
         drop(instance);
+        self.trim();
+        result
+    }
+
+    /// The loaded instance of `id`, marked as just used, and the idle
+    /// instances to drop once the state lock is released. Instances held by a
+    /// lease are never evicted.
+    fn lease(
+        &self,
+        state: &mut State,
+        id: &str,
+    ) -> (Arc<ModuleInstance>, Vec<Arc<ModuleInstance>>) {
+        state.sequence = state.sequence.saturating_add(1);
+        let last_used = state.sequence;
+        let loaded = state.loaded.entry(id.into()).or_insert_with(|| Loaded {
+            instance: Arc::new(ModuleInstance::new(id, Arc::clone(&self.shared))),
+            last_used,
+        });
+        loaded.last_used = last_used;
+        let instance = Arc::clone(&loaded.instance);
+        (instance, trim_idle_instances(state))
+    }
+
+    fn trim(&self) {
+        let evicted = match self.state.lock() {
+            Ok(mut state) => trim_idle_instances(&mut state),
+            Err(_) => return,
+        };
+        drop(evicted);
+    }
+
+    fn access(
+        &self,
+        manifest: &ModuleManifest,
+        record: &Record,
+    ) -> Result<HostAccess, ModuleError> {
+        Ok(HostAccess {
+            sync: self
+                .sync_services
+                .lock()
+                .map_err(|_| ModuleError::State)?
+                .clone(),
+            sync_provider: manifest.sync_provider.is_some(),
+            capabilities: manifest
+                .capabilities
+                .iter()
+                .filter(|capability| record.capabilities.contains(capability))
+                .copied()
+                .collect(),
+            preference_fields: manifest.preferences.clone(),
+        })
+    }
+
+    /// The registry values of `id` with its synced values applied.
+    fn preferences(
+        &self,
+        id: &str,
+        manifest: &ModuleManifest,
+        values: &BTreeMap<String, Value>,
+    ) -> BTreeMap<String, Value> {
+        crate::preferences::merged(
+            self.shared.services().as_deref(),
+            id,
+            &manifest.preferences,
+            values.clone(),
+        )
+    }
+
+    /// Opens an endpoint connection. The session keeps the instance loaded
+    /// until it closes. `privileged` is true only for the verified app.
+    pub fn connect(
+        &self,
+        id: &str,
+        endpoint: &str,
+        privileged: bool,
+    ) -> Result<EndpointSession, ModuleError> {
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
-        let evicted = trim_idle_instances(&mut state);
+        let record = state
+            .registry
+            .modules
+            .get(id)
+            .cloned()
+            .ok_or(ModuleError::NotInstalled)?;
+        if !record.enabled || record.removing {
+            return Err(ModuleError::Disabled);
+        }
+        let manifest = self.manifest(id, &record)?;
+        let platform = self.worker_identity.target.platform;
+        if manifest.search_provider.is_some()
+            || !record.capabilities.contains(&ModuleCapability::Endpoints)
+            || !manifest
+                .endpoints
+                .iter()
+                .any(|declared| declared.id == endpoint && declared.platforms.contains(&platform))
+        {
+            return Err(ModuleError::Invalid(
+                "This module has no such endpoint on this device.".into(),
+            ));
+        }
+        let preferences = resolve_fields(
+            &manifest.preferences,
+            &self.preferences(id, &manifest, &record.preferences),
+        )?;
+        let (instance, evicted) = self.lease(&mut state, id);
         drop(state);
         drop(evicted);
-        result
+        let (connection, outbound) = instance.endpoints().open()?;
+        let session = EndpointSession::new(connection.clone(), Arc::clone(&instance), outbound);
+        let package_dir = self.directory(id, &record.version);
+        let data_dir = self.root.join("data").join(id);
+        instance.open_endpoint(
+            LoadSpec {
+                verifier: &self.verifier,
+                package_dir: &package_dir,
+                data_dir: &data_dir,
+                preferences: &preferences,
+                access: self.access(&manifest, &record)?,
+            },
+            &ModuleDelivery::EndpointOpen {
+                endpoint: endpoint.into(),
+                connection,
+                privileged,
+            },
+        )?;
+        Ok(session)
+    }
+
+    /// The UI locale for summaries and the `context` host request. It is
+    /// kept across restarts, so endpoint clients served before the app
+    /// reconnects see it too.
+    pub fn set_locale(&self, locale: &str) -> Result<(), ModuleError> {
+        if !valid_locale(locale) {
+            return Err(ModuleError::Invalid("The locale is invalid.".into()));
+        }
+        if self.shared.locale() != locale {
+            copypaste_fs::write_atomically(
+                &self.root.join(LOCALE_FILE),
+                locale.as_bytes(),
+                copypaste_fs::Visibility::OwnerOnly,
+            )?;
+            self.shared.set_locale(locale.into());
+        }
+        Ok(())
+    }
+
+    pub fn set_host_services(&self, services: Arc<dyn crate::ModuleHostServices>) {
+        self.shared.set_services(services);
+    }
+
+    pub fn set_prompt_listener(&self, listener: crate::PromptListener) {
+        self.shared.prompts.set_listener(listener);
+    }
+
+    pub fn prompts(&self) -> Vec<copypaste_module_sdk::ModulePrompt> {
+        self.shared.prompts.list()
+    }
+
+    pub fn answer_prompt(
+        &self,
+        prompt_id: &str,
+        choice: Option<String>,
+    ) -> Result<(), ModuleError> {
+        self.shared.prompts.answer(prompt_id, choice)
     }
 }
 
@@ -892,6 +1141,7 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
                     .event_handlers
                     .iter()
                     .any(|handler| handler.command == command.id)
+                && !command.hidden
         })
         .collect();
     InstalledModule {
@@ -918,6 +1168,8 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
         enabled: record.enabled,
         size_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
         commands,
+        capabilities: manifest.capabilities,
+        endpoints: manifest.endpoints,
         preference_fields: manifest.preferences,
         preferences: record.preferences.clone(),
         error: None,
@@ -938,6 +1190,8 @@ fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
         enabled: false,
         size_bytes: 0,
         commands: Vec::new(),
+        capabilities: Vec::new(),
+        endpoints: Vec::new(),
         preference_fields: Vec::new(),
         preferences: BTreeMap::new(),
         error: Some(error),

@@ -59,6 +59,16 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/009_history_organization.sql"),
         transform: |_| Ok(()),
     },
+    Migration {
+        version: 10,
+        sql: include_str!("migrations/010_feature_package.sql"),
+        transform: |_| Ok(()),
+    },
+    Migration {
+        version: 11,
+        sql: include_str!("migrations/011_module_records.sql"),
+        transform: |_| Ok(()),
+    },
 ];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
@@ -294,7 +304,7 @@ mod tests {
     #[test]
     fn version_one_history_survives_upgrade_to_the_current_version() {
         use super::super::{connection::apply_key, Store};
-        assert_eq!(LATEST_VERSION, 9);
+        assert_eq!(LATEST_VERSION, 11);
         let keyring = crate::Keyring::from_secret(&[37; 32]);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
@@ -334,6 +344,25 @@ mod tests {
                 .count()
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn existing_organization_records_stay_live_in_the_legacy_kind_class() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&schema_at(9)).unwrap();
+        record_versions(&conn, &(1..=9).collect::<Vec<_>>()).unwrap();
+        conn.pragma_update(None, "user_version", 9).unwrap();
+        conn.execute("INSERT INTO organization_records (id, content_ciphertext, nonce, content_hash, created_at) VALUES ('org:v1:pin', X'01', X'', 'hash', 5)", []).unwrap();
+        upgrade(&mut conn).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT r.kind_class, s.deleted FROM sync_records s JOIN organization_records r USING (id)",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            )
+            .unwrap(),
+            (1, 0)
         );
     }
 

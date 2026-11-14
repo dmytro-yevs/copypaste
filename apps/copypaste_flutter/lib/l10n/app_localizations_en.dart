@@ -57,12 +57,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonEnable => 'Enable';
 
   @override
-  String get commonOn => 'On';
-
-  @override
-  String get commonOff => 'Off';
-
-  @override
   String get settingsLanguageTitle => 'Language';
 
   @override
@@ -126,15 +120,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsRuntimeExcludedAppsLimit =>
       'You can exclude up to 256 applications.';
-
-  @override
-  String get settingsQuickPasteStartFailed =>
-      'Quick Paste could not start, so its shortcut does not work.';
-
-  @override
-  String settingsQuickPasteShortcutInUse(String shortcut) {
-    return '$shortcut is used by another app. Choose another shortcut.';
-  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -803,6 +788,480 @@ class AppLocalizationsEn extends AppLocalizations {
       'Install and manage optional modules.';
 
   @override
+  String get settingsSectionRules => 'Content rules';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Tag, skip, protect, or expire clips automatically.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Quick access';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Keyboard, tiles, and home-screen widget.';
+
+  @override
+  String get settingsSectionSnippets => 'Snippets';
+
+  @override
+  String get settingsSectionSnippetsSummary => 'Reusable text and templates.';
+
+  @override
+  String get settingsSectionTransforms => 'Text transforms';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favorites, pipelines, and default paste transforms.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Collect several copies and paste them in order.';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Pasted $position of $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Item $position of $total is on the clipboard';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Pasted $count items',
+      one: 'Pasted 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items are on the clipboard',
+      one: '1 item is on the clipboard',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Queue finished';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Added, $total in queue',
+      one: 'Added, 1 in queue',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Queue empty, nothing pasted';
+
+  @override
+  String get pasteQueueMixed =>
+      'Paste all works with text-only or files-only queues';
+
+  @override
+  String get pasteQueueSeveralFiles => 'Paste files one at a time.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items no longer available',
+      one: '1 item no longer available',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => 'Paste next copies only';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Item copied. Allow Accessibility to paste automatically.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Couldn\'t paste automatically. Item copied instead.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Can\'t paste into an admin app. Item copied instead.';
+
+  @override
+  String get pasteQueueNoTarget => 'No app to paste into. Item copied instead.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Collecting copies';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Stopped collecting';
+
+  @override
+  String get pasteQueueFailed => 'Couldn\'t complete the Paste Queue action';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pending',
+      one: '1 pending',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pending · Collecting',
+      one: '1 pending · Collecting',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Collecting';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Finished';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Queue full ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage => 'New copies are no longer added.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue is empty';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Collect copies or add items from history.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => 'Copy items to add them';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Each copy joins the queue until you stop collecting.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Start collecting';
+
+  @override
+  String get pasteQueueStopCollecting => 'Stop collecting';
+
+  @override
+  String get pasteQueueLoading => 'Loading the queue…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Couldn\'t load the queue';
+
+  @override
+  String get pasteQueuePasteNext => 'Paste next';
+
+  @override
+  String get pasteQueueCopyNext => 'Copy next';
+
+  @override
+  String get pasteQueuePasteAll => 'Paste all';
+
+  @override
+  String get pasteQueueCopyAll => 'Copy all';
+
+  @override
+  String get pasteQueueReverse => 'Reverse order';
+
+  @override
+  String get pasteQueueStepBack => 'Step back';
+
+  @override
+  String get pasteQueueSkip => 'Skip';
+
+  @override
+  String get pasteQueueRemovePasted => 'Remove pasted';
+
+  @override
+  String get pasteQueueCleared => 'Queue cleared';
+
+  @override
+  String get pasteQueueUndo => 'Undo';
+
+  @override
+  String get pasteQueueStartFresh => 'Start fresh';
+
+  @override
+  String get pasteQueueAppend => 'Append';
+
+  @override
+  String get pasteQueueRestartTitle => 'Start a new collection?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Start fresh removes the pasted items. Append keeps them.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Queue from $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Pasted';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Skipped';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'No longer available';
+
+  @override
+  String get pasteQueueEdited => 'Edited';
+
+  @override
+  String get pasteQueueSecret => 'Secret';
+
+  @override
+  String get pasteQueueKindImage => 'Image';
+
+  @override
+  String get pasteQueueKindFiles => 'Files';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Rendered at $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Item $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Moved to position $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Move up';
+
+  @override
+  String get pasteQueueMoveDown => 'Move down';
+
+  @override
+  String get pasteQueueMoveToTop => 'Move to top';
+
+  @override
+  String get pasteQueueMoveToBottom => 'Move to bottom';
+
+  @override
+  String get pasteQueueReorder => 'Drag to reorder';
+
+  @override
+  String get pasteQueueMoreActions => 'More actions';
+
+  @override
+  String get pasteQueuePasteNow => 'Paste now';
+
+  @override
+  String get pasteQueueEdit => 'Edit text';
+
+  @override
+  String get pasteQueueUseOriginal => 'Use original text';
+
+  @override
+  String get pasteQueueRemove => 'Remove from queue';
+
+  @override
+  String get pasteQueueEditTitle => 'Edit queued text';
+
+  @override
+  String get pasteQueueEditMessage => 'Edits apply only to this queue.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Set shortcuts';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Collect and paste without opening CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => 'Start or stop collecting';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => 'Paste next as plain text';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'A global shortcut that works in any app.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Another CopyPaste shortcut uses this combination. The previous one is kept.';
+
+  @override
+  String get pasteQueueShortcutInUse => 'Another app uses this combination.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'The system refused this combination. The previous one is kept.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt types characters on many layouts. Choose another.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Global shortcuts aren\'t available in this session.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Couldn\'t set this shortcut.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Enable Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'When off, shortcuts and collecting stop.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Paste next does';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Paste automatically or only copy to the clipboard.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Paste into the front app';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Put on the clipboard only';
+
+  @override
+  String get pasteQueueInsertTitle => 'New items go to';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Where collected and added items join the queue.';
+
+  @override
+  String get pasteQueueInsertEnd => 'End (first in, first out)';
+
+  @override
+  String get pasteQueueInsertStart => 'Start (last in, first out)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'After the last item';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'What Paste next does once every item was pasted.';
+
+  @override
+  String get pasteQueueEndStop => 'Stop';
+
+  @override
+  String get pasteQueueEndLoop => 'Start over';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Keep pasting the last item';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Paste all separator';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Placed between items when pasting all at once.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'New line';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Blank line';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Tab';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Space';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Comma';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Comma and space';
+
+  @override
+  String get pasteQueueSeparatorNone => 'None';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Custom';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'Up to 32 characters; \\n and \\t allowed';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Always paste as plain text';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Drops formatting from queued items.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Stop collecting after';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Stop collecting after this long without copies.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Never';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Queue size limit';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'When full, new copies aren\'t added.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Restore the previous clipboard when finished';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Bring back what you copied before pasting.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue collect sequence order shortcut hotkey separator stack';
+
+  @override
   String get settingsSectionAbout => 'About';
 
   @override
@@ -892,7 +1351,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsStartupAndroidDescription =>
-      'Resume enabled background services after restarting the device.';
+      'Resume background services after a restart.';
 
   @override
   String get settingsStartupDesktopDescription =>
@@ -948,7 +1407,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.';
+      'Full or Limited mode and one-time Shizuku or ADB setup.';
 
   @override
   String get settingsOpenSetup => 'Open setup';
@@ -973,7 +1432,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      'Allow access to all photos and notifications to save new screenshots in the background.';
+      'Needed to save screenshots in the background.';
 
   @override
   String get settingsAllowAccess => 'Allow access';
@@ -1039,7 +1498,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsMaxFileSizeDescription =>
-      'Limit for adding and downloading files. File contents transfer only when you choose Download.';
+      'Largest file you can add or download.';
 
   @override
   String get settingsHistoryFilesTitle => 'History files';
@@ -1086,7 +1545,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsRestoreDialogMessage =>
-      'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.';
+      'The backup replaces this device\'s history. Settings are kept.';
 
   @override
   String get settingsRestoreFailed => 'The backup could not be restored.';
@@ -1096,7 +1555,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSyncSwitchDescription =>
-      'Master switch for paired-device synchronization.';
+      'Sync history with paired devices.';
 
   @override
   String get settingsSyncSearchDescription => 'Paired-device synchronization.';
@@ -1114,7 +1573,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      'Automatically copy newer clips from other devices to this clipboard.';
+      'Copy new clips from other devices to this clipboard.';
 
   @override
   String get settingsLanVisibilityTitle => 'LAN visibility';
@@ -1137,16 +1596,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsExcludedAppsKeywords => 'privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.';
-
-  @override
   String get settingsExcludedAppsDesktopDescription =>
-      'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.';
+      'Skip automatic capture from these apps.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Android skips automatic capture while exclusions are set because it cannot identify source apps.';
+      'Automatic capture pauses while any app is excluded.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1164,23 +1619,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Exclude application';
+  String get applicationPickerSearch => 'Search applications';
 
   @override
-  String get settingsExcludeDialogAction => 'Exclude';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Application identifier';
-
-  @override
-  String get settingsExcludeFailed => 'The application could not be excluded.';
+  String get applicationPickerEmpty => 'No applications found';
 
   @override
   String get settingsSkipSecretTitle => 'Skip confidential clipboard';
 
   @override
   String get settingsSkipSecretDescription =>
-      'Keep producer-marked secrets out of History.';
+      'Don\'t save copies that apps mark as secret.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1191,7 +1640,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSkipTransientDescription =>
-      'Keep producer-marked temporary copies out of History.';
+      'Don\'t save copies that apps mark as temporary.';
 
   @override
   String get settingsSkipTransientKeywords => 'transient temporary privacy';
@@ -1388,7 +1837,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      'The shortcut works while CopyPaste is running in the background.';
+      'Works while CopyPaste runs in the background.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -1423,6 +1872,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsShortcutRecording => 'Press shortcut…';
 
   @override
+  String get settingsShortcutNotSet => 'Not set';
+
+  @override
   String get settingsShortcutReset => 'Reset shortcut';
 
   @override
@@ -1453,13 +1905,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'No devices nearby';
-
-  @override
-  String get devicesEmptyTitle => 'No other devices paired yet';
-
-  @override
-  String get devicesEmptyMessage =>
-      'Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.';
 
   @override
   String get devicesThisDevice => 'This device';
@@ -1802,9 +2247,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pairingStateFailed => 'Pairing failed';
 
   @override
-  String get pairingStateNotCompleted => 'Pairing not completed';
-
-  @override
   String get pairingHandshakingDescription =>
       'The devices are establishing a secure channel.';
 
@@ -1826,48 +2268,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Start a pairing attempt to connect a device.';
-
-  @override
-  String get pairingStepInvite => 'Invite';
-
-  @override
-  String get pairingStepScan => 'Scan';
-
-  @override
-  String get pairingStepCode => 'Code';
-
-  @override
-  String get pairingStepRequest => 'Request';
-
-  @override
-  String get pairingStepConnect => 'Connect';
-
-  @override
-  String get pairingStepConfirm => 'Confirm';
-
-  @override
-  String get pairingStepPaired => 'Paired';
-
-  @override
-  String get pairingOtherDevice => 'Other device';
-
-  @override
-  String get pairingDecisionNotConfirmed => 'Not confirmed yet';
-
-  @override
-  String get pairingDecisionSending => 'Sending your decision…';
-
-  @override
-  String get pairingDecisionConfirmed => 'Confirmed';
-
-  @override
-  String get pairingDecisionRejected => 'Rejected';
-
-  @override
-  String get pairingDecisionWaiting => 'Waiting for confirmation';
-
-  @override
-  String get pairingDecisionUnknown => 'Answer not known';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2043,17 +2443,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Synchronization: $status';
-  }
-
-  @override
-  String syncHeaderDeviceCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count devices',
-      one: '1 device',
-    );
-    return '$_temp0';
   }
 
   @override
@@ -2449,17 +2838,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String historyClipLineCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count lines',
-      one: '1 line',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get historyInspectorEmptyTitle => 'Select a clip';
 
   @override
@@ -2700,9 +3078,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appWindowSetupTitle => 'Window setup needs attention';
 
   @override
-  String get appNavigationLabel => 'Main navigation';
-
-  @override
   String get appOpenHistory => 'Open History';
 
   @override
@@ -2786,16 +3161,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedStepPosition(int step, int count, String name) {
-    return '$step / $count · $name';
-  }
-
-  @override
-  String sharedStepSemantics(int step, int count, String name) {
-    return 'Step $step of $count: $name';
   }
 
   @override
@@ -3258,22 +3623,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modulesDownloadingModel => 'Downloading language model…';
 
   @override
-  String get modulesPhaseDownload => 'Download';
-
-  @override
-  String get modulesPhaseInstall => 'Install';
-
-  @override
-  String modulesInstallingModule(String module) {
-    return 'Installing $module';
-  }
-
-  @override
-  String modulesUpdatingModule(String module) {
-    return 'Updating $module';
-  }
-
-  @override
   String get modulesRun => 'Run';
 
   @override
@@ -3545,6 +3894,158 @@ class AppLocalizationsEn extends AppLocalizations {
   String get historyTagsAction => 'Tags…';
 
   @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'unlock secret items',
+      'other': 'Unlock secret items',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'use a concealed snippet',
+      'other': 'Use a concealed snippet',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'copy a secret item',
+      'other': 'Copy a secret item',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Not available on this system';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Set up a device password, PIN or biometrics first';
+
+  @override
+  String get commonOn => 'On';
+
+  @override
+  String get commonOff => 'Off';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste could not start, so its shortcut does not work.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut is used by another app. Choose another shortcut.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'No other devices paired yet';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Pair a device on the same network to sync history.';
+
+  @override
+  String get pairingStateNotCompleted => 'Pairing not completed';
+
+  @override
+  String get pairingStepInvite => 'Invite';
+
+  @override
+  String get pairingStepScan => 'Scan';
+
+  @override
+  String get pairingStepCode => 'Code';
+
+  @override
+  String get pairingStepRequest => 'Request';
+
+  @override
+  String get pairingStepConnect => 'Connect';
+
+  @override
+  String get pairingStepConfirm => 'Confirm';
+
+  @override
+  String get pairingStepPaired => 'Paired';
+
+  @override
+  String get pairingOtherDevice => 'Other device';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Not confirmed yet';
+
+  @override
+  String get pairingDecisionSending => 'Sending your decision…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Confirmed';
+
+  @override
+  String get pairingDecisionRejected => 'Rejected';
+
+  @override
+  String get pairingDecisionWaiting => 'Waiting for confirmation';
+
+  @override
+  String get pairingDecisionUnknown => 'Answer not known';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count devices',
+      one: '1 device',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines',
+      one: '1 line',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Main navigation';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Step $step of $count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'Download';
+
+  @override
+  String get modulesPhaseInstall => 'Install';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Installing $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Updating $module';
+  }
+
+  @override
   String get commonDismiss => 'Dismiss';
 
   @override
@@ -3552,7 +4053,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'New limit: $limit. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.';
+    return 'New limit: $limit. Older unpinned items are deleted permanently.';
   }
 
   @override
@@ -3560,7 +4061,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'New quota: $size. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.';
+    return 'New quota: $size. The oldest unpinned items over it are deleted permanently.';
   }
 
   @override
@@ -3571,11 +4072,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      'With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.';
+      'With both off, there\'s no icon. To open it, start CopyPaste again.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return 'With both turned off, CopyPaste has no visible icon. To open it again, press $shortcut or start CopyPaste again.';
+    return 'With both off, there\'s no icon. To open it, press $shortcut or start CopyPaste again.';
   }
 
   @override
@@ -3676,7 +4177,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'New quota: $size. Unpinned history uses $used, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.';
+    return 'New quota: $size. $used is in use, so the oldest unpinned items are deleted permanently.';
   }
 
   @override
@@ -3689,4 +4190,2485 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Open CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Open Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Open Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'New snippet';
+
+  @override
+  String get trayRecent => 'Recent';
+
+  @override
+  String get trayRecentLoading => 'Loading…';
+
+  @override
+  String get trayRecentFailed => 'Couldn\'t load clips';
+
+  @override
+  String get trayRecentEmpty => 'No clips yet';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count recent clips hidden',
+      one: '1 recent clip hidden',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Secret';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => 'Copy latest from other device';
+
+  @override
+  String get trayCaptureNow => 'Capture now';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'Paused until $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Pause for…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 minutes';
+
+  @override
+  String get trayPauseForOneHour => '1 hour';
+
+  @override
+  String get trayPauseUntilResumed => 'Until I resume';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count items',
+      one: 'Paste Queue: 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Collecting: $count items',
+      one: 'Collecting: 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Recently skipped ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Open content rules';
+
+  @override
+  String get trayRecentSettingsTitle => 'Menu bar and tray';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'What the menu bar or tray menu lists under Recent.';
+
+  @override
+  String get trayRecentCountTitle => 'Recent clips';
+
+  @override
+  String get trayRecentCountDescription =>
+      'How many of the newest clips the menu lists.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Recent clip previews';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'How much clip text the menu shows.';
+
+  @override
+  String get trayRecentPreviewFull => 'Full preview';
+
+  @override
+  String get trayRecentPreviewTitles => 'Type and source only';
+
+  @override
+  String get trayRecentPreviewHidden => 'Hidden';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'tray menu bar recent preview privacy count';
+
+  @override
+  String get transformsPaletteTitle => 'Transform text';
+
+  @override
+  String get transformsFilterPlaceholder => 'Filter transforms';
+
+  @override
+  String get transformsNoMatches => 'No transforms match';
+
+  @override
+  String get transformsGroupResults => 'Results';
+
+  @override
+  String get transformsGroupSuggested => 'Suggested';
+
+  @override
+  String get transformsGroupRecent => 'Recent';
+
+  @override
+  String get transformsGroupFavorites => 'Favorites';
+
+  @override
+  String get transformsGroupPipelines => 'Pipelines';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV and XML';
+
+  @override
+  String get transformsCategoryEncode => 'Encode and decode';
+
+  @override
+  String get transformsCategoryCase => 'Case';
+
+  @override
+  String get transformsCategoryHash => 'Hashes';
+
+  @override
+  String get transformsCategoryLines => 'Lines and whitespace';
+
+  @override
+  String get transformsCategoryClean => 'Clean up';
+
+  @override
+  String get transformsCategoryUrl => 'Links';
+
+  @override
+  String get transformsCategoryMarkup => 'Rich text and Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Developer';
+
+  @override
+  String get transformsCategoryOther => 'Other';
+
+  @override
+  String get transformsChainEmpty => 'No steps yet';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Then: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Run this step';
+
+  @override
+  String get transformsMoveEarlier => 'Move up';
+
+  @override
+  String get transformsMoveLater => 'Move down';
+
+  @override
+  String get transformsRemoveStep => 'Remove step';
+
+  @override
+  String get transformsSavePipeline => 'Save as pipeline';
+
+  @override
+  String get transformsSavePipelineTitle => 'Save pipeline';
+
+  @override
+  String get transformsSavePipelineFailed => 'The pipeline could not be saved.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Name';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Description (optional)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Steps';
+
+  @override
+  String get transformsPipelineNoSteps => 'Add at least one step.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Enter a name.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Use at most 80 characters.';
+
+  @override
+  String get transformsPipelineNameTaken =>
+      'Another pipeline already has this name.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Pipeline saved';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name is available in every transform palette.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Steps: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Deleted pipeline';
+
+  @override
+  String get transformsNeedsNewerVersion => 'Needs a newer CopyPaste version';
+
+  @override
+  String get transformsLoadFailed => 'Transforms could not be loaded.';
+
+  @override
+  String get transformsNotTextTitle => 'Transforms work on text';
+
+  @override
+  String get transformsNotTextMessage =>
+      'This item is an image, a file or a color. Pick a text item or copy some text.';
+
+  @override
+  String get transformsNothingTitle => 'Nothing to transform';
+
+  @override
+  String get transformsNothingMessage =>
+      'Copy some text or pick a history item.';
+
+  @override
+  String get transformsPickTransform => 'Pick a transform';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab adds it as a step. Enter applies the result.';
+
+  @override
+  String get transformsPreviewing => 'Updating preview…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Lines: $lines · Words: $words · Characters: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'No changes';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Showing the first 64 KiB of $size';
+  }
+
+  @override
+  String get transformsRandom => 'Random';
+
+  @override
+  String get transformsNotRun => 'Not run';
+
+  @override
+  String get transformsSensitiveHidden => 'The result is sensitive and hidden.';
+
+  @override
+  String get transformsReveal => 'Reveal';
+
+  @override
+  String get transformsPaneOutput => 'Output';
+
+  @override
+  String get transformsPaneInput => 'Input';
+
+  @override
+  String get transformsPaneChanges => 'Changes';
+
+  @override
+  String get transformsCannotTransform => 'Can\'t transform this text';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Step $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Show as hex';
+
+  @override
+  String get transformsActionPaste => 'Paste';
+
+  @override
+  String get transformsActionSave => 'Save as new clip';
+
+  @override
+  String get transformsCopiedMessage =>
+      'The result is on the clipboard and in history.';
+
+  @override
+  String get transformsSavedTitle => 'Saved';
+
+  @override
+  String get transformsSavedMessage => 'Saved as a new history item.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Couldn\'t paste';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'The result is on the clipboard. Paste it manually.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message at line $line, column $column';
+  }
+
+  @override
+  String get transformsErrorBinary => 'Decoded data is binary, not text';
+
+  @override
+  String get transformsErrorTooLarge => 'Too large to transform';
+
+  @override
+  String get transformsErrorInvalidParam =>
+      'A setting of this step is not valid';
+
+  @override
+  String get transformsErrorCancelled => 'Cancelled';
+
+  @override
+  String get transformsErrorTooExpensive => 'Pattern too expensive';
+
+  @override
+  String get transformsErrorPattern => 'The pattern is not valid';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Choose whether the number is in seconds or milliseconds';
+
+  @override
+  String get transformsErrorExternalEntity =>
+      'External entities are not allowed';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'Encrypted tokens can\'t be decoded';
+
+  @override
+  String get transformsErrorJson => 'Invalid JSON';
+
+  @override
+  String get transformsErrorYaml => 'Invalid YAML';
+
+  @override
+  String get transformsErrorXml => 'Invalid XML';
+
+  @override
+  String get transformsErrorCsv => 'Invalid CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Invalid Base64';
+
+  @override
+  String get transformsErrorHex => 'Invalid hex';
+
+  @override
+  String get transformsErrorEscape => 'Invalid escape sequence';
+
+  @override
+  String get transformsErrorUrl => 'Malformed percent-encoding';
+
+  @override
+  String get transformsErrorJwt => 'Not a valid JWT';
+
+  @override
+  String get transformsErrorDate => 'Not a recognized date or timestamp';
+
+  @override
+  String get transformsErrorGeneric => 'This step can\'t transform its input';
+
+  @override
+  String get transformsWarningSignedLink => 'Signed link left unchanged';
+
+  @override
+  String get transformsWarningExpired => 'Expired';
+
+  @override
+  String get transformsWarningNotYetValid => 'Not yet valid';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Signature not verified';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Duplicate keys';
+
+  @override
+  String get transformsWarningLenientJson => 'Accepted non-standard JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'The JSON was encoded twice';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Unknown escape sequences kept as written';
+
+  @override
+  String get transformsWarningLocalZone => 'Local time zone assumed';
+
+  @override
+  String get transformsWarningNoMatches => 'No matches';
+
+  @override
+  String get transformsWarningGeneric => 'Check the result';
+
+  @override
+  String get transformsRestoreTitle => 'Restore clipboard after paste';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Bring back the previous clipboard after pasting.';
+
+  @override
+  String get transformsDefaultTitle => 'Default paste transform';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Applied to text you paste from Quick Paste.';
+
+  @override
+  String get transformsNoDefault => 'None';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Defaults per app';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Use a different default in specific apps.';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'only on $platform';
+  }
+
+  @override
+  String get transformsAddApp => 'Add app';
+
+  @override
+  String get transformsRemove => 'Remove';
+
+  @override
+  String get transformsFavoritesTitle => 'Favorites';
+
+  @override
+  String get transformsFavoritesDescription => 'Shown first in every palette.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number in the palette';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Add a favorite';
+
+  @override
+  String get transformsPipelinesTitle => 'Pipelines';
+
+  @override
+  String get transformsPipelinesDescription => 'Saved chains of transforms.';
+
+  @override
+  String get transformsNewPipeline => 'New pipeline';
+
+  @override
+  String get transformsEditPipeline => 'Edit pipeline';
+
+  @override
+  String get transformsDuplicatePipeline => 'Duplicate';
+
+  @override
+  String get transformsDeletePipeline => 'Delete';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return 'Delete $name?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Favorites and paste defaults using it are cleared.';
+
+  @override
+  String get transformsDeletePipelineFailed =>
+      'The pipeline could not be deleted.';
+
+  @override
+  String get transformsAddStep => 'Add a step';
+
+  @override
+  String get transformsHiddenTitle => 'Hidden transforms';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Left out of palettes and suggestions.';
+
+  @override
+  String get transformsHideTransform => 'Hide a transform';
+
+  @override
+  String get transformsShow => 'Show';
+
+  @override
+  String get transformsSuggestionsTitle => 'Suggestions';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Suggest transforms that fit the text.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Tokens';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'Links with tracking parameters';
+
+  @override
+  String get transformsDetectorTimestamp => 'Timestamps';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Tracking parameters';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Link parameters to also remove or always keep.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Also remove';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Always keep';
+
+  @override
+  String get transformsTrackingPlaceholder => 'name or name@domain, then Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => 'Quick access status unavailable';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste couldn\'t read the keyboard, tile, and widget status. Try again.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Couldn\'t complete that';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android didn\'t open the requested screen or save the change. Try again.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Clips keyboard';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Turn on CopyPaste clips in keyboard settings.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Turned on';
+
+  @override
+  String get quickAccessKeyboardOff => 'Turned off';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Open keyboard settings';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Turn on the CopyPaste clips keyboard panel.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'keyboard input method ime panel enable';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Switch to the clips keyboard';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Make CopyPaste clips the current keyboard.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Choose keyboard';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Current keyboard';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Capture mode';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'How copies from other apps are saved.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'See how copies from other apps are saved.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'capture tier full panel manual shizuku collect';
+
+  @override
+  String get quickAccessTierFull =>
+      'Full: every copy is saved in the background';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panel selected: collecting';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Panel mode: catch-up on open';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manual: save from the app, a tile, the widget, or Share';
+
+  @override
+  String get quickAccessTierPaused => 'Capture paused';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Return to previous keyboard after inserting';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Switch back after inserting one clip.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'switch back previous keyboard auto return insert';
+
+  @override
+  String get quickAccessFocusSearchTitle => 'Focus search when the panel opens';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Open the panel with search ready.';
+
+  @override
+  String get quickAccessTilesTitle => 'Quick Settings tiles';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Add the Save clipboard and Clipboard capture tiles.';
+
+  @override
+  String get quickAccessTilesKeywords => 'quick settings tile shade save pause';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Swipe down twice, tap Edit, and add a CopyPaste tile.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Save clipboard tile';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Saves what\'s on the clipboard from Quick Settings.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Clipboard capture tile';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Pauses and resumes capture from Quick Settings.';
+
+  @override
+  String get quickAccessAddTile => 'Add tile';
+
+  @override
+  String get quickAccessTileAdded => 'Added to Quick Settings';
+
+  @override
+  String get quickAccessWidgetTitle => 'Recent clips widget';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Recent clips on your home screen, one tap to copy.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Hold the home screen, tap Widgets, and add Recent clips.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widgets added',
+      one: '1 widget added',
+      zero: 'Not added',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Add widget';
+
+  @override
+  String get quickAccessWidgetKeywords => 'home screen widget launcher recent';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Abbreviation $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Abbreviation';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Optional, for example sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Already used by “$title”';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Use at most $max characters.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'An abbreviation can\'t contain spaces or control characters.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets need review after a sync',
+      one: '1 snippet needs review after a sync',
+      zero: 'No snippets need review',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Text';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Type the snippet text';
+
+  @override
+  String get snippetsClearSelection => 'Clear selection';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Too large to edit. This clip opens read-only.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Neutral',
+      'blue': 'Blue',
+      'green': 'Green',
+      'amber': 'Amber',
+      'red': 'Red',
+      'other': 'Neutral',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Accent';
+
+  @override
+  String get snippetsCollectionIcon => 'Icon';
+
+  @override
+  String get snippetsCollectionLabel => 'Collection';
+
+  @override
+  String get snippetsCollectionName => 'Name';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'A collection with this name already exists.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Use at most $max characters.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'This snippet is concealed.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Continue';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'This device can\'t verify you. Continue only on your own device.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Confirm it\'s you';
+
+  @override
+  String get snippetsConcealedPreview => 'Concealed snippet';
+
+  @override
+  String get snippetsConcealedSwitch => 'Concealed';
+
+  @override
+  String get snippetsConcealedTitle => 'Concealed snippet';
+
+  @override
+  String get snippetsConflictBadge => 'Conflict copy';
+
+  @override
+  String get snippetsCopied => 'Copied';
+
+  @override
+  String get snippetsCreate => 'Create snippet';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Create snippet “$query”';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Delete collection';
+
+  @override
+  String get snippetsDeleteCollectionMove => 'Move its snippets to Unfiled';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return 'Delete “$name”?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Delete its snippets too';
+
+  @override
+  String get snippetsDeletedMessage => 'Moved to Recently Deleted.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets deleted',
+      one: 'Snippet deleted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Save to';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'History clip',
+      'snippet': 'Snippet',
+      'other': 'History clip',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Discard';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets',
+      one: '1 snippet',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Another snippet has this abbreviation. Change one.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Duplicate abbreviation';
+
+  @override
+  String get snippetsEditClip => 'Edit clip';
+
+  @override
+  String get snippetsEditCollection => 'Edit collection';
+
+  @override
+  String get snippetsEditSnippet => 'Edit snippet';
+
+  @override
+  String get snippetsEditTab => 'Edit';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Give a snippet an abbreviation, then type it in Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'No snippets yet';
+
+  @override
+  String get snippetsEnableTemplate => 'Turn on';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Text that looks like a placeholder will be filled in.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Turn on Template?';
+
+  @override
+  String get snippetsExport => 'Export';
+
+  @override
+  String get snippetsExportCollection => 'Export collection';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Include concealed snippets in the readable file';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count snippets written',
+      one: '1 snippet written',
+      zero: 'No snippets written',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Snippets exported';
+
+  @override
+  String get snippetsExportEncrypt => 'Encrypt with passphrase';
+
+  @override
+  String get snippetsExportFailed => 'Export failed';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'I understand that anyone with the file can read it';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'All snippets',
+      'collections': 'This collection',
+      'snippets': 'Selected snippets ($count)',
+      'other': 'All snippets',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Export snippets';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Insert field';
+
+  @override
+  String get snippetsFieldDefault => 'Default value';
+
+  @override
+  String get snippetsFieldName => 'Name';
+
+  @override
+  String get snippetsFieldOptions => 'Options, separated by commas';
+
+  @override
+  String get snippetsFieldRequired => 'Fill in this field.';
+
+  @override
+  String get snippetsFieldType => 'Type';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Single line',
+      'multiline': 'Multiple lines',
+      'choice': 'Choice',
+      'other': 'Single line',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Formatting will be removed when you save.';
+
+  @override
+  String get snippetsGoToSnippet => 'Go to snippet';
+
+  @override
+  String get snippetsImport => 'Import';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Abbreviation already used';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Import without abbreviation',
+      'renameWithSuffix': 'Add a number to the abbreviation',
+      'skip': 'Skip',
+      'other': 'Import without abbreviation',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Collection with the same name';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Add to the existing one',
+      'createNew': 'Create a new one',
+      'other': 'Add to the existing one',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Convert known placeholders';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'New: $added. Identical, skipped: $identical. Changed: $updated. Abbreviation conflicts: $conflicts. Invalid: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Snippets imported';
+
+  @override
+  String get snippetsImportFailed => 'Import failed';
+
+  @override
+  String get snippetsImportFileType => 'Snippet files';
+
+  @override
+  String get snippetsImportFormat => 'Format';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste bundle',
+      'json': 'JSON list',
+      'csv': 'CSV',
+      'other': 'CopyPaste bundle',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Row $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Rows that won\'t be imported';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Passphrase, if the file is encrypted';
+
+  @override
+  String get snippetsImportPreview => 'Preview';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Added: $inserted. Updated: $updated. Skipped: $skipped. Abbreviations to review: $flagged. Unrecognized placeholders: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Same snippet, different content';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Keep both',
+      'replace': 'Replace existing',
+      'skip': 'Skip',
+      'other': 'Keep both',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Import snippets';
+
+  @override
+  String get snippetsInsert => 'Insert';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Insert placeholder';
+
+  @override
+  String get snippetsKeepReferences => 'Keep them';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Browse, organize and edit snippets and collections.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'snippets templates abbreviations collections text';
+
+  @override
+  String get snippetsLibraryTitle => 'Snippet library';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'This placeholder is never closed.',
+      'malformed': 'This placeholder can\'t be read.',
+      'unknownPlaceholder':
+          'Unknown placeholder “$detail”. It is pasted as typed.',
+      'unknownParameter': 'Unknown option “$detail”.',
+      'duplicateParameter': 'Option “$detail” is set twice.',
+      'missingParameter': 'Option “$detail” is missing.',
+      'invalidValue': 'Option “$detail” has an invalid value.',
+      'conflictingParameters': 'These options can\'t be used together.',
+      'unknownLocale': 'Unknown language.',
+      'unknownTimeZone': 'Unknown time zone.',
+      'invalidPattern': 'Invalid date pattern.',
+      'dateOutOfRange': 'The date is out of range.',
+      'unknownModifier': 'Unknown modifier “$detail”.',
+      'modifierFailed': 'Modifier “$detail” couldn\'t be applied.',
+      'emptyClipboard': 'Clipboard item $detail is empty.',
+      'extraCursor': 'Only the first cursor placeholder is used.',
+      'nestedCursor': 'A cursor inside an inserted snippet is ignored.',
+      'tooManyFields': 'Field “$detail” is over the limit of 10 fields.',
+      'conflictingField':
+          'Field “$detail” is defined twice with different settings.',
+      'choiceDefaultNotOption':
+          'The default of “$detail” is not one of its options.',
+      'cycle': 'Snippets insert each other in a loop: $detail.',
+      'depthExceeded': 'Snippets are inserted more than 3 levels deep.',
+      'nestingLimit': 'Too many inserted snippets.',
+      'unknownSnippet': 'No snippet has this abbreviation.',
+      'containsPlaceholders':
+          'The text contains placeholders. Turn on Template to fill them in.',
+      'other': 'This placeholder has a problem.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Couldn\'t load snippets';
+
+  @override
+  String get snippetsLoadMore => 'Load more';
+
+  @override
+  String get snippetsMerge => 'Merge';
+
+  @override
+  String get snippetsMergeCollection => 'Merge into another collection';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Merge “$name” into';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Move to';
+
+  @override
+  String get snippetsNewCollection => 'New collection';
+
+  @override
+  String get snippetsNewSnippet => 'New snippet';
+
+  @override
+  String get snippetsNewText => 'New text';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'No snippets match “$query”';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Repeat passphrase';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Passphrase, at least $min characters';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Passphrase';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'A forgotten passphrase can\'t be recovered.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Too short',
+      'weak': 'Weak',
+      'fair': 'Fair',
+      'good': 'Good',
+      'other': 'Strong',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Pinned';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Placeholders';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Date',
+      'dateShort': 'Date, short',
+      'dateLong': 'Date, long',
+      'dateIso': 'Date, ISO 8601',
+      'dateNextWeek': 'Date in one week',
+      'now': 'Time',
+      'dateTime': 'Date and time',
+      'clipboard': 'Clipboard',
+      'clipboardPrevious': 'Previous clipboard item',
+      'field': 'Fill-in field…',
+      'cursor': 'Cursor position',
+      'uuid': 'UUID',
+      'random': 'Random number',
+      'upper': 'Modifier: uppercase',
+      'lower': 'Modifier: lowercase',
+      'trim': 'Modifier: trim spaces',
+      'other': 'Placeholder',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Insert another snippet';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'No placeholders match';
+
+  @override
+  String get snippetsPreviewEmpty => 'Nothing to preview';
+
+  @override
+  String get snippetsPreviewTab => 'Preview';
+
+  @override
+  String get snippetsPurge => 'Delete permanently';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'They will be erased on all your devices. This can\'t be undone.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Delete $count snippets permanently?',
+      one: 'Delete snippet permanently?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => 'Recently Deleted is empty';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Add pasted snippets to History.';
+
+  @override
+  String get snippetsRecordPastedKeywords => 'history record pasted snippets';
+
+  @override
+  String get snippetsRecordPastedTitle => 'Record pasted snippets in History';
+
+  @override
+  String get snippetsReplaceOriginal => 'Replace original';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Deletes the original clip after saving.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Ask for your password or biometrics first.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'concealed password biometrics fingerprint face lock verify';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Verify before using concealed snippets';
+
+  @override
+  String get snippetsRestore => 'Restore';
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'The text is longer than 64 KB.';
+
+  @override
+  String get snippetsSaveFailed => 'Couldn\'t save';
+
+  @override
+  String get snippetsScopeAll => 'All';
+
+  @override
+  String get snippetsScopeEmpty => 'No snippets here';
+
+  @override
+  String get snippetsScopePinned => 'Pinned';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Recently Deleted';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Search snippets';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count selected',
+      one: '1 selected',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Show';
+
+  @override
+  String get snippetsShowAll => 'Show all';
+
+  @override
+  String get snippetsShowAttention => 'Review';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'You have $count snippets. Up to 20,000 are allowed.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Template';
+
+  @override
+  String get snippetsTemplateSwitch => 'Template';
+
+  @override
+  String get snippetsTitleLabel => 'Title';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Optional';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Back up snippets or move them between apps.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'import export backup bundle json csv passphrase';
+
+  @override
+  String get snippetsTransferTitle => 'Import and export';
+
+  @override
+  String get snippetsUndo => 'Undo';
+
+  @override
+  String get snippetsUnfiled => 'Unfiled';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count placeholders are pasted as typed',
+      one: '1 placeholder is pasted as typed',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Unpin';
+
+  @override
+  String get snippetsUnsavedMessage => 'Save your changes before closing?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Unsaved changes';
+
+  @override
+  String get snippetsUntitled => 'Untitled snippet';
+
+  @override
+  String get snippetsUpdateReferences => 'Update';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Other templates may insert “$from”. Update them to use “$to”?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Update references?';
+
+  @override
+  String get snippetsUseFailed => 'Couldn\'t use the snippet';
+
+  @override
+  String get quickPasteTabQueue => 'Queue';
+
+  @override
+  String get quickPasteMaskedMode => 'Password field: previews are hidden';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Hidden: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Unlock secret items';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Pasting with: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut pastes the original';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Default transform skipped';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'The original was used instead.';
+
+  @override
+  String get quickPastePasteManually =>
+      'The content is on the clipboard. Paste it manually.';
+
+  @override
+  String get quickPastePaste => 'Paste';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Snippets are unavailable';
+
+  @override
+  String get rulesLoadFailed => 'Content rules could not be loaded.';
+
+  @override
+  String get rulesNewRule => 'New rule';
+
+  @override
+  String get rulesEditRule => 'Edit rule';
+
+  @override
+  String get rulesUntitled => 'Untitled rule';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Privacy defaults';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Privacy settings apply before any rule.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'privacy concealed temporary excluded apps built-in credentials passwords payment cards';
+
+  @override
+  String get rulesOpenPrivacy => 'Open Privacy';
+
+  @override
+  String get rulesMyRulesTitle => 'My rules';
+
+  @override
+  String get rulesMyRulesDescription => 'Run in order on new copies.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'content rules automation tag skip secret expire delete pattern regex';
+
+  @override
+  String get rulesEmptyTitle => 'No rules yet';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Rules tag, protect, expire or skip new copies.';
+
+  @override
+  String get rulesDeletedTitle => 'Recently deleted';
+
+  @override
+  String get rulesDeletedDescription => 'Restore within 30 days.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Deleted $time';
+  }
+
+  @override
+  String get rulesRestore => 'Restore';
+
+  @override
+  String get rulesDeletedToast => 'Rule deleted';
+
+  @override
+  String get rulesDeletedToastMessage => 'You can restore it for 30 days.';
+
+  @override
+  String get rulesUndo => 'Undo';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return 'A concurrent edit of “$rule” from $device was replaced by a newer one.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'another device';
+
+  @override
+  String get rulesRestoreConflict => 'Use that version';
+
+  @override
+  String get rulesSkipLogTitle => 'Recently skipped';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Copies your rules didn\'t save on this device.';
+
+  @override
+  String get rulesSkipLogKeywords => 'skipped ignored not saved log';
+
+  @override
+  String get rulesSkipLogShow => 'Show';
+
+  @override
+  String get rulesSkipLogEmpty => 'No copies were skipped.';
+
+  @override
+  String get rulesUnknownApp => 'Unknown app';
+
+  @override
+  String get rulesMatchesEverything => 'Any copy';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, then stop';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' or ',
+      'other': ' and ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Runs on $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return 'New from $device';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Needs update';
+
+  @override
+  String get rulesUpdateRequired => 'Update CopyPaste to run this rule.';
+
+  @override
+  String get rulesErrorBadge => 'Error';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Until fixed, matches are protected.';
+  }
+
+  @override
+  String get rulesReorder => 'Drag to reorder';
+
+  @override
+  String get rulesMoreActions => 'More actions';
+
+  @override
+  String get rulesEdit => 'Edit';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Move up',
+      'down': 'Move down',
+      'top': 'Move to top',
+      'other': 'Move to bottom',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Apply to existing items…';
+
+  @override
+  String get rulesResetBuiltin => 'Reset to default';
+
+  @override
+  String get rulesNameLabel => 'Name';
+
+  @override
+  String get rulesNamePlaceholder => 'For example, Work links';
+
+  @override
+  String get rulesWhenTitle => 'When';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Any condition matches',
+      'other': 'All conditions match',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions =>
+      'No conditions: this rule applies to every copy.';
+
+  @override
+  String get rulesAddCondition => 'Add condition';
+
+  @override
+  String get rulesRemoveCondition => 'Remove condition';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Text',
+      'content_type': 'Content type',
+      'detected_kind': 'Detected kind',
+      'source_app': 'Source app',
+      'size': 'Size',
+      'privacy_marker': 'Privacy marker',
+      'capture_origin': 'Origin',
+      'other': 'Unknown condition',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'contains',
+      'equals': 'is',
+      'starts_with': 'starts with',
+      'ends_with': 'ends with',
+      'matches_regex': 'matches the pattern',
+      'other': 'matches',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'does not contain',
+      'equals': 'is not',
+      'starts_with': 'does not start with',
+      'ends_with': 'does not end with',
+      'matches_regex': 'does not match the pattern',
+      'other': 'does not match',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'is not',
+      'other': 'is',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'is less than',
+      'other': 'is more than',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'is not less than',
+      'other': 'is not more than',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'lines',
+      'bytes': 'bytes',
+      'other': 'characters',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'lines',
+      'bytes': 'bytes',
+      'other': 'characters',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Plain text',
+      'rich_text': 'Rich text',
+      'image': 'Image',
+      'files': 'Files',
+      'color': 'Color',
+      'link': 'Link',
+      'other': 'Other',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Password or secret',
+      'url': 'Web address',
+      'email': 'Email address',
+      'phone': 'Phone number',
+      'code': 'Code',
+      'color': 'Color value',
+      'json': 'JSON',
+      'file_path': 'File path',
+      'number': 'Number',
+      'one_time_code': 'One-time code',
+      'payment_card': 'Payment card number',
+      'other': 'Other',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Concealed',
+      'transient': 'Temporary',
+      'auto_generated': 'Auto-generated',
+      'excluded_from_history': 'Excluded from history',
+      'other': 'Other',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Copied on this device',
+      'received': 'Received from another device',
+      'created_in_app': 'Created in CopyPaste',
+      'other': 'Other',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Text to look for';
+
+  @override
+  String get rulesPatternPlaceholder => 'Pattern, for example ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Look-around and backreferences aren\'t supported.';
+
+  @override
+  String get rulesCaseSensitive => 'Match case';
+
+  @override
+  String get rulesChooseValues => 'Choose';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'This condition comes from a newer version of CopyPaste.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'On Android, only copies made with the clips keyboard match.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Not every system reports every marker.';
+
+  @override
+  String get rulesThenTitle => 'Then';
+
+  @override
+  String get rulesNoActions => 'Add at least one action.';
+
+  @override
+  String get rulesAddAction => 'Add action';
+
+  @override
+  String get rulesRemoveAction => 'Remove action';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Don\'t save',
+      'mark_secret': 'Mark as secret',
+      'delete_after': 'Delete after',
+      'add_tags': 'Add tags',
+      'transform': 'Transform',
+      'other': 'Unknown action',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“Don\'t save” can\'t be combined with other actions.',
+      'present': 'This rule already has this action.',
+      'other': 'A rule can have up to 8 actions.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'This action comes from a newer version of CopyPaste.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Matching copies are never stored, indexed or synced.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count minutes',
+      one: '1 minute',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count hours',
+      one: '1 hour',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count days',
+      one: '1 day',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Also clear the clipboard if it still holds this copy.';
+
+  @override
+  String get rulesNoTags => 'Create tags in History to use them here.';
+
+  @override
+  String get rulesNoTransforms => 'No transforms are available.';
+
+  @override
+  String get rulesReplaceClipboard =>
+      'Also replace the clipboard with the result';
+
+  @override
+  String get rulesOptionsTitle => 'Options';
+
+  @override
+  String get rulesEnabledSwitch => 'Enabled';
+
+  @override
+  String get rulesStopProcessing =>
+      'Stop processing later rules when this one matches';
+
+  @override
+  String get rulesRunsOnLabel => 'Runs on';
+
+  @override
+  String get rulesAllDevices => 'All devices';
+
+  @override
+  String get rulesChosenDevices => 'Chosen devices';
+
+  @override
+  String get rulesTestTitle => 'Test';
+
+  @override
+  String get rulesTestDescription => 'Try the rule on sample text.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Paste or type sample text';
+
+  @override
+  String get rulesTestFullSet => 'Test together with all rules';
+
+  @override
+  String get rulesRunTest => 'Run test';
+
+  @override
+  String get rulesTestFailed => 'The test could not run.';
+
+  @override
+  String get rulesPreviewHistory => 'Preview against history';
+
+  @override
+  String get rulesSaveFailed => 'The rule could not be saved.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Made by a newer CopyPaste. Update to edit or run it.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'The rule could not be read.',
+      'unsupported_schema': 'This rule needs a newer version of CopyPaste.',
+      'unknown_condition_type':
+          'This condition needs a newer version of CopyPaste.',
+      'unknown_action_type': 'This action needs a newer version of CopyPaste.',
+      'too_many_conditions': 'A rule can have up to 20 conditions.',
+      'too_many_actions': 'A rule can have up to 8 actions.',
+      'too_many_rules': 'Only the first 200 rules run.',
+      'no_actions': 'Add at least one action.',
+      'conflicting_actions':
+          '“Don\'t save” can\'t be combined with other actions.',
+      'duplicate_action': 'Each action can be used only once.',
+      'empty_value': 'Enter a value.',
+      'empty_list': 'Choose at least one value.',
+      'too_many_values': 'Choose up to 64 values.',
+      'invalid_value': 'This value is not valid.',
+      'pattern_too_long': 'Patterns can be up to 2,000 characters.',
+      'unsupported_look_around':
+          'Look-ahead and look-behind are not supported. Use two conditions with “All conditions match” instead.',
+      'unsupported_backreference': 'Backreferences are not supported.',
+      'pattern_too_large':
+          'This pattern is too complex. Simplify its repetitions.',
+      'invalid_pattern': 'This pattern is not valid.',
+      'invalid_duration': 'Choose a duration from 1 minute to 90 days.',
+      'invalid_tags': 'Choose at least one tag.',
+      'invalid_transform': 'Choose a transform.',
+      'other': 'This rule has a problem.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'matched',
+      'not_matched': 'not matched',
+      'unknown': 'unknown',
+      'skipped': 'not run',
+      'other': 'error',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Condition $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'No rule was evaluated.';
+
+  @override
+  String get rulesTraceStopped => 'Later rules did not run.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Unknown for this copy, so it doesn\'t match.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'This rule couldn\'t run, so matches are protected.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Result';
+
+  @override
+  String get rulesTraceNoEffect => 'No rule changes this copy.';
+
+  @override
+  String get rulesTraceSkipped => 'Not saved';
+
+  @override
+  String get rulesTraceSecret => 'Saved as secret';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return 'Deleted after $duration';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Tagged $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Transformed with $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Transformed text';
+
+  @override
+  String get rulesPreviewTitle => 'Apply to existing items';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Checking the latest $count clips…';
+  }
+
+  @override
+  String get rulesPreviewNone => 'No recent clip matches this rule.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips match',
+      one: '1 clip matches',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count would be deleted',
+      one: '1 would be deleted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count would be marked secret',
+      one: '1 would be marked secret',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count would get a deletion time',
+      one: '1 would get a deletion time',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count would be tagged',
+      one: '1 would be tagged',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Only the latest $count clips were checked.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 'and $count more';
+  }
+
+  @override
+  String get rulesPreviewNote => 'Nothing changes until you apply.';
+
+  @override
+  String get rulesSecretItem => 'Secret item';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return 'Secret item from $app';
+  }
+
+  @override
+  String get rulesPreviewCancelled =>
+      'The preview was stopped. Nothing changed.';
+
+  @override
+  String get rulesPreviewFailed => 'The preview could not run.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Delete $count clips?',
+      one: 'Delete 1 clip?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'Matching clips are deleted on all your devices. This can\'t be undone.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Delete and apply';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Applying: $done of $total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips changed',
+      one: '1 clip changed',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips deleted',
+      one: '1 clip deleted',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips could not be changed',
+      one: '1 clip could not be changed',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled => 'Stopped. Changes made so far stay.';
+
+  @override
+  String get historyActionEdit => 'Edit';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Save as snippet';
+
+  @override
+  String get historyActionAddToQueue => 'Add to Paste Queue';
+
+  @override
+  String get historyActionTransform => 'Transform…';
+
+  @override
+  String get historyActionExplain => 'Why is this here?';
+
+  @override
+  String get historyActionKeep => 'Keep';
+
+  @override
+  String get historyNewClip => 'New clip';
+
+  @override
+  String get historySavedTitle => 'Saved';
+
+  @override
+  String get historyEditSaved =>
+      'The edited text is a new clip at the top of History.';
+
+  @override
+  String get historyNewClipSaved => 'Your text was saved.';
+
+  @override
+  String get historySnippetSaved => 'The clip\'s text is now a snippet.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'This clip could not be saved as a snippet.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count clips joined the queue.',
+      one: '1 clip joined the queue.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Couldn\'t add to Paste Queue. Check that it is turned on.';
+
+  @override
+  String get historyKeepFailed => 'This clip could not be kept.';
+
+  @override
+  String get historyExplainFailed => 'The explanation could not be loaded.';
+
+  @override
+  String get historyDeletesSoon => 'Deletes in less than a minute';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Deletes in $count min',
+      one: 'Deletes in 1 min',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Deletes in $count h',
+      one: 'Deletes in 1 h',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Deletes in $count days',
+      one: 'Deletes in 1 day',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Manual';
+
+  @override
+  String get historyProvenanceEdited => 'Edited';
+
+  @override
+  String get historyProvenanceTransformed => 'Transformed';
+
+  @override
+  String get historyProvenanceModule => 'Module';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (auto)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Deletion';
+
+  @override
+  String get historyMetadataRuleTags => 'Automatic tags';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return 'Enable $module?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'It will be able to:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Read your clipboard history',
+      'clipboard_write': 'Copy to your clipboard',
+      'library_write': 'Save snippets and pin clips',
+      'snippets': 'Read your snippets',
+      'synced_records': 'Sync its data across your devices',
+      'local_state': 'Keep its data on this device',
+      'prompts': 'Ask you to confirm actions',
+      'endpoints': 'Accept connections from local apps',
+      'other': 'Use a CopyPaste service',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'From $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Unknown module';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Your answer was not sent.';
+
+  @override
+  String get modulesPromptNotificationBody => 'Open CopyPaste to answer.';
+
+  @override
+  String get modulesUnknownDevice => 'Unknown device';
+
+  @override
+  String get modulesChooseDevices => 'Choose devices';
+
+  @override
+  String get modulesAddApp => 'Add app';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return 'Remove $app';
+  }
+
+  @override
+  String get modulesNoApps => 'No apps chosen';
 }

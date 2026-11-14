@@ -1,5 +1,6 @@
 import 'dart:ui' show SemanticsRole, Tristate;
 
+import 'package:copypaste_flutter/app/app.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
@@ -11,6 +12,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
+
+import '../app_features_test_support.dart';
 
 void main() {
   for (final platform in [
@@ -820,12 +823,27 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
       await tester.pump();
       expect(find.text('Close test drawer'), findsOneWidget);
-      expect(
-        tester
-            .getRect(find.byKey(const ValueKey('app-body-drawer-overlay')))
-            .top,
-        greaterThan(headerRect.bottom),
+      final overlay = tester.getRect(
+        find.byKey(const ValueKey('app-body-drawer-overlay')),
       );
+      expect(overlay.top, greaterThan(headerRect.bottom));
+      if (layout.name != 'mobile') {
+        // A side drawer starts on the header divider, where the body clip
+        // hides its own top border, and its content follows its corners.
+        Finder drawer(Type type) => find.ancestor(
+          of: find.text('Close test drawer'),
+          matching: find.byType(type),
+        );
+        expect(tester.getRect(drawer(DrawerRawContainer)).top, overlay.top);
+        expect(
+          tester.getRect(find.byType(AppHeader)).bottom,
+          overlay.top + AppTheme.headerDividerWidth,
+        );
+        expect(
+          tester.widget<ClipRRect>(drawer(ClipRRect).first).borderRadius,
+          const BorderRadius.only(bottomLeft: Radius.circular(AppRadius.xl)),
+        );
+      }
       expect(tester.getRect(action), headerRect);
       expect(action.hitTestable(), findsOneWidget);
       await tester.tap(action);
@@ -1273,6 +1291,29 @@ void main() {
       expect(historyNavigation, findsOneWidget);
     } finally {
       semantics.dispose();
+    }
+  });
+
+  testWidgets('the paste queue header action is on every destination', (
+    tester,
+  ) async {
+    final navigation = AppNavigationController();
+    addTearDown(navigation.dispose);
+    final features = testAppFeatures();
+    addTearDown(features.dispose);
+    await features.pasteQueue.start();
+
+    await tester.pumpWidget(
+      CopyPasteApp(navigation: navigation, features: features),
+    );
+    for (final destination in AppDestination.values) {
+      navigation.selectDestination(destination);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('paste-queue-open')),
+        findsOneWidget,
+        reason: destination.name,
+      );
     }
   });
 }

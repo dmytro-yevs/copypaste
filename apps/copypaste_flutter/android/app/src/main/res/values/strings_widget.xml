@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">History</string>
+    <string name="widget_filter_pinned">Pinned</string>
+    <string name="widget_filter_snippets">Snippets</string>
+    <string name="widget_filter_description">Showing %1$s. Tap to change.</string>
+    <string name="widget_privacy_full">Full preview</string>
+    <string name="widget_privacy_titles">Titles only</string>
+    <string name="widget_privacy_hidden">Hidden</string>
+    <string name="widget_privacy_description">Previews: %1$s. Tap to change.</string>
+    <string name="widget_search">Search in CopyPaste</string>
+    <string name="widget_paused">Capture paused · Resume</string>
+    <string name="widget_empty">No clips yet · Save clipboard</string>
+    <string name="widget_empty_pinned">No pinned clips</string>
+    <string name="widget_empty_snippets">No snippets yet</string>
+    <string name="widget_setup">Set up capture</string>
+    <string name="widget_unavailable">Unlock to show clips</string>
+    <string name="widget_error">Couldn\'t load clips · Tap to retry</string>
+    <string name="widget_hidden">Previews hidden</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d clip</item>
+        <item quantity="other">%d clips</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d snippet</item>
+        <item quantity="other">%d snippets</item>
+    </plurals>
+    <string name="widget_kind_text">Text</string>
+    <string name="widget_kind_link">Link</string>
+    <string name="widget_kind_image">Image</string>
+    <string name="widget_kind_file">File</string>
+    <string name="widget_kind_color">Color</string>
+    <string name="widget_kind_code">Code</string>
+    <string name="widget_kind_snippet">Snippet</string>
+    <string name="widget_secret_item">Secret item</string>
+    <string name="widget_secret_description">%1$s, secret. Double-tap and authenticate to copy.</string>
+    <string name="widget_concealed_snippet">Concealed snippet</string>
+    <string name="widget_copied">Copied</string>
+    <string name="widget_copy_failed">Couldn\'t copy</string>
+    <string name="widget_auth_reason">Copy a secret item</string>
+</resources>

@@ -32,7 +32,7 @@ def module_tag(manifest_path: Path) -> str:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     module_id = manifest.get("id")
     version = manifest.get("version")
-    if module_id not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
+    if module_id not in {"copypaste.ai-tools", "copypaste.ocr", "copypaste.semantic-search", "copypaste.sms-codes", "copypaste.supabase"}:
         raise ValueError("unrecognized first-party module")
     if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
         raise ValueError("invalid module release version")

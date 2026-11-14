@@ -4,6 +4,7 @@
 #![cfg_attr(windows, deny(unsafe_code))]
 
 mod clipboard_privacy;
+pub mod clips;
 pub mod config;
 pub use clipboard_privacy::ClipboardPrivacy;
 pub mod content_type;
@@ -18,10 +19,14 @@ mod file_operations;
 pub mod health;
 pub mod limits;
 mod organization;
+pub mod paste_queue;
 pub mod paths;
 pub mod payload;
 pub mod redact;
 mod response;
+pub mod rules;
+pub mod snippets;
+pub mod transforms;
 pub use file_operations::{
     FileOperation, FileOperationKind, FileOperationPhase, FileOperationUpdate,
 };
@@ -36,7 +41,9 @@ pub use config::{
     MIN_DECODED_IMAGE_MB, MIN_FILE_SIZE_BYTES, MIN_IMAGE_SIZE_BYTES, MIN_STORAGE_QUOTA_BYTES,
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
-pub use copypaste_module_sdk::ModuleOperation;
+pub use copypaste_module_sdk::{
+    EndpointConnected, EndpointFrame, ModuleOperation, MAX_DELIVERY_BYTES, MAX_ENDPOINT_FRAME_BYTES,
+};
 pub use error::ErrorCode;
 pub use health::SettingsHealth;
 pub use limits::{
@@ -45,26 +52,27 @@ pub use limits::{
     MAX_SOURCE_APP_ICON_BYTES, MAX_SYNC_METADATA_BYTES, SOURCE_APP_ICON_EDGE,
 };
 pub use payload::{
-    BackupData, CapabilityGuarantee, CapabilityState, CapabilityStatus, CloudStatusData,
-    CloudSyncData, DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
-    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
-    DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters, DiscoveredData,
-    DiscoveredDevice, ExportChunk, ExportData, ExportItem, ExternalNetworkObservation, FileDetails,
-    HistoryCountRange, HistoryDeviceFacet, HistoryFacets, HistoryGroupCounts, HistoryQuery,
-    HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview, ImagePreviewBounds, ImportData,
-    Item, ItemPage, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    BackupData, CapabilityGuarantee, CapabilityState, CapabilityStatus, ClipProvenance,
+    CloudStatusData, CloudSyncData, DeviceClass, DeviceDetails, DeviceEndpointObservation,
+    DeviceLatencyObservation, DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform,
+    DevicePresence, DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters,
+    DiscoveredData, DiscoveredDevice, ExportChunk, ExportData, ExportItem,
+    ExternalNetworkObservation, FileDetails, HistoryCountRange, HistoryDeviceFacet, HistoryFacets,
+    HistoryGroupCounts, HistoryQuery, HistorySort, HistorySourceAppFacet, ImageDetails,
+    ImagePreview, ImagePreviewBounds, ImportData, Item, ItemAnnotations, ItemPage,
+    PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
     PlatformCapability, PrivateModeData, StatusData, SyncResult, TransferProgress,
     MAX_HISTORY_COUNT_RANGES,
 };
 pub use response::{
-    ConfigApplied, EventData, EventKind, FileProgress, Response, ResponseData, RuntimeEventData,
-    StorageUsage,
+    ConfigApplied, EventData, EventKind, EventKindFilter, FileProgress, LibraryKinds,
+    OperationProgress, Response, ResponseData, RuntimeEventData, StorageUsage, MAX_EVENT_FILTERS,
 };
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// The one stdout line an `--app-parent` daemon writes once it is listening.
 pub const APP_PARENT_READY_LINE: &str = "copypaste-daemon-listening";
@@ -454,6 +462,28 @@ pub enum Method {
     /// Opt in to typed runtime events, including transfer progress.
     WatchRuntime,
 
+    /// Like [`Method::WatchRuntime`], but only the listed kinds are delivered.
+    WatchEvents {
+        kinds: Vec<EventKindFilter>,
+    },
+
+    // ---- feature groups (protocol v7) ---------------------------------------
+    Snippets {
+        op: snippets::SnippetOp,
+    },
+    Clips {
+        op: clips::ClipOp,
+    },
+    PasteQueue {
+        op: paste_queue::PasteQueueOp,
+    },
+    Transforms {
+        op: transforms::TransformOp,
+    },
+    Rules {
+        op: rules::RuleOp,
+    },
+
     /// Stop the daemon.
     ///
     /// Acknowledged first and acted on second, so a client learns the request
@@ -508,7 +538,7 @@ impl Method {
                 | Self::PairJoin { .. }
                 | Self::PairNearby { .. }
                 | Self::PairConfirm { .. }
-        )
+        ) || self.feature_op().is_some_and(OpGates::is_long_running)
     }
 
     /// Whether the reply is a sequence of interim frames ending in one final
@@ -517,6 +547,56 @@ impl Method {
     pub fn streams_progress(&self) -> bool {
         matches!(self, Self::ExportStream | Self::BackupStream { .. })
     }
+
+    /// Served by the daemon only to the CopyPaste app (never to the CLI).
+    #[must_use]
+    pub fn privileged(&self) -> bool {
+        match self {
+            Self::Modules { operation } => operation.privileged(),
+            _ => self.feature_op().is_some_and(OpGates::privileged),
+        }
+    }
+
+    /// Whether the daemon must settle if the caller is the app: privileged
+    /// verbs, plus module invocations and endpoints, whose outcome depends on it.
+    #[must_use]
+    pub fn needs_caller_identity(&self) -> bool {
+        self.privileged()
+            || matches!(
+                self,
+                Self::Modules {
+                    operation: ModuleOperation::Invoke { .. } | ModuleOperation::Connect { .. }
+                }
+            )
+    }
+
+    /// The operation of a feature-group method, for delegated gate answers.
+    #[must_use]
+    pub fn feature_op(&self) -> Option<&dyn OpGates> {
+        match self {
+            Self::Snippets { op } => Some(op),
+            Self::Clips { op } => Some(op),
+            Self::PasteQueue { op } => Some(op),
+            Self::Transforms { op } => Some(op),
+            Self::Rules { op } => Some(op),
+            _ => None,
+        }
+    }
+}
+
+/// Gate answers each feature-group operation enum gives about itself, so the
+/// daemon delegates instead of enumerating every operation.
+pub trait OpGates {
+    /// Needs an open database.
+    fn requires_ready(&self) -> bool;
+    /// Runs in the small admission pool kept for user-facing actions.
+    fn interactive(&self) -> bool;
+    /// Admission units in MiB; interactive work stays within its pool.
+    fn blocking_weight(&self) -> u32;
+    /// Needs the long client budget.
+    fn is_long_running(&self) -> bool;
+    /// Served by the daemon only to the CopyPaste app.
+    fn privileged(&self) -> bool;
 }
 
 #[cfg(test)]
@@ -626,6 +706,20 @@ mod tests {
         ] {
             assert!(!ordinary.is_long_running(), "{ordinary:?}");
         }
+    }
+
+    #[test]
+    fn module_privilege_follows_the_module_contract() {
+        let modules = |operation| Method::Modules { operation };
+        assert!(!modules(ModuleOperation::List).privileged());
+        assert!(modules(ModuleOperation::Prompts).privileged());
+        let connect = modules(ModuleOperation::Connect {
+            id: "copypaste.ai-tools".into(),
+            endpoint: "mcp".into(),
+        });
+        assert!(!connect.privileged());
+        assert!(connect.needs_caller_identity());
+        assert!(!modules(ModuleOperation::List).needs_caller_identity());
     }
 
     /// Absent means healthy, and it has to stay distinguishable from a health

@@ -1,0 +1,30 @@
+[package]
+name = "copypaste-transform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Pure text in, text out: no storage, IO or network. Linked by
+# copypaste-runtime, so the daemon and Android run the same code.
+[dependencies]
+base64.workspace = true
+crc32fast.workspace = true
+csv.workspace = true
+hex.workspace = true
+html2text.workspace = true
+icu_casemap.workspace = true
+jiff.workspace = true
+markup5ever.workspace = true
+md-5.workspace = true
+percent-encoding.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+saphyr.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+unicode-segmentation.workspace = true
+url.workspace = true

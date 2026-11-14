@@ -246,10 +246,18 @@ mod tests {
             "the completed session did not commit its cursor"
         );
 
+        // The replay may still step the cursor over B's own built-in rule
+        // records echoed back from A, but it must apply nothing.
         let replay = crate::testutil::calls::sync_now(&b, 3, Some(&pairing_id)).await;
-        assert!(replay.ok);
+        let results = match replay.data {
+            Some(copypaste_ipc::ResponseData::Sync(results)) => results,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].error, None);
+        assert_eq!(results[0].received, 0, "the replay applied an item again");
         assert_eq!(contents(&b), ["off then on"]);
-        assert_eq!(b.p2p.node().cursors().get(&pairing_id).since_ms, cursor);
+        assert!(b.p2p.node().cursors().get(&pairing_id).since_ms >= cursor);
         let _ = shutdown_tx.send(true);
     }
 

@@ -33,6 +33,10 @@ const JSON_ESCAPE_WORST_CASE: usize = 6;
 /// and up to [`crate::MAX_ITEM_TAG_IDS`] tag ids.
 const ITEM_ENVELOPE_BYTES: usize = 4 * 1024;
 
+/// Room for one item's serialized [`crate::payload::ItemAnnotations`] at
+/// their bounds: tag ids, provenance strings and a 16-step snapshot.
+pub const MAX_ITEM_ANNOTATIONS_BYTES: usize = 4 * 1024;
+
 /// Frames larger than this are rejected before allocation.
 ///
 /// Derived rather than chosen, and the assertion below is what keeps it
@@ -52,9 +56,52 @@ pub const MAX_PAGE_CONTENT_BYTES: usize = MAX_CONTENT_BYTES;
 const _: () = assert!(
     MAX_FRAME_BYTES
         >= MAX_PAGE_CONTENT_BYTES * JSON_ESCAPE_WORST_CASE
-            + MAX_PAGE as usize * ITEM_ENVELOPE_BYTES,
+            + MAX_PAGE as usize * (ITEM_ENVELOPE_BYTES + MAX_ITEM_ANNOTATIONS_BYTES),
     "a full page must fit a frame with every content byte escaped"
 );
+
+const MIB: usize = 1024 * 1024;
+
+/// Admission units (MiB) for work holding `multiple` maximal items.
+#[must_use]
+pub const fn content_weight_units(multiple: usize) -> u32 {
+    (multiple * MAX_CONTENT_BYTES / MIB) as u32
+}
+
+/// Admission units (MiB) for work holding `multiple` maximal frames.
+#[must_use]
+pub const fn frame_weight_units(multiple: usize) -> u32 {
+    (multiple * MAX_FRAME_BYTES / MIB) as u32
+}
+
+/// What one item counts against [`MAX_PAGE_CONTENT_BYTES`]: its content plus
+/// its serialized annotations, so annotated rows cannot overfill a page.
+#[must_use]
+pub fn page_item_bytes(
+    content_bytes: usize,
+    annotations: Option<&crate::payload::ItemAnnotations>,
+) -> usize {
+    let annotation_bytes = annotations
+        .and_then(|annotations| serde_json::to_vec(annotations).ok())
+        .map_or(0, |encoded| encoded.len().min(MAX_ITEM_ANNOTATIONS_BYTES));
+    content_bytes.saturating_add(annotation_bytes)
+}
+
+/// How many leading items fit one page: the first always does, so a caller
+/// can advance past an oversized row; each later one only within `budget`.
+#[must_use]
+pub fn page_len(item_bytes: impl IntoIterator<Item = usize>, budget: usize) -> usize {
+    let mut used = 0usize;
+    let mut count = 0;
+    for bytes in item_bytes {
+        used = used.saturating_add(bytes);
+        if count > 0 && used > budget {
+            break;
+        }
+        count += 1;
+    }
+    count
+}
 
 /// Server-side clamp on any caller-supplied page size (manifest 04 §3.3).
 ///
@@ -210,6 +257,25 @@ mod tests {
         assert_eq!(clamp_page(u32::MAX, DEFAULT_LIST_PAGE), MAX_PAGE);
     }
 
+    #[test]
+    fn annotations_count_against_the_page_budget_and_split_the_page() {
+        let annotations = crate::payload::ItemAnnotations {
+            rule_tag_ids: vec!["t".repeat(128); crate::MAX_ITEM_TAG_IDS],
+            ..Default::default()
+        }
+        .bounded();
+        let half = MAX_PAGE_CONTENT_BYTES / 2;
+        assert_eq!(page_len([half, half], MAX_PAGE_CONTENT_BYTES), 2);
+        let annotated = page_item_bytes(half, Some(&annotations));
+        assert!(annotated > half && annotated <= half + MAX_ITEM_ANNOTATIONS_BYTES);
+        assert_eq!(
+            page_len([annotated, annotated], MAX_PAGE_CONTENT_BYTES),
+            1,
+            "annotations pushed the page over its budget, so it must split"
+        );
+        assert_eq!(page_len([MAX_PAGE_CONTENT_BYTES * 2], 1), 1);
+    }
+
     fn item_of(content: String) -> Item {
         Item {
             privacy: Default::default(),
@@ -231,9 +297,8 @@ mod tests {
             source_app_bundle_id: None,
             source_app_name: None,
             source_app_icon_id: None,
-            too_large_to_sync: false,
-            truncated: false,
             line_count: Some(u32::MAX),
+            ..Item::default()
         }
     }
 

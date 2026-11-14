@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The keyboard panel retrieves and inserts clips; it has no typing keys for
+     host fields, so it declares no language subtypes. -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.copypaste.app.MainActivity"
+    android:supportsSwitchingToNextInputMethod="true" />

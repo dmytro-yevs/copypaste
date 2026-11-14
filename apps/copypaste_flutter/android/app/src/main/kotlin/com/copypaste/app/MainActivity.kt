@@ -21,6 +21,7 @@ import androidx.annotation.Keep
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import com.jakewharton.processphoenix.ProcessPhoenix
+import com.copypaste.app.quickaccess.QuickAccessTiles
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -67,28 +68,39 @@ class MainActivity : FlutterActivity() {
             contentType: String,
             received: Boolean,
             secret: Boolean,
+            transient: Boolean,
         ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeText(context, text, contentType, secret = secret).also { written ->
                 if (written) runCatching {
-                    if (received) {
-                        AndroidCaptureFeedback.onCaptured(
+                    when (ClipboardWriteFeedback.of(received, transient)) {
+                        ClipboardWriteFeedback.Captured -> AndroidCaptureFeedback.onCaptured(
                             context,
                             if (secret) null else CaptureFeedbackPreview(
                                 AndroidCaptureFeedback.textPreview(text),
                             ),
                         )
-                    } else AndroidCaptureFeedback.onCopied()
+                        ClipboardWriteFeedback.Copied -> AndroidCaptureFeedback.onCopied()
+                        ClipboardWriteFeedback.Silent -> Unit
+                    }
                 }
             }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardFile(path: String, filename: String, mimeType: String, secret: Boolean): Boolean {
+        fun writeClipboardFile(
+            path: String,
+            filename: String,
+            mimeType: String,
+            secret: Boolean,
+            transient: Boolean,
+        ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeFile(context, path, filename, mimeType, secret).also { written ->
-                if (written) runCatching { AndroidCaptureFeedback.onCopied() }
+                if (written && ClipboardWriteFeedback.of(received = false, transient) == ClipboardWriteFeedback.Copied) {
+                    runCatching { AndroidCaptureFeedback.onCopied() }
+                }
             }
         }
 
@@ -100,16 +112,19 @@ class MainActivity : FlutterActivity() {
             mimeType: String,
             received: Boolean,
             secret: Boolean,
+            transient: Boolean,
         ): Boolean {
             val context = instance ?: return false
             return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType, secret).also { written ->
-                if (written) {
-                    if (received) {
+                if (written) when (ClipboardWriteFeedback.of(received, transient)) {
+                    ClipboardWriteFeedback.Captured -> {
                         val preview = if (secret) null else runCatching {
                             AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
                         }.getOrNull()
                         runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
-                    } else runCatching { AndroidCaptureFeedback.onCopied() }
+                    }
+                    ClipboardWriteFeedback.Copied -> runCatching { AndroidCaptureFeedback.onCopied() }
+                    ClipboardWriteFeedback.Silent -> Unit
                 }
             }
         }
@@ -119,6 +134,9 @@ class MainActivity : FlutterActivity() {
 
         @JvmStatic
         private external fun releaseRuntimeMemory()
+
+        /** For surfaces without an activity, such as the keyboard panel after it hides. */
+        internal fun trimRuntimeMemory() = releaseRuntimeMemory()
 
         // Registered on the application context: capture services keep the
         // process-wide runtime open after this activity is gone.
@@ -169,6 +187,9 @@ class MainActivity : FlutterActivity() {
     private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
     private var historyFilesChannel: HistoryFilesChannel? = null
+    private var deviceAuthChannel: DeviceAuthChannel? = null
+    private var quickAccessChannel: QuickAccessChannel? = null
+    private var installedAppsChannel: InstalledAppsChannel? = null
     private val clipboardFocusGuard = ClipboardFocusCaptureGuard()
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
@@ -205,6 +226,9 @@ class MainActivity : FlutterActivity() {
                 }
             }
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        deviceAuthChannel = DeviceAuthChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        quickAccessChannel = QuickAccessChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        installedAppsChannel = InstalledAppsChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/app_language")
             .setMethodCallHandler { call, result ->
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -523,6 +547,8 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         AndroidCaptureSignals.changed()
+        // Pause and capture setup change in the app; the tile redraws only when they differ.
+        if (!hasFocus) QuickAccessTiles.refresh(this)
         if (hasFocus && clipboardListenerRegistered) {
             if (!clipboardFocusGuard.hasPendingPicker ||
                 clipboardFocusGuard.shouldCaptureAfterFocus(clipboardGeneration())) {
@@ -585,12 +611,19 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (historyFilesChannel?.onActivityResult(requestCode, resultCode, data) == true) return
+        if (deviceAuthChannel?.onActivityResult(requestCode, resultCode) == true) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {
         historyFilesChannel?.dispose()
         historyFilesChannel = null
+        deviceAuthChannel?.dispose()
+        deviceAuthChannel = null
+        quickAccessChannel?.dispose()
+        quickAccessChannel = null
+        installedAppsChannel?.dispose()
+        installedAppsChannel = null
         foregroundCaptureEligible = false
         AndroidClipboardReader.retireForeground(foregroundCaptureHost)
         foregroundCaptureHost = null

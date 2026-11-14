@@ -31,6 +31,8 @@ pub(crate) static JAVA_VM: OnceLock<Arc<JavaVM>> = OnceLock::new();
 // cannot resolve application classes through FindClass on attached threads.
 static CLIPBOARD_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 pub(crate) static INFERENCE_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
+/// The home-screen widget provider, told when what it shows changed.
+static WIDGET_PROVIDER_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
 static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -58,6 +60,19 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
             Err(_) => {
                 let _ = env.exception_clear();
                 return;
+            }
+        }
+    }
+    if WIDGET_PROVIDER_CLASS.get().is_none() {
+        match env
+            .find_class("com/copypaste/app/RecentClipsWidgetProvider")
+            .and_then(|class| env.new_global_ref(class))
+        {
+            Ok(class) => {
+                let _ = WIDGET_PROVIDER_CLASS.set(class);
+            }
+            Err(_) => {
+                let _ = env.exception_clear();
             }
         }
     }
@@ -195,7 +210,12 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
                 tracing::error!("could not initialize the Android inference launcher");
                 return;
             }
-            let _ = RUNTIME.set(Arc::new(runtime));
+            let runtime = Arc::new(runtime);
+            if runtime.attach_module_services().is_err() {
+                tracing::error!("could not attach the module host services");
+                return;
+            }
+            let _ = RUNTIME.set(runtime);
         }
         Err(error) => tracing::error!(%error, "could not open Android runtime"),
     }
@@ -766,9 +786,9 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         &self,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
-        secret: bool,
+        options: copypaste_runtime::WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, false, secret)
+        self.write_native(payload, content_type, false, options)
     }
 
     fn write_received(
@@ -777,7 +797,47 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         content_type: &str,
         secret: bool,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
-        self.write_native(payload, content_type, true, secret)
+        let options = copypaste_runtime::WriteOptions::copy(secret);
+        self.write_native(payload, content_type, true, options)
+    }
+
+    fn history_cleared(&self) {
+        notify_widgets(true);
+    }
+
+    fn device_removed(&self, _device_id: &str) {
+        notify_widgets(true);
+    }
+
+    fn surfaces_changed(&self) {
+        notify_widgets(false);
+    }
+}
+
+/// Tells the home-screen widget that its content changed. Kotlin coalesces
+/// ordinary changes; `cleared` (history cleared, device removed) empties every
+/// instance at once. Carries no content.
+fn notify_widgets(cleared: bool) {
+    let (Some(vm), Some(class), Some(context)) = (
+        JAVA_VM.get(),
+        WIDGET_PROVIDER_CLASS.get(),
+        APPLICATION_CONTEXT.get(),
+    ) else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    if env
+        .call_static_method(
+            class,
+            "notifyChanged",
+            "(Landroid/content/Context;Z)V",
+            &[JValue::Object(context.as_obj()), jni_bool(cleared)],
+        )
+        .is_err()
+    {
+        let _ = env.exception_clear();
     }
 }
 
@@ -787,7 +847,7 @@ impl AndroidClipboard {
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
         received: bool,
-        secret: bool,
+        options: copypaste_runtime::WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let vm = JAVA_VM
             .get()
@@ -797,7 +857,7 @@ impl AndroidClipboard {
             .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
         let ok = match payload {
             copypaste_core::ClipboardPayload::Text(text) => {
-                call_text(&mut env, text, content_type, received, secret)
+                call_text(&mut env, text, content_type, received, options)
             }
             copypaste_core::ClipboardPayload::Image {
                 content_type,
@@ -812,7 +872,7 @@ impl AndroidClipboard {
                 },
                 content_type,
                 received,
-                secret,
+                options,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
                 if let Some(file) = metadata
@@ -839,12 +899,13 @@ impl AndroidClipboard {
                         .call_static_method(
                             class,
                             "writeClipboardFile",
-                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZ)Z",
                             &[
                                 (&path).into(),
                                 (&name).into(),
                                 (&mime).into(),
-                                JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+                                jni_bool(options.secret),
+                                jni_bool(options.transient),
                             ],
                         )
                         .ok()
@@ -863,7 +924,7 @@ impl AndroidClipboard {
                         .as_ref()
                         .map_or("application/octet-stream", |file| file.mime_type.as_str()),
                     received,
-                    secret,
+                    options,
                 )
             }
             copypaste_core::ClipboardPayload::Unsupported { .. } => {
@@ -875,12 +936,16 @@ impl AndroidClipboard {
     }
 }
 
+fn jni_bool(value: bool) -> JValue<'static, 'static> {
+    JValue::Bool(if value { JNI_TRUE } else { JNI_FALSE })
+}
+
 fn call_text(
     env: &mut JNIEnv,
     text: &str,
     content_type: &str,
     received: bool,
-    secret: bool,
+    options: copypaste_runtime::WriteOptions,
 ) -> bool {
     let (Ok(text), Ok(content_type)) = (env.new_string(text), env.new_string(content_type)) else {
         return false;
@@ -891,12 +956,13 @@ fn call_text(
     env.call_static_method(
         class,
         "writeClipboardText",
-        "(Ljava/lang/String;Ljava/lang/String;ZZ)Z",
+        "(Ljava/lang/String;Ljava/lang/String;ZZZ)Z",
         &[
             JValue::Object(&text.into()),
             JValue::Object(&content_type.into()),
-            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
-            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+            jni_bool(received),
+            jni_bool(options.secret),
+            jni_bool(options.transient),
         ],
     )
     .ok()
@@ -910,7 +976,7 @@ fn call_binary(
     filename: &str,
     mime_type: &str,
     received: bool,
-    secret: bool,
+    options: copypaste_runtime::WriteOptions,
 ) -> bool {
     let (Ok(bytes), Ok(filename), Ok(mime_type)) = (
         env.byte_array_from_slice(bytes),
@@ -925,13 +991,14 @@ fn call_binary(
     env.call_static_method(
         class,
         "writeClipboardBinary",
-        "([BLjava/lang/String;Ljava/lang/String;ZZ)Z",
+        "([BLjava/lang/String;Ljava/lang/String;ZZZ)Z",
         &[
             JValue::Object(&JObject::from(bytes)),
             JValue::Object(&filename.into()),
             JValue::Object(&mime_type.into()),
-            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
-            JValue::Bool(if secret { JNI_TRUE } else { JNI_FALSE }),
+            jni_bool(received),
+            jni_bool(options.secret),
+            jni_bool(options.transient),
         ],
     )
     .ok()
@@ -950,6 +1017,97 @@ pub(crate) async fn request(
         .await
         .map_err(|_| crate::api::RuntimeError::internal())?;
     Ok(runtime.request(0, method).await)
+}
+
+/// Serves one IPC method for the native surfaces that run without a Flutter
+/// engine (keyboard panel, tiles, widget). Takes `{"method", "params"}` JSON and
+/// returns the response JSON with id 0. It never starts the P2P listener or
+/// module sync: reactor methods (network I/O) are refused as `unsupported`.
+/// Kotlin calls it from one worker thread, never the main thread.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeAccess_request<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    method: JString<'local>,
+) -> jni::sys::jstring {
+    let response = match env.get_string(&method) {
+        Ok(method) => native_request(&method.to_string_lossy()),
+        Err(_) => {
+            let _ = env.exception_clear();
+            invalid_native_request()
+        }
+    };
+    let encoded = serde_json::to_string(&response).unwrap_or_else(|_| {
+        serde_json::to_string(&copypaste_ipc::Response::err(
+            0,
+            copypaste_ipc::ErrorCode::Internal,
+            "The reply could not be encoded.",
+        ))
+        .unwrap_or_default()
+    });
+    match env.new_string(encoded) {
+        Ok(encoded) => encoded.into_raw(),
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+fn native_request(json: &str) -> copypaste_ipc::Response {
+    use copypaste_runtime::Route;
+    let Some(runtime) = RUNTIME.get() else {
+        return copypaste_ipc::Response::err(
+            0,
+            copypaste_ipc::ErrorCode::NotReady,
+            "CopyPaste is still starting.",
+        );
+    };
+    let Ok(method) = serde_json::from_str::<copypaste_ipc::Method>(json) else {
+        return invalid_native_request();
+    };
+    let admission = match block_on(runtime.route(&method)) {
+        Route::Blocking(admission) => admission,
+        Route::Reactor => {
+            return copypaste_ipc::Response::err(
+                0,
+                copypaste_ipc::ErrorCode::Unsupported,
+                "This action needs the CopyPaste app.",
+            )
+        }
+    };
+    let response = runtime.request_blocking(0, method);
+    drop(admission);
+    response
+}
+
+fn invalid_native_request() -> copypaste_ipc::Response {
+    copypaste_ipc::Response::err(
+        0,
+        copypaste_ipc::ErrorCode::InvalidRequest,
+        "The request is not a valid method.",
+    )
+}
+
+/// Drives [`copypaste_runtime::Runtime::route`] on the calling JNI thread.
+/// Its only await is a runtime-agnostic semaphore, so no reactor is needed.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+        std::thread::park();
+    }
 }
 
 pub(crate) async fn stream(

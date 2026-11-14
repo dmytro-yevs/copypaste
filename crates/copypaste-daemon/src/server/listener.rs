@@ -33,7 +33,10 @@ use std::time::Duration;
 #[cfg(unix)]
 use anyhow::Context;
 use copypaste_ipc::transport::{Listener, OwnedReadHalf, OwnedWriteHalf, Stream};
-use copypaste_ipc::{ErrorCode, Method, Response, ResponseData, MAX_FRAME_BYTES};
+use copypaste_ipc::{
+    EndpointConnected, ErrorCode, Method, ModuleOperation, Response, ResponseData, MAX_FRAME_BYTES,
+};
+use copypaste_modules::ModuleCaller;
 #[cfg(all(test, unix))]
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -44,8 +47,11 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::{dispatch_request, dispatch_stream, gate, parse};
-use super::messages::{MSG_NOT_READY, MSG_TOO_LARGE, MSG_WATCHERS_FULL};
+use super::dispatch::{dispatch_request, dispatch_stream, gate, is_watch, parse};
+use super::messages::{
+    MSG_BAD_EVENT_FILTER, MSG_ENDPOINTS_FULL, MSG_INTERNAL, MSG_NOT_READY, MSG_TOO_LARGE,
+    MSG_WATCHERS_FULL,
+};
 use crate::AppState;
 
 /// Connections served at once (manifest 04 §3.5). Over-cap connections are
@@ -61,6 +67,10 @@ pub(super) const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 /// long as it likes; without a cap of its own, idle subscribers could take the
 /// whole connection budget. Eight is several app windows and a CLI `watch`.
 const MAX_WATCHERS: usize = 8;
+
+/// How many may be module endpoint streams, which are also exempt from the
+/// read deadline. Each module additionally holds at most eight.
+const MAX_ENDPOINT_STREAMS: usize = 16;
 
 /// Per-read deadline. A connection that says nothing for this long is dropped
 /// **without a response** — the client sees EOF, which its retry logic already
@@ -198,6 +208,7 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
     let mut connections = tokio::task::JoinSet::new();
     let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let watchers = Arc::new(Semaphore::new(MAX_WATCHERS));
+    let endpoints = Arc::new(Semaphore::new(MAX_ENDPOINT_STREAMS));
 
     let mut release = state.drain_release_rx();
     let mut draining = state.is_draining();
@@ -220,12 +231,15 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
                         continue;
                     };
                     let state = Arc::clone(&state);
-                    let watchers = Arc::clone(&watchers);
+                    let streams = Streams {
+                        watchers: Arc::clone(&watchers),
+                        endpoints: Arc::clone(&endpoints),
+                    };
                     let shutdown = shutdown.clone();
                     let release = release.clone();
                     connections.spawn(async move {
                         let _permit = permit;
-                        handle_connection(stream, state, watchers, shutdown, release).await;
+                        handle_connection(stream, state, streams, shutdown, release).await;
                     });
                 }
                 Err(e) => warn!(error = %e, "could not accept an ipc connection"),
@@ -236,15 +250,22 @@ pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::
     while connections.join_next().await.is_some() {}
 }
 
+/// The separate caps of connections exempt from the read deadline.
+struct Streams {
+    watchers: Arc<Semaphore>,
+    endpoints: Arc<Semaphore>,
+}
+
 /// One connection: read lines, answer each with exactly one line, until EOF —
-/// or until it subscribes, after which it only writes.
+/// or until it subscribes or opens a module endpoint, after which it streams.
 async fn handle_connection(
     stream: Stream,
     state: Arc<AppState>,
-    watchers: Arc<Semaphore>,
+    streams: Streams,
     mut shutdown: watch::Receiver<bool>,
     mut release: watch::Receiver<bool>,
 ) {
+    let mut peer = super::peer_identity::PeerIdentity::capture(&stream);
     let (reader, mut writer) = stream.into_split();
     let mut lines = Reader::new(reader);
 
@@ -336,7 +357,8 @@ async fn handle_connection(
             break;
         }
 
-        if let Some(rejection) = gate(&state, &request) {
+        let caller = peer.caller(&request.method).await;
+        if let Some(rejection) = gate(&state, &request, caller) {
             let close_connection = rejection.was_watch;
             if send(&mut writer, &rejection.response).await.is_err() || close_connection {
                 break;
@@ -347,11 +369,23 @@ async fn handle_connection(
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
         // longer owns the read half's deadline.
-        if matches!(&request.method, Method::Watch | Method::WatchRuntime) {
-            let typed = matches!(&request.method, Method::WatchRuntime);
-            drop(wire_lease);
+        if is_watch(&request.method) {
             let id = request.id;
-            let Ok(_permit) = Arc::clone(&watchers).try_acquire_owned() else {
+            let typed = !matches!(&request.method, Method::Watch);
+            let filter = match request.method {
+                Method::WatchEvents { kinds } => {
+                    let Some(filter) = super::watch::WatchFilter::new(kinds) else {
+                        let invalid =
+                            Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_EVENT_FILTER);
+                        let _ = send(&mut writer, &invalid).await;
+                        break;
+                    };
+                    Some(filter)
+                }
+                _ => None,
+            };
+            drop(wire_lease);
+            let Ok(_permit) = Arc::clone(&streams.watchers).try_acquire_owned() else {
                 let full = Response::err(id, ErrorCode::Internal, MSG_WATCHERS_FULL);
                 let _ = send(&mut writer, &full).await;
                 break;
@@ -377,10 +411,68 @@ async fn handle_connection(
                     &mut lines,
                     &mut writer,
                     &mut shutdown,
+                    filter.as_ref(),
                 )
                 .await;
             } else {
                 super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
+            }
+            break;
+        }
+
+        if let Method::Modules {
+            operation: ModuleOperation::Connect { id, endpoint },
+        } = &request.method
+        {
+            drop(wire_lease);
+            let Ok(_permit) = Arc::clone(&streams.endpoints).try_acquire_owned() else {
+                let full = Response::err(request.id, ErrorCode::Internal, MSG_ENDPOINTS_FULL);
+                let _ = send(&mut writer, &full).await;
+                break;
+            };
+            let (modules, id, endpoint) = (
+                Arc::clone(&state.runtime.modules),
+                id.clone(),
+                endpoint.clone(),
+            );
+            let caller = if caller.is_app {
+                ModuleCaller::App
+            } else {
+                ModuleCaller::Client
+            };
+            let opened =
+                tokio::task::spawn_blocking(move || modules.connect(&id, &endpoint, caller)).await;
+            let session = match opened {
+                Ok(Ok(session)) => session,
+                Ok(Err(error)) => {
+                    let refused =
+                        Response::err(request.id, ErrorCode::InvalidRequest, error.to_string());
+                    if send(&mut writer, &refused).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                Err(_) => {
+                    let failed = Response::err(request.id, ErrorCode::Internal, MSG_INTERNAL);
+                    let _ = send(&mut writer, &failed).await;
+                    break;
+                }
+            };
+            let connected = EndpointConnected {
+                connection: session.connection().into(),
+            };
+            let ack = serde_json::to_string(&connected)
+                .map(|json| Response::ok(request.id, ResponseData::Modules { json }));
+            let acknowledged = match ack {
+                Ok(ack) => send(&mut writer, &ack).await.is_ok(),
+                Err(_) => false,
+            };
+            if acknowledged {
+                super::endpoint::pump(session, &mut lines, &mut writer, &mut shutdown).await;
+            } else {
+                let link = session.link();
+                drop(session);
+                let _ = tokio::task::spawn_blocking(move || link.close()).await;
             }
             break;
         }
@@ -418,9 +510,9 @@ async fn handle_connection(
         }
 
         let is_interactive = super::dispatch::interactive(&request.method);
-        let response = dispatch_request(&state, request, wire_lease).await;
+        let response = dispatch_request(&state, request, caller, wire_lease).await;
 
-        if send_in(&mut writer, &response, is_interactive, wire_budget())
+        if send_in(&mut writer, &*response, is_interactive, wire_budget())
             .await
             .is_err()
         {
@@ -661,9 +753,17 @@ pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Re
     send_in(writer, response, false, wire_budget()).await
 }
 
-async fn send_in(
+/// [`send`] for a line that is not a [`Response`], such as an endpoint frame.
+pub(super) async fn send_value<T: serde::Serialize>(
     writer: &mut OwnedWriteHalf,
-    response: &Response,
+    value: &T,
+) -> Result<(), ()> {
+    send_in(writer, value, false, wire_budget()).await
+}
+
+async fn send_in<T: serde::Serialize + ?Sized>(
+    writer: &mut OwnedWriteHalf,
+    response: &T,
     interactive: bool,
     budget: &'static WireBudget,
 ) -> Result<(), ()> {
@@ -795,7 +895,7 @@ mod tests {
         static TEST_BUDGET: OnceLock<WireBudget> = OnceLock::new();
         reader.budget = TEST_BUDGET.get_or_init(WireBudget::default);
         let task = tokio::spawn(async move {
-            let prefix = br#"{"id":1,"protocol_version":6,"method":"status","unknown":""#;
+            let prefix = br#"{"id":1,"protocol_version":7,"method":"status","unknown":""#;
             let suffix = br#""}"#;
             let mut remaining = MAX_FRAME_BYTES - prefix.len() - suffix.len();
             let chunk = [b'x'; CONTROL_FRAME];
@@ -1352,6 +1452,117 @@ mod tests {
         let _ = server.await;
     }
 
+    /// A peer that is not the app is refused a privileged operation before any
+    /// handler runs, and the same connection keeps serving ordinary requests.
+    #[tokio::test]
+    async fn privileged_operations_from_a_non_app_peer_are_forbidden() {
+        let (state, dir) = test_state("peer-identity");
+        let path = test_socket_path(&dir, "daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+        let unhide = Method::Clips {
+            op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
+                ids: vec!["clip".into()],
+                hidden: false,
+            },
+        };
+        let refused = client.call(request(1, unhide)).await;
+        assert_eq!(refused.id, 1);
+        assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
+        let status = client.call(request(2, Method::Status)).await;
+        assert!(status.ok, "{:?}", status.error);
+
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    /// Module management is the app's, while a refused endpoint leaves the
+    /// connection serving ordinary requests.
+    #[tokio::test]
+    async fn module_endpoints_and_management_follow_the_caller() {
+        let (state, dir) = test_state("module-endpoint");
+        let path = test_socket_path(&dir, "daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+        let modules = |operation| Method::Modules { operation };
+        let prompts = client
+            .call(request(1, modules(copypaste_ipc::ModuleOperation::Prompts)))
+            .await;
+        assert_eq!(prompts.error_code, Some(ErrorCode::Forbidden));
+        let connect = modules(copypaste_ipc::ModuleOperation::Connect {
+            id: "copypaste.missing".into(),
+            endpoint: "mcp".into(),
+        });
+        let refused = client.call(request(2, connect)).await;
+        assert_eq!(refused.id, 2);
+        assert!(!refused.ok);
+        let status = client.call(request(3, Method::Status)).await;
+        assert!(status.ok, "{:?}", status.error);
+
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    /// A filtered subscriber gets only its kinds: no capture snapshot and no
+    /// history change unless asked.
+    #[tokio::test]
+    async fn watch_events_delivers_only_the_requested_kinds() {
+        use copypaste_ipc::EventKindFilter;
+        let (state, dir) = test_state("watch-events");
+        let path = test_socket_path(&dir, "daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let subscribe = |kinds| async {
+            let mut client = Client::new(transport::connect(&path).await.expect("connect"));
+            let ack = client.call(request(1, Method::WatchEvents { kinds })).await;
+            (client, ack)
+        };
+
+        let (mut empty, ack) = subscribe(Vec::new()).await;
+        assert_eq!(ack.error_code, Some(ErrorCode::InvalidRequest));
+        assert_connection_closed(&mut empty).await;
+
+        let (mut items, ack) = subscribe(vec![EventKindFilter::Items]).await;
+        assert!(ack.ok, "{:?}", ack.error);
+        let (mut queue, ack) = subscribe(vec![EventKindFilter::PasteQueue]).await;
+        assert!(ack.ok, "{:?}", ack.error);
+        crate::server::dispatch::dispatch_store(
+            &state,
+            99,
+            Method::Add {
+                content: "pushed".into(),
+            },
+        );
+        let frame = tokio::time::timeout(Duration::from_secs(5), items.next_frame())
+            .await
+            .expect("the requested kind arrives");
+        let Some(ResponseData::RuntimeEvent(event)) = frame.data else {
+            panic!("expected a runtime event, got {frame:?}");
+        };
+        assert!(event.capture.is_none(), "the snapshot was not requested");
+        assert_eq!(event.change.unwrap().event, copypaste_ipc::EventKind::Items);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), queue.next_frame())
+                .await
+                .is_err(),
+            "the history change was filtered out"
+        );
+
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
     #[tokio::test]
     async fn runtime_watch_sends_snapshot_and_capture_transitions() {
         let (state, dir) = test_state("runtime-capture-watch");
@@ -1705,12 +1916,13 @@ mod tests {
                 &mut reader,
                 &mut writer,
                 &mut shutdown_rx,
+                None,
             )
             .await;
         });
         let mut client = Client::new(client_stream);
         let mut frames = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..6 {
             frames.push(
                 tokio::time::timeout(Duration::from_secs(5), client.next_frame())
                     .await
@@ -1738,6 +1950,24 @@ mod tests {
         let peers = peers.change.as_ref().unwrap();
         assert_eq!(peers.event, copypaste_ipc::EventKind::Peers);
         assert!(peers.sync_status.is_some());
+        let refreshed: Vec<_> = frames[4..]
+            .iter()
+            .filter_map(|frame| match &frame.data {
+                Some(ResponseData::RuntimeEvent(event)) => event.change.as_ref(),
+                _ => None,
+            })
+            .map(|change| (change.event, change.library))
+            .collect();
+        assert_eq!(
+            refreshed,
+            [
+                (copypaste_ipc::EventKind::PasteQueue, None),
+                (
+                    copypaste_ipc::EventKind::Library,
+                    Some(copypaste_ipc::LibraryKinds::all())
+                ),
+            ]
+        );
         drop(client);
         tokio::time::timeout(Duration::from_secs(5), pump)
             .await
@@ -1749,21 +1979,16 @@ mod tests {
     async fn a_watcher_continues_after_lagging() {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
         events_tx
-            .send(copypaste_ipc::EventData {
-                sync_status: None,
-                event: copypaste_ipc::EventKind::Items,
-                item_count: 1,
-                captured: false,
-                captured_item_id: None,
-            })
+            .send(copypaste_ipc::EventData::change(
+                copypaste_ipc::EventKind::Items,
+                1,
+            ))
             .unwrap();
         events_tx
             .send(copypaste_ipc::EventData {
-                sync_status: None,
-                event: copypaste_ipc::EventKind::Items,
-                item_count: 2,
                 captured: true,
                 captured_item_id: Some("captured-item".into()),
+                ..copypaste_ipc::EventData::change(copypaste_ipc::EventKind::Items, 2)
             })
             .unwrap();
 

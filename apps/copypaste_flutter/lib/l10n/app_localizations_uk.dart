@@ -57,12 +57,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get commonEnable => 'Увімкнути';
 
   @override
-  String get commonOn => 'Увімкнено';
-
-  @override
-  String get commonOff => 'Вимкнено';
-
-  @override
   String get settingsLanguageTitle => 'Мова';
 
   @override
@@ -126,15 +120,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get settingsRuntimeExcludedAppsLimit =>
       'Можна виключити до 256 програм.';
-
-  @override
-  String get settingsQuickPasteStartFailed =>
-      'Не вдалося запустити Quick Paste, тому його скорочення не працює.';
-
-  @override
-  String settingsQuickPasteShortcutInUse(String shortcut) {
-    return '$shortcut використовує інша програма. Виберіть інше скорочення.';
-  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -816,6 +801,500 @@ class AppLocalizationsUk extends AppLocalizations {
       'Встановлення й керування додатковими модулями.';
 
   @override
+  String get settingsSectionRules => 'Правила вмісту';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Автоматично додавайте теги, пропускайте, захищайте або видаляйте записи за часом.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Швидкий доступ';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Клавіатура, плитки й віджет головного екрана.';
+
+  @override
+  String get settingsSectionSnippets => 'Фрагменти';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Повторно використовуваний текст і шаблони.';
+
+  @override
+  String get settingsSectionTransforms => 'Перетворення тексту';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Улюблені, конвеєри й типові перетворення під час вставлення.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Збирайте кілька копій і вставляйте їх по черзі.';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return 'Вставлено $position з $total';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return 'Елемент $position з $total у буфері обміну';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Вставлено $count елемента',
+      many: 'Вставлено $count елементів',
+      few: 'Вставлено $count елементи',
+      one: 'Вставлено $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count елемента в буфері обміну',
+      many: '$count елементів у буфері обміну',
+      few: '$count елементи в буфері обміну',
+      one: '$count елемент у буфері обміну',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Чергу завершено';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Додано, у черзі $total',
+      many: 'Додано, у черзі $total',
+      few: 'Додано, у черзі $total',
+      one: 'Додано, у черзі $total',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => 'Черга порожня, нічого не вставлено';
+
+  @override
+  String get pasteQueueMixed =>
+      '«Вставити все» працює лише з чергою тільки з тексту або тільки з файлів';
+
+  @override
+  String get pasteQueueSeveralFiles => 'Вставляйте файли по одному.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count елемента більше недоступні',
+      many: '$count елементів більше недоступні',
+      few: '$count елементи більше недоступні',
+      one: '$count елемент більше недоступний',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '«Вставити наступний» лише копіює';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Елемент скопійовано. Дозвольте «Універсальний доступ», щоб вставляти автоматично.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Не вдалося вставити автоматично. Елемент скопійовано.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Не можна вставити в програму адміністратора. Елемент скопійовано.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Немає програми для вставлення. Елемент скопійовано.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Збирання копій';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Збирання зупинено';
+
+  @override
+  String get pasteQueueFailed => 'Не вдалося виконати дію Paste Queue';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count в очікуванні',
+      many: '$count в очікуванні',
+      few: '$count в очікуванні',
+      one: '$count в очікуванні',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count в очікуванні · Збирання',
+      many: '$count в очікуванні · Збирання',
+      few: '$count в очікуванні · Збирання',
+      one: '$count в очікуванні · Збирання',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Збирання';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Завершено';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Черга заповнена ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage => 'Нові копії більше не додаються.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue порожня';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Збирайте копії або додавайте елементи з історії.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Копіюйте елементи, щоб додати їх';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Кожна копія потрапляє в чергу, доки ви не зупините збирання.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Почати збирання';
+
+  @override
+  String get pasteQueueStopCollecting => 'Зупинити збирання';
+
+  @override
+  String get pasteQueueLoading => 'Завантаження черги…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Не вдалося завантажити чергу';
+
+  @override
+  String get pasteQueuePasteNext => 'Вставити наступний';
+
+  @override
+  String get pasteQueueCopyNext => 'Копіювати наступний';
+
+  @override
+  String get pasteQueuePasteAll => 'Вставити все';
+
+  @override
+  String get pasteQueueCopyAll => 'Копіювати все';
+
+  @override
+  String get pasteQueueReverse => 'Обернути порядок';
+
+  @override
+  String get pasteQueueStepBack => 'Крок назад';
+
+  @override
+  String get pasteQueueSkip => 'Пропустити';
+
+  @override
+  String get pasteQueueRemovePasted => 'Прибрати вставлені';
+
+  @override
+  String get pasteQueueCleared => 'Чергу очищено';
+
+  @override
+  String get pasteQueueUndo => 'Скасувати';
+
+  @override
+  String get pasteQueueStartFresh => 'Почати заново';
+
+  @override
+  String get pasteQueueAppend => 'Додати в кінець';
+
+  @override
+  String get pasteQueueRestartTitle => 'Почати нове збирання?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '«Почати заново» прибирає вставлені елементи. «Додати в кінець» їх зберігає.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return 'Черга від $time';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Вставлено';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Пропущено';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Більше недоступний';
+
+  @override
+  String get pasteQueueEdited => 'Змінено';
+
+  @override
+  String get pasteQueueSecret => 'Секрет';
+
+  @override
+  String get pasteQueueKindImage => 'Зображення';
+
+  @override
+  String get pasteQueueKindFiles => 'Файли';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return 'Сформовано о $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Елемент $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return 'Переміщено на позицію $position';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Перемістити вгору';
+
+  @override
+  String get pasteQueueMoveDown => 'Перемістити вниз';
+
+  @override
+  String get pasteQueueMoveToTop => 'На початок';
+
+  @override
+  String get pasteQueueMoveToBottom => 'У кінець';
+
+  @override
+  String get pasteQueueReorder => 'Перетягніть, щоб змінити порядок';
+
+  @override
+  String get pasteQueueMoreActions => 'Інші дії';
+
+  @override
+  String get pasteQueuePasteNow => 'Вставити зараз';
+
+  @override
+  String get pasteQueueEdit => 'Редагувати текст';
+
+  @override
+  String get pasteQueueUseOriginal => 'Використати оригінальний текст';
+
+  @override
+  String get pasteQueueRemove => 'Прибрати з черги';
+
+  @override
+  String get pasteQueueEditTitle => 'Редагувати текст у черзі';
+
+  @override
+  String get pasteQueueEditMessage => 'Зміни стосуються лише цієї черги.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Налаштувати поєднання клавіш';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'Збирайте й вставляйте, не відкриваючи CopyPaste.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Почати або зупинити збирання';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Вставити наступний як звичайний текст';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Глобальне поєднання клавіш, що працює в будь-якому застосунку.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Це поєднання вже використовує інше поєднання клавіш CopyPaste. Попереднє збережено.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Цю комбінацію використовує інша програма.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Система відхилила це поєднання. Попереднє збережено.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt вводить символи в багатьох розкладках. Виберіть іншу.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Глобальні скорочення недоступні в цьому сеансі.';
+
+  @override
+  String get pasteQueueShortcutFailed =>
+      'Не вдалося налаштувати це поєднання клавіш.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Увімкнути Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Якщо вимкнено, скорочення й збирання не працюють.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '«Вставити наступний» виконує';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Вставляти автоматично або лише копіювати в буфер обміну.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Вставити в активний застосунок';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Лише в буфер обміну';
+
+  @override
+  String get pasteQueueInsertTitle => 'Нові елементи додаються';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Куди в черзі потрапляють зібрані й додані елементи.';
+
+  @override
+  String get pasteQueueInsertEnd => 'У кінець (першим прийшов — першим вийшов)';
+
+  @override
+  String get pasteQueueInsertStart =>
+      'На початок (останнім прийшов — першим вийшов)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Після останнього елемента';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Що робить «Вставити наступний», коли всі елементи вже вставлено.';
+
+  @override
+  String get pasteQueueEndStop => 'Зупинити';
+
+  @override
+  String get pasteQueueEndLoop => 'Почати спочатку';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Вставляти останній далі';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Роздільник для «Вставити все»';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Ставиться між елементами, коли вставляються всі разом.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Новий рядок';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Порожній рядок';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Табуляція';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Пробіл';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Кома';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Кома й пробіл';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Немає';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Власний';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'До 32 символів; можна \\n і \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Завжди вставляти як звичайний текст';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Прибирає форматування з елементів черги.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Зупиняти збирання через';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Зупиняти збирання, якщо стільки часу немає копій.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes хв';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Ніколи';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Ліміт розміру черги';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Коли черга заповнена, нові копії не додаються.';
+
+  @override
+  String get pasteQueueRestoreTitle =>
+      'Відновлювати попередній буфер обміну після завершення';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Повертає те, що було скопійовано до вставлення.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue черга збирання порядок поєднання клавіш роздільник';
+
+  @override
   String get settingsSectionAbout => 'Про програму';
 
   @override
@@ -905,7 +1384,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsStartupAndroidDescription =>
-      'Відновлювати ввімкнені фонові служби після перезапуску пристрою.';
+      'Відновлювати фонові служби після перезапуску.';
 
   @override
   String get settingsStartupDesktopDescription =>
@@ -963,7 +1442,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      'Виберіть повний або обмежений запис і керуйте одноразовим налаштуванням Shizuku чи ADB.';
+      'Повний чи обмежений режим і одноразове налаштування Shizuku або ADB.';
 
   @override
   String get settingsOpenSetup => 'Налаштувати';
@@ -988,7 +1467,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      'Надайте доступ до всіх фото й сповіщень, щоб зберігати нові знімки екрана у фоновому режимі.';
+      'Потрібно, щоб зберігати знімки екрана у фоні.';
 
   @override
   String get settingsAllowAccess => 'Дозволити доступ';
@@ -1055,7 +1534,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsMaxFileSizeDescription =>
-      'Обмеження для додавання й завантаження файлів. Вміст файлу передається, лише коли ви вибираєте «Завантажити».';
+      'Найбільший файл, який можна додати чи завантажити.';
 
   @override
   String get settingsHistoryFilesTitle => 'Файли історії';
@@ -1103,7 +1582,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsRestoreDialogMessage =>
-      'Вибрана зашифрована резервна копія замінить історію буфера обміну на цьому пристрої. Поточні налаштування та ідентичність пристрою збережуться.';
+      'Резервна копія замінить історію на цьому пристрої. Налаштування збережуться.';
 
   @override
   String get settingsRestoreFailed => 'Не вдалося відновити резервну копію.';
@@ -1113,7 +1592,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsSyncSwitchDescription =>
-      'Головний перемикач синхронізації зі сполученими пристроями.';
+      'Синхронізувати історію зі сполученими пристроями.';
 
   @override
   String get settingsSyncSearchDescription =>
@@ -1132,7 +1611,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      'Автоматично копіювати новіші кліпи з інших пристроїв у буфер обміну цього пристрою.';
+      'Копіювати нові кліпи з інших пристроїв у цей буфер обміну.';
 
   @override
   String get settingsLanVisibilityTitle => 'Видимість у локальній мережі';
@@ -1157,16 +1636,12 @@ class AppLocalizationsUk extends AppLocalizations {
       'приватність програма ідентифікатори privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      'Пропускати автоматичний запис під час роботи з цими програмами. Копіювання у фоновому режимі може оминати виключення.';
-
-  @override
   String get settingsExcludedAppsDesktopDescription =>
-      'Пропускати автоматичний запис від визначених власників буфера обміну. Якщо виключення задано, а джерело не вдається визначити, запис призупиняється.';
+      'Не записувати автоматично з цих програм.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Поки задано виключення, Android пропускає автоматичний запис, оскільки не може визначати програми-джерела.';
+      'Поки є виключені програми, автоматичний запис призупинено.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1184,23 +1659,17 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Виключити програму';
+  String get applicationPickerSearch => 'Пошук програм';
 
   @override
-  String get settingsExcludeDialogAction => 'Виключити';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Ідентифікатор програми';
-
-  @override
-  String get settingsExcludeFailed => 'Не вдалося виключити програму.';
+  String get applicationPickerEmpty => 'Програм не знайдено';
 
   @override
   String get settingsSkipSecretTitle => 'Пропускати конфіденційні дані';
 
   @override
   String get settingsSkipSecretDescription =>
-      'Не додавати до Історії дані, позначені програмою як секретні.';
+      'Не зберігати копії, які програми позначають як секретні.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1211,7 +1680,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsSkipTransientDescription =>
-      'Не додавати до Історії копії, позначені програмою як тимчасові.';
+      'Не зберігати копії, які програми позначають як тимчасові.';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1417,7 +1886,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      'Скорочення працює, поки CopyPaste запущено у фоновому режимі.';
+      'Працює, поки CopyPaste запущено у фоні.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -1454,6 +1923,9 @@ class AppLocalizationsUk extends AppLocalizations {
   String get settingsShortcutRecording => 'Натисніть скорочення…';
 
   @override
+  String get settingsShortcutNotSet => 'Не задано';
+
+  @override
   String get settingsShortcutReset => 'Скинути скорочення';
 
   @override
@@ -1486,13 +1958,6 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'Поблизу немає пристроїв';
-
-  @override
-  String get devicesEmptyTitle => 'Інших пристроїв ще не сполучено';
-
-  @override
-  String get devicesEmptyMessage =>
-      'Сполучіть інший пристрій, щоб синхронізувати між ними історію буфера обміну. Обидва пристрої мають бути в одній мережі, а кожне сполучення підтверджується на обох пристроях.';
 
   @override
   String get devicesThisDevice => 'Цей пристрій';
@@ -1837,9 +2302,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get pairingStateFailed => 'Не вдалося сполучити';
 
   @override
-  String get pairingStateNotCompleted => 'Сполучення не завершено';
-
-  @override
   String get pairingHandshakingDescription =>
       'Пристрої встановлюють захищений канал.';
 
@@ -1861,48 +2323,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Почніть спробу сполучення, щоб під’єднати пристрій.';
-
-  @override
-  String get pairingStepInvite => 'Запрошення';
-
-  @override
-  String get pairingStepScan => 'Сканування';
-
-  @override
-  String get pairingStepCode => 'Код';
-
-  @override
-  String get pairingStepRequest => 'Запит';
-
-  @override
-  String get pairingStepConnect => 'З’єднання';
-
-  @override
-  String get pairingStepConfirm => 'Підтвердження';
-
-  @override
-  String get pairingStepPaired => 'Сполучено';
-
-  @override
-  String get pairingOtherDevice => 'Інший пристрій';
-
-  @override
-  String get pairingDecisionNotConfirmed => 'Ще не підтверджено';
-
-  @override
-  String get pairingDecisionSending => 'Надсилання рішення…';
-
-  @override
-  String get pairingDecisionConfirmed => 'Підтверджено';
-
-  @override
-  String get pairingDecisionRejected => 'Відхилено';
-
-  @override
-  String get pairingDecisionWaiting => 'Очікування підтвердження';
-
-  @override
-  String get pairingDecisionUnknown => 'Відповідь невідома';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2090,19 +2510,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Синхронізація: $status';
-  }
-
-  @override
-  String syncHeaderDeviceCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count пристрою',
-      many: '$count пристроїв',
-      few: '$count пристрої',
-      one: '$count пристрій',
-    );
-    return '$_temp0';
   }
 
   @override
@@ -2512,19 +2919,6 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String historyClipLineCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count рядка',
-      many: '$count рядків',
-      few: '$count рядки',
-      one: '$count рядок',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get historyInspectorEmptyTitle => 'Виберіть кліп';
 
   @override
@@ -2775,9 +3169,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get appWindowSetupTitle => 'Налаштування вікна потребує уваги';
 
   @override
-  String get appNavigationLabel => 'Головна навігація';
-
-  @override
   String get appOpenHistory => 'Відкрити Історію';
 
   @override
@@ -2863,16 +3254,6 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size Б';
-  }
-
-  @override
-  String sharedStepPosition(int step, int count, String name) {
-    return '$step / $count · $name';
-  }
-
-  @override
-  String sharedStepSemantics(int step, int count, String name) {
-    return 'Крок $step з $count: $name';
   }
 
   @override
@@ -3339,22 +3720,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get modulesDownloadingModel => 'Завантаження мовної моделі…';
 
   @override
-  String get modulesPhaseDownload => 'Завантаження';
-
-  @override
-  String get modulesPhaseInstall => 'Встановлення';
-
-  @override
-  String modulesInstallingModule(String module) {
-    return 'Встановлення модуля $module';
-  }
-
-  @override
-  String modulesUpdatingModule(String module) {
-    return 'Оновлення модуля $module';
-  }
-
-  @override
   String get modulesRun => 'Виконати';
 
   @override
@@ -3627,6 +3992,162 @@ class AppLocalizationsUk extends AppLocalizations {
   String get historyTagsAction => 'Теги…';
 
   @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'розблокувати секретні елементи',
+      'other': 'Розблокувати секретні елементи',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'використати прихований фрагмент',
+      'other': 'Використати прихований фрагмент',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'скопіювати секретний елемент',
+      'other': 'Скопіювати секретний елемент',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Недоступно в цій системі';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Спершу налаштуйте пароль, PIN-код або біометрію пристрою';
+
+  @override
+  String get commonOn => 'Увімкнено';
+
+  @override
+  String get commonOff => 'Вимкнено';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Не вдалося запустити Quick Paste, тому його скорочення не працює.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut використовує інша програма. Виберіть інше скорочення.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'Інших пристроїв ще не сполучено';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Сполучіть пристрій у тій самій мережі, щоб синхронізувати історію.';
+
+  @override
+  String get pairingStateNotCompleted => 'Сполучення не завершено';
+
+  @override
+  String get pairingStepInvite => 'Запрошення';
+
+  @override
+  String get pairingStepScan => 'Сканування';
+
+  @override
+  String get pairingStepCode => 'Код';
+
+  @override
+  String get pairingStepRequest => 'Запит';
+
+  @override
+  String get pairingStepConnect => 'З’єднання';
+
+  @override
+  String get pairingStepConfirm => 'Підтвердження';
+
+  @override
+  String get pairingStepPaired => 'Сполучено';
+
+  @override
+  String get pairingOtherDevice => 'Інший пристрій';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Ще не підтверджено';
+
+  @override
+  String get pairingDecisionSending => 'Надсилання рішення…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Підтверджено';
+
+  @override
+  String get pairingDecisionRejected => 'Відхилено';
+
+  @override
+  String get pairingDecisionWaiting => 'Очікування підтвердження';
+
+  @override
+  String get pairingDecisionUnknown => 'Відповідь невідома';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count пристрою',
+      many: '$count пристроїв',
+      few: '$count пристрої',
+      one: '$count пристрій',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count рядка',
+      many: '$count рядків',
+      few: '$count рядки',
+      one: '$count рядок',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Головна навігація';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Крок $step з $count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'Завантаження';
+
+  @override
+  String get modulesPhaseInstall => 'Встановлення';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return 'Встановлення модуля $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return 'Оновлення модуля $module';
+  }
+
+  @override
   String get commonDismiss => 'Закрити';
 
   @override
@@ -3634,7 +4155,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'Нове обмеження: $limit. Старіші незакріплені елементи буде зараз вилучено з цього пристрою, і відновити їх неможливо. Закріплені елементи збережуться.';
+    return 'Нове обмеження: $limit. Старіші незакріплені елементи буде остаточно видалено.';
   }
 
   @override
@@ -3642,7 +4163,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'Нова квота: $size. Якщо незакріплена історія займає більше, найстаріші елементи буде зараз вилучено, і відновити їх неможливо. Закріплені елементи збережуться.';
+    return 'Нова квота: $size. Найстаріші незакріплені елементи понад неї буде остаточно видалено.';
   }
 
   @override
@@ -3653,11 +4174,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      'Коли обидва параметри вимкнено, CopyPaste не має видимого значка. Щоб відкрити його знову, запустіть CopyPaste ще раз.';
+      'Якщо обидва вимкнено, значка немає. Щоб відкрити CopyPaste, запустіть його знову.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return 'Коли обидва параметри вимкнено, CopyPaste не має видимого значка. Щоб відкрити його знову, натисніть $shortcut або запустіть CopyPaste ще раз.';
+    return 'Якщо обидва вимкнено, значка немає. Щоб відкрити, натисніть $shortcut або запустіть CopyPaste знову.';
   }
 
   @override
@@ -3759,7 +4280,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'Нова квота: $size. Незакріплена історія займає $used, тож її найстаріші кліпи буде зараз вилучено, доки вона не вміститься. Відновити їх неможливо. Закріплені елементи збережуться.';
+    return 'Нова квота: $size. Зайнято $used, тож найстаріші незакріплені елементи буде остаточно видалено.';
   }
 
   @override
@@ -3774,4 +4295,2557 @@ class AppLocalizationsUk extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'Відкрити CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => 'Відкрити Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Відкрити Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Новий фрагмент';
+
+  @override
+  String get trayRecent => 'Нещодавні';
+
+  @override
+  String get trayRecentLoading => 'Завантаження…';
+
+  @override
+  String get trayRecentFailed => 'Не вдалося завантажити кліпи';
+
+  @override
+  String get trayRecentEmpty => 'Кліпів ще немає';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count нещодавнього кліпу приховано',
+      many: '$count нещодавніх кліпів приховано',
+      few: '$count нещодавні кліпи приховано',
+      one: '$count нещодавній кліп приховано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Секрет';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Копіювати останній з іншого пристрою';
+
+  @override
+  String get trayCaptureNow => 'Записати зараз';
+
+  @override
+  String trayPausedUntil(String time) {
+    return 'Призупинено до $time';
+  }
+
+  @override
+  String get trayPauseFor => 'Призупинити на…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 хвилин';
+
+  @override
+  String get trayPauseForOneHour => '1 годину';
+
+  @override
+  String get trayPauseUntilResumed => 'Доки не відновлю';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count елемента',
+      many: 'Paste Queue: $count елементів',
+      few: 'Paste Queue: $count елементи',
+      one: 'Paste Queue: $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Збирання: $count елемента',
+      many: 'Збирання: $count елементів',
+      few: 'Збирання: $count елементи',
+      one: 'Збирання: $count елемент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Нещодавно пропущені ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'Відкрити правила вмісту';
+
+  @override
+  String get trayRecentSettingsTitle => 'Смуга меню і трей';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Що меню в смузі меню або треї показує в розділі «Нещодавні».';
+
+  @override
+  String get trayRecentCountTitle => 'Нещодавні кліпи';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Скільки найновіших кліпів показує меню.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Попередній перегляд нещодавніх кліпів';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Скільки тексту кліпів показує меню.';
+
+  @override
+  String get trayRecentPreviewFull => 'Повний перегляд';
+
+  @override
+  String get trayRecentPreviewTitles => 'Лише тип і джерело';
+
+  @override
+  String get trayRecentPreviewHidden => 'Приховано';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'трей смуга меню нещодавні перегляд приватність кількість';
+
+  @override
+  String get transformsPaletteTitle => 'Перетворити текст';
+
+  @override
+  String get transformsFilterPlaceholder => 'Фільтрувати перетворення';
+
+  @override
+  String get transformsNoMatches => 'Немає відповідних перетворень';
+
+  @override
+  String get transformsGroupResults => 'Результати';
+
+  @override
+  String get transformsGroupSuggested => 'Рекомендовані';
+
+  @override
+  String get transformsGroupRecent => 'Нещодавні';
+
+  @override
+  String get transformsGroupFavorites => 'Улюблені';
+
+  @override
+  String get transformsGroupPipelines => 'Конвеєри';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV і XML';
+
+  @override
+  String get transformsCategoryEncode => 'Кодування й декодування';
+
+  @override
+  String get transformsCategoryCase => 'Регістр';
+
+  @override
+  String get transformsCategoryHash => 'Хеші';
+
+  @override
+  String get transformsCategoryLines => 'Рядки й пробіли';
+
+  @override
+  String get transformsCategoryClean => 'Очищення';
+
+  @override
+  String get transformsCategoryUrl => 'Посилання';
+
+  @override
+  String get transformsCategoryMarkup => 'Форматований текст і Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Для розробників';
+
+  @override
+  String get transformsCategoryOther => 'Інше';
+
+  @override
+  String get transformsChainEmpty => 'Кроків ще немає';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Далі: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Виконувати цей крок';
+
+  @override
+  String get transformsMoveEarlier => 'Перемістити вище';
+
+  @override
+  String get transformsMoveLater => 'Перемістити нижче';
+
+  @override
+  String get transformsRemoveStep => 'Видалити крок';
+
+  @override
+  String get transformsSavePipeline => 'Зберегти як конвеєр';
+
+  @override
+  String get transformsSavePipelineTitle => 'Зберегти конвеєр';
+
+  @override
+  String get transformsSavePipelineFailed => 'Не вдалося зберегти конвеєр.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Назва';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Опис (необов\'язково)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Кроки';
+
+  @override
+  String get transformsPipelineNoSteps => 'Додайте принаймні один крок.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Введіть назву.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'Не більше 80 символів.';
+
+  @override
+  String get transformsPipelineNameTaken => 'Інший конвеєр уже має цю назву.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'Конвеєр збережено';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name доступний у кожній палітрі перетворень.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Кроків: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Видалений конвеєр';
+
+  @override
+  String get transformsNeedsNewerVersion => 'Потрібна новіша версія CopyPaste';
+
+  @override
+  String get transformsLoadFailed => 'Не вдалося завантажити перетворення.';
+
+  @override
+  String get transformsNotTextTitle => 'Перетворення працюють із текстом';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Цей елемент — зображення, файл або колір. Виберіть текстовий елемент або скопіюйте текст.';
+
+  @override
+  String get transformsNothingTitle => 'Немає що перетворювати';
+
+  @override
+  String get transformsNothingMessage =>
+      'Скопіюйте текст або виберіть елемент з історії.';
+
+  @override
+  String get transformsPickTransform => 'Виберіть перетворення';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab додає його як крок. Enter застосовує результат.';
+
+  @override
+  String get transformsPreviewing => 'Оновлення попереднього перегляду…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Рядків: $lines · Слів: $words · Символів: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Без змін';
+
+  @override
+  String transformsTruncated(String size) {
+    return 'Показано перші 64 КіБ із $size';
+  }
+
+  @override
+  String get transformsRandom => 'Випадково';
+
+  @override
+  String get transformsNotRun => 'Не виконано';
+
+  @override
+  String get transformsSensitiveHidden =>
+      'Результат конфіденційний і прихований.';
+
+  @override
+  String get transformsReveal => 'Показати';
+
+  @override
+  String get transformsPaneOutput => 'Результат';
+
+  @override
+  String get transformsPaneInput => 'Вхідні дані';
+
+  @override
+  String get transformsPaneChanges => 'Зміни';
+
+  @override
+  String get transformsCannotTransform => 'Не вдається перетворити цей текст';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Крок $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Показати в hex';
+
+  @override
+  String get transformsActionPaste => 'Вставити';
+
+  @override
+  String get transformsActionSave => 'Зберегти як новий елемент';
+
+  @override
+  String get transformsCopiedMessage =>
+      'Результат у буфері обміну та в історії.';
+
+  @override
+  String get transformsSavedTitle => 'Збережено';
+
+  @override
+  String get transformsSavedMessage => 'Збережено як новий елемент історії.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Не вдалося вставити';
+
+  @override
+  String get transformsPasteFailedMessage =>
+      'Результат у буфері обміну. Вставте його вручну.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message у рядку $line, стовпці $column';
+  }
+
+  @override
+  String get transformsErrorBinary => 'Декодовані дані двійкові, а не текст';
+
+  @override
+  String get transformsErrorTooLarge => 'Завеликий для перетворення';
+
+  @override
+  String get transformsErrorInvalidParam => 'Налаштування цього кроку недійсне';
+
+  @override
+  String get transformsErrorCancelled => 'Скасовано';
+
+  @override
+  String get transformsErrorTooExpensive => 'Шаблон надто складний';
+
+  @override
+  String get transformsErrorPattern => 'Шаблон недійсний';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Виберіть, чи число в секундах, чи в мілісекундах';
+
+  @override
+  String get transformsErrorExternalEntity => 'Зовнішні сутності заборонені';
+
+  @override
+  String get transformsErrorJwtEncrypted =>
+      'Зашифровані токени не можна декодувати';
+
+  @override
+  String get transformsErrorJson => 'Недійсний JSON';
+
+  @override
+  String get transformsErrorYaml => 'Недійсний YAML';
+
+  @override
+  String get transformsErrorXml => 'Недійсний XML';
+
+  @override
+  String get transformsErrorCsv => 'Недійсний CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Недійсний Base64';
+
+  @override
+  String get transformsErrorHex => 'Недійсний hex';
+
+  @override
+  String get transformsErrorEscape => 'Недійсна escape-послідовність';
+
+  @override
+  String get transformsErrorUrl => 'Неправильне відсоткове кодування';
+
+  @override
+  String get transformsErrorJwt => 'Недійсний JWT';
+
+  @override
+  String get transformsErrorDate => 'Нерозпізнана дата або позначка часу';
+
+  @override
+  String get transformsErrorGeneric =>
+      'Цей крок не може перетворити вхідні дані';
+
+  @override
+  String get transformsWarningSignedLink =>
+      'Підписане посилання залишено без змін';
+
+  @override
+  String get transformsWarningExpired => 'Термін дії минув';
+
+  @override
+  String get transformsWarningNotYetValid => 'Ще не дійсний';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'Підпис не перевірено';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Дубльовані ключі';
+
+  @override
+  String get transformsWarningLenientJson => 'Прийнято нестандартний JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON було закодовано двічі';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Невідомі escape-послідовності залишено як є';
+
+  @override
+  String get transformsWarningLocalZone => 'Припущено локальний часовий пояс';
+
+  @override
+  String get transformsWarningNoMatches => 'Збігів немає';
+
+  @override
+  String get transformsWarningGeneric => 'Перевірте результат';
+
+  @override
+  String get transformsRestoreTitle =>
+      'Відновлювати буфер обміну після вставлення';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Повертати попередній буфер обміну після вставлення.';
+
+  @override
+  String get transformsDefaultTitle => 'Типове перетворення під час вставлення';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Застосовується до тексту, вставленого з Quick Paste.';
+
+  @override
+  String get transformsNoDefault => 'Немає';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Типові для програм';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Інше типове значення для окремих програм.';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'лише на $platform';
+  }
+
+  @override
+  String get transformsAddApp => 'Додати програму';
+
+  @override
+  String get transformsRemove => 'Видалити';
+
+  @override
+  String get transformsFavoritesTitle => 'Улюблені';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Показуються першими в кожній палітрі.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Mod+$number у палітрі';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Додати улюблене';
+
+  @override
+  String get transformsPipelinesTitle => 'Конвеєри';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Збережені ланцюжки перетворень.';
+
+  @override
+  String get transformsNewPipeline => 'Новий конвеєр';
+
+  @override
+  String get transformsEditPipeline => 'Редагувати конвеєр';
+
+  @override
+  String get transformsDuplicatePipeline => 'Дублювати';
+
+  @override
+  String get transformsDeletePipeline => 'Видалити';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return 'Видалити $name?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Улюблені й типові значення вставлення, що його використовують, буде скинуто.';
+
+  @override
+  String get transformsDeletePipelineFailed => 'Не вдалося видалити конвеєр.';
+
+  @override
+  String get transformsAddStep => 'Додати крок';
+
+  @override
+  String get transformsHiddenTitle => 'Приховані перетворення';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Не показуються в палітрах і пропозиціях.';
+
+  @override
+  String get transformsHideTransform => 'Приховати перетворення';
+
+  @override
+  String get transformsShow => 'Показати';
+
+  @override
+  String get transformsSuggestionsTitle => 'Рекомендації';
+
+  @override
+  String get transformsSuggestionsDescription =>
+      'Пропонувати перетворення, що пасують до тексту.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Tokens';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl =>
+      'Посилання з параметрами відстеження';
+
+  @override
+  String get transformsDetectorTimestamp => 'Позначки часу';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'Параметри відстеження';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Параметри посилань, які також видаляти або завжди зберігати.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Також видаляти';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Завжди зберігати';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'назва або назва@домен, потім Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => 'Стан швидкого доступу недоступний';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste не вдалося прочитати стан клавіатури, плиток і віджета. Спробуйте ще раз.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'Не вдалося виконати дію';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android не відкрив потрібний екран або не зберіг зміну. Спробуйте ще раз.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Клавіатура кліпів';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Увімкніть «Кліпи CopyPaste» в налаштуваннях клавіатури.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Увімкнено';
+
+  @override
+  String get quickAccessKeyboardOff => 'Вимкнено';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Налаштування клавіатури';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'Увімкнути панель клавіатури «Кліпи CopyPaste».';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'клавіатура метод введення ime панель увімкнути';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Перейти на клавіатуру кліпів';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'Зробіть «Кліпи CopyPaste» поточною клавіатурою.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Вибрати клавіатуру';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Поточна клавіатура';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Режим запису';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Як зберігаються копії з інших програм.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Як зберігаються копії з інших застосунків.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'запис рівень повний панель вручну shizuku збирати';
+
+  @override
+  String get quickAccessTierFull =>
+      'Повний: кожна копія зберігається у фоновому режимі';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Панель вибрано: збирання';
+
+  @override
+  String get quickAccessTierPanelCatchUp =>
+      'Режим панелі: синхронізація під час відкриття';
+
+  @override
+  String get quickAccessTierManual =>
+      'Вручну: зберігайте із застосунку, плитки, віджета або меню «Поділитися»';
+
+  @override
+  String get quickAccessTierPaused => 'Запис призупинено';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Повертатися до попередньої клавіатури після вставлення';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Перемикатися назад після вставлення кліпу.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'повернутися попередня клавіатура автоматично вставлення';
+
+  @override
+  String get quickAccessFocusSearchTitle =>
+      'Фокус на пошуку під час відкриття панелі';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Відкривати панель із готовим пошуком.';
+
+  @override
+  String get quickAccessTilesTitle => 'Плитки швидких налаштувань';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Додати плитки «Зберегти буфер обміну» та «Запис буфера обміну».';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'швидкі налаштування плитка шторка зберегти пауза';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'Двічі проведіть униз, торкніться «Змінити» й додайте плитку CopyPaste.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Плитка «Зберегти буфер обміну»';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Зберігає вміст буфера обміну зі швидких налаштувань.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Плитка «Запис буфера обміну»';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Призупиняє та відновлює запис зі швидких налаштувань.';
+
+  @override
+  String get quickAccessAddTile => 'Додати плитку';
+
+  @override
+  String get quickAccessTileAdded => 'Додано до швидких налаштувань';
+
+  @override
+  String get quickAccessWidgetTitle => 'Віджет «Останні кліпи»';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Останні кліпи на головному екрані, копіювання одним дотиком.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Утримуйте головний екран, торкніться «Віджети» й додайте «Останні кліпи».';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Додано $count віджета',
+      many: 'Додано $count віджетів',
+      few: 'Додано $count віджети',
+      one: 'Додано 1 віджет',
+      zero: 'Не додано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Додати віджет';
+
+  @override
+  String get quickAccessWidgetKeywords =>
+      'головний екран віджет лаунчер останні';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Скорочення $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Скорочення';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'Необов’язково, наприклад підп';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Уже використовується у «$title»';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'Використайте не більше $max символів.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Скорочення не може містити пробілів або керівних символів.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count фрагмента потребують перевірки після синхронізації',
+      many: '$count фрагментів потребують перевірки після синхронізації',
+      few: '$count фрагменти потребують перевірки після синхронізації',
+      one: '$count фрагмент потребує перевірки після синхронізації',
+      zero: 'Немає фрагментів для перевірки',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Текст';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Введіть текст фрагмента';
+
+  @override
+  String get snippetsClearSelection => 'Зняти виділення';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Завеликий для редагування. Цей кліп відкривається лише для читання.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Нейтральний',
+      'blue': 'Синій',
+      'green': 'Зелений',
+      'amber': 'Бурштиновий',
+      'red': 'Червоний',
+      'other': 'Нейтральний',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Колір акценту';
+
+  @override
+  String get snippetsCollectionIcon => 'Значок';
+
+  @override
+  String get snippetsCollectionLabel => 'Колекція';
+
+  @override
+  String get snippetsCollectionName => 'Назва';
+
+  @override
+  String get snippetsCollectionNameTaken =>
+      'Колекція з такою назвою вже існує.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'Використайте не більше $max символів.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Цей фрагмент прихований.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Продовжити';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Цей пристрій не може вас перевірити. Продовжуйте лише на власному пристрої.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Підтвердьте, що це ви';
+
+  @override
+  String get snippetsConcealedPreview => 'Прихований фрагмент';
+
+  @override
+  String get snippetsConcealedSwitch => 'Прихований';
+
+  @override
+  String get snippetsConcealedTitle => 'Прихований фрагмент';
+
+  @override
+  String get snippetsConflictBadge => 'Конфліктна копія';
+
+  @override
+  String get snippetsCopied => 'Скопійовано';
+
+  @override
+  String get snippetsCreate => 'Створити фрагмент';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return 'Створити фрагмент «$query»';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Видалити колекцію';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Перемістити її фрагменти в «Без колекції»';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return 'Видалити «$name»?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Видалити і її фрагменти';
+
+  @override
+  String get snippetsDeletedMessage => 'Переміщено в «Нещодавно видалені».';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалено $count фрагмента',
+      many: 'Видалено $count фрагментів',
+      few: 'Видалено $count фрагменти',
+      one: 'Видалено $count фрагмент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Зберегти в';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Кліп в історії',
+      'snippet': 'Фрагмент',
+      'other': 'Кліп в історії',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Відкинути';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count фрагмента',
+      many: '$count фрагментів',
+      few: '$count фрагменти',
+      one: '$count фрагмент',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Інший фрагмент має це скорочення. Змініть одне з них.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Дубльоване скорочення';
+
+  @override
+  String get snippetsEditClip => 'Редагувати кліп';
+
+  @override
+  String get snippetsEditCollection => 'Редагувати колекцію';
+
+  @override
+  String get snippetsEditSnippet => 'Редагувати фрагмент';
+
+  @override
+  String get snippetsEditTab => 'Редагування';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Дайте фрагменту скорочення, а потім введіть його в Quick Paste.';
+
+  @override
+  String get snippetsEmptyTitle => 'Ще немає фрагментів';
+
+  @override
+  String get snippetsEnableTemplate => 'Увімкнути';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Текст, схожий на заповнювач, буде заповнено.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Увімкнути «Шаблон»?';
+
+  @override
+  String get snippetsExport => 'Експортувати';
+
+  @override
+  String get snippetsExportCollection => 'Експортувати колекцію';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Додати приховані фрагменти до читабельного файлу';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Записано $count фрагмента',
+      many: 'Записано $count фрагментів',
+      few: 'Записано $count фрагменти',
+      one: 'Записано $count фрагмент',
+      zero: 'Жодного фрагмента не записано',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Фрагменти експортовано';
+
+  @override
+  String get snippetsExportEncrypt => 'Зашифрувати парольною фразою';
+
+  @override
+  String get snippetsExportFailed => 'Не вдалося експортувати';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Я розумію, що будь-хто з цим файлом зможе його прочитати';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Усі фрагменти',
+      'collections': 'Ця колекція',
+      'snippets': 'Вибрані фрагменти ($count)',
+      'other': 'Усі фрагменти',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Експорт фрагментів';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Вставити поле';
+
+  @override
+  String get snippetsFieldDefault => 'Типове значення';
+
+  @override
+  String get snippetsFieldName => 'Назва';
+
+  @override
+  String get snippetsFieldOptions => 'Варіанти через кому';
+
+  @override
+  String get snippetsFieldRequired => 'Заповніть це поле.';
+
+  @override
+  String get snippetsFieldType => 'Тип';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Один рядок',
+      'multiline': 'Кілька рядків',
+      'choice': 'Вибір',
+      'other': 'Один рядок',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Форматування буде вилучено під час збереження.';
+
+  @override
+  String get snippetsGoToSnippet => 'Перейти до фрагмента';
+
+  @override
+  String get snippetsImport => 'Імпортувати';
+
+  @override
+  String get snippetsImportAbbreviationPolicy =>
+      'Скорочення вже використовується';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Імпортувати без скорочення',
+      'renameWithSuffix': 'Додати число до скорочення',
+      'skip': 'Пропустити',
+      'other': 'Імпортувати без скорочення',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Колекція з такою самою назвою';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Додати до наявної',
+      'createNew': 'Створити нову',
+      'other': 'Додати до наявної',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Перетворити відомі заповнювачі';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Нові: $added. Однакові, пропущено: $identical. Змінені: $updated. Конфлікти скорочень: $conflicts. Недійсні: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Фрагменти імпортовано';
+
+  @override
+  String get snippetsImportFailed => 'Не вдалося імпортувати';
+
+  @override
+  String get snippetsImportFileType => 'Файли фрагментів';
+
+  @override
+  String get snippetsImportFormat => 'Формат';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'Пакет CopyPaste',
+      'json': 'Список JSON',
+      'csv': 'CSV',
+      'other': 'Пакет CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Рядок $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'Рядки, які не буде імпортовано';
+
+  @override
+  String get snippetsImportPassphraseHint =>
+      'Парольна фраза, якщо файл зашифровано';
+
+  @override
+  String get snippetsImportPreview => 'Переглянути';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Додано: $inserted. Оновлено: $updated. Пропущено: $skipped. Скорочення для перевірки: $flagged. Нерозпізнані заповнювачі: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Той самий фрагмент, інший вміст';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'Залишити обидва',
+      'replace': 'Замінити наявний',
+      'skip': 'Пропустити',
+      'other': 'Залишити обидва',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Імпорт фрагментів';
+
+  @override
+  String get snippetsInsert => 'Вставити';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Вставити заповнювач';
+
+  @override
+  String get snippetsKeepReferences => 'Залишити';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Переглядайте, впорядковуйте й редагуйте фрагменти та колекції.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'фрагменти шаблони скорочення колекції текст сніпети';
+
+  @override
+  String get snippetsLibraryTitle => 'Бібліотека фрагментів';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Цей заповнювач не закрито.',
+      'malformed': 'Не вдається прочитати цей заповнювач.',
+      'unknownPlaceholder':
+          'Невідомий заповнювач «$detail». Його буде вставлено як є.',
+      'unknownParameter': 'Невідомий параметр «$detail».',
+      'duplicateParameter': 'Параметр «$detail» задано двічі.',
+      'missingParameter': 'Бракує параметра «$detail».',
+      'invalidValue': 'Параметр «$detail» має недійсне значення.',
+      'conflictingParameters': 'Ці параметри не можна використовувати разом.',
+      'unknownLocale': 'Невідома мова.',
+      'unknownTimeZone': 'Невідомий часовий пояс.',
+      'invalidPattern': 'Недійсний шаблон дати.',
+      'dateOutOfRange': 'Дата поза допустимим діапазоном.',
+      'unknownModifier': 'Невідомий модифікатор «$detail».',
+      'modifierFailed': 'Не вдалося застосувати модифікатор «$detail».',
+      'emptyClipboard': 'Елемент буфера обміну $detail порожній.',
+      'extraCursor': 'Використовується лише перший заповнювач курсора.',
+      'nestedCursor': 'Курсор у вставленому фрагменті ігнорується.',
+      'tooManyFields': 'Поле «$detail» перевищує ліміт у 10 полів.',
+      'conflictingField':
+          'Поле «$detail» визначено двічі з різними параметрами.',
+      'choiceDefaultNotOption':
+          'Типове значення «$detail» не входить до його варіантів.',
+      'cycle': 'Фрагменти вставляють один одного по колу: $detail.',
+      'depthExceeded': 'Фрагменти вкладено глибше ніж на 3 рівні.',
+      'nestingLimit': 'Забагато вставлених фрагментів.',
+      'unknownSnippet': 'Жоден фрагмент не має такого скорочення.',
+      'containsPlaceholders':
+          'Текст містить заповнювачі. Увімкніть «Шаблон», щоб заповнити їх.',
+      'other': 'Із цим заповнювачем проблема.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Не вдалося завантажити фрагменти';
+
+  @override
+  String get snippetsLoadMore => 'Завантажити ще';
+
+  @override
+  String get snippetsMerge => 'Об’єднати';
+
+  @override
+  String get snippetsMergeCollection => 'Об’єднати з іншою колекцією';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return 'Об’єднати «$name» з';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Перемістити в';
+
+  @override
+  String get snippetsNewCollection => 'Нова колекція';
+
+  @override
+  String get snippetsNewSnippet => 'Новий фрагмент';
+
+  @override
+  String get snippetsNewText => 'Новий текст';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return 'Немає фрагментів для «$query»';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Повторіть парольну фразу';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Парольна фраза, щонайменше $min символів';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Парольна фраза';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Забуту парольну фразу неможливо відновити.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Закоротка',
+      'weak': 'Слабка',
+      'fair': 'Посередня',
+      'good': 'Добра',
+      'other': 'Надійна',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Закріплений';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Заповнювачі';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Дата',
+      'dateShort': 'Дата, коротка',
+      'dateLong': 'Дата, повна',
+      'dateIso': 'Дата, ISO 8601',
+      'dateNextWeek': 'Дата через тиждень',
+      'now': 'Час',
+      'dateTime': 'Дата й час',
+      'clipboard': 'Буфер обміну',
+      'clipboardPrevious': 'Попередній елемент буфера обміну',
+      'field': 'Поле для заповнення…',
+      'cursor': 'Позиція курсора',
+      'uuid': 'UUID',
+      'random': 'Випадкове число',
+      'upper': 'Модифікатор: великі літери',
+      'lower': 'Модифікатор: малі літери',
+      'trim': 'Модифікатор: прибрати пробіли',
+      'other': 'Заповнювач',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Вставити інший фрагмент';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Немає відповідних заповнювачів';
+
+  @override
+  String get snippetsPreviewEmpty => 'Нічого переглядати';
+
+  @override
+  String get snippetsPreviewTab => 'Перегляд';
+
+  @override
+  String get snippetsPurge => 'Видалити назавжди';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Їх буде стерто на всіх ваших пристроях. Цю дію неможливо скасувати.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалити $count фрагмента назавжди?',
+      many: 'Видалити $count фрагментів назавжди?',
+      few: 'Видалити $count фрагменти назавжди?',
+      one: 'Видалити $count фрагмент назавжди?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '«Нещодавно видалені» порожні';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Додавати вставлені фрагменти до історії.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'історія записувати вставлені фрагменти';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Записувати вставлені фрагменти в історію';
+
+  @override
+  String get snippetsReplaceOriginal => 'Замінити оригінал';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Видаляє оригінальний кліп після збереження.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Спершу запитувати пароль або біометрію.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'прихований пароль біометрія відбиток обличчя блокування перевірка';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Перевіряти перед використанням прихованих фрагментів';
+
+  @override
+  String get snippetsRestore => 'Відновити';
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'Текст більший за 64 КБ.';
+
+  @override
+  String get snippetsSaveFailed => 'Не вдалося зберегти';
+
+  @override
+  String get snippetsScopeAll => 'Усі';
+
+  @override
+  String get snippetsScopeEmpty => 'Тут немає фрагментів';
+
+  @override
+  String get snippetsScopePinned => 'Закріплені';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Нещодавно видалені';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Шукати фрагменти';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Вибрано $count',
+      many: 'Вибрано $count',
+      few: 'Вибрано $count',
+      one: 'Вибрано $count',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Показати';
+
+  @override
+  String get snippetsShowAll => 'Показати всі';
+
+  @override
+  String get snippetsShowAttention => 'Перевірити';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return 'У вас $count фрагментів. Дозволено до 20 000.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Шаблон';
+
+  @override
+  String get snippetsTemplateSwitch => 'Шаблон';
+
+  @override
+  String get snippetsTitleLabel => 'Назва';
+
+  @override
+  String get snippetsTitlePlaceholder => 'Необов’язково';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Створюйте резервні копії фрагментів або переносьте їх між програмами.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'імпорт експорт резервна копія пакет json csv парольна фраза';
+
+  @override
+  String get snippetsTransferTitle => 'Імпорт і експорт';
+
+  @override
+  String get snippetsUndo => 'Скасувати';
+
+  @override
+  String get snippetsUnfiled => 'Без колекції';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count заповнювача буде вставлено як є',
+      many: '$count заповнювачів буде вставлено як є',
+      few: '$count заповнювачі буде вставлено як є',
+      one: '$count заповнювач буде вставлено як є',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Відкріпити';
+
+  @override
+  String get snippetsUnsavedMessage => 'Зберегти зміни перед закриттям?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Незбережені зміни';
+
+  @override
+  String get snippetsUntitled => 'Фрагмент без назви';
+
+  @override
+  String get snippetsUpdateReferences => 'Оновити';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Інші шаблони можуть вставляти «$from». Оновити їх, щоб вони використовували «$to»?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Оновити посилання?';
+
+  @override
+  String get snippetsUseFailed => 'Не вдалося використати фрагмент';
+
+  @override
+  String get quickPasteTabQueue => 'Черга';
+
+  @override
+  String get quickPasteMaskedMode =>
+      'Поле пароля: попередній перегляд приховано';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Приховано: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Розблокувати секретні елементи';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Вставлення з: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut вставляє оригінал';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Типове перетворення пропущено';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'Натомість використано оригінал.';
+
+  @override
+  String get quickPastePasteManually =>
+      'Вміст у буфері обміну. Вставте його вручну.';
+
+  @override
+  String get quickPastePaste => 'Вставити';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Фрагменти недоступні';
+
+  @override
+  String get rulesLoadFailed => 'Не вдалося завантажити правила вмісту.';
+
+  @override
+  String get rulesNewRule => 'Нове правило';
+
+  @override
+  String get rulesEditRule => 'Редагувати правило';
+
+  @override
+  String get rulesUntitled => 'Правило без назви';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Типові налаштування приватності';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Налаштування приватності діють раніше за правила.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'приватність прихований тимчасовий виключені програми вбудовані облікові дані паролі картки';
+
+  @override
+  String get rulesOpenPrivacy => 'Відкрити Приватність';
+
+  @override
+  String get rulesMyRulesTitle => 'Мої правила';
+
+  @override
+  String get rulesMyRulesDescription => 'Виконуються по черзі для нових копій.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'правила автоматизація тег пропустити секрет термін видалити шаблон регулярний вираз';
+
+  @override
+  String get rulesEmptyTitle => 'Ще немає правил';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Правила додають теги, захищають, обмежують строк або пропускають нові копії.';
+
+  @override
+  String get rulesDeletedTitle => 'Нещодавно видалені';
+
+  @override
+  String get rulesDeletedDescription => 'Можна відновити протягом 30 днів.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Видалено: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Відновити';
+
+  @override
+  String get rulesDeletedToast => 'Правило видалено';
+
+  @override
+  String get rulesDeletedToastMessage =>
+      'Його можна відновити протягом 30 днів.';
+
+  @override
+  String get rulesUndo => 'Скасувати';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return 'Одночасну зміну правила «$rule» з пристрою $device замінено новішою.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'іншого пристрою';
+
+  @override
+  String get rulesRestoreConflict => 'Використати ту версію';
+
+  @override
+  String get rulesSkipLogTitle => 'Нещодавно пропущені';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Копії, які ваші правила не зберегли на цьому пристрої.';
+
+  @override
+  String get rulesSkipLogKeywords =>
+      'пропущені проігноровані не збережені журнал';
+
+  @override
+  String get rulesSkipLogShow => 'Показати';
+
+  @override
+  String get rulesSkipLogEmpty => 'Жодну копію не пропущено.';
+
+  @override
+  String get rulesUnknownApp => 'Невідома програма';
+
+  @override
+  String get rulesMatchesEverything => 'Будь-яка копія';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, далі зупинити';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' або ',
+      'other': ' і ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Працює на: $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return 'Нове з $device';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Потрібне оновлення';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Оновіть CopyPaste, щоб виконувати це правило.';
+
+  @override
+  String get rulesErrorBadge => 'Помилка';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Доки не виправлено, збіги захищено.';
+  }
+
+  @override
+  String get rulesReorder => 'Перетягніть, щоб змінити порядок';
+
+  @override
+  String get rulesMoreActions => 'Інші дії';
+
+  @override
+  String get rulesEdit => 'Редагувати';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Перемістити вгору',
+      'down': 'Перемістити вниз',
+      'top': 'На початок',
+      'other': 'У кінець',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Застосувати до наявних записів…';
+
+  @override
+  String get rulesResetBuiltin => 'Скинути до типових';
+
+  @override
+  String get rulesNameLabel => 'Назва';
+
+  @override
+  String get rulesNamePlaceholder => 'Наприклад, Робочі посилання';
+
+  @override
+  String get rulesWhenTitle => 'Коли';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Виконується будь-яка умова',
+      'other': 'Виконуються всі умови',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions =>
+      'Без умов: це правило застосовується до кожної копії.';
+
+  @override
+  String get rulesAddCondition => 'Додати умову';
+
+  @override
+  String get rulesRemoveCondition => 'Видалити умову';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Текст',
+      'content_type': 'Тип вмісту',
+      'detected_kind': 'Виявлений тип',
+      'source_app': 'Програма-джерело',
+      'size': 'Розмір',
+      'privacy_marker': 'Позначка приватності',
+      'capture_origin': 'Походження',
+      'other': 'Невідома умова',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'містить',
+      'equals': 'дорівнює',
+      'starts_with': 'починається з',
+      'ends_with': 'закінчується на',
+      'matches_regex': 'відповідає шаблону',
+      'other': 'відповідає',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'не містить',
+      'equals': 'не дорівнює',
+      'starts_with': 'не починається з',
+      'ends_with': 'не закінчується на',
+      'matches_regex': 'не відповідає шаблону',
+      'other': 'не відповідає',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'не є',
+      'other': 'є',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'менший за',
+      'other': 'більший за',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'не менший за',
+      'other': 'не більший за',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'рядки',
+      'bytes': 'байти',
+      'other': 'символи',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'рядків',
+      'bytes': 'байтів',
+      'other': 'символів',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Звичайний текст',
+      'rich_text': 'Форматований текст',
+      'image': 'Зображення',
+      'files': 'Файли',
+      'color': 'Колір',
+      'link': 'Посилання',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Пароль або секрет',
+      'url': 'Вебадреса',
+      'email': 'Адреса електронної пошти',
+      'phone': 'Номер телефону',
+      'code': 'Код',
+      'color': 'Значення кольору',
+      'json': 'JSON',
+      'file_path': 'Шлях до файлу',
+      'number': 'Число',
+      'one_time_code': 'Одноразовий код',
+      'payment_card': 'Номер картки',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Прихований',
+      'transient': 'Тимчасовий',
+      'auto_generated': 'Створений автоматично',
+      'excluded_from_history': 'Виключений з історії',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Скопійовано на цьому пристрої',
+      'received': 'Отримано з іншого пристрою',
+      'created_in_app': 'Створено в CopyPaste',
+      'other': 'Інше',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Текст для пошуку';
+
+  @override
+  String get rulesPatternPlaceholder => 'Шаблон, наприклад ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Перевірки lookaround і зворотні посилання не підтримуються.';
+
+  @override
+  String get rulesCaseSensitive => 'Враховувати регістр';
+
+  @override
+  String get rulesChooseValues => 'Вибрати';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Ця умова походить із новішої версії CopyPaste.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'В Android збігаються лише копії з клавіатури кліпів.';
+
+  @override
+  String get rulesPrivacyMarkerNotice =>
+      'Не кожна система повідомляє кожну позначку.';
+
+  @override
+  String get rulesThenTitle => 'Тоді';
+
+  @override
+  String get rulesNoActions => 'Додайте принаймні одну дію.';
+
+  @override
+  String get rulesAddAction => 'Додати дію';
+
+  @override
+  String get rulesRemoveAction => 'Видалити дію';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Не зберігати',
+      'mark_secret': 'Позначити як секрет',
+      'delete_after': 'Видалити через',
+      'add_tags': 'Додати теги',
+      'transform': 'Перетворити',
+      'other': 'Невідома дія',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '«Не зберігати» не можна поєднувати з іншими діями.',
+      'present': 'Це правило вже має цю дію.',
+      'other': 'Правило може мати до 8 дій.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Ця дія походить із новішої версії CopyPaste.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Відповідні копії ніколи не зберігаються, не індексуються й не синхронізуються.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count хвилини',
+      many: '$count хвилин',
+      few: '$count хвилини',
+      one: '$count хвилина',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count години',
+      many: '$count годин',
+      few: '$count години',
+      one: '$count година',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count дня',
+      many: '$count днів',
+      few: '$count дні',
+      one: '$count день',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Також очищати буфер обміну, якщо там ще ця копія.';
+
+  @override
+  String get rulesNoTags =>
+      'Створіть теги в Історії, щоб використовувати їх тут.';
+
+  @override
+  String get rulesNoTransforms => 'Немає доступних перетворень.';
+
+  @override
+  String get rulesReplaceClipboard =>
+      'Також замінити вміст буфера обміну результатом';
+
+  @override
+  String get rulesOptionsTitle => 'Параметри';
+
+  @override
+  String get rulesEnabledSwitch => 'Увімкнено';
+
+  @override
+  String get rulesStopProcessing =>
+      'Не обробляти наступні правила, якщо це спрацювало';
+
+  @override
+  String get rulesRunsOnLabel => 'Працює на';
+
+  @override
+  String get rulesAllDevices => 'Усі пристрої';
+
+  @override
+  String get rulesChosenDevices => 'Вибрані пристрої';
+
+  @override
+  String get rulesTestTitle => 'Перевірка';
+
+  @override
+  String get rulesTestDescription => 'Випробуйте правило на зразку тексту.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Вставте або введіть приклад тексту';
+
+  @override
+  String get rulesTestFullSet => 'Перевіряти разом з усіма правилами';
+
+  @override
+  String get rulesRunTest => 'Перевірити';
+
+  @override
+  String get rulesTestFailed => 'Не вдалося виконати перевірку.';
+
+  @override
+  String get rulesPreviewHistory => 'Переглянути на історії';
+
+  @override
+  String get rulesSaveFailed => 'Не вдалося зберегти правило.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Створено новішою версією CopyPaste. Оновіть, щоб змінити чи запустити.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'Не вдалося прочитати правило.',
+      'unsupported_schema': 'Це правило потребує новішої версії CopyPaste.',
+      'unknown_condition_type': 'Ця умова потребує новішої версії CopyPaste.',
+      'unknown_action_type': 'Ця дія потребує новішої версії CopyPaste.',
+      'too_many_conditions': 'Правило може мати до 20 умов.',
+      'too_many_actions': 'Правило може мати до 8 дій.',
+      'too_many_rules': 'Виконуються лише перші 200 правил.',
+      'no_actions': 'Додайте принаймні одну дію.',
+      'conflicting_actions':
+          '«Не зберігати» не можна поєднувати з іншими діями.',
+      'duplicate_action': 'Кожну дію можна використати лише один раз.',
+      'empty_value': 'Введіть значення.',
+      'empty_list': 'Виберіть принаймні одне значення.',
+      'too_many_values': 'Виберіть до 64 значень.',
+      'invalid_value': 'Це значення недійсне.',
+      'pattern_too_long': 'Шаблони можуть мати до 2000 символів.',
+      'unsupported_look_around':
+          'Перегляд уперед і назад не підтримується. Натомість використайте дві умови з «Виконуються всі умови».',
+      'unsupported_backreference': 'Зворотні посилання не підтримуються.',
+      'pattern_too_large':
+          'Цей шаблон надто складний. Спростіть його повторення.',
+      'invalid_pattern': 'Цей шаблон недійсний.',
+      'invalid_duration': 'Виберіть тривалість від 1 хвилини до 90 днів.',
+      'invalid_tags': 'Виберіть принаймні один тег.',
+      'invalid_transform': 'Виберіть перетворення.',
+      'other': 'У цьому правилі є проблема.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'збігається',
+      'not_matched': 'не збігається',
+      'unknown': 'невідомо',
+      'skipped': 'не виконувалося',
+      'other': 'помилка',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Умова $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'Жодне правило не перевірялося.';
+
+  @override
+  String get rulesTraceStopped => 'Наступні правила не виконувалися.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Невідомо для цієї копії, тож збігу немає.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Це правило не вдалося виконати, тож збіги захищено.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Результат';
+
+  @override
+  String get rulesTraceNoEffect => 'Жодне правило не змінює цю копію.';
+
+  @override
+  String get rulesTraceSkipped => 'Не зберігається';
+
+  @override
+  String get rulesTraceSecret => 'Зберігається як секрет';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return 'Видаляється через $duration';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Теги: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Перетворено: $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Перетворений текст';
+
+  @override
+  String get rulesPreviewTitle => 'Застосувати до наявних записів';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Перевірка останніх $count записів…';
+  }
+
+  @override
+  String get rulesPreviewNone =>
+      'Жоден нещодавній запис не відповідає цьому правилу.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Відповідають $count запису',
+      many: 'Відповідають $count записів',
+      few: 'Відповідають $count записи',
+      one: 'Відповідає $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count буде видалено',
+      many: '$count буде видалено',
+      few: '$count буде видалено',
+      one: '$count буде видалено',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count буде позначено як секрет',
+      many: '$count буде позначено як секрет',
+      few: '$count буде позначено як секрет',
+      one: '$count буде позначено як секрет',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count отримають час видалення',
+      many: '$count отримають час видалення',
+      few: '$count отримають час видалення',
+      one: '$count отримає час видалення',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count отримають теги',
+      many: '$count отримають теги',
+      few: '$count отримають теги',
+      one: '$count отримає теги',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Перевірено лише останні $count записів.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 'і ще $count';
+  }
+
+  @override
+  String get rulesPreviewNote => 'Нічого не зміниться, доки ви не застосуєте.';
+
+  @override
+  String get rulesSecretItem => 'Секретний запис';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return 'Секретний запис із $app';
+  }
+
+  @override
+  String get rulesPreviewCancelled => 'Перегляд зупинено. Нічого не змінено.';
+
+  @override
+  String get rulesPreviewFailed => 'Не вдалося виконати перегляд.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалити $count запису?',
+      many: 'Видалити $count записів?',
+      few: 'Видалити $count записи?',
+      one: 'Видалити $count запис?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'Відповідні кліпи буде видалено на всіх ваших пристроях. Цю дію не можна скасувати.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Видалити й застосувати';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Застосування: $done з $total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Змінено $count запису',
+      many: 'Змінено $count записів',
+      few: 'Змінено $count записи',
+      one: 'Змінено $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалено $count запису',
+      many: 'Видалено $count записів',
+      few: 'Видалено $count записи',
+      one: 'Видалено $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Не вдалося змінити $count запису',
+      many: 'Не вдалося змінити $count записів',
+      few: 'Не вдалося змінити $count записи',
+      one: 'Не вдалося змінити $count запис',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled => 'Зупинено. Уже внесені зміни залишаться.';
+
+  @override
+  String get historyActionEdit => 'Редагувати';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Зберегти як фрагмент';
+
+  @override
+  String get historyActionAddToQueue => 'Додати до Paste Queue';
+
+  @override
+  String get historyActionTransform => 'Перетворити…';
+
+  @override
+  String get historyActionExplain => 'Чому це тут?';
+
+  @override
+  String get historyActionKeep => 'Залишити';
+
+  @override
+  String get historyNewClip => 'Новий кліп';
+
+  @override
+  String get historySavedTitle => 'Збережено';
+
+  @override
+  String get historyEditSaved =>
+      'Змінений текст став новим кліпом угорі історії.';
+
+  @override
+  String get historyNewClipSaved => 'Ваш текст збережено.';
+
+  @override
+  String get historySnippetSaved => 'Текст кліпу тепер є фрагментом.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Не вдалося зберегти цей кліп як фрагмент.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count кліпу додано до черги.',
+      many: '$count кліпів додано до черги.',
+      few: '$count кліпи додано до черги.',
+      one: '$count кліп додано до черги.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Не вдалося додати до Paste Queue. Перевірте, чи її ввімкнено.';
+
+  @override
+  String get historyKeepFailed => 'Не вдалося залишити цей кліп.';
+
+  @override
+  String get historyExplainFailed => 'Не вдалося завантажити пояснення.';
+
+  @override
+  String get historyDeletesSoon => 'Видалиться менш ніж за хвилину';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count хв',
+      many: 'Видалиться через $count хв',
+      few: 'Видалиться через $count хв',
+      one: 'Видалиться через $count хв',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count год',
+      many: 'Видалиться через $count год',
+      few: 'Видалиться через $count год',
+      one: 'Видалиться через $count год',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Видалиться через $count дня',
+      many: 'Видалиться через $count днів',
+      few: 'Видалиться через $count дні',
+      one: 'Видалиться через $count день',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Вручну';
+
+  @override
+  String get historyProvenanceEdited => 'Змінено';
+
+  @override
+  String get historyProvenanceTransformed => 'Перетворено';
+
+  @override
+  String get historyProvenanceModule => 'Модуль';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (авто)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Видалення';
+
+  @override
+  String get historyMetadataRuleTags => 'Автоматичні теги';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return 'Увімкнути $module?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Модуль зможе:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Читати історію буфера обміну',
+      'clipboard_write': 'Копіювати в буфер обміну',
+      'library_write': 'Зберігати фрагменти й закріплювати записи',
+      'snippets': 'Читати ваші фрагменти',
+      'synced_records': 'Синхронізувати свої дані між пристроями',
+      'local_state': 'Зберігати свої дані на цьому пристрої',
+      'prompts': 'Просити вас підтвердити дії',
+      'endpoints': 'Приймати підключення від локальних програм',
+      'other': 'Використовувати сервіс CopyPaste',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Від $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Невідомий модуль';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Вашу відповідь не надіслано.';
+
+  @override
+  String get modulesPromptNotificationBody =>
+      'Відкрийте CopyPaste, щоб відповісти.';
+
+  @override
+  String get modulesUnknownDevice => 'Невідомий пристрій';
+
+  @override
+  String get modulesChooseDevices => 'Виберіть пристрої';
+
+  @override
+  String get modulesAddApp => 'Додати програму';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return 'Вилучити $app';
+  }
+
+  @override
+  String get modulesNoApps => 'Програми не вибрано';
 }

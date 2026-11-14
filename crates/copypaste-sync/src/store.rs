@@ -12,6 +12,7 @@ use copypaste_core::{RemoteVersion, Store, StoreSource};
 use tracing::warn;
 use zeroize::Zeroizing;
 
+use super::cloud_id;
 use super::source::{Applied, LocalItem};
 use super::unreadable::{Sweep, UnreadableUploads, UploadFloor};
 use super::SyncError;
@@ -92,7 +93,8 @@ impl StoreView {
     }
 
     /// Bound plaintext crossing a native provider boundary while retaining a
-    /// resumable keyset for every deferred row.
+    /// resumable keyset for every deferred row. Rows the store withholds from
+    /// cloud are passed over without being offered.
     pub fn scan_bounded(
         &self,
         store: &Store,
@@ -122,7 +124,11 @@ impl StoreView {
         let retried: Vec<String> = previously_unreadable.ids.iter().cloned().collect();
         if !retried.is_empty() {
             for chunk in retried.chunks(UPLOAD_SCAN_LIMIT as usize) {
+                let withheld = store.cloud_withheld_among(chunk).map_err(source_error)?;
                 for row in store.versions(chunk).map_err(source_error)? {
+                    if withheld.contains(&row.id) {
+                        continue;
+                    }
                     match self.to_local(&row) {
                         Some(item)
                             if items
@@ -179,8 +185,9 @@ impl StoreView {
         // to resume from to read that row again.
         let mut behind = offer.started.clone();
         let mut bytes = items.iter().map(|item| item.content.len()).sum::<usize>();
+        let withheld = withheld(store, &rows)?;
         for row in &rows {
-            if !previously_unreadable.ids.contains(&row.id) {
+            if !previously_unreadable.ids.contains(&row.id) && !withheld.contains(&row.id) {
                 match self.to_local(row) {
                     Some(item) => {
                         if bytes.saturating_add(item.content.len()) > max_bytes {
@@ -245,13 +252,14 @@ impl StoreView {
             )
             .map_err(source_error)?;
         let mut cycled = page.len() < UPLOAD_SCAN_LIMIT as usize;
+        let withheld = withheld(store, &page)?;
         for row in &page {
             let at = keyset_of(row);
             if at > *floor {
                 cycled = true;
                 break;
             }
-            if previously_unreadable.ids.contains(&row.id) {
+            if previously_unreadable.ids.contains(&row.id) || withheld.contains(&row.id) {
                 sweep.next = at;
                 continue;
             }
@@ -280,6 +288,9 @@ impl StoreView {
 
     /// Merge a page of remote versions, answering positionally.
     ///
+    /// Ids arrive in provider form ([`cloud_id`]); a declined item is handed
+    /// back exactly as it came.
+    ///
     /// One call into the store for the page: one read of every local version,
     /// then one write transaction. See
     /// [`copypaste_core::sync::apply_remote_versions`].
@@ -298,10 +309,15 @@ impl StoreView {
                     .then(|| String::from_utf8_lossy(&item.content).into_owned())
             })
             .collect();
+        let ids: Vec<_> = items
+            .iter()
+            .map(|item| cloud_id::to_local(&item.item_id, &item.content_type))
+            .collect();
         let versions: Vec<RemoteVersion<'_>> = items
             .iter()
+            .zip(&ids)
             .zip(&texts)
-            .map(|(item, text)| remote_version(item, text.as_deref()))
+            .map(|((item, id), text)| remote_version(item, id, text.as_deref()))
             .collect();
 
         let applied = self
@@ -333,15 +349,17 @@ impl StoreView {
     pub fn requeue_stamp(&self, incoming: &LocalItem) -> Result<Option<i64>, SyncError> {
         let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
             .then(|| String::from_utf8_lossy(&incoming.content));
+        let id = cloud_id::to_local(&incoming.item_id, &incoming.content_type);
         copypaste_core::local_winner_stamp(
             self.shared.store(),
             &self.device_id,
-            &remote_version(incoming, text.as_deref()),
+            &remote_version(incoming, &id, text.as_deref()),
         )
         .map_err(|e| SyncError::Source(e.message()))
     }
 
-    /// One stored row in the plain, or `None` when it will not open.
+    /// One stored row in the plain, its id in provider form ([`cloud_id`]),
+    /// or `None` when it will not open.
     ///
     /// A tombstone has no payload to open, and carries none on the wire either
     /// (manifest 05 T-4).
@@ -354,7 +372,7 @@ impl StoreView {
         Some(LocalItem {
             origin_device_id: copypaste_core::origin_or(&row.origin_device_id, &self.device_id)
                 .to_string(),
-            item_id: row.id.clone(),
+            item_id: cloud_id::to_provider(&row.id, &row.content_type).into_owned(),
             content,
             content_type: row.content_type.clone(),
             payload_metadata: self.shared.store().payload_metadata_for_sync(row).ok()?,
@@ -394,11 +412,16 @@ pub fn floor_after_round(offer: &Offer, round_started_ms: i64) -> UploadFloor {
 
 /// The `LocalItem`/`RemoteVersion` conversion both hosts made identically.
 ///
-/// `text` is the lossy decode the caller already made, kept out of here so a
-/// page allocates its decodes once.
-fn remote_version<'a>(item: &'a LocalItem, text: Option<&'a str>) -> RemoteVersion<'a> {
+/// `item_id` is the local form of the provider's id, and `text` is the lossy
+/// decode the caller already made, kept out of here so a page allocates its
+/// decodes once.
+fn remote_version<'a>(
+    item: &'a LocalItem,
+    item_id: &'a str,
+    text: Option<&'a str>,
+) -> RemoteVersion<'a> {
     RemoteVersion {
-        item_id: &item.item_id,
+        item_id,
         content: text.unwrap_or(""),
         binary_content: (!item.deleted
             && !copypaste_ipc::content_type::is_text(&item.content_type))
@@ -413,6 +436,16 @@ fn remote_version<'a>(item: &'a LocalItem, text: Option<&'a str>) -> RemoteVersi
         app_bundle_id: item.source_app_bundle_id.as_deref(),
         app_name: item.source_app_name.as_deref(),
     }
+}
+
+/// The rows a cloud upload must never carry: clips that expire within an hour
+/// of creation, their notes and their tombstones.
+fn withheld(
+    store: &Store,
+    rows: &[copypaste_core::StoredItem],
+) -> Result<std::collections::HashSet<String>, SyncError> {
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    store.cloud_withheld_among(&ids).map_err(source_error)
 }
 
 fn source_error(e: impl std::fmt::Debug) -> SyncError {

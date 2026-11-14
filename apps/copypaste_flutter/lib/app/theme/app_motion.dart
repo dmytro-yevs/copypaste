@@ -20,6 +20,8 @@ abstract final class AppMotion {
   static const Duration spoilerReveal = Duration(milliseconds: 350);
   static const Curve spoilerRevealCurve = Curves.easeOut;
   static const Duration settingsHighlightHold = Duration(milliseconds: 1200);
+  static const Duration toastHold = Duration(seconds: 5);
+  static const Duration toastActionHoldAccessible = Duration(seconds: 10);
   static const Duration navigation = Duration(milliseconds: 320);
   static const Duration navigationHold = Duration(milliseconds: 375);
   static const double navigationPressScale = 1.012;

@@ -695,6 +695,138 @@ pub struct Item {
     /// `content` is a cut preview. Only textual, non-secret items carry it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_count: Option<u32>,
+    /// Rule, expiry, integration visibility and provenance state. Absent when nothing applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ItemAnnotations>,
+}
+
+/// An empty text item; producers set what they know with struct update
+/// syntax, so adding a field does not touch every construction site.
+impl Default for Item {
+    fn default() -> Self {
+        Self {
+            privacy: crate::ClipboardPrivacy::default(),
+            id: String::new(),
+            content: String::new(),
+            content_type: crate::content_type::TEXT.to_string(),
+            content_class: default_content_class(),
+            semantic_kind: None,
+            color_rgba: None,
+            created_at: 0,
+            pinned: false,
+            tag_ids: Vec::new(),
+            file_details: None,
+            image_details: None,
+            origin_device_id: String::new(),
+            origin_device_name: None,
+            origin_device_class: DeviceClass::default(),
+            source_app_bundle_id: None,
+            source_app_name: None,
+            source_app_icon_id: None,
+            too_large_to_sync: false,
+            truncated: false,
+            line_count: None,
+            annotations: None,
+        }
+    }
+}
+
+/// Longest provenance string (pipeline name, clip id), in chars.
+pub const MAX_PROVENANCE_TEXT_CHARS: usize = 64;
+/// Most transform steps a provenance snapshot records.
+pub const MAX_PROVENANCE_STEPS: usize = 16;
+/// Longest module id a provenance names, in chars.
+pub const MAX_PROVENANCE_MODULE_CHARS: usize = 96;
+/// Longest label a module gives its write, in chars.
+pub const MAX_PROVENANCE_LABEL_CHARS: usize = 80;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceKind {
+    Manual,
+    Edited,
+    Transformed,
+    /// Written to the clipboard by an optional module (`module_id`, `label`).
+    Module,
+}
+
+/// One transform identity and version; parameters are never stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransformStamp {
+    pub transform_id: String,
+    pub version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipProvenance {
+    pub kind: ProvenanceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_clip_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transform_snapshot: Vec<TransformStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_id: Option<String>,
+    /// What the module says the write was, shown with its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Per-clip state outside the authenticated payload metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemAnnotations {
+    /// Wall-clock deadline in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    #[serde(default)]
+    pub hidden_from_integrations: bool,
+    /// A rule masks this clip on this device.
+    #[serde(default)]
+    pub rule_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ClipProvenance>,
+    /// Bounded by [`crate::MAX_ITEM_TAG_IDS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_tag_ids: Vec<String>,
+    #[serde(default)]
+    pub keep: bool,
+}
+
+fn bound_text(value: &mut Option<String>) {
+    bound_chars(value, MAX_PROVENANCE_TEXT_CHARS);
+}
+
+fn bound_chars(value: &mut Option<String>, max: usize) {
+    if let Some((cut, _)) = value
+        .as_deref()
+        .and_then(|text| text.char_indices().nth(max))
+    {
+        if let Some(text) = value.as_mut() {
+            text.truncate(cut);
+        }
+    }
+}
+
+impl ItemAnnotations {
+    /// Clamp every list and string to its wire bound.
+    #[must_use]
+    pub fn bounded(mut self) -> Self {
+        self.rule_tag_ids.truncate(crate::MAX_ITEM_TAG_IDS);
+        if let Some(provenance) = self.provenance.as_mut() {
+            provenance.transform_snapshot.truncate(MAX_PROVENANCE_STEPS);
+            for stamp in &mut provenance.transform_snapshot {
+                let mut id = Some(std::mem::take(&mut stamp.transform_id));
+                bound_text(&mut id);
+                stamp.transform_id = id.unwrap_or_default();
+            }
+            bound_text(&mut provenance.from_clip_id);
+            bound_text(&mut provenance.pipeline_name);
+            bound_chars(&mut provenance.module_id, MAX_PROVENANCE_MODULE_CHARS);
+            bound_chars(&mut provenance.label, MAX_PROVENANCE_LABEL_CHARS);
+        }
+        self
+    }
 }
 
 #[cfg(test)]

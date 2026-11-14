@@ -225,6 +225,28 @@ pub(crate) enum Command {
     /// A push subscription, not a poll: the daemon writes when something
     /// happens and this process is idle in between.
     Watch,
+
+    /// Work with installed modules.
+    Module {
+        #[command(subcommand)]
+        action: ModuleAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum ModuleAction {
+    /// Relay stdin and stdout to a module endpoint, one message per line.
+    ///
+    /// Meant to be launched by another program, such as an MCP client. The
+    /// relay knows nothing of the protocol: each stdin line is sent to the
+    /// module as one message, and each module message is written as one line.
+    /// It ends when stdin closes or the module closes the connection.
+    Connect {
+        /// The module id, for example `copypaste.ai-tools`.
+        id: String,
+        /// The endpoint the module declares, for example `mcp`.
+        endpoint: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -395,6 +417,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         notify_on_copy: *notify_on_copy,
         notification_preview: *notification_preview,
         sound_on_copy: *sound_on_copy,
+        paste_queue: None,
     }
 }
 
@@ -571,6 +594,7 @@ mod tests {
                 notify_on_copy: Some(true),
                 notification_preview: Some(false),
                 sound_on_copy: Some(false),
+                paste_queue: None,
             }
         );
     }

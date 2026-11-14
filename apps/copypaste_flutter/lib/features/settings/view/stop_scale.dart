@@ -10,13 +10,15 @@ import '../../../app/theme/app_tokens.dart';
 
 /// A stock slider that moves between discrete stops and names its value.
 ///
-/// A change is committed once, when the pointer is released or a key is
-/// pressed; [onCommit] completes when the change was applied, declined or
-/// failed, and the scale then shows [value] again. A stop that is not
-/// confirmed therefore snaps back.
+/// The value is named through [header], beside the setting's copy; the track
+/// follows with only its end stops named. A change is committed once, when the
+/// pointer is released or a key is pressed; [onCommit] completes when the
+/// change was applied, declined or failed, and the scale then shows [value]
+/// again. A stop that is not confirmed therefore snaps back.
 class StopScale extends StatefulWidget {
   const StopScale({
     super.key,
+    required this.header,
     required this.label,
     required this.stops,
     required this.value,
@@ -24,6 +26,9 @@ class StopScale extends StatefulWidget {
     required this.onCommit,
     this.pending = false,
   });
+
+  /// Places the shown value, normally beside the setting's copy.
+  final Widget Function(Widget value) header;
 
   /// The accessible name, normally the setting's title.
   final String label;
@@ -153,49 +158,69 @@ class _StopScaleState extends State<StopScale> {
         ),
       ),
     );
-    return Semantics(
-      container: true,
-      slider: true,
-      label: widget.label,
-      value: valueText,
-      enabled: _enabled,
-      focused: _focused,
-      increasedValue: index < last
-          ? widget.stopLabel(widget.stops[index + 1])
-          : null,
-      decreasedValue: index > 0
-          ? widget.stopLabel(widget.stops[index - 1])
-          : null,
-      onIncrease: _accepting && index < last ? () => _commit(index + 1) : null,
-      onDecrease: _accepting && index > 0 ? () => _commit(index - 1) : null,
-      child: ExcludeSemantics(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    // The slider announces the value, so the value text stays silent. As one
+    // text it keeps its natural width beside the copy and wraps when stacked.
+    final value = ExcludeSemantics(
+      child: Text.rich(
+        TextSpan(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (widget.pending) ...[
-                  const SizedBox.square(
+            if (widget.pending)
+              const WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(end: AppSpacing.sm),
+                  child: SizedBox.square(
                     dimension: AppIconSize.sm,
                     child: AppIconFrame(
                       size: AppIconSize.sm,
                       child: CircularProgressIndicator(),
                     ),
                   ),
-                  const Gap(AppSpacing.sm),
-                ],
-                Flexible(child: Text(valueText).small().medium()),
-              ],
-            ),
-            const Gap(AppSpacing.sm),
-            slider,
-            _StopLabels(
-              labels: [for (final stop in widget.stops) widget.stopLabel(stop)],
-            ),
+                ),
+              ),
+            TextSpan(text: valueText),
           ],
         ),
-      ),
+        textAlign: TextAlign.end,
+      ).small().medium(),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        widget.header(value),
+        const Gap(AppSpacing.sm),
+        Semantics(
+          container: true,
+          slider: true,
+          label: widget.label,
+          value: valueText,
+          enabled: _enabled,
+          focused: _focused,
+          increasedValue: index < last
+              ? widget.stopLabel(widget.stops[index + 1])
+              : null,
+          decreasedValue: index > 0
+              ? widget.stopLabel(widget.stops[index - 1])
+              : null,
+          onIncrease: _accepting && index < last
+              ? () => _commit(index + 1)
+              : null,
+          onDecrease: _accepting && index > 0 ? () => _commit(index - 1) : null,
+          child: ExcludeSemantics(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                slider,
+                if (last > 0)
+                  _EndLabels(
+                    first: widget.stopLabel(widget.stops.first),
+                    last: widget.stopLabel(widget.stops.last),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -208,85 +233,39 @@ class _LastStopIntent extends Intent {
   const _LastStopIntent();
 }
 
-/// Stop names under the track, at the stops' positions. All names show when
-/// they fit, otherwise only the two ends, otherwise none; the current value is
-/// always named above the track.
-class _StopLabels extends StatelessWidget {
-  const _StopLabels({required this.labels});
+/// The end stops' names under the track's ends; each shortens before it
+/// overlaps the other.
+class _EndLabels extends StatelessWidget {
+  const _EndLabels({required this.first, required this.last});
 
-  final List<String> labels;
+  final String first;
+  final String last;
 
   @override
   Widget build(BuildContext context) {
     final style = AppTheme.stopScaleLabelStyle(context);
-    final scaler = MediaQuery.textScalerOf(context);
-    final direction = Directionality.of(context);
-    final theme = Theme.of(context);
-    final inset = theme.density.baseGap * theme.scaling / 2;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final painters = [
-          for (final label in labels)
-            TextPainter(
-              text: TextSpan(text: label, style: style),
-              textScaler: scaler,
-              textDirection: direction,
-              maxLines: 1,
-            )..layout(),
-        ];
-        try {
-          final track = width - inset * 2;
-          final count = labels.length;
-          double centre(int index) =>
-              inset + (count == 1 ? 0 : track * index / (count - 1));
-          bool fits(List<int> shown) {
-            var end = 0.0;
-            for (final index in shown) {
-              final size = painters[index].width;
-              if (size > width) return false;
-              final start = (centre(index) - size / 2).clamp(0.0, width - size);
-              if (start < end) return false;
-              end = start + size + AppSpacing.sm;
-            }
-            return true;
-          }
-
-          final all = [for (var i = 0; i < count; i++) i];
-          final ends = count > 1 ? [0, count - 1] : [0];
-          final shown = fits(all) ? all : (fits(ends) ? ends : const <int>[]);
-          if (shown.isEmpty) return const SizedBox.shrink();
-          final height = painters
-              .map((painter) => painter.height)
-              .reduce((a, b) => a > b ? a : b);
-          return Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.xs),
-            child: SizedBox(
-              height: height,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // The stock slider lays its track out left to right, so
-                  // the names follow the same physical positions.
-                  for (final index in shown)
-                    Positioned(
-                      left: (centre(index) - painters[index].width / 2).clamp(
-                        0.0,
-                        width - painters[index].width,
-                      ),
-                      top: 0,
-                      child: Text(labels[index], style: style, maxLines: 1),
-                    ),
-                ],
-              ),
-            ),
-          );
-        } finally {
-          for (final painter in painters) {
-            painter.dispose();
-          }
-        }
-      },
+    Widget label(String text, TextAlign align) => Flexible(
+      child: Text(
+        text,
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: align,
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      // The stock slider lays its track out left to right, so the names
+      // follow the same physical ends.
+      child: Row(
+        textDirection: TextDirection.ltr,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          label(first, TextAlign.left),
+          const Gap(AppSpacing.sm),
+          label(last, TextAlign.right),
+        ],
+      ),
     );
   }
 }

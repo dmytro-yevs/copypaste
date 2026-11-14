@@ -61,6 +61,7 @@ bool historySummaryEquals(HistoryClip a, HistoryClip b) {
       a.body == b.body &&
       a.colorRgba == b.colorRgba &&
       a.tooLargeToSync == b.tooLargeToSync &&
+      a.annotations == b.annotations &&
       ((af == null && bf == null) ||
           (af != null &&
               bf != null &&

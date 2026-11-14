@@ -79,8 +79,10 @@ impl AppState {
             port: opened.port,
             host: Arc::clone(&host) as _,
         })?;
+        let runtime = Arc::new(runtime);
+        runtime.attach_module_services()?;
         Ok(Self {
-            runtime: Arc::new(runtime),
+            runtime,
             clipboard,
             db_path: opened.db_path,
             shutdown: watch::channel(false).0,
@@ -203,7 +205,11 @@ mod tests {
             fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<Capture> {
                 None
             }
-            fn set_contents(&mut self, _: &str, _: bool) -> anyhow::Result<()> {
+            fn set_contents(
+                &mut self,
+                _: &str,
+                _: crate::clipboard::WriteOptions,
+            ) -> anyhow::Result<()> {
                 Ok(())
             }
             fn backend_name(&self) -> &'static str {

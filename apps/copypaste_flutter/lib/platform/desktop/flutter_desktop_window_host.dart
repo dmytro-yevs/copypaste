@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:copypaste_flutter/l10n/l10n.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart' show IconData, Offset, Rect, Size;
 import 'package:flutter/services.dart'
     show MissingPluginException, PlatformException;
 import 'package:screen_retriever/screen_retriever.dart';
-import 'package:shadcn_flutter/shadcn_flutter.dart' show LucideIcons;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -29,17 +28,12 @@ class FlutterDesktopWindowHost
 
   TrayIcon? _trayIcon;
   Image? _trayImage;
-  Map<IconData, Image> _trayMenuImages = {};
-  Menu? _trayMenu;
-  MenuItem? _openMenuItem;
-  MenuItem? _captureMenuItem;
-  MenuItem? _settingsMenuItem;
-  MenuItem? _quitMenuItem;
   ListenerId? _trayListener;
-  ListenerId? _openMenuItemListener;
-  ListenerId? _captureMenuItemListener;
-  ListenerId? _settingsMenuItemListener;
-  ListenerId? _quitMenuItemListener;
+  _NativeMenu? _trayMenu;
+  TrayMenuEvents? _trayEvents;
+  final Map<String, _NativeItem> _trayItems = {};
+  final Map<IconData, Image> _trayGlyphs = {};
+  Future<void> _trayRender = Future<void>.value();
   bool _openingQuickPaste = false;
   bool _nativeTrayActivationBound = false;
 
@@ -166,86 +160,40 @@ class FlutterDesktopWindowHost
   @override
   Future<void> initializeTray({
     bool visible = true,
-    required Future<void> Function() onOpenRequested,
-    required Future<void> Function() onCaptureRequested,
-    required Future<void> Function() onSettingsRequested,
-    required Future<void> Function() onQuitRequested,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
   }) async {
     await _unbindNativeTrayActivation();
     _disposeTray();
     final image = ImageAsset.fromAsset(_trayIconAsset);
     final icon = TrayIcon.create();
-    final menu = Menu.create();
-    final strings = AppStrings.current;
-    final open = MenuItem.createWithLabelAndType(
-      strings.platformTrayOpen,
-      MenuItemType.normal,
-    );
-    final capture = MenuItem.createWithLabelAndType(
-      strings.platformCaptureActionPause,
-      MenuItemType.normal,
-    );
-    final settings = MenuItem.createWithLabelAndType(
-      strings.platformTraySettings,
-      MenuItemType.normal,
-    );
-    final quit = MenuItem.createWithLabelAndType(
-      strings.platformTrayQuit,
-      MenuItemType.normal,
-    );
-
-    if (image == null ||
-        icon == null ||
-        menu == null ||
-        open == null ||
-        capture == null ||
-        settings == null ||
-        quit == null) {
+    final root = Menu.create();
+    if (image == null || icon == null || root == null) {
       image?.dispose();
       icon?.dispose();
-      menu?.dispose();
-      open?.dispose();
-      capture?.dispose();
-      settings?.dispose();
-      quit?.dispose();
+      root?.dispose();
       throw StateError('Unable to create the system tray controls.');
     }
-
-    ListenerId? openListener;
-    ListenerId? captureListener;
-    ListenerId? settingsListener;
-    ListenerId? quitListener;
-    ListenerId? trayListener;
-    final menuImages = <IconData, Image>{};
-
+    _trayIcon = icon;
+    _trayImage = image;
+    _trayEvents = events;
+    final native = _trayMenu = _NativeMenu(root);
     try {
-      for (final glyph in const [
-        LucideIcons.appWindow,
-        LucideIcons.pause,
-        LucideIcons.play,
-        LucideIcons.settings,
-        LucideIcons.power,
-      ]) {
-        menuImages[glyph] = await createTrayMenuIcon(glyph);
-      }
-      menu
-        ..addItem(open)
-        ..addItem(capture)
-        ..addItem(settings)
-        ..addSeparator()
-        ..addItem(quit);
-      open.icon = menuImages[LucideIcons.appWindow];
-      capture.icon = menuImages[LucideIcons.pause];
-      settings.icon = menuImages[LucideIcons.settings];
-      quit.icon = menuImages[LucideIcons.power];
-      if (Platform.isMacOS) {
-        await showMacosTrayMenuImages(menu.nativeObject.address);
-      }
+      native.listener = root.addListener((event) {
+        final events = _trayEvents;
+        if (events == null) return;
+        if (event is MenuOpenedEvent && event.menuId == root.id) {
+          events.onOpened();
+        } else if (event is MenuClosedEvent && event.menuId == root.id) {
+          events.onClosed();
+        }
+      });
+      await _showTrayMenu(native, menu);
       icon
         ..icon = image
         ..setTitle(Platform.isMacOS ? null : 'CopyPaste')
         ..setTooltip('CopyPaste')
-        ..setContextMenu(menu)
+        ..setContextMenu(root)
         ..setContextMenuTrigger(
           // Linux exports its D-Bus menu only with the primary menu trigger.
           Platform.isLinux
@@ -255,74 +203,175 @@ class FlutterDesktopWindowHost
       if (!icon.setVisible(visible)) {
         throw StateError('Unable to show the system tray controls.');
       }
-      openListener = open.addListener((event) {
-        if (event is MenuItemClickedEvent) {
-          unawaited(onOpenRequested());
-        }
-      });
-      capture.isEnabled = false;
-      captureListener = capture.addListener((event) {
-        if (event is MenuItemClickedEvent) {
-          unawaited(onCaptureRequested());
-        }
-      });
-      settingsListener = settings.addListener((event) {
-        if (event is MenuItemClickedEvent) {
-          unawaited(onSettingsRequested());
-        }
-      });
-      quitListener = quit.addListener((event) {
-        if (event is MenuItemClickedEvent) {
-          unawaited(onQuitRequested());
-        }
-      });
-      trayListener = icon.addListener((event) {
+      _trayListener = icon.addListener((event) {
         if (Platform.isLinux && event is TrayIconClickedEvent) {
-          unawaited(onOpenRequested());
+          final events = _trayEvents;
+          if (events != null) {
+            unawaited(
+              events.onAction(const TrayCommandAction(TrayCommand.openApp)),
+            );
+          }
         } else if (event is TrayIconClickedEvent &&
             !_nativeTrayActivationBound) {
           unawaited(_openQuickPasteFromTray(icon));
         }
       });
-
-      _trayIcon = icon;
-      _trayImage = image;
-      _trayMenuImages = menuImages;
-      _trayMenu = menu;
-      _openMenuItem = open;
-      _captureMenuItem = capture;
-      _settingsMenuItem = settings;
-      _quitMenuItem = quit;
-      _trayListener = trayListener;
-      _openMenuItemListener = openListener;
-      _captureMenuItemListener = captureListener;
-      _settingsMenuItemListener = settingsListener;
-      _quitMenuItemListener = quitListener;
       if (Platform.isMacOS) {
         await bindMacosTrayQuickPaste(icon.nativeObject.address);
         _nativeTrayActivationBound = true;
       }
     } catch (_) {
-      if (identical(_trayIcon, icon)) {
-        _disposeTray();
-        rethrow;
-      }
-      _disposeTrayResources(
-        icon: icon,
-        image: image,
-        menuImages: menuImages.values,
-        menu: menu,
-        open: open,
-        capture: capture,
-        settings: settings,
-        quit: quit,
-        trayListener: trayListener,
-        openListener: openListener,
-        captureListener: captureListener,
-        settingsListener: settingsListener,
-        quitListener: quitListener,
-      );
+      _disposeTray();
       rethrow;
+    }
+  }
+
+  @override
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu) {
+    _trayRender = _trayRender.catchError((Object _) {}).then((_) async {
+      final native = _trayMenu;
+      final icon = _trayIcon;
+      if (native == null || icon == null) return;
+      final changed = await _showTrayMenu(native, menu);
+      // A D-Bus menu host re-reads the layout only when it is told to.
+      if (changed && Platform.isLinux && identical(native, _trayMenu)) {
+        icon.setContextMenu(native.menu);
+      }
+    });
+    return _trayRender;
+  }
+
+  @override
+  Future<void> openQuickPaste() async {
+    final icon = _trayIcon;
+    if (icon != null) await _openQuickPasteFromTray(icon);
+  }
+
+  /// Renders the glyphs [menu] needs, then shows it in [root]. Returns
+  /// whether any native row changed.
+  Future<bool> _showTrayMenu(_NativeMenu root, List<TrayMenuEntry> menu) async {
+    for (final glyph in _glyphsOf(menu)) {
+      if (!_trayGlyphs.containsKey(glyph)) {
+        _trayGlyphs[glyph] = await createTrayMenuIcon(glyph);
+      }
+    }
+    if (!identical(root, _trayMenu)) return false;
+    final restructured = <Menu>[];
+    final changed = _renderTrayMenu(root, menu, restructured);
+    if (Platform.isMacOS) {
+      for (final target in restructured) {
+        await showMacosTrayMenuImages(target.nativeObject.address);
+      }
+    }
+    return changed;
+  }
+
+  /// Reuses the native item of every key that persists, so a rebuild neither
+  /// re-renders glyphs nor registers listeners again.
+  bool _renderTrayMenu(
+    _NativeMenu target,
+    List<TrayMenuEntry> entries,
+    List<Menu> restructured,
+  ) {
+    final keys = [for (final entry in entries) entry.key];
+    final restructure = !listEquals(keys, target.keys);
+    var changed = restructure;
+    if (restructure) {
+      target.menu.clear();
+      restructured.add(target.menu);
+    }
+    for (final entry in entries) {
+      if (entry is TrayMenuSeparator) {
+        if (restructure) target.menu.addSeparator();
+        continue;
+      }
+      final native = _trayItems[entry.key] ??= _createTrayItem(entry);
+      changed = _applyTrayItem(native, entry) || changed;
+      if (restructure) target.menu.addItem(native.item);
+      if (entry is TrayMenuSubmenu) {
+        changed =
+            _renderTrayMenu(native.submenu!, entry.children, restructured) ||
+            changed;
+      }
+    }
+    target.keys = keys;
+    return changed;
+  }
+
+  _NativeItem _createTrayItem(TrayMenuEntry entry) {
+    final submenu = entry is TrayMenuSubmenu;
+    final item = MenuItem.createWithLabelAndType(
+      '',
+      submenu ? MenuItemType.submenu : MenuItemType.normal,
+    );
+    final menu = submenu ? Menu.create() : null;
+    if (item == null || (submenu && menu == null)) {
+      item?.dispose();
+      menu?.dispose();
+      throw StateError('Unable to create a system tray menu item.');
+    }
+    late final _NativeItem native;
+    final listener = item.addListener((event) {
+      final spec = native.spec;
+      if (event is MenuItemClickedEvent &&
+          spec is TrayMenuItem &&
+          spec.selectable) {
+        final events = _trayEvents;
+        if (events != null) unawaited(events.onAction(spec.action!));
+      }
+    });
+    native = _NativeItem(
+      item,
+      listener,
+      menu == null ? null : _NativeMenu(menu),
+    );
+    if (menu != null) item.submenu = menu;
+    return native;
+  }
+
+  bool _applyTrayItem(_NativeItem native, TrayMenuEntry entry) {
+    final previous = native.spec;
+    native.spec = entry;
+    final (label, icon, enabled) = switch (entry) {
+      TrayMenuItem() => (entry.label, entry.icon, entry.selectable),
+      TrayMenuSubmenu() => (entry.label, entry.icon, entry.enabled),
+      TrayMenuSeparator() => ('', null, false),
+    };
+    final (oldLabel, oldIcon, oldEnabled) = switch (previous) {
+      TrayMenuItem() => (previous.label, previous.icon, previous.selectable),
+      TrayMenuSubmenu() => (previous.label, previous.icon, previous.enabled),
+      _ => (null, null, null),
+    };
+    var changed = false;
+    if (label != oldLabel) {
+      // Windows reads a single ampersand as a mnemonic marker.
+      native.item.label = Platform.isWindows
+          ? label.replaceAll('&', '&&')
+          : label;
+      changed = true;
+    }
+    if (previous == null || icon != oldIcon) {
+      native.item.icon = icon == null ? null : _trayGlyphs[icon];
+      changed = true;
+    }
+    if (enabled != oldEnabled) {
+      native.item.isEnabled = enabled;
+      changed = true;
+    }
+    return changed;
+  }
+
+  static Iterable<IconData> _glyphsOf(List<TrayMenuEntry> entries) sync* {
+    for (final entry in entries) {
+      switch (entry) {
+        case TrayMenuItem(:final icon?):
+          yield icon;
+        case TrayMenuSubmenu(:final icon, :final children):
+          if (icon != null) yield icon;
+          yield* _glyphsOf(children);
+        default:
+          break;
+      }
     }
   }
 
@@ -340,19 +389,6 @@ class FlutterDesktopWindowHost
     if (icon == null || !icon.setVisible(visible)) {
       throw StateError('Unable to change system tray visibility.');
     }
-  }
-
-  @override
-  Future<void> updateCaptureMenu({required CaptureControlState state}) async {
-    final item = _captureMenuItem;
-    if (item == null) return;
-    item
-      ..label = state.actionLabel
-      ..icon =
-          _trayMenuImages[state.canResume
-              ? LucideIcons.play
-              : LucideIcons.pause]
-      ..isEnabled = state != CaptureControlState.unavailable;
   }
 
   @override
@@ -447,91 +483,36 @@ class FlutterDesktopWindowHost
 
   void _disposeTray() {
     final icon = _trayIcon;
+    final listener = _trayListener;
     final image = _trayImage;
-    final menuImages = _trayMenuImages;
-    final menu = _trayMenu;
-    final open = _openMenuItem;
-    final capture = _captureMenuItem;
-    final settings = _settingsMenuItem;
-    final quit = _quitMenuItem;
-    final trayListener = _trayListener;
-    final openListener = _openMenuItemListener;
-    final captureListener = _captureMenuItemListener;
-    final settingsListener = _settingsMenuItemListener;
-    final quitListener = _quitMenuItemListener;
+    final root = _trayMenu;
     _trayIcon = null;
-    _trayImage = null;
-    _trayMenuImages = {};
-    _trayMenu = null;
-    _openMenuItem = null;
-    _captureMenuItem = null;
-    _settingsMenuItem = null;
-    _quitMenuItem = null;
     _trayListener = null;
-    _openMenuItemListener = null;
-    _captureMenuItemListener = null;
-    _settingsMenuItemListener = null;
-    _quitMenuItemListener = null;
-    _disposeTrayResources(
-      icon: icon,
-      image: image,
-      menuImages: menuImages.values,
-      menu: menu,
-      open: open,
-      capture: capture,
-      settings: settings,
-      quit: quit,
-      trayListener: trayListener,
-      openListener: openListener,
-      captureListener: captureListener,
-      settingsListener: settingsListener,
-      quitListener: quitListener,
-    );
-  }
-
-  void _disposeTrayResources({
-    required TrayIcon? icon,
-    required Image? image,
-    required Iterable<Image> menuImages,
-    required Menu? menu,
-    required MenuItem? open,
-    required MenuItem? capture,
-    required MenuItem? settings,
-    required MenuItem? quit,
-    required ListenerId? trayListener,
-    required ListenerId? openListener,
-    required ListenerId? captureListener,
-    required ListenerId? settingsListener,
-    required ListenerId? quitListener,
-  }) {
-    if (icon != null && trayListener != null) {
-      icon.removeListener(trayListener);
-    }
-    if (open != null && openListener != null) {
-      open.removeListener(openListener);
-    }
-    if (capture != null && captureListener != null) {
-      capture.removeListener(captureListener);
-    }
-    if (settings != null && settingsListener != null) {
-      settings.removeListener(settingsListener);
-    }
-    if (quit != null && quitListener != null) {
-      quit.removeListener(quitListener);
-    }
+    _trayImage = null;
+    _trayMenu = null;
+    _trayEvents = null;
+    if (icon != null && listener != null) icon.removeListener(listener);
     icon
       ?..setContextMenu(null)
       ..setVisible(false)
       ..dispose();
-    open?.dispose();
-    capture?.dispose();
-    settings?.dispose();
-    quit?.dispose();
-    menu?.dispose();
-    image?.dispose();
-    for (final menuImage in menuImages) {
-      menuImage.dispose();
+    for (final item in _trayItems.values) {
+      item.item.removeListener(item.listener);
+      item.item.dispose();
+      item.submenu?.menu.dispose();
     }
+    _trayItems.clear();
+    if (root != null) {
+      if (root.listener case final listener?) {
+        root.menu.removeListener(listener);
+      }
+      root.menu.dispose();
+    }
+    image?.dispose();
+    for (final glyph in _trayGlyphs.values) {
+      glyph.dispose();
+    }
+    _trayGlyphs.clear();
   }
 
   Display _displayWithGreatestOverlap(
@@ -569,4 +550,21 @@ double _overlapArea(DesktopWindowBounds bounds, DesktopWorkArea workArea) {
       (bounds.top + bounds.height).clamp(workArea.top, workArea.bottom) -
       bounds.top.clamp(workArea.top, workArea.bottom);
   return horizontal * vertical;
+}
+
+class _NativeMenu {
+  _NativeMenu(this.menu);
+
+  final Menu menu;
+  ListenerId? listener;
+  List<String> keys = const [];
+}
+
+class _NativeItem {
+  _NativeItem(this.item, this.listener, this.submenu);
+
+  final MenuItem item;
+  final ListenerId listener;
+  final _NativeMenu? submenu;
+  TrayMenuEntry? spec;
 }

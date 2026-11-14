@@ -64,14 +64,6 @@
   "@commonEnable": {
     "description": "Verb. Turns a feature on."
   },
-  "commonOn": "On",
-  "@commonOn": {
-    "description": "State word shown beside a switch that is turned on. Adjective; keep it as short as possible."
-  },
-  "commonOff": "Off",
-  "@commonOff": {
-    "description": "State word shown beside a switch that is turned off. Adjective; keep it as short as possible."
-  },
   "settingsLanguageTitle": "Language",
   "@settingsLanguageTitle": {
     "description": "Settings row title for choosing the interface language."
@@ -139,20 +131,6 @@
   "settingsRuntimeExcludedAppsLimit": "You can exclude up to 256 applications.",
   "@settingsRuntimeExcludedAppsLimit": {
     "description": "Settings error message shown when the exclusion list already holds the maximum number of applications."
-  },
-  "settingsQuickPasteStartFailed": "Quick Paste could not start, so its shortcut does not work.",
-  "@settingsQuickPasteStartFailed": {
-    "description": "Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name."
-  },
-  "settingsQuickPasteShortcutInUse": "{shortcut} is used by another app. Choose another shortcut.",
-  "@settingsQuickPasteShortcutInUse": {
-    "description": "Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.",
-    "placeholders": {
-      "shortcut": {
-        "type": "String",
-        "example": "Shift+⌘+C"
-      }
-    }
   },
   "settingsRuntimeAutoPasteUpdateFailed": "Auto-paste could not be updated.",
   "@settingsRuntimeAutoPasteUpdateFailed": {
@@ -967,6 +945,593 @@
   "@settingsSectionModulesSummary": {
     "description": "Short summary of the Modules settings section, used when searching settings."
   },
+  "settingsSectionRules": "Content rules",
+  "@settingsSectionRules": {
+    "description": "Settings section name in navigation and as the section heading. Rules that act on copied content automatically."
+  },
+  "settingsSectionRulesSummary": "Tag, skip, protect, or expire clips automatically.",
+  "@settingsSectionRulesSummary": {
+    "description": "Short summary of the Content rules settings section, used when searching settings."
+  },
+  "settingsSectionQuickAccess": "Quick access",
+  "@settingsSectionQuickAccess": {
+    "description": "Android settings section name for the clipboard keyboard, Quick Settings tiles and home-screen widget."
+  },
+  "settingsSectionQuickAccessSummary": "Keyboard, tiles, and home-screen widget.",
+  "@settingsSectionQuickAccessSummary": {
+    "description": "Short summary of the Quick access settings section, used when searching settings."
+  },
+  "settingsSectionSnippets": "Snippets",
+  "@settingsSectionSnippets": {
+    "description": "Settings section name in navigation and as the section heading. Noun: saved reusable texts."
+  },
+  "settingsSectionSnippetsSummary": "Reusable text and templates.",
+  "@settingsSectionSnippetsSummary": {
+    "description": "Short summary of the Snippets settings section, used when searching settings."
+  },
+  "settingsSectionTransforms": "Text transforms",
+  "@settingsSectionTransforms": {
+    "description": "Settings section name in navigation and as the section heading. Text conversions such as case changes or JSON formatting."
+  },
+  "settingsSectionTransformsSummary": "Favorites, pipelines, and default paste transforms.",
+  "@settingsSectionTransformsSummary": {
+    "description": "Short summary of the Text transforms settings section, used when searching settings."
+  },
+  "pasteQueueSettingsTitle": "Paste Queue",
+  "@pasteQueueSettingsTitle": {
+    "description": "Heading of the Paste Queue settings group. Paste Queue is the product feature name."
+  },
+  "pasteQueueSettingsSummary": "Collect several copies and paste them in order.",
+  "@pasteQueueSettingsSummary": {
+    "description": "Description of the Paste Queue settings group."
+  },
+  "pasteQueuePasted": "Pasted {position} of {total}",
+  "@pasteQueuePasted": {
+    "description": "Announcement after Paste next pasted one queue item.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopied": "Item {position} of {total} is on the clipboard",
+  "@pasteQueueCopied": {
+    "description": "Announcement after one queue item was put on the clipboard for the user to paste.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueuePastedAll": "{count, plural, =1{Pasted 1 item} other{Pasted {count} items}}",
+  "@pasteQueuePastedAll": {
+    "description": "Announcement after Paste all pasted several queue items at once.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopiedAll": "{count, plural, =1{1 item is on the clipboard} other{{count} items are on the clipboard}}",
+  "@pasteQueueCopiedAll": {
+    "description": "Announcement after several queue items were joined and put on the clipboard.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueFinished": "Queue finished",
+  "@pasteQueueFinished": {
+    "description": "Announcement when the last queue item was pasted."
+  },
+  "pasteQueueAdded": "{total, plural, =1{Added, 1 in queue} other{Added, {total} in queue}}",
+  "@pasteQueueAdded": {
+    "description": "Announcement after items were added to the queue, with the number now waiting.",
+    "placeholders": {
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueNothingToPaste": "Queue empty, nothing pasted",
+  "@pasteQueueNothingToPaste": {
+    "description": "Feedback when Paste next found no pending item; nothing was pasted."
+  },
+  "pasteQueueMixed": "Paste all works with text-only or files-only queues",
+  "@pasteQueueMixed": {
+    "description": "Why Paste all is unavailable: the queue mixes kinds of content."
+  },
+  "pasteQueueSeveralFiles": "Paste files one at a time.",
+  "@pasteQueueSeveralFiles": {
+    "description": "Why Paste all is unavailable for a queue of several files."
+  },
+  "pasteQueueUnavailable": "{count, plural, =1{1 item no longer available} other{{count} items no longer available}}",
+  "@pasteQueueUnavailable": {
+    "description": "Notice that queued items were skipped because their history item no longer exists.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCopyOnlyTitle": "Paste next copies only",
+  "@pasteQueueCopyOnlyTitle": {
+    "description": "Title of the notice that Paste next only puts items on the clipboard."
+  },
+  "pasteQueueAccessibilityMessage": "Item copied. Allow Accessibility to paste automatically.",
+  "@pasteQueueAccessibilityMessage": {
+    "description": "macOS notice: without the Accessibility permission the item is only put on the clipboard."
+  },
+  "pasteQueuePasteUnsupported": "Couldn't paste automatically. Item copied instead.",
+  "@pasteQueuePasteUnsupported": {
+    "description": "Notice that automatic pasting is not possible here, so the item is only on the clipboard."
+  },
+  "pasteQueueTargetElevated": "Can't paste into an admin app. Item copied instead.",
+  "@pasteQueueTargetElevated": {
+    "description": "Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue."
+  },
+  "pasteQueueNoTarget": "No app to paste into. Item copied instead.",
+  "@pasteQueueNoTarget": {
+    "description": "Notice that no app could receive the paste, so the item stays in the queue."
+  },
+  "pasteQueueCollectingStarted": "Collecting copies",
+  "@pasteQueueCollectingStarted": {
+    "description": "Announcement and notification when the queue starts collecting copies."
+  },
+  "pasteQueueCollectingStopped": "Stopped collecting",
+  "@pasteQueueCollectingStopped": {
+    "description": "Announcement and notification when the queue stops collecting copies."
+  },
+  "pasteQueueFailed": "Couldn't complete the Paste Queue action",
+  "@pasteQueueFailed": {
+    "description": "Generic error when a Paste Queue action could not be completed."
+  },
+  "pasteQueueSummary": "{count, plural, =1{1 pending} other{{count} pending}}",
+  "@pasteQueueSummary": {
+    "description": "Queue header summary: the number of items still to paste.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueSummaryCollecting": "{count, plural, =1{1 pending · Collecting} other{{count} pending · Collecting}}",
+  "@pasteQueueSummaryCollecting": {
+    "description": "Queue header summary while collecting: the number of items still to paste.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueCollectingLabel": "Collecting",
+  "@pasteQueueCollectingLabel": {
+    "description": "Short header label while the queue collects copies."
+  },
+  "pasteQueueFinishedSummary": "Finished",
+  "@pasteQueueFinishedSummary": {
+    "description": "Queue header summary when every item was pasted."
+  },
+  "pasteQueueFull": "Queue full ({max})",
+  "@pasteQueueFull": {
+    "description": "Warning that the queue reached its size limit.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueFullMessage": "New copies are no longer added.",
+  "@pasteQueueFullMessage": {
+    "description": "Explains what happens while the queue is full."
+  },
+  "pasteQueueEmptyTitle": "Paste Queue is empty",
+  "@pasteQueueEmptyTitle": {
+    "description": "Empty state title of the queue drawer."
+  },
+  "pasteQueueEmptyMessage": "Collect copies or add items from history.",
+  "@pasteQueueEmptyMessage": {
+    "description": "Empty state message of the queue drawer."
+  },
+  "pasteQueueCollectingEmptyTitle": "Copy items to add them",
+  "@pasteQueueCollectingEmptyTitle": {
+    "description": "Empty state title while collecting and nothing was copied yet."
+  },
+  "pasteQueueCollectingEmptyMessage": "Each copy joins the queue until you stop collecting.",
+  "@pasteQueueCollectingEmptyMessage": {
+    "description": "Empty state message while collecting."
+  },
+  "pasteQueueStartCollecting": "Start collecting",
+  "@pasteQueueStartCollecting": {
+    "description": "Button that starts collecting copies into the queue."
+  },
+  "pasteQueueStopCollecting": "Stop collecting",
+  "@pasteQueueStopCollecting": {
+    "description": "Button that stops collecting copies; existing items stay."
+  },
+  "pasteQueueLoading": "Loading the queue…",
+  "@pasteQueueLoading": {
+    "description": "Loading message of the queue drawer."
+  },
+  "pasteQueueLoadFailed": "Couldn't load the queue",
+  "@pasteQueueLoadFailed": {
+    "description": "Error state title when the queue could not be read."
+  },
+  "pasteQueuePasteNext": "Paste next",
+  "@pasteQueuePasteNext": {
+    "description": "Action and shortcut name: paste the next queue item into the front app."
+  },
+  "pasteQueueCopyNext": "Copy next",
+  "@pasteQueueCopyNext": {
+    "description": "Action that puts the next queue item on the clipboard without pasting."
+  },
+  "pasteQueuePasteAll": "Paste all",
+  "@pasteQueuePasteAll": {
+    "description": "Action and shortcut name: paste every pending item at once, joined by the separator."
+  },
+  "pasteQueueCopyAll": "Copy all",
+  "@pasteQueueCopyAll": {
+    "description": "Action that puts every pending item, joined, on the clipboard without pasting."
+  },
+  "pasteQueueReverse": "Reverse order",
+  "@pasteQueueReverse": {
+    "description": "Action that reverses the order of the pending items."
+  },
+  "pasteQueueStepBack": "Step back",
+  "@pasteQueueStepBack": {
+    "description": "Action and shortcut name: return the last pasted item to the head of the queue."
+  },
+  "pasteQueueSkip": "Skip",
+  "@pasteQueueSkip": {
+    "description": "Action and shortcut name: mark the next item skipped without pasting it."
+  },
+  "pasteQueueRemovePasted": "Remove pasted",
+  "@pasteQueueRemovePasted": {
+    "description": "Action that removes pasted and skipped items from the queue."
+  },
+  "pasteQueueCleared": "Queue cleared",
+  "@pasteQueueCleared": {
+    "description": "Notice after the queue was cleared, shown with Undo."
+  },
+  "pasteQueueUndo": "Undo",
+  "@pasteQueueUndo": {
+    "description": "Button that restores the entries the last Clear removed."
+  },
+  "pasteQueueStartFresh": "Start fresh",
+  "@pasteQueueStartFresh": {
+    "description": "Choice when collecting restarts after the queue finished: remove pasted items first."
+  },
+  "pasteQueueAppend": "Append",
+  "@pasteQueueAppend": {
+    "description": "Choice when collecting restarts after the queue finished: keep pasted items."
+  },
+  "pasteQueueRestartTitle": "Start a new collection?",
+  "@pasteQueueRestartTitle": {
+    "description": "Dialog title when collecting starts again on a finished queue."
+  },
+  "pasteQueueRestartMessage": "Start fresh removes the pasted items. Append keeps them.",
+  "@pasteQueueRestartMessage": {
+    "description": "Dialog message explaining Start fresh and Append."
+  },
+  "pasteQueueStale": "Queue from {time}",
+  "@pasteQueueStale": {
+    "description": "One-line hint that the pending items are old.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueStatusPasted": "Pasted",
+  "@pasteQueueStatusPasted": {
+    "description": "Status word of a queue item that was pasted."
+  },
+  "pasteQueueStatusSkipped": "Skipped",
+  "@pasteQueueStatusSkipped": {
+    "description": "Status word of a queue item that was skipped."
+  },
+  "pasteQueueStatusUnavailable": "No longer available",
+  "@pasteQueueStatusUnavailable": {
+    "description": "Status word of a queue item whose history item was deleted."
+  },
+  "pasteQueueEdited": "Edited",
+  "@pasteQueueEdited": {
+    "description": "Marker of a queue item whose text was edited in the queue."
+  },
+  "pasteQueueSecret": "Secret",
+  "@pasteQueueSecret": {
+    "description": "Placeholder shown instead of the content of a secret queue item."
+  },
+  "pasteQueueKindImage": "Image",
+  "@pasteQueueKindImage": {
+    "description": "Shown for a queued image."
+  },
+  "pasteQueueKindFiles": "Files",
+  "@pasteQueueKindFiles": {
+    "description": "Shown for queued files without a name."
+  },
+  "pasteQueueRenderedAt": "Rendered at {time}",
+  "@pasteQueueRenderedAt": {
+    "description": "When a queued snippet was rendered.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueRowLabel": "Item {position}: {content}",
+  "@pasteQueueRowLabel": {
+    "description": "Screen-reader label of a queue row: its position and content.",
+    "placeholders": {
+      "position": {
+        "type": "String"
+      },
+      "content": {
+        "type": "String"
+      }
+    }
+  },
+  "pasteQueueMoved": "Moved to position {position}",
+  "@pasteQueueMoved": {
+    "description": "Announcement after an item was moved.",
+    "placeholders": {
+      "position": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueMoveUp": "Move up",
+  "@pasteQueueMoveUp": {
+    "description": "Row action that moves an item one place earlier."
+  },
+  "pasteQueueMoveDown": "Move down",
+  "@pasteQueueMoveDown": {
+    "description": "Row action that moves an item one place later."
+  },
+  "pasteQueueMoveToTop": "Move to top",
+  "@pasteQueueMoveToTop": {
+    "description": "Row action that moves an item to the start of the queue."
+  },
+  "pasteQueueMoveToBottom": "Move to bottom",
+  "@pasteQueueMoveToBottom": {
+    "description": "Row action that moves an item to the end of the queue."
+  },
+  "pasteQueueReorder": "Drag to reorder",
+  "@pasteQueueReorder": {
+    "description": "Tooltip of the drag handle that reorders a queue item."
+  },
+  "pasteQueueMoreActions": "More actions",
+  "@pasteQueueMoreActions": {
+    "description": "Tooltip of the button that opens a queue row's actions."
+  },
+  "pasteQueuePasteNow": "Paste now",
+  "@pasteQueuePasteNow": {
+    "description": "Row action that pastes this item now, out of order."
+  },
+  "pasteQueueEdit": "Edit text",
+  "@pasteQueueEdit": {
+    "description": "Row action that edits a queued text item."
+  },
+  "pasteQueueUseOriginal": "Use original text",
+  "@pasteQueueUseOriginal": {
+    "description": "Row action that drops the queue-local edit and pastes the original text again."
+  },
+  "pasteQueueRemove": "Remove from queue",
+  "@pasteQueueRemove": {
+    "description": "Row action that removes the item from the queue; history keeps it."
+  },
+  "pasteQueueEditTitle": "Edit queued text",
+  "@pasteQueueEditTitle": {
+    "description": "Title of the dialog that edits a queued text item."
+  },
+  "pasteQueueEditMessage": "Edits apply only to this queue.",
+  "@pasteQueueEditMessage": {
+    "description": "Explains that a queue edit does not change history."
+  },
+  "pasteQueueShortcutPromptTitle": "Set shortcuts",
+  "@pasteQueueShortcutPromptTitle": {
+    "description": "Prompt title and button that leads to setting queue shortcuts."
+  },
+  "pasteQueueShortcutPromptMessage": "Collect and paste without opening CopyPaste.",
+  "@pasteQueueShortcutPromptMessage": {
+    "description": "Explains why to set queue shortcuts; they start unbound on Windows and Linux."
+  },
+  "pasteQueueShortcutToggleCollecting": "Start or stop collecting",
+  "@pasteQueueShortcutToggleCollecting": {
+    "description": "Shortcut name: start or stop collecting copies."
+  },
+  "pasteQueueShortcutPasteNextPlain": "Paste next as plain text",
+  "@pasteQueueShortcutPasteNextPlain": {
+    "description": "Shortcut name: paste the next item without formatting."
+  },
+  "pasteQueueShortcutDescription": "A global shortcut that works in any app.",
+  "@pasteQueueShortcutDescription": {
+    "description": "Description of each queue shortcut row."
+  },
+  "pasteQueueShortcutHeldByApp": "Another CopyPaste shortcut uses this combination. The previous one is kept.",
+  "@pasteQueueShortcutHeldByApp": {
+    "description": "Shortcut refused because another CopyPaste shortcut uses it."
+  },
+  "pasteQueueShortcutInUse": "Another app uses this combination.",
+  "@pasteQueueShortcutInUse": {
+    "description": "Shortcut refused because another app holds it."
+  },
+  "pasteQueueShortcutRejected": "The system refused this combination. The previous one is kept.",
+  "@pasteQueueShortcutRejected": {
+    "description": "Shortcut refused by the operating system."
+  },
+  "pasteQueueShortcutAltGr": "Ctrl+Alt types characters on many layouts. Choose another.",
+  "@pasteQueueShortcutAltGr": {
+    "description": "Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts."
+  },
+  "pasteQueueShortcutUnavailable": "Global shortcuts aren't available in this session.",
+  "@pasteQueueShortcutUnavailable": {
+    "description": "This desktop session offers no global shortcuts (for example some Wayland sessions)."
+  },
+  "pasteQueueShortcutFailed": "Couldn't set this shortcut.",
+  "@pasteQueueShortcutFailed": {
+    "description": "Generic failure when a queue shortcut could not be set."
+  },
+  "pasteQueueEnableTitle": "Enable Paste Queue",
+  "@pasteQueueEnableTitle": {
+    "description": "Settings switch that turns the Paste Queue feature on or off."
+  },
+  "pasteQueueEnableDescription": "When off, shortcuts and collecting stop.",
+  "@pasteQueueEnableDescription": {
+    "description": "Description of the Paste Queue switch."
+  },
+  "pasteQueuePasteNextStyleTitle": "Paste next does",
+  "@pasteQueuePasteNextStyleTitle": {
+    "description": "Setting: what Paste next does on this device."
+  },
+  "pasteQueuePasteNextStyleDescription": "Paste automatically or only copy to the clipboard.",
+  "@pasteQueuePasteNextStyleDescription": {
+    "description": "Description of the Paste next delivery style."
+  },
+  "pasteQueuePasteIntoApp": "Paste into the front app",
+  "@pasteQueuePasteIntoApp": {
+    "description": "Delivery style: paste into the front app."
+  },
+  "pasteQueueClipboardOnly": "Put on the clipboard only",
+  "@pasteQueueClipboardOnly": {
+    "description": "Delivery style: only put the item on the clipboard."
+  },
+  "pasteQueueInsertTitle": "New items go to",
+  "@pasteQueueInsertTitle": {
+    "description": "Setting: where new items join the queue."
+  },
+  "pasteQueueInsertDescription": "Where collected and added items join the queue.",
+  "@pasteQueueInsertDescription": {
+    "description": "Description of the insertion position setting."
+  },
+  "pasteQueueInsertEnd": "End (first in, first out)",
+  "@pasteQueueInsertEnd": {
+    "description": "Insertion position: at the end (first in, first out)."
+  },
+  "pasteQueueInsertStart": "Start (last in, first out)",
+  "@pasteQueueInsertStart": {
+    "description": "Insertion position: at the start (last in, first out)."
+  },
+  "pasteQueueEndBehaviorTitle": "After the last item",
+  "@pasteQueueEndBehaviorTitle": {
+    "description": "Setting: what happens after the last item was pasted."
+  },
+  "pasteQueueEndBehaviorDescription": "What Paste next does once every item was pasted.",
+  "@pasteQueueEndBehaviorDescription": {
+    "description": "Description of the end behavior setting."
+  },
+  "pasteQueueEndStop": "Stop",
+  "@pasteQueueEndStop": {
+    "description": "End behavior: stop and finish the queue."
+  },
+  "pasteQueueEndLoop": "Start over",
+  "@pasteQueueEndLoop": {
+    "description": "End behavior: start over from the first item."
+  },
+  "pasteQueueEndKeepLast": "Keep pasting the last item",
+  "@pasteQueueEndKeepLast": {
+    "description": "End behavior: keep pasting the last item."
+  },
+  "pasteQueueSeparatorTitle": "Paste all separator",
+  "@pasteQueueSeparatorTitle": {
+    "description": "Setting: the separator placed between items by Paste all."
+  },
+  "pasteQueueSeparatorDescription": "Placed between items when pasting all at once.",
+  "@pasteQueueSeparatorDescription": {
+    "description": "Description of the separator setting."
+  },
+  "pasteQueueSeparatorNewLine": "New line",
+  "@pasteQueueSeparatorNewLine": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorBlankLine": "Blank line",
+  "@pasteQueueSeparatorBlankLine": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorTab": "Tab",
+  "@pasteQueueSeparatorTab": {
+    "description": "Separator choice: a tab character."
+  },
+  "pasteQueueSeparatorSpace": "Space",
+  "@pasteQueueSeparatorSpace": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorComma": "Comma",
+  "@pasteQueueSeparatorComma": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorCommaSpace": "Comma and space",
+  "@pasteQueueSeparatorCommaSpace": {
+    "description": "Separator choice."
+  },
+  "pasteQueueSeparatorNone": "None",
+  "@pasteQueueSeparatorNone": {
+    "description": "Separator choice: nothing between items."
+  },
+  "pasteQueueSeparatorCustom": "Custom",
+  "@pasteQueueSeparatorCustom": {
+    "description": "Separator choice: text the user enters."
+  },
+  "pasteQueueCustomSeparatorPlaceholder": "Up to 32 characters; \\n and \\t allowed",
+  "@pasteQueueCustomSeparatorPlaceholder": {
+    "description": "Placeholder of the custom separator field; \\n and \\t are typed literally by the user."
+  },
+  "pasteQueuePlainTextTitle": "Always paste as plain text",
+  "@pasteQueuePlainTextTitle": {
+    "description": "Setting: always paste queue items without formatting."
+  },
+  "pasteQueuePlainTextDescription": "Drops formatting from queued items.",
+  "@pasteQueuePlainTextDescription": {
+    "description": "Description of the plain-text setting."
+  },
+  "pasteQueueIdleStopTitle": "Stop collecting after",
+  "@pasteQueueIdleStopTitle": {
+    "description": "Setting: stop collecting after a period without copies."
+  },
+  "pasteQueueIdleStopDescription": "Stop collecting after this long without copies.",
+  "@pasteQueueIdleStopDescription": {
+    "description": "Description of the idle stop setting."
+  },
+  "pasteQueueIdleMinutes": "{minutes} min",
+  "@pasteQueueIdleMinutes": {
+    "description": "Idle stop choice in minutes.",
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "pasteQueueIdleNever": "Never",
+  "@pasteQueueIdleNever": {
+    "description": "Idle stop choice: never stop on its own."
+  },
+  "pasteQueueMaxEntriesTitle": "Queue size limit",
+  "@pasteQueueMaxEntriesTitle": {
+    "description": "Setting: the queue size limit."
+  },
+  "pasteQueueMaxEntriesDescription": "When full, new copies aren't added.",
+  "@pasteQueueMaxEntriesDescription": {
+    "description": "Description of the size limit setting."
+  },
+  "pasteQueueRestoreTitle": "Restore the previous clipboard when finished",
+  "@pasteQueueRestoreTitle": {
+    "description": "Setting: restore the clipboard from before the queue started pasting."
+  },
+  "pasteQueueRestoreDescription": "Bring back what you copied before pasting.",
+  "@pasteQueueRestoreDescription": {
+    "description": "Description of the restore clipboard setting."
+  },
+  "pasteQueueSettingsKeywords": "paste queue collect sequence order shortcut hotkey separator stack",
+  "@pasteQueueSettingsKeywords": {
+    "description": "Search keywords for the Paste Queue settings, space separated."
+  },
   "settingsSectionAbout": "About",
   "@settingsSectionAbout": {
     "description": "Settings section name in navigation and as the section heading, about the application."
@@ -1067,7 +1632,7 @@
   "@settingsStartupUnavailable": {
     "description": "Startup setting description when automatic startup cannot be configured."
   },
-  "settingsStartupAndroidDescription": "Resume enabled background services after restarting the device.",
+  "settingsStartupAndroidDescription": "Resume background services after a restart.",
   "@settingsStartupAndroidDescription": {
     "description": "Android startup setting description."
   },
@@ -1131,7 +1696,7 @@
   "@settingsAndroidCaptureKeywords": {
     "description": "Space-separated search keywords that find the Android background capture setting. Translate each word and keep the English words too."
   },
-  "settingsAndroidCaptureDescription": "Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.",
+  "settingsAndroidCaptureDescription": "Full or Limited mode and one-time Shizuku or ADB setup.",
   "@settingsAndroidCaptureDescription": {
     "description": "Description of the Android background capture row. Full and Limited are capture mode names; Shizuku and ADB are tool names."
   },
@@ -1159,7 +1724,7 @@
   "@settingsScreenshotAccessTitle": {
     "description": "Settings row title asking for permissions needed to save screenshots."
   },
-  "settingsScreenshotAccessDescription": "Allow access to all photos and notifications to save new screenshots in the background.",
+  "settingsScreenshotAccessDescription": "Needed to save screenshots in the background.",
   "@settingsScreenshotAccessDescription": {
     "description": "Description of the permission row needed to save screenshots."
   },
@@ -1235,7 +1800,7 @@
   "@settingsMaxFileSizeKeywords": {
     "description": "Space-separated search keywords that find the maximum file size setting. Translate each word and keep the English words too."
   },
-  "settingsMaxFileSizeDescription": "Limit for adding and downloading files. File contents transfer only when you choose Download.",
+  "settingsMaxFileSizeDescription": "Largest file you can add or download.",
   "@settingsMaxFileSizeDescription": {
     "description": "Description of the maximum file size setting. Download is the name of the History action that transfers a file."
   },
@@ -1291,7 +1856,7 @@
   "@settingsRestoreDialogTitle": {
     "description": "Title of the dialog confirming a backup restore."
   },
-  "settingsRestoreDialogMessage": "The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.",
+  "settingsRestoreDialogMessage": "The backup replaces this device's history. Settings are kept.",
   "@settingsRestoreDialogMessage": {
     "description": "Message of the dialog confirming a backup restore."
   },
@@ -1303,7 +1868,7 @@
   "@settingsSyncSwitchTitle": {
     "description": "Settings row title for the master synchronization switch. Noun, short for synchronization."
   },
-  "settingsSyncSwitchDescription": "Master switch for paired-device synchronization.",
+  "settingsSyncSwitchDescription": "Sync history with paired devices.",
   "@settingsSyncSwitchDescription": {
     "description": "Description of the master synchronization switch."
   },
@@ -1323,7 +1888,7 @@
   "@settingsInstantClipboardKeywords": {
     "description": "Space-separated search keywords that find the instant clipboard setting. Translate each word and keep the English words too."
   },
-  "settingsInstantClipboardDescription": "Automatically copy newer clips from other devices to this clipboard.",
+  "settingsInstantClipboardDescription": "Copy new clips from other devices to this clipboard.",
   "@settingsInstantClipboardDescription": {
     "description": "Description of the instant clipboard setting."
   },
@@ -1351,15 +1916,11 @@
   "@settingsExcludedAppsKeywords": {
     "description": "Space-separated search keywords that find the excluded applications setting. Translate each word and keep the English words too."
   },
-  "settingsExcludedAppsMacDescription": "Skip automatic capture during activity from these apps. Background copies may bypass exclusions.",
-  "@settingsExcludedAppsMacDescription": {
-    "description": "macOS description of excluded applications."
-  },
-  "settingsExcludedAppsDesktopDescription": "Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.",
+  "settingsExcludedAppsDesktopDescription": "Skip automatic capture from these apps.",
   "@settingsExcludedAppsDesktopDescription": {
     "description": "Windows and Linux description of excluded applications."
   },
-  "settingsExcludedAppsAndroidDescription": "Android skips automatic capture while exclusions are set because it cannot identify source apps.",
+  "settingsExcludedAppsAndroidDescription": "Automatic capture pauses while any app is excluded.",
   "@settingsExcludedAppsAndroidDescription": {
     "description": "Android description of excluded applications."
   },
@@ -1385,27 +1946,19 @@
       }
     }
   },
-  "settingsExcludeDialogTitle": "Exclude application",
-  "@settingsExcludeDialogTitle": {
-    "description": "Title of the dialog that adds an excluded application."
+  "applicationPickerSearch": "Search applications",
+  "@applicationPickerSearch": {
+    "description": "Search field placeholder of the list for choosing an application."
   },
-  "settingsExcludeDialogAction": "Exclude",
-  "@settingsExcludeDialogAction": {
-    "description": "Verb. Confirm button of the dialog that adds an excluded application."
-  },
-  "settingsExcludeDialogPlaceholder": "Application identifier",
-  "@settingsExcludeDialogPlaceholder": {
-    "description": "Placeholder of the field for the application identifier, such as a bundle ID or executable name."
-  },
-  "settingsExcludeFailed": "The application could not be excluded.",
-  "@settingsExcludeFailed": {
-    "description": "Error shown in the exclude application dialog when adding fails."
+  "applicationPickerEmpty": "No applications found",
+  "@applicationPickerEmpty": {
+    "description": "Shown when no application matches the search in the application list."
   },
   "settingsSkipSecretTitle": "Skip confidential clipboard",
   "@settingsSkipSecretTitle": {
     "description": "Settings row title for not capturing clipboard content that the source app marked as confidential."
   },
-  "settingsSkipSecretDescription": "Keep producer-marked secrets out of History.",
+  "settingsSkipSecretDescription": "Don't save copies that apps mark as secret.",
   "@settingsSkipSecretDescription": {
     "description": "Description of the confidential clipboard setting. History is the clipboard history screen."
   },
@@ -1417,7 +1970,7 @@
   "@settingsSkipTransientTitle": {
     "description": "Settings row title for not capturing clipboard content that the source app marked as temporary."
   },
-  "settingsSkipTransientDescription": "Keep producer-marked temporary copies out of History.",
+  "settingsSkipTransientDescription": "Don't save copies that apps mark as temporary.",
   "@settingsSkipTransientDescription": {
     "description": "Description of the temporary clipboard setting. History is the clipboard history screen."
   },
@@ -1685,7 +2238,7 @@
   "@settingsQuickPasteShortcutKeywords": {
     "description": "Space-separated search keywords that find the Quick Paste shortcut setting. Translate each word and keep the English words too."
   },
-  "settingsQuickPasteShortcutDescription": "The shortcut works while CopyPaste is running in the background.",
+  "settingsQuickPasteShortcutDescription": "Works while CopyPaste runs in the background.",
   "@settingsQuickPasteShortcutDescription": {
     "description": "Description of the Quick Paste shortcut row. CopyPaste is the product name."
   },
@@ -1731,6 +2284,10 @@
   "@settingsShortcutRecording": {
     "description": "Button label while waiting for the user to press a new keyboard shortcut."
   },
+  "settingsShortcutNotSet": "Not set",
+  "@settingsShortcutNotSet": {
+    "description": "Label of a global shortcut recorder button when no shortcut is assigned."
+  },
   "settingsShortcutReset": "Reset shortcut",
   "@settingsShortcutReset": {
     "description": "Tooltip of the button that restores the default Quick Paste shortcut."
@@ -1767,14 +2324,6 @@
   "devicesNoneNearby": "No devices nearby",
   "@devicesNoneNearby": {
     "description": "Empty state when no unpaired devices were found on the local network."
-  },
-  "devicesEmptyTitle": "No other devices paired yet",
-  "@devicesEmptyTitle": {
-    "description": "Empty state title on the Devices screen when no other device has been paired yet."
-  },
-  "devicesEmptyMessage": "Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.",
-  "@devicesEmptyMessage": {
-    "description": "Empty state message on the Devices screen explaining what pairing another device gives and requires."
   },
   "devicesThisDevice": "This device",
   "@devicesThisDevice": {
@@ -2225,10 +2774,6 @@
   "@pairingStateFailed": {
     "description": "Pairing status title after the pairing failed."
   },
-  "pairingStateNotCompleted": "Pairing not completed",
-  "@pairingStateNotCompleted": {
-    "description": "Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it."
-  },
   "pairingHandshakingDescription": "The devices are establishing a secure channel.",
   "@pairingHandshakingDescription": {
     "description": "Pairing status description while the two devices establish a secure connection."
@@ -2252,62 +2797,6 @@
   "pairingIdleDescription": "Start a pairing attempt to connect a device.",
   "@pairingIdleDescription": {
     "description": "Pairing status description before any pairing attempt started."
-  },
-  "pairingStepInvite": "Invite",
-  "@pairingStepInvite": {
-    "description": "Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words."
-  },
-  "pairingStepScan": "Scan",
-  "@pairingStepScan": {
-    "description": "Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words."
-  },
-  "pairingStepCode": "Code",
-  "@pairingStepCode": {
-    "description": "Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words."
-  },
-  "pairingStepRequest": "Request",
-  "@pairingStepRequest": {
-    "description": "Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words."
-  },
-  "pairingStepConnect": "Connect",
-  "@pairingStepConnect": {
-    "description": "Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words."
-  },
-  "pairingStepConfirm": "Confirm",
-  "@pairingStepConfirm": {
-    "description": "Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words."
-  },
-  "pairingStepPaired": "Paired",
-  "@pairingStepPaired": {
-    "description": "Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words."
-  },
-  "pairingOtherDevice": "Other device",
-  "@pairingOtherDevice": {
-    "description": "Label for the other device in the pairing confirmation status when its name is not known."
-  },
-  "pairingDecisionNotConfirmed": "Not confirmed yet",
-  "@pairingDecisionNotConfirmed": {
-    "description": "Pairing confirmation status of this device before the user has confirmed or rejected."
-  },
-  "pairingDecisionSending": "Sending your decision…",
-  "@pairingDecisionSending": {
-    "description": "Pairing confirmation status of this device while its confirmation or rejection is being sent."
-  },
-  "pairingDecisionConfirmed": "Confirmed",
-  "@pairingDecisionConfirmed": {
-    "description": "Pairing confirmation status of a device that confirmed the pairing."
-  },
-  "pairingDecisionRejected": "Rejected",
-  "@pairingDecisionRejected": {
-    "description": "Pairing confirmation status of a device that rejected the pairing."
-  },
-  "pairingDecisionWaiting": "Waiting for confirmation",
-  "@pairingDecisionWaiting": {
-    "description": "Pairing confirmation status of the other device after this device confirmed and the other has not answered yet."
-  },
-  "pairingDecisionUnknown": "Answer not known",
-  "@pairingDecisionUnknown": {
-    "description": "Pairing confirmation status of the other device when this device has not been told its answer."
   },
   "pairingProtectedUnavailableTitle": "Protected pairing is unavailable",
   "@pairingProtectedUnavailableTitle": {
@@ -2508,15 +2997,6 @@
     "placeholders": {
       "status": {
         "type": "String"
-      }
-    }
-  },
-  "syncHeaderDeviceCount": "{count, plural, =1{1 device} other{{count} devices}}",
-  "@syncHeaderDeviceCount": {
-    "description": "Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.",
-    "placeholders": {
-      "count": {
-        "type": "int"
       }
     }
   },
@@ -3005,15 +3485,6 @@
       }
     }
   },
-  "historyClipLineCount": "{count, plural, =1{1 line} other{{count} lines}}",
-  "@historyClipLineCount": {
-    "description": "Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
   "historyInspectorEmptyTitle": "Select a clip",
   "@historyInspectorEmptyTitle": {
     "description": "Empty-state title of the clip details panel when no clip is selected."
@@ -3321,10 +3792,6 @@
   "@appWindowSetupTitle": {
     "description": "Error title shown when the desktop window could not be configured."
   },
-  "appNavigationLabel": "Main navigation",
-  "@appNavigationLabel": {
-    "description": "Screen reader label of the application header region that holds the History, Devices and Settings destinations."
-  },
   "appOpenHistory": "Open History",
   "@appOpenHistory": {
     "description": "Screen reader label of the app logo button that opens the History screen. History is the name of the clipboard history screen."
@@ -3436,42 +3903,6 @@
     "placeholders": {
       "size": {
         "type": "String"
-      }
-    }
-  },
-  "sharedStepPosition": "{step} / {count} · {name}",
-  "@sharedStepPosition": {
-    "description": "Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.",
-    "placeholders": {
-      "step": {
-        "type": "int",
-        "example": "1"
-      },
-      "count": {
-        "type": "int",
-        "example": "2"
-      },
-      "name": {
-        "type": "String",
-        "example": "Download"
-      }
-    }
-  },
-  "sharedStepSemantics": "Step {step} of {count}: {name}",
-  "@sharedStepSemantics": {
-    "description": "Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.",
-    "placeholders": {
-      "step": {
-        "type": "int",
-        "example": "1"
-      },
-      "count": {
-        "type": "int",
-        "example": "2"
-      },
-      "name": {
-        "type": "String",
-        "example": "Download"
       }
     }
   },
@@ -4018,32 +4449,6 @@
   "@modulesDownloadingModel": {
     "description": "Progress text shown while a module downloads a language model."
   },
-  "modulesPhaseDownload": "Download",
-  "@modulesPhaseDownload": {
-    "description": "Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible."
-  },
-  "modulesPhaseInstall": "Install",
-  "@modulesPhaseInstall": {
-    "description": "Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible."
-  },
-  "modulesInstallingModule": "Installing {module}",
-  "@modulesInstallingModule": {
-    "description": "Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.",
-    "placeholders": {
-      "module": {
-        "type": "String"
-      }
-    }
-  },
-  "modulesUpdatingModule": "Updating {module}",
-  "@modulesUpdatingModule": {
-    "description": "Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.",
-    "placeholders": {
-      "module": {
-        "type": "String"
-      }
-    }
-  },
   "modulesRun": "Run",
   "@modulesRun": {
     "description": "Verb. Button in a module command dialog that runs the command."
@@ -4390,6 +4795,215 @@
   "@historyTagsAction": {
     "description": "Menu item on a History row that opens the editor for the clip's tags."
   },
+  "deviceAuthReasonUnlockSecrets": "{platform, select, macos{unlock secret items} other{Unlock secret items}}",
+  "@deviceAuthReasonUnlockSecrets": {
+    "description": "Reason shown in the operating system's identity prompt for unlocking secret items for the current surface (Quick Paste, the Android keyboard panel or History). The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthReasonUseConcealedSnippet": "{platform, select, macos{use a concealed snippet} other{Use a concealed snippet}}",
+  "@deviceAuthReasonUseConcealedSnippet": {
+    "description": "Reason shown in the operating system's identity prompt for using a snippet the user marked as concealed. The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthReasonCopySecret": "{platform, select, macos{copy a secret item} other{Copy a secret item}}",
+  "@deviceAuthReasonCopySecret": {
+    "description": "Reason shown in the operating system's identity prompt for copying a secret item, for example from the tray Recent menu. The macos form is a lowercase clause that macOS inserts into its own sentence \"<App> is trying to <reason>.\" in the system language; the other form is a standalone phrase.",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "deviceAuthUnavailable": "Not available on this system",
+  "@deviceAuthUnavailable": {
+    "description": "Status shown for an identity-check setting when the system has no device authentication (for example Linux)."
+  },
+  "deviceAuthNotConfigured": "Set up a device password, PIN or biometrics first",
+  "@deviceAuthNotConfigured": {
+    "description": "Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up."
+  },
+  "commonOn": "On",
+  "@commonOn": {
+    "description": "State word shown beside a switch that is turned on. Adjective; keep it as short as possible."
+  },
+  "commonOff": "Off",
+  "@commonOff": {
+    "description": "State word shown beside a switch that is turned off. Adjective; keep it as short as possible."
+  },
+  "settingsQuickPasteStartFailed": "Quick Paste could not start, so its shortcut does not work.",
+  "@settingsQuickPasteStartFailed": {
+    "description": "Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name."
+  },
+  "settingsQuickPasteShortcutInUse": "{shortcut} is used by another app. Choose another shortcut.",
+  "@settingsQuickPasteShortcutInUse": {
+    "description": "Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "Shift+⌘+C"
+      }
+    }
+  },
+  "devicesEmptyTitle": "No other devices paired yet",
+  "@devicesEmptyTitle": {
+    "description": "Empty state title on the Devices screen when no other device has been paired yet."
+  },
+  "devicesEmptyMessage": "Pair a device on the same network to sync history.",
+  "@devicesEmptyMessage": {
+    "description": "Empty state message on the Devices screen explaining what pairing another device gives and requires."
+  },
+  "pairingStateNotCompleted": "Pairing not completed",
+  "@pairingStateNotCompleted": {
+    "description": "Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it."
+  },
+  "pairingStepInvite": "Invite",
+  "@pairingStepInvite": {
+    "description": "Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words."
+  },
+  "pairingStepScan": "Scan",
+  "@pairingStepScan": {
+    "description": "Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words."
+  },
+  "pairingStepCode": "Code",
+  "@pairingStepCode": {
+    "description": "Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words."
+  },
+  "pairingStepRequest": "Request",
+  "@pairingStepRequest": {
+    "description": "Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words."
+  },
+  "pairingStepConnect": "Connect",
+  "@pairingStepConnect": {
+    "description": "Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words."
+  },
+  "pairingStepConfirm": "Confirm",
+  "@pairingStepConfirm": {
+    "description": "Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words."
+  },
+  "pairingStepPaired": "Paired",
+  "@pairingStepPaired": {
+    "description": "Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words."
+  },
+  "pairingOtherDevice": "Other device",
+  "@pairingOtherDevice": {
+    "description": "Label for the other device in the pairing confirmation status when its name is not known."
+  },
+  "pairingDecisionNotConfirmed": "Not confirmed yet",
+  "@pairingDecisionNotConfirmed": {
+    "description": "Pairing confirmation status of this device before the user has confirmed or rejected."
+  },
+  "pairingDecisionSending": "Sending your decision…",
+  "@pairingDecisionSending": {
+    "description": "Pairing confirmation status of this device while its confirmation or rejection is being sent."
+  },
+  "pairingDecisionConfirmed": "Confirmed",
+  "@pairingDecisionConfirmed": {
+    "description": "Pairing confirmation status of a device that confirmed the pairing."
+  },
+  "pairingDecisionRejected": "Rejected",
+  "@pairingDecisionRejected": {
+    "description": "Pairing confirmation status of a device that rejected the pairing."
+  },
+  "pairingDecisionWaiting": "Waiting for confirmation",
+  "@pairingDecisionWaiting": {
+    "description": "Pairing confirmation status of the other device after this device confirmed and the other has not answered yet."
+  },
+  "pairingDecisionUnknown": "Answer not known",
+  "@pairingDecisionUnknown": {
+    "description": "Pairing confirmation status of the other device when this device has not been told its answer."
+  },
+  "syncHeaderDeviceCount": "{count, plural, =1{1 device} other{{count} devices}}",
+  "@syncHeaderDeviceCount": {
+    "description": "Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyClipLineCount": "{count, plural, =1{1 line} other{{count} lines}}",
+  "@historyClipLineCount": {
+    "description": "Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "appNavigationLabel": "Main navigation",
+  "@appNavigationLabel": {
+    "description": "Screen reader label of the application header region that holds the History, Devices and Settings destinations."
+  },
+  "sharedStepPosition": "{step} / {count} · {name}",
+  "@sharedStepPosition": {
+    "description": "Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "example": "1"
+      },
+      "count": {
+        "type": "int",
+        "example": "2"
+      },
+      "name": {
+        "type": "String",
+        "example": "Download"
+      }
+    }
+  },
+  "sharedStepSemantics": "Step {step} of {count}: {name}",
+  "@sharedStepSemantics": {
+    "description": "Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "example": "1"
+      },
+      "count": {
+        "type": "int",
+        "example": "2"
+      },
+      "name": {
+        "type": "String",
+        "example": "Download"
+      }
+    }
+  },
+  "modulesPhaseDownload": "Download",
+  "@modulesPhaseDownload": {
+    "description": "Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible."
+  },
+  "modulesPhaseInstall": "Install",
+  "@modulesPhaseInstall": {
+    "description": "Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible."
+  },
+  "modulesInstallingModule": "Installing {module}",
+  "@modulesInstallingModule": {
+    "description": "Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesUpdatingModule": "Updating {module}",
+  "@modulesUpdatingModule": {
+    "description": "Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
   "commonDismiss": "Dismiss",
   "@commonDismiss": {
     "description": "Screen reader name of the button that closes a transient message before it leaves by itself."
@@ -4398,7 +5012,7 @@
   "@settingsRetentionConfirmTitle": {
     "description": "Title of the confirmation shown before a shorter retention period deletes history."
   },
-  "settingsRetentionConfirmMessage": "New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.",
+  "settingsRetentionConfirmMessage": "New limit: {limit}. Older unpinned items are deleted permanently.",
   "@settingsRetentionConfirmMessage": {
     "description": "Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.",
     "placeholders": {
@@ -4412,7 +5026,7 @@
   "@settingsStorageQuotaConfirmTitle": {
     "description": "Title of the confirmation shown before a smaller storage quota deletes history."
   },
-  "settingsStorageQuotaConfirmMessage": "New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.",
+  "settingsStorageQuotaConfirmMessage": "New quota: {size}. The oldest unpinned items over it are deleted permanently.",
   "@settingsStorageQuotaConfirmMessage": {
     "description": "Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.",
     "placeholders": {
@@ -4430,11 +5044,11 @@
   "@settingsHideEverywhereTitle": {
     "description": "Title of the confirmation shown before the last visible entry point of the application (Dock or taskbar icon, menu bar or tray icon) is turned off."
   },
-  "settingsHideEverywhereMessage": "With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.",
+  "settingsHideEverywhereMessage": "With both off, there's no icon. To open it, start CopyPaste again.",
   "@settingsHideEverywhereMessage": {
     "description": "Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice."
   },
-  "settingsHideEverywhereShortcutMessage": "With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.",
+  "settingsHideEverywhereShortcutMessage": "With both off, there's no icon. To open it, press {shortcut} or start CopyPaste again.",
   "@settingsHideEverywhereShortcutMessage": {
     "description": "Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.",
     "placeholders": {
@@ -4612,7 +5226,7 @@
       }
     }
   },
-  "settingsStorageQuotaConfirmRemovesMessage": "New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.",
+  "settingsStorageQuotaConfirmRemovesMessage": "New quota: {size}. {used} is in use, so the oldest unpinned items are deleted permanently.",
   "@settingsStorageQuotaConfirmRemovesMessage": {
     "description": "Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.",
     "placeholders": {
@@ -4634,5 +5248,2971 @@
         "type": "int"
       }
     }
+  },
+  "trayOpenApp": "Open CopyPaste",
+  "@trayOpenApp": {
+    "description": "Tray and menu-bar menu item that shows the main window."
+  },
+  "trayOpenQuickPaste": "Open Quick Paste",
+  "@trayOpenQuickPaste": {
+    "description": "Tray and menu-bar menu item that opens the Quick Paste window. Quick Paste is a product name."
+  },
+  "trayOpenQuickPasteWithShortcut": "Open Quick Paste ({shortcut})",
+  "@trayOpenQuickPasteWithShortcut": {
+    "description": "Same as trayOpenQuickPaste, followed by its global shortcut.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "Ctrl+Shift+C"
+      }
+    }
+  },
+  "trayNewSnippet": "New snippet",
+  "@trayNewSnippet": {
+    "description": "Tray and menu-bar menu item that opens the snippet editor for a new snippet."
+  },
+  "trayRecent": "Recent",
+  "@trayRecent": {
+    "description": "Tray and menu-bar submenu that lists the newest clips."
+  },
+  "trayRecentLoading": "Loading…",
+  "@trayRecentLoading": {
+    "description": "Shown in the Recent submenu while clips load."
+  },
+  "trayRecentFailed": "Couldn't load clips",
+  "@trayRecentFailed": {
+    "description": "Shown in the Recent submenu when clips could not be read."
+  },
+  "trayRecentEmpty": "No clips yet",
+  "@trayRecentEmpty": {
+    "description": "Shown in the Recent submenu when History is empty."
+  },
+  "trayRecentHidden": "{count, plural, =1{1 recent clip hidden} other{{count} recent clips hidden}}",
+  "@trayRecentHidden": {
+    "description": "Shown in the Recent submenu when previews are set to Hidden: only the number of clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayRecentSecret": "Secret",
+  "@trayRecentSecret": {
+    "description": "Replaces the content of a secret clip in the Recent submenu, followed by its source and time."
+  },
+  "trayCopyLatestFromOtherDevice": "Copy latest from other device",
+  "@trayCopyLatestFromOtherDevice": {
+    "description": "Tray and menu-bar menu item that copies the newest clip received from another device."
+  },
+  "trayCaptureNow": "Capture now",
+  "@trayCaptureNow": {
+    "description": "Tray and menu-bar menu item that stores the current clipboard in History now, even while capture is paused."
+  },
+  "trayPausedUntil": "Paused until {time}",
+  "@trayPausedUntil": {
+    "description": "Disabled tray row while capture is paused for a while. time is a clock time.",
+    "placeholders": {
+      "time": {
+        "type": "String",
+        "example": "2:30 PM"
+      }
+    }
+  },
+  "trayPauseFor": "Pause for…",
+  "@trayPauseFor": {
+    "description": "Tray and menu-bar submenu with pause durations."
+  },
+  "trayPauseFor15Minutes": "15 minutes",
+  "@trayPauseFor15Minutes": {
+    "description": "Pause duration in the Pause for submenu."
+  },
+  "trayPauseForOneHour": "1 hour",
+  "@trayPauseForOneHour": {
+    "description": "Pause duration in the Pause for submenu."
+  },
+  "trayPauseUntilResumed": "Until I resume",
+  "@trayPauseUntilResumed": {
+    "description": "Pause option in the Pause for submenu: no automatic resume."
+  },
+  "trayPasteQueue": "{count, plural, =1{Paste Queue: 1 item} other{Paste Queue: {count} items}}",
+  "@trayPasteQueue": {
+    "description": "Tray row with the number of items in the Paste Queue. Paste Queue is a product name.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayPasteQueueCollecting": "{count, plural, =1{Collecting: 1 item} other{Collecting: {count} items}}",
+  "@trayPasteQueueCollecting": {
+    "description": "Tray row while the Paste Queue collects copies, with its number of items.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayRecentlySkipped": "Recently skipped ({count})",
+  "@trayRecentlySkipped": {
+    "description": "Tray submenu listing captures that content rules did not save, with their number.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "trayOpenContentRules": "Open content rules",
+  "@trayOpenContentRules": {
+    "description": "Item in the Recently skipped submenu that opens the content rules settings."
+  },
+  "trayRecentSettingsTitle": "Menu bar and tray",
+  "@trayRecentSettingsTitle": {
+    "description": "Heading of the settings for the menu-bar (macOS) or tray (Windows, Linux) menu."
+  },
+  "trayRecentSettingsDescription": "What the menu bar or tray menu lists under Recent.",
+  "@trayRecentSettingsDescription": {
+    "description": "Description under trayRecentSettingsTitle."
+  },
+  "trayRecentCountTitle": "Recent clips",
+  "@trayRecentCountTitle": {
+    "description": "Setting title: how many clips the Recent submenu lists."
+  },
+  "trayRecentCountDescription": "How many of the newest clips the menu lists.",
+  "@trayRecentCountDescription": {
+    "description": "Description of trayRecentCountTitle."
+  },
+  "trayRecentPreviewTitle": "Recent clip previews",
+  "@trayRecentPreviewTitle": {
+    "description": "Setting title: how much of each clip the Recent submenu shows."
+  },
+  "trayRecentPreviewDescription": "How much clip text the menu shows.",
+  "@trayRecentPreviewDescription": {
+    "description": "Description of trayRecentPreviewTitle: menu text leaves the encrypted store."
+  },
+  "trayRecentPreviewFull": "Full preview",
+  "@trayRecentPreviewFull": {
+    "description": "Option of trayRecentPreviewTitle: the beginning of the clip text."
+  },
+  "trayRecentPreviewTitles": "Type and source only",
+  "@trayRecentPreviewTitles": {
+    "description": "Option of trayRecentPreviewTitle: clip type, source app and time, no content."
+  },
+  "trayRecentPreviewHidden": "Hidden",
+  "@trayRecentPreviewHidden": {
+    "description": "Option of trayRecentPreviewTitle: only the number of clips."
+  },
+  "trayRecentSettingsKeywords": "tray menu bar recent preview privacy count",
+  "@trayRecentSettingsKeywords": {
+    "description": "Space-separated search keywords for the menu-bar and tray settings."
+  },
+  "transformsPaletteTitle": "Transform text",
+  "@transformsPaletteTitle": {
+    "description": "Title of the transform palette dialog."
+  },
+  "transformsFilterPlaceholder": "Filter transforms",
+  "@transformsFilterPlaceholder": {
+    "description": "Placeholder of the filter field in the transform palette."
+  },
+  "transformsNoMatches": "No transforms match",
+  "@transformsNoMatches": {
+    "description": "Shown in the palette list when the filter matches nothing."
+  },
+  "transformsGroupResults": "Results",
+  "@transformsGroupResults": {
+    "description": "Palette list group with filtered results."
+  },
+  "transformsGroupSuggested": "Suggested",
+  "@transformsGroupSuggested": {
+    "description": "Palette list group with transforms suggested for the content."
+  },
+  "transformsGroupRecent": "Recent",
+  "@transformsGroupRecent": {
+    "description": "Palette list group with recently used transforms."
+  },
+  "transformsGroupFavorites": "Favorites",
+  "@transformsGroupFavorites": {
+    "description": "Palette list group with favorite transforms."
+  },
+  "transformsGroupPipelines": "Pipelines",
+  "@transformsGroupPipelines": {
+    "description": "Palette list group with saved pipelines (chains of transforms)."
+  },
+  "transformsCategoryStructure": "JSON, YAML, CSV and XML",
+  "@transformsCategoryStructure": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryEncode": "Encode and decode",
+  "@transformsCategoryEncode": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryCase": "Case",
+  "@transformsCategoryCase": {
+    "description": "Transform category name: letter case changes."
+  },
+  "transformsCategoryHash": "Hashes",
+  "@transformsCategoryHash": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryLines": "Lines and whitespace",
+  "@transformsCategoryLines": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryClean": "Clean up",
+  "@transformsCategoryClean": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryUrl": "Links",
+  "@transformsCategoryUrl": {
+    "description": "Transform category name: URL cleanup."
+  },
+  "transformsCategoryMarkup": "Rich text and Markdown",
+  "@transformsCategoryMarkup": {
+    "description": "Transform category name."
+  },
+  "transformsCategoryDev": "Developer",
+  "@transformsCategoryDev": {
+    "description": "Transform category name: tokens, timestamps, find and replace."
+  },
+  "transformsCategoryOther": "Other",
+  "@transformsCategoryOther": {
+    "description": "Transform category name for transforms of an unknown category."
+  },
+  "transformsChainEmpty": "No steps yet",
+  "@transformsChainEmpty": {
+    "description": "Shown in the palette chain strip when no transform is picked."
+  },
+  "transformsStepLabel": "{step} · {name}",
+  "@transformsStepLabel": {
+    "description": "Label of one step in a transform chain: its position and transform name.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "description": "1-based step position."
+      },
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      }
+    }
+  },
+  "transformsThenLabel": "Then: {name}",
+  "@transformsThenLabel": {
+    "description": "Label of the highlighted transform that is not yet a step of the chain.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      }
+    }
+  },
+  "transformsStepEnabled": "Run this step",
+  "@transformsStepEnabled": {
+    "description": "Switch label that enables or disables one step of a chain."
+  },
+  "transformsMoveEarlier": "Move up",
+  "@transformsMoveEarlier": {
+    "description": "Button that moves a step or favorite one place earlier."
+  },
+  "transformsMoveLater": "Move down",
+  "@transformsMoveLater": {
+    "description": "Button that moves a step or favorite one place later."
+  },
+  "transformsRemoveStep": "Remove step",
+  "@transformsRemoveStep": {
+    "description": "Button that removes one step of a chain."
+  },
+  "transformsSavePipeline": "Save as pipeline",
+  "@transformsSavePipeline": {
+    "description": "Button that saves the current chain as a named pipeline."
+  },
+  "transformsSavePipelineTitle": "Save pipeline",
+  "@transformsSavePipelineTitle": {
+    "description": "Title of the dialog that names a new pipeline."
+  },
+  "transformsSavePipelineFailed": "The pipeline could not be saved.",
+  "@transformsSavePipelineFailed": {
+    "description": "Error when saving a pipeline fails."
+  },
+  "transformsPipelineNameLabel": "Name",
+  "@transformsPipelineNameLabel": {
+    "description": "Label of the pipeline name field."
+  },
+  "transformsPipelineDescriptionLabel": "Description (optional)",
+  "@transformsPipelineDescriptionLabel": {
+    "description": "Label of the pipeline description field."
+  },
+  "transformsPipelineStepsLabel": "Steps",
+  "@transformsPipelineStepsLabel": {
+    "description": "Heading of the step list in the pipeline editor."
+  },
+  "transformsPipelineNoSteps": "Add at least one step.",
+  "@transformsPipelineNoSteps": {
+    "description": "Shown in the pipeline editor when it has no steps."
+  },
+  "transformsPipelineNameRequired": "Enter a name.",
+  "@transformsPipelineNameRequired": {
+    "description": "Validation message when the pipeline name is empty."
+  },
+  "transformsPipelineNameTooLong": "Use at most 80 characters.",
+  "@transformsPipelineNameTooLong": {
+    "description": "Validation message when the pipeline name is too long."
+  },
+  "transformsPipelineNameTaken": "Another pipeline already has this name.",
+  "@transformsPipelineNameTaken": {
+    "description": "Validation message when the pipeline name is already used."
+  },
+  "transformsPipelineSavedTitle": "Pipeline saved",
+  "@transformsPipelineSavedTitle": {
+    "description": "Toast title after saving a pipeline."
+  },
+  "transformsPipelineSavedMessage": "{name} is available in every transform palette.",
+  "@transformsPipelineSavedMessage": {
+    "description": "Toast message after saving a pipeline.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Pipeline name."
+      }
+    }
+  },
+  "transformsPipelineSteps": "Steps: {count}",
+  "@transformsPipelineSteps": {
+    "description": "Number of steps of a pipeline.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "description": "Step count."
+      }
+    }
+  },
+  "transformsPipelineCopyName": "{name} ({index})",
+  "@transformsPipelineCopyName": {
+    "description": "Name of a duplicated pipeline.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Original pipeline name."
+      },
+      "index": {
+        "type": "int",
+        "description": "Copy number, starting at 2."
+      }
+    }
+  },
+  "transformsRemovedPipeline": "Deleted pipeline",
+  "@transformsRemovedPipeline": {
+    "description": "Shown where a favorite or default names a pipeline that no longer exists."
+  },
+  "transformsNeedsNewerVersion": "Needs a newer CopyPaste version",
+  "@transformsNeedsNewerVersion": {
+    "description": "Shown for a pipeline or step made by a newer app version; it cannot run here."
+  },
+  "transformsLoadFailed": "Transforms could not be loaded.",
+  "@transformsLoadFailed": {
+    "description": "Error when the transform catalogue or settings cannot be loaded."
+  },
+  "transformsNotTextTitle": "Transforms work on text",
+  "@transformsNotTextTitle": {
+    "description": "Title shown when the palette opens on an image, file or color item."
+  },
+  "transformsNotTextMessage": "This item is an image, a file or a color. Pick a text item or copy some text.",
+  "@transformsNotTextMessage": {
+    "description": "Explanation shown when the palette opens on a non-text item."
+  },
+  "transformsNothingTitle": "Nothing to transform",
+  "@transformsNothingTitle": {
+    "description": "Title shown when there is no source text for the palette."
+  },
+  "transformsNothingMessage": "Copy some text or pick a history item.",
+  "@transformsNothingMessage": {
+    "description": "Hint shown when there is no source text for the palette."
+  },
+  "transformsPickTransform": "Pick a transform",
+  "@transformsPickTransform": {
+    "description": "Shown in the preview before any transform is highlighted."
+  },
+  "transformsPickTransformHint": "Tab adds it as a step. Enter applies the result.",
+  "@transformsPickTransformHint": {
+    "description": "Keyboard hint in the empty preview on desktop."
+  },
+  "transformsPreviewing": "Updating preview…",
+  "@transformsPreviewing": {
+    "description": "Status line while the preview is computed."
+  },
+  "transformsCounts": "Lines: {lines} · Words: {words} · Characters: {chars}",
+  "@transformsCounts": {
+    "description": "Counts of the shown output, announced to screen readers when the preview updates.",
+    "placeholders": {
+      "lines": {
+        "type": "int",
+        "description": "Line count."
+      },
+      "words": {
+        "type": "int",
+        "description": "Word count."
+      },
+      "chars": {
+        "type": "int",
+        "description": "Character count."
+      }
+    }
+  },
+  "transformsNoChanges": "No changes",
+  "@transformsNoChanges": {
+    "description": "Preview status when the output equals the input."
+  },
+  "transformsTruncated": "Showing the first 64 KiB of {size}",
+  "@transformsTruncated": {
+    "description": "Preview status when only a prefix of a long text is shown.",
+    "placeholders": {
+      "size": {
+        "type": "String",
+        "description": "Formatted size of the whole text."
+      }
+    }
+  },
+  "transformsRandom": "Random",
+  "@transformsRandom": {
+    "description": "Preview status when the chain contains a random transform such as shuffle."
+  },
+  "transformsNotRun": "Not run",
+  "@transformsNotRun": {
+    "description": "Preview of a step after a failed step."
+  },
+  "transformsSensitiveHidden": "The result is sensitive and hidden.",
+  "@transformsSensitiveHidden": {
+    "description": "Shown instead of a sensitive preview until it is revealed."
+  },
+  "transformsReveal": "Reveal",
+  "@transformsReveal": {
+    "description": "Button that shows a hidden sensitive preview."
+  },
+  "transformsPaneOutput": "Output",
+  "@transformsPaneOutput": {
+    "description": "Preview tab with the transform output."
+  },
+  "transformsPaneInput": "Input",
+  "@transformsPaneInput": {
+    "description": "Preview tab with the transform input."
+  },
+  "transformsPaneChanges": "Changes",
+  "@transformsPaneChanges": {
+    "description": "Preview tab that highlights what the transform changed."
+  },
+  "transformsCannotTransform": "Can't transform this text",
+  "@transformsCannotTransform": {
+    "description": "Title of an error about the source text."
+  },
+  "transformsStepFailed": "Step {step} · {name}: {message}",
+  "@transformsStepFailed": {
+    "description": "Preview error naming the failed step of a chain.",
+    "placeholders": {
+      "step": {
+        "type": "int",
+        "description": "1-based failed step."
+      },
+      "name": {
+        "type": "String",
+        "description": "Transform name."
+      },
+      "message": {
+        "type": "String",
+        "description": "What failed, possibly with its position."
+      }
+    }
+  },
+  "transformsUseHexOutput": "Show as hex",
+  "@transformsUseHexOutput": {
+    "description": "Button offered when decoded data is binary: switch the step to hex output."
+  },
+  "transformsActionPaste": "Paste",
+  "@transformsActionPaste": {
+    "description": "Palette action that pastes the result into the previous app."
+  },
+  "transformsActionSave": "Save as new clip",
+  "@transformsActionSave": {
+    "description": "Palette action that stores the result as a new history item."
+  },
+  "transformsCopiedMessage": "The result is on the clipboard and in history.",
+  "@transformsCopiedMessage": {
+    "description": "Toast message after copying a transform result."
+  },
+  "transformsSavedTitle": "Saved",
+  "@transformsSavedTitle": {
+    "description": "Toast title after saving a transform result as a new item."
+  },
+  "transformsSavedMessage": "Saved as a new history item.",
+  "@transformsSavedMessage": {
+    "description": "Toast message after saving a transform result as a new item."
+  },
+  "transformsPasteFailedTitle": "Couldn't paste",
+  "@transformsPasteFailedTitle": {
+    "description": "Toast title when a transformed paste cannot reach the target app."
+  },
+  "transformsPasteFailedMessage": "The result is on the clipboard. Paste it manually.",
+  "@transformsPasteFailedMessage": {
+    "description": "Toast message when a transformed paste cannot reach the target app."
+  },
+  "transformsErrorAt": "{message} at line {line}, column {column}",
+  "@transformsErrorAt": {
+    "description": "A transform error with its position in the input.",
+    "placeholders": {
+      "message": {
+        "type": "String",
+        "description": "What failed."
+      },
+      "line": {
+        "type": "int",
+        "description": "1-based line."
+      },
+      "column": {
+        "type": "int",
+        "description": "1-based column."
+      }
+    }
+  },
+  "transformsErrorBinary": "Decoded data is binary, not text",
+  "@transformsErrorBinary": {
+    "description": "Transform error: decoded bytes are not text."
+  },
+  "transformsErrorTooLarge": "Too large to transform",
+  "@transformsErrorTooLarge": {
+    "description": "Transform error: input or output is over the size limit."
+  },
+  "transformsErrorInvalidParam": "A setting of this step is not valid",
+  "@transformsErrorInvalidParam": {
+    "description": "Transform error: a parameter value is refused."
+  },
+  "transformsErrorCancelled": "Cancelled",
+  "@transformsErrorCancelled": {
+    "description": "Transform error: the computation was cancelled."
+  },
+  "transformsErrorTooExpensive": "Pattern too expensive",
+  "@transformsErrorTooExpensive": {
+    "description": "Transform error: a pattern exceeded the time budget."
+  },
+  "transformsErrorPattern": "The pattern is not valid",
+  "@transformsErrorPattern": {
+    "description": "Transform error: an empty or invalid search pattern."
+  },
+  "transformsErrorTimestampUnit": "Choose whether the number is in seconds or milliseconds",
+  "@transformsErrorTimestampUnit": {
+    "description": "Transform error: a timestamp needs its unit."
+  },
+  "transformsErrorExternalEntity": "External entities are not allowed",
+  "@transformsErrorExternalEntity": {
+    "description": "Transform error: XML that references external entities."
+  },
+  "transformsErrorJwtEncrypted": "Encrypted tokens can't be decoded",
+  "@transformsErrorJwtEncrypted": {
+    "description": "Transform error: the JWT is encrypted."
+  },
+  "transformsErrorJson": "Invalid JSON",
+  "@transformsErrorJson": {
+    "description": "Transform error."
+  },
+  "transformsErrorYaml": "Invalid YAML",
+  "@transformsErrorYaml": {
+    "description": "Transform error."
+  },
+  "transformsErrorXml": "Invalid XML",
+  "@transformsErrorXml": {
+    "description": "Transform error."
+  },
+  "transformsErrorCsv": "Invalid CSV",
+  "@transformsErrorCsv": {
+    "description": "Transform error."
+  },
+  "transformsErrorBase64": "Invalid Base64",
+  "@transformsErrorBase64": {
+    "description": "Transform error."
+  },
+  "transformsErrorHex": "Invalid hex",
+  "@transformsErrorHex": {
+    "description": "Transform error."
+  },
+  "transformsErrorEscape": "Invalid escape sequence",
+  "@transformsErrorEscape": {
+    "description": "Transform error."
+  },
+  "transformsErrorUrl": "Malformed percent-encoding",
+  "@transformsErrorUrl": {
+    "description": "Transform error in URL decoding."
+  },
+  "transformsErrorJwt": "Not a valid JWT",
+  "@transformsErrorJwt": {
+    "description": "Transform error."
+  },
+  "transformsErrorDate": "Not a recognized date or timestamp",
+  "@transformsErrorDate": {
+    "description": "Transform error."
+  },
+  "transformsErrorGeneric": "This step can't transform its input",
+  "@transformsErrorGeneric": {
+    "description": "Transform error with an unknown code."
+  },
+  "transformsWarningSignedLink": "Signed link left unchanged",
+  "@transformsWarningSignedLink": {
+    "description": "Transform warning: a signed URL was not modified."
+  },
+  "transformsWarningExpired": "Expired",
+  "@transformsWarningExpired": {
+    "description": "Transform warning: the decoded token has expired."
+  },
+  "transformsWarningNotYetValid": "Not yet valid",
+  "@transformsWarningNotYetValid": {
+    "description": "Transform warning: the decoded token is not valid yet."
+  },
+  "transformsWarningSignatureNotVerified": "Signature not verified",
+  "@transformsWarningSignatureNotVerified": {
+    "description": "Transform warning: a decoded token's signature is not checked."
+  },
+  "transformsWarningDuplicateKeys": "Duplicate keys",
+  "@transformsWarningDuplicateKeys": {
+    "description": "Transform warning: the input has duplicate keys."
+  },
+  "transformsWarningLenientJson": "Accepted non-standard JSON",
+  "@transformsWarningLenientJson": {
+    "description": "Transform warning: trailing commas or comments were accepted."
+  },
+  "transformsWarningDoubleEncoded": "The JSON was encoded twice",
+  "@transformsWarningDoubleEncoded": {
+    "description": "Transform warning."
+  },
+  "transformsWarningEscapes": "Unknown escape sequences kept as written",
+  "@transformsWarningEscapes": {
+    "description": "Transform warning."
+  },
+  "transformsWarningLocalZone": "Local time zone assumed",
+  "@transformsWarningLocalZone": {
+    "description": "Transform warning: a date without a zone was read as local time."
+  },
+  "transformsWarningNoMatches": "No matches",
+  "@transformsWarningNoMatches": {
+    "description": "Transform warning: an extraction found nothing."
+  },
+  "transformsWarningGeneric": "Check the result",
+  "@transformsWarningGeneric": {
+    "description": "Transform warning with an unknown code."
+  },
+  "transformsRestoreTitle": "Restore clipboard after paste",
+  "@transformsRestoreTitle": {
+    "description": "Settings row title: put the previous clipboard back after a transformed paste."
+  },
+  "transformsRestoreDescription": "Bring back the previous clipboard after pasting.",
+  "@transformsRestoreDescription": {
+    "description": "Settings row description."
+  },
+  "transformsDefaultTitle": "Default paste transform",
+  "@transformsDefaultTitle": {
+    "description": "Settings row title: a pipeline applied when pasting from Quick Paste."
+  },
+  "transformsDefaultDescription": "Applied to text you paste from Quick Paste.",
+  "@transformsDefaultDescription": {
+    "description": "Settings row description."
+  },
+  "transformsNoDefault": "None",
+  "@transformsNoDefault": {
+    "description": "Option meaning no default paste transform."
+  },
+  "transformsAppDefaultsTitle": "Defaults per app",
+  "@transformsAppDefaultsTitle": {
+    "description": "Settings row title: default paste transforms for specific apps."
+  },
+  "transformsAppDefaultsDescription": "Use a different default in specific apps.",
+  "@transformsAppDefaultsDescription": {
+    "description": "Settings row description."
+  },
+  "transformsOtherPlatform": "only on {platform}",
+  "@transformsOtherPlatform": {
+    "description": "Marks a per-app default made for another platform.",
+    "placeholders": {
+      "platform": {
+        "type": "String",
+        "description": "Platform name such as macos."
+      }
+    }
+  },
+  "transformsAddApp": "Add app",
+  "@transformsAddApp": {
+    "description": "Button that chooses an application to add a per-app default for."
+  },
+  "transformsRemove": "Remove",
+  "@transformsRemove": {
+    "description": "Button that removes an entry from a list."
+  },
+  "transformsFavoritesTitle": "Favorites",
+  "@transformsFavoritesTitle": {
+    "description": "Settings row title: favorite transforms and pipelines."
+  },
+  "transformsFavoritesDescription": "Shown first in every palette.",
+  "@transformsFavoritesDescription": {
+    "description": "Settings row description; Mod is Command on macOS and Ctrl elsewhere."
+  },
+  "transformsFavoriteShortcut": "Mod+{number} in the palette",
+  "@transformsFavoriteShortcut": {
+    "description": "Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.",
+    "placeholders": {
+      "number": {
+        "type": "int",
+        "description": "1 to 9."
+      }
+    }
+  },
+  "transformsAddFavorite": "Add a favorite",
+  "@transformsAddFavorite": {
+    "description": "Placeholder of the selector that adds a favorite."
+  },
+  "transformsPipelinesTitle": "Pipelines",
+  "@transformsPipelinesTitle": {
+    "description": "Settings row title: saved chains of transforms."
+  },
+  "transformsPipelinesDescription": "Saved chains of transforms.",
+  "@transformsPipelinesDescription": {
+    "description": "Settings row description."
+  },
+  "transformsNewPipeline": "New pipeline",
+  "@transformsNewPipeline": {
+    "description": "Button and drawer title for creating a pipeline."
+  },
+  "transformsEditPipeline": "Edit pipeline",
+  "@transformsEditPipeline": {
+    "description": "Button and drawer title for editing a pipeline."
+  },
+  "transformsDuplicatePipeline": "Duplicate",
+  "@transformsDuplicatePipeline": {
+    "description": "Button that copies a pipeline."
+  },
+  "transformsDeletePipeline": "Delete",
+  "@transformsDeletePipeline": {
+    "description": "Button that deletes a pipeline."
+  },
+  "transformsDeletePipelineTitle": "Delete {name}?",
+  "@transformsDeletePipelineTitle": {
+    "description": "Title of the dialog confirming a pipeline deletion.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "description": "Pipeline name."
+      }
+    }
+  },
+  "transformsDeletePipelineMessage": "Favorites and paste defaults using it are cleared.",
+  "@transformsDeletePipelineMessage": {
+    "description": "Explanation in the delete pipeline dialog."
+  },
+  "transformsDeletePipelineFailed": "The pipeline could not be deleted.",
+  "@transformsDeletePipelineFailed": {
+    "description": "Error when deleting a pipeline fails."
+  },
+  "transformsAddStep": "Add a step",
+  "@transformsAddStep": {
+    "description": "Placeholder of the selector that adds a step to a pipeline."
+  },
+  "transformsHiddenTitle": "Hidden transforms",
+  "@transformsHiddenTitle": {
+    "description": "Settings row title: transforms hidden from the palette."
+  },
+  "transformsHiddenDescription": "Left out of palettes and suggestions.",
+  "@transformsHiddenDescription": {
+    "description": "Settings row description."
+  },
+  "transformsHideTransform": "Hide a transform",
+  "@transformsHideTransform": {
+    "description": "Placeholder of the selector that hides a transform."
+  },
+  "transformsShow": "Show",
+  "@transformsShow": {
+    "description": "Button that shows a hidden transform again."
+  },
+  "transformsSuggestionsTitle": "Suggestions",
+  "@transformsSuggestionsTitle": {
+    "description": "Settings row title: suggested transforms in the palette."
+  },
+  "transformsSuggestionsDescription": "Suggest transforms that fit the text.",
+  "@transformsSuggestionsDescription": {
+    "description": "Settings row description."
+  },
+  "transformsDetectorJson": "JSON",
+  "@transformsDetectorJson": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorJwt": "JSON Web Tokens",
+  "@transformsDetectorJwt": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorBase64": "Base64",
+  "@transformsDetectorBase64": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorTrackingUrl": "Links with tracking parameters",
+  "@transformsDetectorTrackingUrl": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorTimestamp": "Timestamps",
+  "@transformsDetectorTimestamp": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorHtml": "HTML",
+  "@transformsDetectorHtml": {
+    "description": "Content detector name."
+  },
+  "transformsDetectorMarkdown": "Markdown",
+  "@transformsDetectorMarkdown": {
+    "description": "Content detector name."
+  },
+  "transformsTrackingTitle": "Tracking parameters",
+  "@transformsTrackingTitle": {
+    "description": "Settings row title: URL parameters removed by the Remove tracking parameters transform."
+  },
+  "transformsTrackingDescription": "Link parameters to also remove or always keep.",
+  "@transformsTrackingDescription": {
+    "description": "Settings row description."
+  },
+  "transformsTrackingRemoveLabel": "Also remove",
+  "@transformsTrackingRemoveLabel": {
+    "description": "Label of the custom list of tracking parameters to remove."
+  },
+  "transformsTrackingAllowLabel": "Always keep",
+  "@transformsTrackingAllowLabel": {
+    "description": "Label of the list of parameters that are never removed."
+  },
+  "transformsTrackingPlaceholder": "name or name@domain, then Enter",
+  "@transformsTrackingPlaceholder": {
+    "description": "Placeholder of the tracking parameter field."
+  },
+  "quickAccessUnavailableTitle": "Quick access status unavailable",
+  "@quickAccessUnavailableTitle": {
+    "description": "Error title in Android Settings > Quick access when the keyboard, tile and widget status cannot be read."
+  },
+  "quickAccessUnavailableMessage": "CopyPaste couldn't read the keyboard, tile, and widget status. Try again.",
+  "@quickAccessUnavailableMessage": {
+    "description": "Error message under quickAccessUnavailableTitle; a Retry button follows."
+  },
+  "quickAccessActionFailedTitle": "Couldn't complete that",
+  "@quickAccessActionFailedTitle": {
+    "description": "Notice title in Android Settings > Quick access when a system screen could not be opened or an option could not be saved."
+  },
+  "quickAccessActionFailedMessage": "Android didn't open the requested screen or save the change. Try again.",
+  "@quickAccessActionFailedMessage": {
+    "description": "Notice message under quickAccessActionFailedTitle."
+  },
+  "quickAccessKeyboardTitle": "Clips keyboard",
+  "@quickAccessKeyboardTitle": {
+    "description": "Setting row title: the CopyPaste clips keyboard panel (an Android input method that inserts saved clips)."
+  },
+  "quickAccessKeyboardDescription": "Turn on CopyPaste clips in keyboard settings.",
+  "@quickAccessKeyboardDescription": {
+    "description": "Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes."
+  },
+  "quickAccessKeyboardOn": "Turned on",
+  "@quickAccessKeyboardOn": {
+    "description": "Status under the clips keyboard row: the keyboard is turned on in system settings."
+  },
+  "quickAccessKeyboardOff": "Turned off",
+  "@quickAccessKeyboardOff": {
+    "description": "Status under the clips keyboard row: the keyboard is turned off in system settings."
+  },
+  "quickAccessOpenKeyboardSettings": "Open keyboard settings",
+  "@quickAccessOpenKeyboardSettings": {
+    "description": "Button that opens the Android system screen where keyboards are turned on."
+  },
+  "quickAccessKeyboardSearchDescription": "Turn on the CopyPaste clips keyboard panel.",
+  "@quickAccessKeyboardSearchDescription": {
+    "description": "Settings search result description for the clips keyboard row."
+  },
+  "quickAccessKeyboardKeywords": "keyboard input method ime panel enable",
+  "@quickAccessKeyboardKeywords": {
+    "description": "Space-separated search keywords for the clips keyboard row; translate and add local synonyms."
+  },
+  "quickAccessSwitchKeyboardTitle": "Switch to the clips keyboard",
+  "@quickAccessSwitchKeyboardTitle": {
+    "description": "Setting row title: make the clips keyboard the current keyboard."
+  },
+  "quickAccessSwitchKeyboardDescription": "Make CopyPaste clips the current keyboard.",
+  "@quickAccessSwitchKeyboardDescription": {
+    "description": "Setting row description for switching to the clips keyboard."
+  },
+  "quickAccessSwitchKeyboardAction": "Choose keyboard",
+  "@quickAccessSwitchKeyboardAction": {
+    "description": "Button that shows the Android keyboard picker."
+  },
+  "quickAccessKeyboardCurrent": "Current keyboard",
+  "@quickAccessKeyboardCurrent": {
+    "description": "Status: the clips keyboard is the current keyboard."
+  },
+  "quickAccessCaptureTierTitle": "Capture mode",
+  "@quickAccessCaptureTierTitle": {
+    "description": "Setting row title: how copies made in other apps are saved on this device."
+  },
+  "quickAccessCaptureTierDescription": "How copies from other apps are saved.",
+  "@quickAccessCaptureTierDescription": {
+    "description": "Setting row description explaining capture without Shizuku or ADB access."
+  },
+  "quickAccessCaptureTierSearchDescription": "See how copies from other apps are saved.",
+  "@quickAccessCaptureTierSearchDescription": {
+    "description": "Settings search result description for the capture mode row."
+  },
+  "quickAccessCaptureTierKeywords": "capture tier full panel manual shizuku collect",
+  "@quickAccessCaptureTierKeywords": {
+    "description": "Space-separated search keywords for the capture mode row; translate and add local synonyms."
+  },
+  "quickAccessTierFull": "Full: every copy is saved in the background",
+  "@quickAccessTierFull": {
+    "description": "Capture mode status: background capture granted through Shizuku or ADB saves every copy."
+  },
+  "quickAccessTierPanelCollecting": "Panel selected: collecting",
+  "@quickAccessTierPanelCollecting": {
+    "description": "Capture mode status: the clips keyboard is the current keyboard and saves each copy."
+  },
+  "quickAccessTierPanelCatchUp": "Panel mode: catch-up on open",
+  "@quickAccessTierPanelCatchUp": {
+    "description": "Capture mode status: the clips keyboard is turned on and saves the clipboard when it opens."
+  },
+  "quickAccessTierManual": "Manual: save from the app, a tile, the widget, or Share",
+  "@quickAccessTierManual": {
+    "description": "Capture mode status: copies are saved only by an explicit action."
+  },
+  "quickAccessTierPaused": "Capture paused",
+  "@quickAccessTierPaused": {
+    "description": "Capture mode status: the user paused clipboard capture."
+  },
+  "quickAccessAutoReturnTitle": "Return to previous keyboard after inserting",
+  "@quickAccessAutoReturnTitle": {
+    "description": "Switch title: after inserting a clip, the panel switches back to the keyboard used before."
+  },
+  "quickAccessAutoReturnDescription": "Switch back after inserting one clip.",
+  "@quickAccessAutoReturnDescription": {
+    "description": "Switch description for returning to the previous keyboard after inserting."
+  },
+  "quickAccessAutoReturnKeywords": "switch back previous keyboard auto return insert",
+  "@quickAccessAutoReturnKeywords": {
+    "description": "Space-separated search keywords for the return-to-previous-keyboard switch; translate and add local synonyms."
+  },
+  "quickAccessFocusSearchTitle": "Focus search when the panel opens",
+  "@quickAccessFocusSearchTitle": {
+    "description": "Switch title: the clips panel opens with its search field focused."
+  },
+  "quickAccessFocusSearchDescription": "Open the panel with search ready.",
+  "@quickAccessFocusSearchDescription": {
+    "description": "Switch description for focusing search when the clips panel opens."
+  },
+  "quickAccessTilesTitle": "Quick Settings tiles",
+  "@quickAccessTilesTitle": {
+    "description": "Setting row title for the Android Quick Settings tiles; also the search result label."
+  },
+  "quickAccessTilesSearchDescription": "Add the Save clipboard and Clipboard capture tiles.",
+  "@quickAccessTilesSearchDescription": {
+    "description": "Settings search result description for the Quick Settings tile rows."
+  },
+  "quickAccessTilesKeywords": "quick settings tile shade save pause",
+  "@quickAccessTilesKeywords": {
+    "description": "Space-separated search keywords for the Quick Settings tile rows; translate and add local synonyms."
+  },
+  "quickAccessTileInstructions": "Swipe down twice, tap Edit, and add a CopyPaste tile.",
+  "@quickAccessTileInstructions": {
+    "description": "How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt."
+  },
+  "quickAccessSaveTileTitle": "Save clipboard tile",
+  "@quickAccessSaveTileTitle": {
+    "description": "Setting row title for the Save clipboard Quick Settings tile."
+  },
+  "quickAccessSaveTileDescription": "Saves what's on the clipboard from Quick Settings.",
+  "@quickAccessSaveTileDescription": {
+    "description": "Setting row description for the Save clipboard tile."
+  },
+  "quickAccessCaptureTileTitle": "Clipboard capture tile",
+  "@quickAccessCaptureTileTitle": {
+    "description": "Setting row title for the Clipboard capture Quick Settings tile."
+  },
+  "quickAccessCaptureTileDescription": "Pauses and resumes capture from Quick Settings.",
+  "@quickAccessCaptureTileDescription": {
+    "description": "Setting row description for the Clipboard capture tile."
+  },
+  "quickAccessAddTile": "Add tile",
+  "@quickAccessAddTile": {
+    "description": "Button that asks Android to add the tile to Quick Settings."
+  },
+  "quickAccessTileAdded": "Added to Quick Settings",
+  "@quickAccessTileAdded": {
+    "description": "Status: the tile is in Quick Settings."
+  },
+  "quickAccessWidgetTitle": "Recent clips widget",
+  "@quickAccessWidgetTitle": {
+    "description": "Setting row title for the Recent clips home-screen widget."
+  },
+  "quickAccessWidgetDescription": "Recent clips on your home screen, one tap to copy.",
+  "@quickAccessWidgetDescription": {
+    "description": "Setting row description for the Recent clips widget."
+  },
+  "quickAccessWidgetInstructions": "Hold the home screen, tap Widgets, and add Recent clips.",
+  "@quickAccessWidgetInstructions": {
+    "description": "How to add the widget by hand, shown when the launcher cannot pin widgets."
+  },
+  "quickAccessWidgetCount": "{count, plural, =0{Not added} =1{1 widget added} other{{count} widgets added}}",
+  "@quickAccessWidgetCount": {
+    "description": "Status: how many Recent clips widgets are on the home screen.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "quickAccessAddWidget": "Add widget",
+  "@quickAccessAddWidget": {
+    "description": "Button that asks the launcher to add the Recent clips widget."
+  },
+  "quickAccessWidgetKeywords": "home screen widget launcher recent",
+  "@quickAccessWidgetKeywords": {
+    "description": "Space-separated search keywords for the widget row; translate and add local synonyms."
+  },
+  "snippetsAbbreviationBadge": "Abbreviation {abbreviation}",
+  "@snippetsAbbreviationBadge": {
+    "description": "Screen-reader label of the abbreviation badge on a snippet row.",
+    "placeholders": {
+      "abbreviation": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsAbbreviationLabel": "Abbreviation",
+  "@snippetsAbbreviationLabel": {
+    "description": "Label of the abbreviation field in the snippet editor."
+  },
+  "snippetsAbbreviationPlaceholder": "Optional, for example sig",
+  "@snippetsAbbreviationPlaceholder": {
+    "description": "Placeholder of the abbreviation field; \"sig\" is a sample abbreviation and may be localized."
+  },
+  "snippetsAbbreviationTaken": "Already used by “{title}”",
+  "@snippetsAbbreviationTaken": {
+    "description": "Inline error: another snippet already has this abbreviation; title is that snippet's title.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsAbbreviationTooLong": "Use at most {max} characters.",
+  "@snippetsAbbreviationTooLong": {
+    "description": "Inline error: the abbreviation is too long.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsAbbreviationWhitespace": "An abbreviation can't contain spaces or control characters.",
+  "@snippetsAbbreviationWhitespace": {
+    "description": "Inline error: the abbreviation contains whitespace."
+  },
+  "snippetsAttention": "{count, plural, =0{No snippets need review} =1{1 snippet needs review after a sync} other{{count} snippets need review after a sync}}",
+  "@snippetsAttention": {
+    "description": "Banner above the snippet list: snippets with a duplicate abbreviation or conflict copies created by sync.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsBodyLabel": "Text",
+  "@snippetsBodyLabel": {
+    "description": "Label of the snippet body field."
+  },
+  "snippetsBodyPlaceholder": "Type the snippet text",
+  "@snippetsBodyPlaceholder": {
+    "description": "Placeholder of the empty snippet body field."
+  },
+  "snippetsClearSelection": "Clear selection",
+  "@snippetsClearSelection": {
+    "description": "Button that deselects all selected snippets."
+  },
+  "snippetsClipTooLarge": "Too large to edit. This clip opens read-only.",
+  "@snippetsClipTooLarge": {
+    "description": "Notice in the clip editor for clips over 256 KB."
+  },
+  "snippetsCollectionAccent": "{accent, select, neutral{Neutral} blue{Blue} green{Green} amber{Amber} red{Red} other{Neutral}}",
+  "@snippetsCollectionAccent": {
+    "description": "Name of a collection accent color.",
+    "placeholders": {
+      "accent": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsCollectionAccentLabel": "Accent",
+  "@snippetsCollectionAccentLabel": {
+    "description": "Label of the collection accent color picker."
+  },
+  "snippetsCollectionIcon": "Icon",
+  "@snippetsCollectionIcon": {
+    "description": "Label of the collection icon picker."
+  },
+  "snippetsCollectionLabel": "Collection",
+  "@snippetsCollectionLabel": {
+    "description": "Label of the collection picker in the snippet editor."
+  },
+  "snippetsCollectionName": "Name",
+  "@snippetsCollectionName": {
+    "description": "Label of the collection name field."
+  },
+  "snippetsCollectionNameTaken": "A collection with this name already exists.",
+  "@snippetsCollectionNameTaken": {
+    "description": "Inline error in the collection editor."
+  },
+  "snippetsCollectionNameTooLong": "Use at most {max} characters.",
+  "@snippetsCollectionNameTooLong": {
+    "description": "Inline error: the collection name is too long.",
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsConcealedBody": "This snippet is concealed.",
+  "@snippetsConcealedBody": {
+    "description": "Shown instead of the body of a concealed snippet in the editor until the user chooses Show."
+  },
+  "snippetsConcealedConfirmAction": "Continue",
+  "@snippetsConcealedConfirmAction": {
+    "description": "Confirms the in-app owner check on devices without device authentication."
+  },
+  "snippetsConcealedConfirmMessage": "This device can't verify you. Continue only on your own device.",
+  "@snippetsConcealedConfirmMessage": {
+    "description": "In-app owner check shown when the system cannot verify the device owner."
+  },
+  "snippetsConcealedConfirmTitle": "Confirm it's you",
+  "@snippetsConcealedConfirmTitle": {
+    "description": "Title of the in-app owner check."
+  },
+  "snippetsConcealedPreview": "Concealed snippet",
+  "@snippetsConcealedPreview": {
+    "description": "Shown and announced instead of a concealed snippet's text in lists."
+  },
+  "snippetsConcealedSwitch": "Concealed",
+  "@snippetsConcealedSwitch": {
+    "description": "Switch in the snippet editor that masks the snippet everywhere."
+  },
+  "snippetsConcealedTitle": "Concealed snippet",
+  "@snippetsConcealedTitle": {
+    "description": "Display title of a concealed snippet without a title."
+  },
+  "snippetsConflictBadge": "Conflict copy",
+  "@snippetsConflictBadge": {
+    "description": "Badge on a snippet created by a sync conflict."
+  },
+  "snippetsCopied": "Copied",
+  "@snippetsCopied": {
+    "description": "Toast title after a snippet was copied."
+  },
+  "snippetsCreate": "Create snippet",
+  "@snippetsCreate": {
+    "description": "Empty-state action that opens a new snippet."
+  },
+  "snippetsCreateNamed": "Create snippet “{query}”",
+  "@snippetsCreateNamed": {
+    "description": "Empty search action that creates a snippet from the query.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDeleteCollection": "Delete collection",
+  "@snippetsDeleteCollection": {
+    "description": "Action that deletes the selected collection."
+  },
+  "snippetsDeleteCollectionMove": "Move its snippets to Unfiled",
+  "@snippetsDeleteCollectionMove": {
+    "description": "Option when deleting a collection (default)."
+  },
+  "snippetsDeleteCollectionTitle": "Delete “{name}”?",
+  "@snippetsDeleteCollectionTitle": {
+    "description": "Title of the delete-collection dialog.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDeleteCollectionWithSnippets": "Delete its snippets too",
+  "@snippetsDeleteCollectionWithSnippets": {
+    "description": "Option when deleting a collection; the snippets go to Recently Deleted."
+  },
+  "snippetsDeletedMessage": "Moved to Recently Deleted.",
+  "@snippetsDeletedMessage": {
+    "description": "Toast message after deleting snippets."
+  },
+  "snippetsDeletedTitle": "{count, plural, =1{Snippet deleted} other{{count} snippets deleted}}",
+  "@snippetsDeletedTitle": {
+    "description": "Toast title after deleting snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsDestination": "Save to",
+  "@snippetsDestination": {
+    "description": "Label of the destination picker in the new-text editor."
+  },
+  "snippetsDestinationName": "{destination, select, historyClip{History clip} snippet{Snippet} other{History clip}}",
+  "@snippetsDestinationName": {
+    "description": "Destination of new text: a one-off history clip or a snippet.",
+    "placeholders": {
+      "destination": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsDiscard": "Discard",
+  "@snippetsDiscard": {
+    "description": "Unsaved-changes dialog action that closes without saving."
+  },
+  "snippetsDragging": "{count, plural, =1{1 snippet} other{{count} snippets}}",
+  "@snippetsDragging": {
+    "description": "Label shown while dragging snippets to a collection.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsDuplicateAbbreviation": "Another snippet has this abbreviation. Change one.",
+  "@snippetsDuplicateAbbreviation": {
+    "description": "Hint under the abbreviation of a snippet marked duplicate."
+  },
+  "snippetsDuplicateBadge": "Duplicate abbreviation",
+  "@snippetsDuplicateBadge": {
+    "description": "Badge on a snippet whose abbreviation is also used by another snippet after sync."
+  },
+  "snippetsEditClip": "Edit clip",
+  "@snippetsEditClip": {
+    "description": "Title of the clip editor."
+  },
+  "snippetsEditCollection": "Edit collection",
+  "@snippetsEditCollection": {
+    "description": "Title and action for editing a collection."
+  },
+  "snippetsEditSnippet": "Edit snippet",
+  "@snippetsEditSnippet": {
+    "description": "Title of the snippet editor for an existing snippet."
+  },
+  "snippetsEditTab": "Edit",
+  "@snippetsEditTab": {
+    "description": "Editor tab with the body field (narrow layouts)."
+  },
+  "snippetsEmptyMessage": "Give a snippet an abbreviation, then type it in Quick Paste.",
+  "@snippetsEmptyMessage": {
+    "description": "Empty state message of the snippet library."
+  },
+  "snippetsEmptyTitle": "No snippets yet",
+  "@snippetsEmptyTitle": {
+    "description": "Empty state title of the snippet library."
+  },
+  "snippetsEnableTemplate": "Turn on",
+  "@snippetsEnableTemplate": {
+    "description": "Confirms turning on Template before inserting a placeholder."
+  },
+  "snippetsEnableTemplateMessage": "Text that looks like a placeholder will be filled in.",
+  "@snippetsEnableTemplateMessage": {
+    "description": "Asked before inserting a placeholder into a literal snippet whose text already contains double braces."
+  },
+  "snippetsEnableTemplateTitle": "Turn on Template?",
+  "@snippetsEnableTemplateTitle": {
+    "description": "Title of the question before turning on Template."
+  },
+  "snippetsExport": "Export",
+  "@snippetsExport": {
+    "description": "Action that exports snippets."
+  },
+  "snippetsExportCollection": "Export collection",
+  "@snippetsExportCollection": {
+    "description": "Action that exports the selected collection."
+  },
+  "snippetsExportConcealedConfirm": "Include concealed snippets in the readable file",
+  "@snippetsExportConcealedConfirm": {
+    "description": "Separate confirmation for concealed snippets in an unencrypted export."
+  },
+  "snippetsExportCount": "{count, plural, =0{No snippets written} =1{1 snippet written} other{{count} snippets written}}",
+  "@snippetsExportCount": {
+    "description": "Toast message after exporting.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsExportDone": "Snippets exported",
+  "@snippetsExportDone": {
+    "description": "Toast title after exporting."
+  },
+  "snippetsExportEncrypt": "Encrypt with passphrase",
+  "@snippetsExportEncrypt": {
+    "description": "Export switch, on by default."
+  },
+  "snippetsExportFailed": "Export failed",
+  "@snippetsExportFailed": {
+    "description": "Error title in the export dialog."
+  },
+  "snippetsExportPlainConfirm": "I understand that anyone with the file can read it",
+  "@snippetsExportPlainConfirm": {
+    "description": "Required confirmation for an unencrypted export."
+  },
+  "snippetsExportScope": "{scope, select, all{All snippets} collections{This collection} snippets{Selected snippets ({count})} other{All snippets}}",
+  "@snippetsExportScope": {
+    "description": "What an export contains.",
+    "placeholders": {
+      "scope": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsExportTitle": "Export snippets",
+  "@snippetsExportTitle": {
+    "description": "Title of the export dialog."
+  },
+  "snippetsFieldBuilderTitle": "Insert field",
+  "@snippetsFieldBuilderTitle": {
+    "description": "Title of the dialog that builds a fill-in field placeholder."
+  },
+  "snippetsFieldDefault": "Default value",
+  "@snippetsFieldDefault": {
+    "description": "Label of the default value of a fill-in field."
+  },
+  "snippetsFieldName": "Name",
+  "@snippetsFieldName": {
+    "description": "Label of the name of a fill-in field."
+  },
+  "snippetsFieldOptions": "Options, separated by commas",
+  "@snippetsFieldOptions": {
+    "description": "Label of the options of a choice field."
+  },
+  "snippetsFieldRequired": "Fill in this field.",
+  "@snippetsFieldRequired": {
+    "description": "Inline error under an empty required template field."
+  },
+  "snippetsFieldType": "Type",
+  "@snippetsFieldType": {
+    "description": "Label of the kind of a fill-in field."
+  },
+  "snippetsFieldTypeName": "{kind, select, text{Single line} multiline{Multiple lines} choice{Choice} other{Single line}}",
+  "@snippetsFieldTypeName": {
+    "description": "Kind of a fill-in field.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsFormattingNotice": "Formatting will be removed when you save.",
+  "@snippetsFormattingNotice": {
+    "description": "Notice when editing text that has rich formatting."
+  },
+  "snippetsGoToSnippet": "Go to snippet",
+  "@snippetsGoToSnippet": {
+    "description": "Link to the snippet that already uses an abbreviation."
+  },
+  "snippetsImport": "Import",
+  "@snippetsImport": {
+    "description": "Action that imports snippets."
+  },
+  "snippetsImportAbbreviationPolicy": "Abbreviation already used",
+  "@snippetsImportAbbreviationPolicy": {
+    "description": "Import policy for snippets whose abbreviation another snippet uses."
+  },
+  "snippetsImportAbbreviationPolicyName": "{policy, select, importWithout{Import without abbreviation} renameWithSuffix{Add a number to the abbreviation} skip{Skip} other{Import without abbreviation}}",
+  "@snippetsImportAbbreviationPolicyName": {
+    "description": "Choices of the abbreviation import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportCollectionPolicy": "Collection with the same name",
+  "@snippetsImportCollectionPolicy": {
+    "description": "Import policy for collections whose name already exists."
+  },
+  "snippetsImportCollectionPolicyName": "{policy, select, merge{Add to the existing one} createNew{Create a new one} other{Add to the existing one}}",
+  "@snippetsImportCollectionPolicyName": {
+    "description": "Choices of the collection import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportConvert": "Convert known placeholders",
+  "@snippetsImportConvert": {
+    "description": "Import switch that translates recognized foreign placeholders."
+  },
+  "snippetsImportCounts": "New: {added}. Identical, skipped: {identical}. Changed: {updated}. Abbreviation conflicts: {conflicts}. Invalid: {invalid}.",
+  "@snippetsImportCounts": {
+    "description": "Import preview counts.",
+    "placeholders": {
+      "added": {
+        "type": "int"
+      },
+      "identical": {
+        "type": "int"
+      },
+      "updated": {
+        "type": "int"
+      },
+      "conflicts": {
+        "type": "int"
+      },
+      "invalid": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsImportDone": "Snippets imported",
+  "@snippetsImportDone": {
+    "description": "Toast title after importing."
+  },
+  "snippetsImportFailed": "Import failed",
+  "@snippetsImportFailed": {
+    "description": "Error title in the import dialog."
+  },
+  "snippetsImportFileType": "Snippet files",
+  "@snippetsImportFileType": {
+    "description": "File type label in the file picker."
+  },
+  "snippetsImportFormat": "Format",
+  "@snippetsImportFormat": {
+    "description": "Label of the import format picker."
+  },
+  "snippetsImportFormatName": "{format, select, bundle{CopyPaste bundle} json{JSON list} csv{CSV} other{CopyPaste bundle}}",
+  "@snippetsImportFormatName": {
+    "description": "Import file formats.",
+    "placeholders": {
+      "format": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportInvalidRow": "Row {row}: {reason}",
+  "@snippetsImportInvalidRow": {
+    "description": "One invalid import row; reason comes from the app.",
+    "placeholders": {
+      "row": {
+        "type": "int"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportInvalidRows": "Rows that won't be imported",
+  "@snippetsImportInvalidRows": {
+    "description": "Heading of the invalid rows in the import preview."
+  },
+  "snippetsImportPassphraseHint": "Passphrase, if the file is encrypted",
+  "@snippetsImportPassphraseHint": {
+    "description": "Placeholder of the import passphrase field."
+  },
+  "snippetsImportPreview": "Preview",
+  "@snippetsImportPreview": {
+    "description": "Import dialog action that checks the file before importing."
+  },
+  "snippetsImportReport": "Added: {inserted}. Updated: {updated}. Skipped: {skipped}. Abbreviations to review: {flagged}. Unrecognized placeholders: {unrecognized}.",
+  "@snippetsImportReport": {
+    "description": "Toast message after importing.",
+    "placeholders": {
+      "inserted": {
+        "type": "int"
+      },
+      "updated": {
+        "type": "int"
+      },
+      "skipped": {
+        "type": "int"
+      },
+      "flagged": {
+        "type": "int"
+      },
+      "unrecognized": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsImportSameIdPolicy": "Same snippet, different content",
+  "@snippetsImportSameIdPolicy": {
+    "description": "Import policy for snippets that exist with different content."
+  },
+  "snippetsImportSameIdPolicyName": "{policy, select, keepBoth{Keep both} replace{Replace existing} skip{Skip} other{Keep both}}",
+  "@snippetsImportSameIdPolicyName": {
+    "description": "Choices of the same-snippet import policy.",
+    "placeholders": {
+      "policy": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsImportTitle": "Import snippets",
+  "@snippetsImportTitle": {
+    "description": "Title of the import dialog."
+  },
+  "snippetsInsert": "Insert",
+  "@snippetsInsert": {
+    "description": "Action that inserts the built placeholder."
+  },
+  "snippetsInsertPlaceholder": "Insert placeholder",
+  "@snippetsInsertPlaceholder": {
+    "description": "Editor action that opens the placeholder palette."
+  },
+  "snippetsKeepReferences": "Keep them",
+  "@snippetsKeepReferences": {
+    "description": "Keeps other templates unchanged after an abbreviation rename."
+  },
+  "snippetsLibraryDescription": "Browse, organize and edit snippets and collections.",
+  "@snippetsLibraryDescription": {
+    "description": "Settings search description of the snippet library."
+  },
+  "snippetsLibraryKeywords": "snippets templates abbreviations collections text",
+  "@snippetsLibraryKeywords": {
+    "description": "Space-separated search keywords for the snippet library; translate and add local synonyms."
+  },
+  "snippetsLibraryTitle": "Snippet library",
+  "@snippetsLibraryTitle": {
+    "description": "Settings search title of the snippet library."
+  },
+  "snippetsLint": "{code, select, unclosed{This placeholder is never closed.} malformed{This placeholder can't be read.} unknownPlaceholder{Unknown placeholder “{detail}”. It is pasted as typed.} unknownParameter{Unknown option “{detail}”.} duplicateParameter{Option “{detail}” is set twice.} missingParameter{Option “{detail}” is missing.} invalidValue{Option “{detail}” has an invalid value.} conflictingParameters{These options can't be used together.} unknownLocale{Unknown language.} unknownTimeZone{Unknown time zone.} invalidPattern{Invalid date pattern.} dateOutOfRange{The date is out of range.} unknownModifier{Unknown modifier “{detail}”.} modifierFailed{Modifier “{detail}” couldn't be applied.} emptyClipboard{Clipboard item {detail} is empty.} extraCursor{Only the first cursor placeholder is used.} nestedCursor{A cursor inside an inserted snippet is ignored.} tooManyFields{Field “{detail}” is over the limit of 10 fields.} conflictingField{Field “{detail}” is defined twice with different settings.} choiceDefaultNotOption{The default of “{detail}” is not one of its options.} cycle{Snippets insert each other in a loop: {detail}.} depthExceeded{Snippets are inserted more than 3 levels deep.} nestingLimit{Too many inserted snippets.} unknownSnippet{No snippet has this abbreviation.} containsPlaceholders{The text contains placeholders. Turn on Template to fill them in.} other{This placeholder has a problem.}}",
+  "@snippetsLint": {
+    "description": "Template problem shown in the editor lint list and above the fill-in preview; detail is a name, option, number or loop from the template.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsLoadFailed": "Couldn't load snippets",
+  "@snippetsLoadFailed": {
+    "description": "Error state of the snippet library."
+  },
+  "snippetsLoadMore": "Load more",
+  "@snippetsLoadMore": {
+    "description": "Loads the next page of snippets."
+  },
+  "snippetsMerge": "Merge",
+  "@snippetsMerge": {
+    "description": "Confirms merging two collections."
+  },
+  "snippetsMergeCollection": "Merge into another collection",
+  "@snippetsMergeCollection": {
+    "description": "Action that merges the selected collection into another."
+  },
+  "snippetsMergeCollectionTitle": "Merge “{name}” into",
+  "@snippetsMergeCollectionTitle": {
+    "description": "Title of the merge dialog; followed by the target collection picker.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsMoveTo": "Move to",
+  "@snippetsMoveTo": {
+    "description": "Placeholder of the picker that moves selected snippets."
+  },
+  "snippetsNewCollection": "New collection",
+  "@snippetsNewCollection": {
+    "description": "Action and title for a new collection."
+  },
+  "snippetsNewSnippet": "New snippet",
+  "@snippetsNewSnippet": {
+    "description": "Action and title for a new snippet."
+  },
+  "snippetsNewText": "New text",
+  "@snippetsNewText": {
+    "description": "Title of the editor for new text without a source clip."
+  },
+  "snippetsNoMatch": "No snippets match “{query}”",
+  "@snippetsNoMatch": {
+    "description": "Empty search state of the snippet library.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPassphraseConfirm": "Repeat passphrase",
+  "@snippetsPassphraseConfirm": {
+    "description": "Placeholder of the passphrase confirmation field."
+  },
+  "snippetsPassphraseHint": "Passphrase, at least {min} characters",
+  "@snippetsPassphraseHint": {
+    "description": "Placeholder of the export passphrase field.",
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsPassphraseLabel": "Passphrase",
+  "@snippetsPassphraseLabel": {
+    "description": "Label of the import passphrase field."
+  },
+  "snippetsPassphraseNoRecovery": "A forgotten passphrase can't be recovered.",
+  "@snippetsPassphraseNoRecovery": {
+    "description": "Warning under the export passphrase."
+  },
+  "snippetsPassphraseStrength": "{score, select, tooShort{Too short} weak{Weak} fair{Fair} good{Good} other{Strong}}",
+  "@snippetsPassphraseStrength": {
+    "description": "Passphrase strength meter label.",
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPinnedSwitch": "Pinned",
+  "@snippetsPinnedSwitch": {
+    "description": "Switch in the snippet editor that shows the snippet in the Pinned section."
+  },
+  "snippetsPlaceholderGroup": "Placeholders",
+  "@snippetsPlaceholderGroup": {
+    "description": "Group of placeholders in the Insert placeholder palette."
+  },
+  "snippetsPlaceholderKind": "{kind, select, today{Date} dateShort{Date, short} dateLong{Date, long} dateIso{Date, ISO 8601} dateNextWeek{Date in one week} now{Time} dateTime{Date and time} clipboard{Clipboard} clipboardPrevious{Previous clipboard item} field{Fill-in field…} cursor{Cursor position} uuid{UUID} random{Random number} upper{Modifier: uppercase} lower{Modifier: lowercase} trim{Modifier: trim spaces} other{Placeholder}}",
+  "@snippetsPlaceholderKind": {
+    "description": "Entries of the Insert placeholder palette.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsPlaceholderNestedGroup": "Insert another snippet",
+  "@snippetsPlaceholderNestedGroup": {
+    "description": "Group of snippets that can be inserted into a template."
+  },
+  "snippetsPlaceholderNoMatch": "No placeholders match",
+  "@snippetsPlaceholderNoMatch": {
+    "description": "Empty search state of the placeholder palette."
+  },
+  "snippetsPreviewEmpty": "Nothing to preview",
+  "@snippetsPreviewEmpty": {
+    "description": "Preview of an empty body."
+  },
+  "snippetsPreviewTab": "Preview",
+  "@snippetsPreviewTab": {
+    "description": "Editor tab and heading of the rendered preview."
+  },
+  "snippetsPurge": "Delete permanently",
+  "@snippetsPurge": {
+    "description": "Action that erases snippets from Recently Deleted."
+  },
+  "snippetsPurgeMessage": "They will be erased on all your devices. This can't be undone.",
+  "@snippetsPurgeMessage": {
+    "description": "Message of the permanent delete confirmation."
+  },
+  "snippetsPurgeTitle": "{count, plural, =1{Delete snippet permanently?} other{Delete {count} snippets permanently?}}",
+  "@snippetsPurgeTitle": {
+    "description": "Title of the permanent delete confirmation.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsRecentlyDeletedEmpty": "Recently Deleted is empty",
+  "@snippetsRecentlyDeletedEmpty": {
+    "description": "Empty state of Recently Deleted."
+  },
+  "snippetsRecordPastedDescription": "Add pasted snippets to History.",
+  "@snippetsRecordPastedDescription": {
+    "description": "Description of the record pasted snippets setting."
+  },
+  "snippetsRecordPastedKeywords": "history record pasted snippets",
+  "@snippetsRecordPastedKeywords": {
+    "description": "Space-separated search keywords for the record pasted snippets setting; translate and add local synonyms."
+  },
+  "snippetsRecordPastedTitle": "Record pasted snippets in History",
+  "@snippetsRecordPastedTitle": {
+    "description": "Title of the record pasted snippets setting."
+  },
+  "snippetsReplaceOriginal": "Replace original",
+  "@snippetsReplaceOriginal": {
+    "description": "Clip editor switch that deletes the original clip after saving."
+  },
+  "snippetsReplaceOriginalHint": "Deletes the original clip after saving.",
+  "@snippetsReplaceOriginalHint": {
+    "description": "Hint under the Replace original switch."
+  },
+  "snippetsRequireAuthDescription": "Ask for your password or biometrics first.",
+  "@snippetsRequireAuthDescription": {
+    "description": "Description of the device authentication setting for concealed snippets."
+  },
+  "snippetsRequireAuthKeywords": "concealed password biometrics fingerprint face lock verify",
+  "@snippetsRequireAuthKeywords": {
+    "description": "Space-separated search keywords for the device authentication setting; translate and add local synonyms."
+  },
+  "snippetsRequireAuthTitle": "Verify before using concealed snippets",
+  "@snippetsRequireAuthTitle": {
+    "description": "Title of the device authentication setting for concealed snippets."
+  },
+  "snippetsRestore": "Restore",
+  "@snippetsRestore": {
+    "description": "Restores snippets from Recently Deleted."
+  },
+  "snippetsSaveBlockTooLarge": "The text is longer than 64 KB.",
+  "@snippetsSaveBlockTooLarge": {
+    "description": "Why Save is disabled: the body is too large."
+  },
+  "snippetsSaveFailed": "Couldn't save",
+  "@snippetsSaveFailed": {
+    "description": "Error title in editors."
+  },
+  "snippetsScopeAll": "All",
+  "@snippetsScopeAll": {
+    "description": "Scope with all snippets."
+  },
+  "snippetsScopeEmpty": "No snippets here",
+  "@snippetsScopeEmpty": {
+    "description": "Empty state of a collection or Unfiled."
+  },
+  "snippetsScopePinned": "Pinned",
+  "@snippetsScopePinned": {
+    "description": "Scope and section with pinned snippets."
+  },
+  "snippetsScopeRecentlyDeleted": "Recently Deleted",
+  "@snippetsScopeRecentlyDeleted": {
+    "description": "Scope with snippets deleted in the last 30 days."
+  },
+  "snippetsSearchPlaceholder": "Search snippets",
+  "@snippetsSearchPlaceholder": {
+    "description": "Placeholder of the snippet search field."
+  },
+  "snippetsSelected": "{count, plural, =1{1 selected} other{{count} selected}}",
+  "@snippetsSelected": {
+    "description": "Number of selected snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsShow": "Show",
+  "@snippetsShow": {
+    "description": "Reveals a concealed snippet in the editor."
+  },
+  "snippetsShowAll": "Show all",
+  "@snippetsShowAll": {
+    "description": "Leaves the review filter of the attention banner."
+  },
+  "snippetsShowAttention": "Review",
+  "@snippetsShowAttention": {
+    "description": "Shows only snippets that need review."
+  },
+  "snippetsSoftLimit": "You have {count} snippets. Up to 20,000 are allowed.",
+  "@snippetsSoftLimit": {
+    "description": "Warning shown from 10,000 snippets.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsTemplateBadge": "Template",
+  "@snippetsTemplateBadge": {
+    "description": "Badge on a template snippet."
+  },
+  "snippetsTemplateSwitch": "Template",
+  "@snippetsTemplateSwitch": {
+    "description": "Switch that turns on placeholders for the snippet."
+  },
+  "snippetsTitleLabel": "Title",
+  "@snippetsTitleLabel": {
+    "description": "Label of the snippet title field."
+  },
+  "snippetsTitlePlaceholder": "Optional",
+  "@snippetsTitlePlaceholder": {
+    "description": "Placeholder of the snippet title field."
+  },
+  "snippetsTransferDescription": "Back up snippets or move them between apps.",
+  "@snippetsTransferDescription": {
+    "description": "Description of the import and export row."
+  },
+  "snippetsTransferKeywords": "import export backup bundle json csv passphrase",
+  "@snippetsTransferKeywords": {
+    "description": "Space-separated search keywords for import and export; translate and add local synonyms."
+  },
+  "snippetsTransferTitle": "Import and export",
+  "@snippetsTransferTitle": {
+    "description": "Title of the import and export row."
+  },
+  "snippetsUndo": "Undo",
+  "@snippetsUndo": {
+    "description": "Toast action that restores deleted snippets."
+  },
+  "snippetsUnfiled": "Unfiled",
+  "@snippetsUnfiled": {
+    "description": "Snippets that belong to no collection."
+  },
+  "snippetsUnfilledWarning": "{count, plural, =1{1 placeholder is pasted as typed} other{{count} placeholders are pasted as typed}}",
+  "@snippetsUnfilledWarning": {
+    "description": "Warning above a preview: placeholders that cannot be filled in.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "snippetsUnpin": "Unpin",
+  "@snippetsUnpin": {
+    "description": "Removes a snippet from Pinned."
+  },
+  "snippetsUnsavedMessage": "Save your changes before closing?",
+  "@snippetsUnsavedMessage": {
+    "description": "Message of the unsaved changes dialog."
+  },
+  "snippetsUnsavedTitle": "Unsaved changes",
+  "@snippetsUnsavedTitle": {
+    "description": "Title of the unsaved changes dialog."
+  },
+  "snippetsUntitled": "Untitled snippet",
+  "@snippetsUntitled": {
+    "description": "Display title of a snippet without title or text."
+  },
+  "snippetsUpdateReferences": "Update",
+  "@snippetsUpdateReferences": {
+    "description": "Rewrites other templates after an abbreviation rename."
+  },
+  "snippetsUpdateReferencesMessage": "Other templates may insert “{from}”. Update them to use “{to}”?",
+  "@snippetsUpdateReferencesMessage": {
+    "description": "Asked when an abbreviation is renamed.",
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "snippetsUpdateReferencesTitle": "Update references?",
+  "@snippetsUpdateReferencesTitle": {
+    "description": "Title of the abbreviation rename question."
+  },
+  "snippetsUseFailed": "Couldn't use the snippet",
+  "@snippetsUseFailed": {
+    "description": "Error title of the fill-in form."
+  },
+  "quickPasteTabQueue": "Queue",
+  "@quickPasteTabQueue": {
+    "description": "Quick Paste tab that shows the paste queue."
+  },
+  "quickPasteMaskedMode": "Password field: previews are hidden",
+  "@quickPasteMaskedMode": {
+    "description": "Notice in Quick Paste while the paste target is a password field, so every preview is masked."
+  },
+  "quickPasteMaskedItem": "Hidden: {kind}",
+  "@quickPasteMaskedItem": {
+    "description": "Masked row label in Quick Paste; the content is hidden and only its kind is named.",
+    "placeholders": {
+      "kind": {
+        "type": "String",
+        "example": "Text"
+      }
+    }
+  },
+  "quickPasteUnlockSecrets": "Unlock secret items",
+  "@quickPasteUnlockSecrets": {
+    "description": "Button label in Quick Paste that verifies the device owner to show and paste secret items."
+  },
+  "quickPastePastingWith": "Pasting with: {name}",
+  "@quickPastePastingWith": {
+    "description": "Chip in Quick Paste naming the transform pipeline that Enter pastes text through.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Remove tracking"
+      }
+    }
+  },
+  "quickPastePasteOriginalHint": "{shortcut} pastes the original",
+  "@quickPastePasteOriginalHint": {
+    "description": "Hint next to the default transform chip naming the shortcut that pastes the original instead.",
+    "placeholders": {
+      "shortcut": {
+        "type": "String",
+        "example": "⌘⇧↩"
+      }
+    }
+  },
+  "quickPasteDefaultSkipped": "Default transform skipped",
+  "@quickPasteDefaultSkipped": {
+    "description": "Toast title when the default paste transform failed on an item."
+  },
+  "quickPasteDefaultSkippedMessage": "The original was used instead.",
+  "@quickPasteDefaultSkippedMessage": {
+    "description": "Toast message when the default paste transform failed and the original item was used."
+  },
+  "quickPastePasteManually": "The content is on the clipboard. Paste it manually.",
+  "@quickPastePasteManually": {
+    "description": "Toast message when Quick Paste put content on the clipboard but could not paste it."
+  },
+  "quickPastePaste": "Paste",
+  "@quickPastePaste": {
+    "description": "Primary button of the template fill-in form inside Quick Paste."
+  },
+  "quickPasteSnippetsUnavailable": "Snippets are unavailable",
+  "@quickPasteSnippetsUnavailable": {
+    "description": "Error state of the Quick Paste snippet results."
+  },
+  "rulesLoadFailed": "Content rules could not be loaded.",
+  "@rulesLoadFailed": {
+    "description": "Error title when the content rules cannot be read."
+  },
+  "rulesNewRule": "New rule",
+  "@rulesNewRule": {
+    "description": "Button and editor title that creates a content rule."
+  },
+  "rulesEditRule": "Edit rule",
+  "@rulesEditRule": {
+    "description": "Title of the rule editor for an existing rule."
+  },
+  "rulesUntitled": "Untitled rule",
+  "@rulesUntitled": {
+    "description": "Shown for a rule without a name."
+  },
+  "rulesPrivacyDefaultsTitle": "Privacy defaults",
+  "@rulesPrivacyDefaultsTitle": {
+    "description": "Heading of the device Privacy settings that guard capture before any content rule."
+  },
+  "rulesPrivacyDefaultsDescription": "Privacy settings apply before any rule.",
+  "@rulesPrivacyDefaultsDescription": {
+    "description": "Description of the Privacy defaults row. The built-in rules are listed below it."
+  },
+  "rulesPrivacyDefaultsKeywords": "privacy concealed temporary excluded apps built-in credentials passwords payment cards",
+  "@rulesPrivacyDefaultsKeywords": {
+    "description": "Search keywords for the Privacy defaults row of Content rules."
+  },
+  "rulesOpenPrivacy": "Open Privacy",
+  "@rulesOpenPrivacy": {
+    "description": "Button that opens the Privacy settings section."
+  },
+  "rulesMyRulesTitle": "My rules",
+  "@rulesMyRulesTitle": {
+    "description": "Heading of the list of rules the user created."
+  },
+  "rulesMyRulesDescription": "Run in order on new copies.",
+  "@rulesMyRulesDescription": {
+    "description": "Description of the user rules list."
+  },
+  "rulesMyRulesKeywords": "content rules automation tag skip secret expire delete pattern regex",
+  "@rulesMyRulesKeywords": {
+    "description": "Search keywords for the user rules list."
+  },
+  "rulesEmptyTitle": "No rules yet",
+  "@rulesEmptyTitle": {
+    "description": "Empty state title when the user has no rules."
+  },
+  "rulesEmptyMessage": "Rules tag, protect, expire or skip new copies.",
+  "@rulesEmptyMessage": {
+    "description": "Empty state message when the user has no rules."
+  },
+  "rulesDeletedTitle": "Recently deleted",
+  "@rulesDeletedTitle": {
+    "description": "Heading of the rules deleted within 30 days."
+  },
+  "rulesDeletedDescription": "Restore within 30 days.",
+  "@rulesDeletedDescription": {
+    "description": "Description of the recently deleted rules."
+  },
+  "rulesDeletedAt": "Deleted {time}",
+  "@rulesDeletedAt": {
+    "description": "When a recently deleted rule was deleted.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesRestore": "Restore",
+  "@rulesRestore": {
+    "description": "Button that restores a deleted rule."
+  },
+  "rulesDeletedToast": "Rule deleted",
+  "@rulesDeletedToast": {
+    "description": "Toast title after a rule was deleted."
+  },
+  "rulesDeletedToastMessage": "You can restore it for 30 days.",
+  "@rulesDeletedToastMessage": {
+    "description": "Toast message after a rule was deleted."
+  },
+  "rulesUndo": "Undo",
+  "@rulesUndo": {
+    "description": "Toast action that undoes deleting a rule."
+  },
+  "rulesConflictMessage": "A concurrent edit of “{rule}” from {device} was replaced by a newer one.",
+  "@rulesConflictMessage": {
+    "description": "Notice that a concurrent edit of a rule from another device lost and can be restored.",
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      },
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesAnotherDevice": "another device",
+  "@rulesAnotherDevice": {
+    "description": "Used in rulesConflictMessage when the device name is unknown."
+  },
+  "rulesRestoreConflict": "Use that version",
+  "@rulesRestoreConflict": {
+    "description": "Button that restores the version of a rule that lost a concurrent edit."
+  },
+  "rulesSkipLogTitle": "Recently skipped",
+  "@rulesSkipLogTitle": {
+    "description": "Title of the list of copies content rules did not save."
+  },
+  "rulesSkipLogDescription": "Copies your rules didn't save on this device.",
+  "@rulesSkipLogDescription": {
+    "description": "Description of the skip log row."
+  },
+  "rulesSkipLogKeywords": "skipped ignored not saved log",
+  "@rulesSkipLogKeywords": {
+    "description": "Search keywords for the skip log row."
+  },
+  "rulesSkipLogShow": "Show",
+  "@rulesSkipLogShow": {
+    "description": "Button that shows the skip log."
+  },
+  "rulesSkipLogEmpty": "No copies were skipped.",
+  "@rulesSkipLogEmpty": {
+    "description": "Skip log text when no copy was skipped."
+  },
+  "rulesUnknownApp": "Unknown app",
+  "@rulesUnknownApp": {
+    "description": "Skip log entry when the source app is not known."
+  },
+  "rulesMatchesEverything": "Any copy",
+  "@rulesMatchesEverything": {
+    "description": "Condition part of a rule summary when the rule has no conditions."
+  },
+  "rulesSummary": "{conditions} → {actions}",
+  "@rulesSummary": {
+    "description": "One-line rule summary: its conditions, an arrow, its actions.",
+    "placeholders": {
+      "conditions": {
+        "type": "String"
+      },
+      "actions": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSummaryStop": "{summary}, then stop",
+  "@rulesSummaryStop": {
+    "description": "A rule summary for a rule that stops later rules.",
+    "placeholders": {
+      "summary": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesConditionJoin": "{mode, select, any{ or } other{ and }}",
+  "@rulesConditionJoin": {
+    "description": "Separator between conditions in a rule summary, by match mode (any or all). Keep the spaces.",
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesConditionSummary": "{attribute} {operator} {value}",
+  "@rulesConditionSummary": {
+    "description": "One condition in a rule summary, such as \"Source app is Terminal\".",
+    "placeholders": {
+      "attribute": {
+        "type": "String"
+      },
+      "operator": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesActionSummary": "{action} {value}",
+  "@rulesActionSummary": {
+    "description": "One action with its value in a rule summary, such as \"Delete after 15 minutes\".",
+    "placeholders": {
+      "action": {
+        "type": "String"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesRunsOn": "Runs on {devices}",
+  "@rulesRunsOn": {
+    "description": "The devices a rule runs on.",
+    "placeholders": {
+      "devices": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNewFromDevice": "New from {device}",
+  "@rulesNewFromDevice": {
+    "description": "Badge on a rule another device added or changed in the last 7 days.",
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNeedsUpdateBadge": "Needs update",
+  "@rulesNeedsUpdateBadge": {
+    "description": "Badge on a rule written by a newer CopyPaste."
+  },
+  "rulesUpdateRequired": "Update CopyPaste to run this rule.",
+  "@rulesUpdateRequired": {
+    "description": "Shown for a rule this version cannot run."
+  },
+  "rulesErrorBadge": "Error",
+  "@rulesErrorBadge": {
+    "description": "Badge on a rule that cannot run on this device."
+  },
+  "rulesErrorHint": "{problem} Until fixed, matches are protected.",
+  "@rulesErrorHint": {
+    "description": "Explains the error badge. problem is the reason, a full sentence.",
+    "placeholders": {
+      "problem": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesReorder": "Drag to reorder",
+  "@rulesReorder": {
+    "description": "Drag handle of a rule row."
+  },
+  "rulesMoreActions": "More actions",
+  "@rulesMoreActions": {
+    "description": "Menu button of a rule row."
+  },
+  "rulesEdit": "Edit",
+  "@rulesEdit": {
+    "description": "Menu item that opens the rule editor."
+  },
+  "rulesMove": "{direction, select, up{Move up} down{Move down} top{Move to top} other{Move to bottom}}",
+  "@rulesMove": {
+    "description": "Menu item and screen reader action that moves a rule in the list.",
+    "placeholders": {
+      "direction": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesApplyToItems": "Apply to existing items…",
+  "@rulesApplyToItems": {
+    "description": "Menu item that previews a rule against history and applies it to existing items."
+  },
+  "rulesResetBuiltin": "Reset to default",
+  "@rulesResetBuiltin": {
+    "description": "Menu item that resets a built-in rule to its shipped definition."
+  },
+  "rulesNameLabel": "Name",
+  "@rulesNameLabel": {
+    "description": "Label of the rule name field."
+  },
+  "rulesNamePlaceholder": "For example, Work links",
+  "@rulesNamePlaceholder": {
+    "description": "Placeholder of the rule name field."
+  },
+  "rulesWhenTitle": "When",
+  "@rulesWhenTitle": {
+    "description": "Editor section with the rule conditions."
+  },
+  "rulesMatchMode": "{mode, select, any{Any condition matches} other{All conditions match}}",
+  "@rulesMatchMode": {
+    "description": "Choice of how conditions combine.",
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesNoConditions": "No conditions: this rule applies to every copy.",
+  "@rulesNoConditions": {
+    "description": "Editor label of a rule without conditions, which applies to every copy."
+  },
+  "rulesAddCondition": "Add condition",
+  "@rulesAddCondition": {
+    "description": "Button that adds a condition."
+  },
+  "rulesRemoveCondition": "Remove condition",
+  "@rulesRemoveCondition": {
+    "description": "Button that removes a condition."
+  },
+  "rulesConditionType": "{type, select, content_text{Text} content_type{Content type} detected_kind{Detected kind} source_app{Source app} size{Size} privacy_marker{Privacy marker} capture_origin{Origin} other{Unknown condition}}",
+  "@rulesConditionType": {
+    "description": "Name of a condition attribute.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTextOperator": "{op, select, contains{contains} equals{is} starts_with{starts with} ends_with{ends with} matches_regex{matches the pattern} other{matches}}",
+  "@rulesTextOperator": {
+    "description": "Operator of a text condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTextOperatorNegated": "{op, select, contains{does not contain} equals{is not} starts_with{does not start with} ends_with{does not end with} matches_regex{does not match the pattern} other{does not match}}",
+  "@rulesTextOperatorNegated": {
+    "description": "Negated operator of a text condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesListOperator": "{negate, select, true{is not} other{is}}",
+  "@rulesListOperator": {
+    "description": "Operator of a choice condition: is or is not one of the chosen values.",
+    "placeholders": {
+      "negate": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeOperator": "{op, select, less_than{is less than} other{is more than}}",
+  "@rulesSizeOperator": {
+    "description": "Operator of a size condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeOperatorNegated": "{op, select, less_than{is not less than} other{is not more than}}",
+  "@rulesSizeOperatorNegated": {
+    "description": "Negated operator of a size condition.",
+    "placeholders": {
+      "op": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeUnit": "{unit, select, lines{lines} bytes{bytes} other{characters}}",
+  "@rulesSizeUnit": {
+    "description": "Unit of a size condition.",
+    "placeholders": {
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesSizeValue": "{count} {unit, select, lines{lines} bytes{bytes} other{characters}}",
+  "@rulesSizeValue": {
+    "description": "A size with its unit in a rule summary.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesContentKind": "{kind, select, plain_text{Plain text} rich_text{Rich text} image{Image} files{Files} color{Color} link{Link} other{Other}}",
+  "@rulesContentKind": {
+    "description": "A content type a condition can match.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesDetectedKind": "{kind, select, credential{Password or secret} url{Web address} email{Email address} phone{Phone number} code{Code} color{Color value} json{JSON} file_path{File path} number{Number} one_time_code{One-time code} payment_card{Payment card number} other{Other}}",
+  "@rulesDetectedKind": {
+    "description": "A kind of content the built-in detector finds.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesPrivacyMarker": "{marker, select, concealed{Concealed} transient{Temporary} auto_generated{Auto-generated} excluded_from_history{Excluded from history} other{Other}}",
+  "@rulesPrivacyMarker": {
+    "description": "A privacy marker the copying app or system sets.",
+    "placeholders": {
+      "marker": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesCaptureOrigin": "{origin, select, local_copy{Copied on this device} received{Received from another device} created_in_app{Created in CopyPaste} other{Other}}",
+  "@rulesCaptureOrigin": {
+    "description": "Where a copy came from.",
+    "placeholders": {
+      "origin": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesValuePlaceholder": "Text to look for",
+  "@rulesValuePlaceholder": {
+    "description": "Placeholder of the text value of a condition."
+  },
+  "rulesPatternPlaceholder": "Pattern, for example ^ticket-[0-9]+",
+  "@rulesPatternPlaceholder": {
+    "description": "Placeholder of a pattern (regular expression) value. Keep the example pattern unchanged."
+  },
+  "rulesPatternHint": "Look-around and backreferences aren't supported.",
+  "@rulesPatternHint": {
+    "description": "Hint under a pattern value."
+  },
+  "rulesCaseSensitive": "Match case",
+  "@rulesCaseSensitive": {
+    "description": "Switch that makes a text condition case-sensitive."
+  },
+  "rulesChooseValues": "Choose",
+  "@rulesChooseValues": {
+    "description": "Placeholder of a multi-choice field."
+  },
+  "rulesUnknownConditionNotice": "This condition comes from a newer version of CopyPaste.",
+  "@rulesUnknownConditionNotice": {
+    "description": "Shown on a condition from a newer version, which this version keeps unchanged."
+  },
+  "rulesSourceAppNotice": "On Android, only copies made with the clips keyboard match.",
+  "@rulesSourceAppNotice": {
+    "description": "Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard."
+  },
+  "rulesPrivacyMarkerNotice": "Not every system reports every marker.",
+  "@rulesPrivacyMarkerNotice": {
+    "description": "Inline notice on a privacy marker condition."
+  },
+  "rulesThenTitle": "Then",
+  "@rulesThenTitle": {
+    "description": "Editor section with the rule actions."
+  },
+  "rulesNoActions": "Add at least one action.",
+  "@rulesNoActions": {
+    "description": "Shown when a rule has no actions yet."
+  },
+  "rulesAddAction": "Add action",
+  "@rulesAddAction": {
+    "description": "Button that adds an action."
+  },
+  "rulesRemoveAction": "Remove action",
+  "@rulesRemoveAction": {
+    "description": "Button that removes an action."
+  },
+  "rulesActionType": "{type, select, dont_save{Don't save} mark_secret{Mark as secret} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}",
+  "@rulesActionType": {
+    "description": "Name of a rule action.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesActionBlock": "{reason, select, dont_save_alone{“Don't save” can't be combined with other actions.} present{This rule already has this action.} other{A rule can have up to 8 actions.}}",
+  "@rulesActionBlock": {
+    "description": "Why an action cannot be added to the rule.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesUnknownActionNotice": "This action comes from a newer version of CopyPaste.",
+  "@rulesUnknownActionNotice": {
+    "description": "Shown on an action from a newer version."
+  },
+  "rulesDontSaveWarning": "Matching copies are never stored, indexed or synced.",
+  "@rulesDontSaveWarning": {
+    "description": "Shown under the Don't save action."
+  },
+  "rulesMinutes": "{count, plural, =1{1 minute} other{{count} minutes}}",
+  "@rulesMinutes": {
+    "description": "A duration in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesHours": "{count, plural, =1{1 hour} other{{count} hours}}",
+  "@rulesHours": {
+    "description": "A duration in hours.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesDays": "{count, plural, =1{1 day} other{{count} days}}",
+  "@rulesDays": {
+    "description": "A duration in days.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesClearClipboardAtExpiry": "Also clear the clipboard if it still holds this copy.",
+  "@rulesClearClipboardAtExpiry": {
+    "description": "Option of the Delete after action."
+  },
+  "rulesNoTags": "Create tags in History to use them here.",
+  "@rulesNoTags": {
+    "description": "Shown in the Add tags action when no tags exist."
+  },
+  "rulesNoTransforms": "No transforms are available.",
+  "@rulesNoTransforms": {
+    "description": "Shown in the Transform action when no transform is available."
+  },
+  "rulesReplaceClipboard": "Also replace the clipboard with the result",
+  "@rulesReplaceClipboard": {
+    "description": "Option of the Transform action."
+  },
+  "rulesOptionsTitle": "Options",
+  "@rulesOptionsTitle": {
+    "description": "Editor section with rule options."
+  },
+  "rulesEnabledSwitch": "Enabled",
+  "@rulesEnabledSwitch": {
+    "description": "Switch that turns a rule on."
+  },
+  "rulesStopProcessing": "Stop processing later rules when this one matches",
+  "@rulesStopProcessing": {
+    "description": "Switch that stops later rules when this rule matches."
+  },
+  "rulesRunsOnLabel": "Runs on",
+  "@rulesRunsOnLabel": {
+    "description": "Label of the device scope field."
+  },
+  "rulesAllDevices": "All devices",
+  "@rulesAllDevices": {
+    "description": "Device scope choice: all devices."
+  },
+  "rulesChosenDevices": "Chosen devices",
+  "@rulesChosenDevices": {
+    "description": "Device scope choice: chosen devices."
+  },
+  "rulesTestTitle": "Test",
+  "@rulesTestTitle": {
+    "description": "Editor section that tests the rule on a sample."
+  },
+  "rulesTestDescription": "Try the rule on sample text.",
+  "@rulesTestDescription": {
+    "description": "Description of the rule test."
+  },
+  "rulesSamplePlaceholder": "Paste or type sample text",
+  "@rulesSamplePlaceholder": {
+    "description": "Placeholder of the test sample field."
+  },
+  "rulesTestFullSet": "Test together with all rules",
+  "@rulesTestFullSet": {
+    "description": "Switch that tests the rule together with every other rule."
+  },
+  "rulesRunTest": "Run test",
+  "@rulesRunTest": {
+    "description": "Button that runs the rule test."
+  },
+  "rulesTestFailed": "The test could not run.",
+  "@rulesTestFailed": {
+    "description": "Shown when the rule test fails."
+  },
+  "rulesPreviewHistory": "Preview against history",
+  "@rulesPreviewHistory": {
+    "description": "Button that previews the rule against recent history."
+  },
+  "rulesSaveFailed": "The rule could not be saved.",
+  "@rulesSaveFailed": {
+    "description": "Alert title when saving a rule fails."
+  },
+  "rulesReadOnlyNotice": "Made by a newer CopyPaste. Update to edit or run it.",
+  "@rulesReadOnlyNotice": {
+    "description": "Editor notice for a rule a newer version wrote."
+  },
+  "rulesProblem": "{code, select, invalid_definition{The rule could not be read.} unsupported_schema{This rule needs a newer version of CopyPaste.} unknown_condition_type{This condition needs a newer version of CopyPaste.} unknown_action_type{This action needs a newer version of CopyPaste.} too_many_conditions{A rule can have up to 20 conditions.} too_many_actions{A rule can have up to 8 actions.} too_many_rules{Only the first 200 rules run.} no_actions{Add at least one action.} conflicting_actions{“Don't save” can't be combined with other actions.} duplicate_action{Each action can be used only once.} empty_value{Enter a value.} empty_list{Choose at least one value.} too_many_values{Choose up to 64 values.} invalid_value{This value is not valid.} pattern_too_long{Patterns can be up to 2,000 characters.} unsupported_look_around{Look-ahead and look-behind are not supported. Use two conditions with “All conditions match” instead.} unsupported_backreference{Backreferences are not supported.} pattern_too_large{This pattern is too complex. Simplify its repetitions.} invalid_pattern{This pattern is not valid.} invalid_duration{Choose a duration from 1 minute to 90 days.} invalid_tags{Choose at least one tag.} invalid_transform{Choose a transform.} other{This rule has a problem.}}",
+  "@rulesProblem": {
+    "description": "A problem the runtime found in a rule, by error code.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceLine": "{label}: {result}",
+  "@rulesTraceLine": {
+    "description": "One line of a rule trace: a rule or condition and its result.",
+    "placeholders": {
+      "label": {
+        "type": "String"
+      },
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceResult": "{result, select, matched{matched} not_matched{not matched} unknown{unknown} skipped{not run} other{error}}",
+  "@rulesTraceResult": {
+    "description": "Result of a rule or condition in a trace.",
+    "placeholders": {
+      "result": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceCondition": "Condition {number}",
+  "@rulesTraceCondition": {
+    "description": "A condition in a trace, by its number.",
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesTraceNoRules": "No rule was evaluated.",
+  "@rulesTraceNoRules": {
+    "description": "Trace when no rule was evaluated."
+  },
+  "rulesTraceStopped": "Later rules did not run.",
+  "@rulesTraceStopped": {
+    "description": "Trace note under a rule that stopped later rules."
+  },
+  "rulesTraceUnknownReason": "Unknown for this copy, so it doesn't match.",
+  "@rulesTraceUnknownReason": {
+    "description": "Trace note under a condition whose attribute is unknown for the copy."
+  },
+  "rulesTraceRuleError": "This rule couldn't run, so matches are protected.",
+  "@rulesTraceRuleError": {
+    "description": "Trace note under a rule that could not run on this device."
+  },
+  "rulesTraceOutcomeTitle": "Result",
+  "@rulesTraceOutcomeTitle": {
+    "description": "Heading of the combined result in a trace."
+  },
+  "rulesTraceNoEffect": "No rule changes this copy.",
+  "@rulesTraceNoEffect": {
+    "description": "Trace result when no rule changes the copy."
+  },
+  "rulesTraceSkipped": "Not saved",
+  "@rulesTraceSkipped": {
+    "description": "Trace result: the copy is not saved."
+  },
+  "rulesTraceSecret": "Saved as secret",
+  "@rulesTraceSecret": {
+    "description": "Trace result: the copy is saved as secret."
+  },
+  "rulesTraceExpires": "Deleted after {duration}",
+  "@rulesTraceExpires": {
+    "description": "Trace result: the copy is deleted after a duration.",
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceTags": "Tagged {tags}",
+  "@rulesTraceTags": {
+    "description": "Trace result: the copy gets tags.",
+    "placeholders": {
+      "tags": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceTransforms": "Transformed with {names}",
+  "@rulesTraceTransforms": {
+    "description": "Trace result: the copy is transformed.",
+    "placeholders": {
+      "names": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesTraceOutput": "Transformed text",
+  "@rulesTraceOutput": {
+    "description": "Heading of the sample text after the rules' transforms."
+  },
+  "rulesPreviewTitle": "Apply to existing items",
+  "@rulesPreviewTitle": {
+    "description": "Title of the dialog that previews and applies a rule to existing items."
+  },
+  "rulesPreviewRunning": "Checking the latest {count} clips…",
+  "@rulesPreviewRunning": {
+    "description": "Shown while the preview checks recent clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewNone": "No recent clip matches this rule.",
+  "@rulesPreviewNone": {
+    "description": "Preview result when no recent clip matches."
+  },
+  "rulesPreviewMatched": "{count, plural, =1{1 clip matches} other{{count} clips match}}",
+  "@rulesPreviewMatched": {
+    "description": "Number of recent clips the rule matches.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewDeleted": "{count, plural, =1{1 would be deleted} other{{count} would be deleted}}",
+  "@rulesPreviewDeleted": {
+    "description": "Preview effect: clips that applying would delete.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewSecret": "{count, plural, =1{1 would be marked secret} other{{count} would be marked secret}}",
+  "@rulesPreviewSecret": {
+    "description": "Preview effect: clips that applying would mark secret.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewExpiring": "{count, plural, =1{1 would get a deletion time} other{{count} would get a deletion time}}",
+  "@rulesPreviewExpiring": {
+    "description": "Preview effect: clips that applying would give a deletion time.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewTagged": "{count, plural, =1{1 would be tagged} other{{count} would be tagged}}",
+  "@rulesPreviewTagged": {
+    "description": "Preview effect: clips that applying would tag.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewTruncated": "Only the latest {count} clips were checked.",
+  "@rulesPreviewTruncated": {
+    "description": "Preview note: older clips past the limit were not checked.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewMore": "and {count} more",
+  "@rulesPreviewMore": {
+    "description": "Preview list note: more matching clips than the list shows.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesPreviewNote": "Nothing changes until you apply.",
+  "@rulesPreviewNote": {
+    "description": "Preview note about when changes happen."
+  },
+  "rulesSecretItem": "Secret item",
+  "@rulesSecretItem": {
+    "description": "A secret clip in the preview list; its content is never shown."
+  },
+  "rulesSecretItemFrom": "Secret item from {app}",
+  "@rulesSecretItemFrom": {
+    "description": "A secret clip from an app in the preview list.",
+    "placeholders": {
+      "app": {
+        "type": "String"
+      }
+    }
+  },
+  "rulesPreviewCancelled": "The preview was stopped. Nothing changed.",
+  "@rulesPreviewCancelled": {
+    "description": "Shown after a preview was stopped."
+  },
+  "rulesPreviewFailed": "The preview could not run.",
+  "@rulesPreviewFailed": {
+    "description": "Shown when the preview cannot run."
+  },
+  "rulesApplyDeleteTitle": "{count, plural, =1{Delete 1 clip?} other{Delete {count} clips?}}",
+  "@rulesApplyDeleteTitle": {
+    "description": "Confirmation title before applying a rule that deletes clips.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyDeleteMessage": "Matching clips are deleted on all your devices. This can't be undone.",
+  "@rulesApplyDeleteMessage": {
+    "description": "Explains that applying a Don't save rule deletes matching clips everywhere."
+  },
+  "rulesApplyDeleteConfirm": "Delete and apply",
+  "@rulesApplyDeleteConfirm": {
+    "description": "Confirmation button that deletes clips and applies the rule."
+  },
+  "rulesApplyProgress": "Applying: {done} of {total}",
+  "@rulesApplyProgress": {
+    "description": "Progress while a rule is applied to existing items.",
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyChanged": "{count, plural, =1{1 clip changed} other{{count} clips changed}}",
+  "@rulesApplyChanged": {
+    "description": "Apply report: clips changed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyDeleted": "{count, plural, =1{1 clip deleted} other{{count} clips deleted}}",
+  "@rulesApplyDeleted": {
+    "description": "Apply report: clips deleted.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyFailed": "{count, plural, =1{1 clip could not be changed} other{{count} clips could not be changed}}",
+  "@rulesApplyFailed": {
+    "description": "Apply report: clips that could not be changed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rulesApplyCancelled": "Stopped. Changes made so far stay.",
+  "@rulesApplyCancelled": {
+    "description": "Shown after applying was stopped."
+  },
+  "historyActionEdit": "Edit",
+  "@historyActionEdit": {
+    "description": "History clip action that opens the text editor; saving creates a new clip."
+  },
+  "historyActionSaveAsSnippet": "Save as snippet",
+  "@historyActionSaveAsSnippet": {
+    "description": "History clip action that saves the clip text as a new snippet."
+  },
+  "historyActionAddToQueue": "Add to Paste Queue",
+  "@historyActionAddToQueue": {
+    "description": "History action that adds the clip, or the selected clips, to the paste queue. Paste Queue is the feature name."
+  },
+  "historyActionTransform": "Transform…",
+  "@historyActionTransform": {
+    "description": "History clip action that opens the text transform palette."
+  },
+  "historyActionExplain": "Why is this here?",
+  "@historyActionExplain": {
+    "description": "History clip action that explains which content rules made the clip stored, secret or expiring."
+  },
+  "historyActionKeep": "Keep",
+  "@historyActionKeep": {
+    "description": "History clip action that cancels the automatic deletion of an expiring clip."
+  },
+  "historyNewClip": "New clip",
+  "@historyNewClip": {
+    "description": "Button and tooltip that opens the editor for a new clip the user types."
+  },
+  "historySavedTitle": "Saved",
+  "@historySavedTitle": {
+    "description": "Toast title after an edited clip, a new clip or a snippet was saved."
+  },
+  "historyEditSaved": "The edited text is a new clip at the top of History.",
+  "@historyEditSaved": {
+    "description": "Toast message after saving an edited clip, which creates a new clip."
+  },
+  "historyNewClipSaved": "Your text was saved.",
+  "@historyNewClipSaved": {
+    "description": "Toast message after saving text typed in the new clip editor."
+  },
+  "historySnippetSaved": "The clip's text is now a snippet.",
+  "@historySnippetSaved": {
+    "description": "Toast message after a clip was saved as a snippet."
+  },
+  "historySnippetSaveFailed": "This clip could not be saved as a snippet.",
+  "@historySnippetSaveFailed": {
+    "description": "Error toast when a clip could not be saved as a snippet."
+  },
+  "historyQueueAddedInOrder": "{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue.}}",
+  "@historyQueueAddedInOrder": {
+    "description": "Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyQueueAddFailed": "Couldn't add to Paste Queue. Check that it is turned on.",
+  "@historyQueueAddFailed": {
+    "description": "Error toast when clips could not be added to the paste queue. Paste Queue is the feature name."
+  },
+  "historyKeepFailed": "This clip could not be kept.",
+  "@historyKeepFailed": {
+    "description": "Error toast when an expiring clip could not be kept."
+  },
+  "historyExplainFailed": "The explanation could not be loaded.",
+  "@historyExplainFailed": {
+    "description": "Error shown when the content-rule explanation of a clip could not be loaded."
+  },
+  "historyDeletesSoon": "Deletes in less than a minute",
+  "@historyDeletesSoon": {
+    "description": "Countdown of an expiring clip with less than one minute left."
+  },
+  "historyDeletesInMinutes": "{count, plural, =1{Deletes in 1 min} other{Deletes in {count} min}}",
+  "@historyDeletesInMinutes": {
+    "description": "Countdown of an expiring clip, in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyDeletesInHours": "{count, plural, =1{Deletes in 1 h} other{Deletes in {count} h}}",
+  "@historyDeletesInHours": {
+    "description": "Countdown of an expiring clip, in hours.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyDeletesInDays": "{count, plural, =1{Deletes in 1 day} other{Deletes in {count} days}}",
+  "@historyDeletesInDays": {
+    "description": "Countdown of an expiring clip, in days.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProvenanceManual": "Manual",
+  "@historyProvenanceManual": {
+    "description": "Marker next to the source app of a clip the user typed in CopyPaste."
+  },
+  "historyProvenanceEdited": "Edited",
+  "@historyProvenanceEdited": {
+    "description": "Marker next to the source app of a clip saved from the clip editor."
+  },
+  "historyProvenanceTransformed": "Transformed",
+  "@historyProvenanceTransformed": {
+    "description": "Marker next to the source app of a clip created by a text transform."
+  },
+  "historyProvenanceModule": "Module",
+  "@historyProvenanceModule": {
+    "description": "Marker next to the source app for a clip written by an installed module."
+  },
+  "historyRuleTag": "{name} (auto)",
+  "@historyRuleTag": {
+    "description": "A tag that a content rule assigned automatically.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "historyMetadataExpiry": "Deletion",
+  "@historyMetadataExpiry": {
+    "description": "Clip details label for when an expiring clip is deleted."
+  },
+  "historyMetadataRuleTags": "Automatic tags",
+  "@historyMetadataRuleTags": {
+    "description": "Clip details label for tags assigned by content rules."
+  },
+  "modulesEnableTitle": "Enable {module}?",
+  "@modulesEnableTitle": {
+    "description": "Title of the dialog confirming what a module may access before it is enabled; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesEnableAccess": "It will be able to:",
+  "@modulesEnableAccess": {
+    "description": "Lead-in above the list of what a module may access."
+  },
+  "modulesCapability": "{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}",
+  "@modulesCapability": {
+    "description": "One line naming a host service a module asks for; {capability} is its identifier.",
+    "placeholders": {
+      "capability": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesPromptFrom": "From {module}",
+  "@modulesPromptFrom": {
+    "description": "Line naming the module that asks a question; {module} is the module name.",
+    "placeholders": {
+      "module": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesUnknownModule": "Unknown module",
+  "@modulesUnknownModule": {
+    "description": "Shown instead of a module name that is no longer known."
+  },
+  "modulesPromptAnswerFailed": "Your answer was not sent.",
+  "@modulesPromptAnswerFailed": {
+    "description": "Error when an answer to a module question could not be sent."
+  },
+  "modulesPromptNotificationBody": "Open CopyPaste to answer.",
+  "@modulesPromptNotificationBody": {
+    "description": "System notification text for a module question that arrives while the app is hidden."
+  },
+  "modulesUnknownDevice": "Unknown device",
+  "@modulesUnknownDevice": {
+    "description": "Shown instead of a device name that is no longer known."
+  },
+  "modulesChooseDevices": "Choose devices",
+  "@modulesChooseDevices": {
+    "description": "Placeholder of a device picker in module settings."
+  },
+  "modulesAddApp": "Add app",
+  "@modulesAddApp": {
+    "description": "Button that adds an application to a module setting."
+  },
+  "modulesRemoveApp": "Remove {app}",
+  "@modulesRemoveApp": {
+    "description": "Tooltip of the button that removes an application from a module setting; {app} is the application name.",
+    "placeholders": {
+      "app": {
+        "type": "String"
+      }
+    }
+  },
+  "modulesNoApps": "No apps chosen",
+  "@modulesNoApps": {
+    "description": "Shown when a module application list is empty."
   }
 }

@@ -214,18 +214,6 @@ abstract class AppLocalizations {
   /// **'Enable'**
   String get commonEnable;
 
-  /// State word shown beside a switch that is turned on. Adjective; keep it as short as possible.
-  ///
-  /// In en, this message translates to:
-  /// **'On'**
-  String get commonOn;
-
-  /// State word shown beside a switch that is turned off. Adjective; keep it as short as possible.
-  ///
-  /// In en, this message translates to:
-  /// **'Off'**
-  String get commonOff;
-
   /// Settings row title for choosing the interface language.
   ///
   /// In en, this message translates to:
@@ -327,18 +315,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You can exclude up to 256 applications.'**
   String get settingsRuntimeExcludedAppsLimit;
-
-  /// Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name.
-  ///
-  /// In en, this message translates to:
-  /// **'Quick Paste could not start, so its shortcut does not work.'**
-  String get settingsQuickPasteStartFailed;
-
-  /// Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.
-  ///
-  /// In en, this message translates to:
-  /// **'{shortcut} is used by another app. Choose another shortcut.'**
-  String settingsQuickPasteShortcutInUse(String shortcut);
 
   /// Settings error message shown when turning automatic pasting after selection on or off fails.
   ///
@@ -1432,6 +1408,768 @@ abstract class AppLocalizations {
   /// **'Install and manage optional modules.'**
   String get settingsSectionModulesSummary;
 
+  /// Settings section name in navigation and as the section heading. Rules that act on copied content automatically.
+  ///
+  /// In en, this message translates to:
+  /// **'Content rules'**
+  String get settingsSectionRules;
+
+  /// Short summary of the Content rules settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag, skip, protect, or expire clips automatically.'**
+  String get settingsSectionRulesSummary;
+
+  /// Android settings section name for the clipboard keyboard, Quick Settings tiles and home-screen widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick access'**
+  String get settingsSectionQuickAccess;
+
+  /// Short summary of the Quick access settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyboard, tiles, and home-screen widget.'**
+  String get settingsSectionQuickAccessSummary;
+
+  /// Settings section name in navigation and as the section heading. Noun: saved reusable texts.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets'**
+  String get settingsSectionSnippets;
+
+  /// Short summary of the Snippets settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Reusable text and templates.'**
+  String get settingsSectionSnippetsSummary;
+
+  /// Settings section name in navigation and as the section heading. Text conversions such as case changes or JSON formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Text transforms'**
+  String get settingsSectionTransforms;
+
+  /// Short summary of the Text transforms settings section, used when searching settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites, pipelines, and default paste transforms.'**
+  String get settingsSectionTransformsSummary;
+
+  /// Heading of the Paste Queue settings group. Paste Queue is the product feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste Queue'**
+  String get pasteQueueSettingsTitle;
+
+  /// Description of the Paste Queue settings group.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect several copies and paste them in order.'**
+  String get pasteQueueSettingsSummary;
+
+  /// Announcement after Paste next pasted one queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasted {position} of {total}'**
+  String pasteQueuePasted(int position, int total);
+
+  /// Announcement after one queue item was put on the clipboard for the user to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Item {position} of {total} is on the clipboard'**
+  String pasteQueueCopied(int position, int total);
+
+  /// Announcement after Paste all pasted several queue items at once.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Pasted 1 item} other{Pasted {count} items}}'**
+  String pasteQueuePastedAll(int count);
+
+  /// Announcement after several queue items were joined and put on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item is on the clipboard} other{{count} items are on the clipboard}}'**
+  String pasteQueueCopiedAll(int count);
+
+  /// Announcement when the last queue item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue finished'**
+  String get pasteQueueFinished;
+
+  /// Announcement after items were added to the queue, with the number now waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'{total, plural, =1{Added, 1 in queue} other{Added, {total} in queue}}'**
+  String pasteQueueAdded(int total);
+
+  /// Feedback when Paste next found no pending item; nothing was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue empty, nothing pasted'**
+  String get pasteQueueNothingToPaste;
+
+  /// Why Paste all is unavailable: the queue mixes kinds of content.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all works with text-only or files-only queues'**
+  String get pasteQueueMixed;
+
+  /// Why Paste all is unavailable for a queue of several files.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste files one at a time.'**
+  String get pasteQueueSeveralFiles;
+
+  /// Notice that queued items were skipped because their history item no longer exists.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item no longer available} other{{count} items no longer available}}'**
+  String pasteQueueUnavailable(int count);
+
+  /// Title of the notice that Paste next only puts items on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next copies only'**
+  String get pasteQueueCopyOnlyTitle;
+
+  /// macOS notice: without the Accessibility permission the item is only put on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Item copied. Allow Accessibility to paste automatically.'**
+  String get pasteQueueAccessibilityMessage;
+
+  /// Notice that automatic pasting is not possible here, so the item is only on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t paste automatically. Item copied instead.'**
+  String get pasteQueuePasteUnsupported;
+
+  /// Windows notice: the front app runs as administrator, so the item was not pasted and stays in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t paste into an admin app. Item copied instead.'**
+  String get pasteQueueTargetElevated;
+
+  /// Notice that no app could receive the paste, so the item stays in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'No app to paste into. Item copied instead.'**
+  String get pasteQueueNoTarget;
+
+  /// Announcement and notification when the queue starts collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting copies'**
+  String get pasteQueueCollectingStarted;
+
+  /// Announcement and notification when the queue stops collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped collecting'**
+  String get pasteQueueCollectingStopped;
+
+  /// Generic error when a Paste Queue action could not be completed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t complete the Paste Queue action'**
+  String get pasteQueueFailed;
+
+  /// Queue header summary: the number of items still to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 pending} other{{count} pending}}'**
+  String pasteQueueSummary(int count);
+
+  /// Queue header summary while collecting: the number of items still to paste.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 pending · Collecting} other{{count} pending · Collecting}}'**
+  String pasteQueueSummaryCollecting(int count);
+
+  /// Short header label while the queue collects copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting'**
+  String get pasteQueueCollectingLabel;
+
+  /// Queue header summary when every item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Finished'**
+  String get pasteQueueFinishedSummary;
+
+  /// Warning that the queue reached its size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue full ({max})'**
+  String pasteQueueFull(int max);
+
+  /// Explains what happens while the queue is full.
+  ///
+  /// In en, this message translates to:
+  /// **'New copies are no longer added.'**
+  String get pasteQueueFullMessage;
+
+  /// Empty state title of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste Queue is empty'**
+  String get pasteQueueEmptyTitle;
+
+  /// Empty state message of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect copies or add items from history.'**
+  String get pasteQueueEmptyMessage;
+
+  /// Empty state title while collecting and nothing was copied yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy items to add them'**
+  String get pasteQueueCollectingEmptyTitle;
+
+  /// Empty state message while collecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Each copy joins the queue until you stop collecting.'**
+  String get pasteQueueCollectingEmptyMessage;
+
+  /// Button that starts collecting copies into the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Start collecting'**
+  String get pasteQueueStartCollecting;
+
+  /// Button that stops collecting copies; existing items stay.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop collecting'**
+  String get pasteQueueStopCollecting;
+
+  /// Loading message of the queue drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading the queue…'**
+  String get pasteQueueLoading;
+
+  /// Error state title when the queue could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load the queue'**
+  String get pasteQueueLoadFailed;
+
+  /// Action and shortcut name: paste the next queue item into the front app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next'**
+  String get pasteQueuePasteNext;
+
+  /// Action that puts the next queue item on the clipboard without pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy next'**
+  String get pasteQueueCopyNext;
+
+  /// Action and shortcut name: paste every pending item at once, joined by the separator.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all'**
+  String get pasteQueuePasteAll;
+
+  /// Action that puts every pending item, joined, on the clipboard without pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy all'**
+  String get pasteQueueCopyAll;
+
+  /// Action that reverses the order of the pending items.
+  ///
+  /// In en, this message translates to:
+  /// **'Reverse order'**
+  String get pasteQueueReverse;
+
+  /// Action and shortcut name: return the last pasted item to the head of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Step back'**
+  String get pasteQueueStepBack;
+
+  /// Action and shortcut name: mark the next item skipped without pasting it.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get pasteQueueSkip;
+
+  /// Action that removes pasted and skipped items from the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove pasted'**
+  String get pasteQueueRemovePasted;
+
+  /// Notice after the queue was cleared, shown with Undo.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue cleared'**
+  String get pasteQueueCleared;
+
+  /// Button that restores the entries the last Clear removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get pasteQueueUndo;
+
+  /// Choice when collecting restarts after the queue finished: remove pasted items first.
+  ///
+  /// In en, this message translates to:
+  /// **'Start fresh'**
+  String get pasteQueueStartFresh;
+
+  /// Choice when collecting restarts after the queue finished: keep pasted items.
+  ///
+  /// In en, this message translates to:
+  /// **'Append'**
+  String get pasteQueueAppend;
+
+  /// Dialog title when collecting starts again on a finished queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a new collection?'**
+  String get pasteQueueRestartTitle;
+
+  /// Dialog message explaining Start fresh and Append.
+  ///
+  /// In en, this message translates to:
+  /// **'Start fresh removes the pasted items. Append keeps them.'**
+  String get pasteQueueRestartMessage;
+
+  /// One-line hint that the pending items are old.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue from {time}'**
+  String pasteQueueStale(String time);
+
+  /// Status word of a queue item that was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasted'**
+  String get pasteQueueStatusPasted;
+
+  /// Status word of a queue item that was skipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped'**
+  String get pasteQueueStatusSkipped;
+
+  /// Status word of a queue item whose history item was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'No longer available'**
+  String get pasteQueueStatusUnavailable;
+
+  /// Marker of a queue item whose text was edited in the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited'**
+  String get pasteQueueEdited;
+
+  /// Placeholder shown instead of the content of a secret queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret'**
+  String get pasteQueueSecret;
+
+  /// Shown for a queued image.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get pasteQueueKindImage;
+
+  /// Shown for queued files without a name.
+  ///
+  /// In en, this message translates to:
+  /// **'Files'**
+  String get pasteQueueKindFiles;
+
+  /// When a queued snippet was rendered.
+  ///
+  /// In en, this message translates to:
+  /// **'Rendered at {time}'**
+  String pasteQueueRenderedAt(String time);
+
+  /// Screen-reader label of a queue row: its position and content.
+  ///
+  /// In en, this message translates to:
+  /// **'Item {position}: {content}'**
+  String pasteQueueRowLabel(String position, String content);
+
+  /// Announcement after an item was moved.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to position {position}'**
+  String pasteQueueMoved(int position);
+
+  /// Row action that moves an item one place earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get pasteQueueMoveUp;
+
+  /// Row action that moves an item one place later.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get pasteQueueMoveDown;
+
+  /// Row action that moves an item to the start of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to top'**
+  String get pasteQueueMoveToTop;
+
+  /// Row action that moves an item to the end of the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to bottom'**
+  String get pasteQueueMoveToBottom;
+
+  /// Tooltip of the drag handle that reorders a queue item.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag to reorder'**
+  String get pasteQueueReorder;
+
+  /// Tooltip of the button that opens a queue row's actions.
+  ///
+  /// In en, this message translates to:
+  /// **'More actions'**
+  String get pasteQueueMoreActions;
+
+  /// Row action that pastes this item now, out of order.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste now'**
+  String get pasteQueuePasteNow;
+
+  /// Row action that edits a queued text item.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit text'**
+  String get pasteQueueEdit;
+
+  /// Row action that drops the queue-local edit and pastes the original text again.
+  ///
+  /// In en, this message translates to:
+  /// **'Use original text'**
+  String get pasteQueueUseOriginal;
+
+  /// Row action that removes the item from the queue; history keeps it.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from queue'**
+  String get pasteQueueRemove;
+
+  /// Title of the dialog that edits a queued text item.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit queued text'**
+  String get pasteQueueEditTitle;
+
+  /// Explains that a queue edit does not change history.
+  ///
+  /// In en, this message translates to:
+  /// **'Edits apply only to this queue.'**
+  String get pasteQueueEditMessage;
+
+  /// Prompt title and button that leads to setting queue shortcuts.
+  ///
+  /// In en, this message translates to:
+  /// **'Set shortcuts'**
+  String get pasteQueueShortcutPromptTitle;
+
+  /// Explains why to set queue shortcuts; they start unbound on Windows and Linux.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect and paste without opening CopyPaste.'**
+  String get pasteQueueShortcutPromptMessage;
+
+  /// Shortcut name: start or stop collecting copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Start or stop collecting'**
+  String get pasteQueueShortcutToggleCollecting;
+
+  /// Shortcut name: paste the next item without formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next as plain text'**
+  String get pasteQueueShortcutPasteNextPlain;
+
+  /// Description of each queue shortcut row.
+  ///
+  /// In en, this message translates to:
+  /// **'A global shortcut that works in any app.'**
+  String get pasteQueueShortcutDescription;
+
+  /// Shortcut refused because another CopyPaste shortcut uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'Another CopyPaste shortcut uses this combination. The previous one is kept.'**
+  String get pasteQueueShortcutHeldByApp;
+
+  /// Shortcut refused because another app holds it.
+  ///
+  /// In en, this message translates to:
+  /// **'Another app uses this combination.'**
+  String get pasteQueueShortcutInUse;
+
+  /// Shortcut refused by the operating system.
+  ///
+  /// In en, this message translates to:
+  /// **'The system refused this combination. The previous one is kept.'**
+  String get pasteQueueShortcutRejected;
+
+  /// Recorder refusal on Windows and Linux: Ctrl+Alt is AltGr on many keyboard layouts.
+  ///
+  /// In en, this message translates to:
+  /// **'Ctrl+Alt types characters on many layouts. Choose another.'**
+  String get pasteQueueShortcutAltGr;
+
+  /// This desktop session offers no global shortcuts (for example some Wayland sessions).
+  ///
+  /// In en, this message translates to:
+  /// **'Global shortcuts aren\'t available in this session.'**
+  String get pasteQueueShortcutUnavailable;
+
+  /// Generic failure when a queue shortcut could not be set.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t set this shortcut.'**
+  String get pasteQueueShortcutFailed;
+
+  /// Settings switch that turns the Paste Queue feature on or off.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable Paste Queue'**
+  String get pasteQueueEnableTitle;
+
+  /// Description of the Paste Queue switch.
+  ///
+  /// In en, this message translates to:
+  /// **'When off, shortcuts and collecting stop.'**
+  String get pasteQueueEnableDescription;
+
+  /// Setting: what Paste next does on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste next does'**
+  String get pasteQueuePasteNextStyleTitle;
+
+  /// Description of the Paste next delivery style.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste automatically or only copy to the clipboard.'**
+  String get pasteQueuePasteNextStyleDescription;
+
+  /// Delivery style: paste into the front app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste into the front app'**
+  String get pasteQueuePasteIntoApp;
+
+  /// Delivery style: only put the item on the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Put on the clipboard only'**
+  String get pasteQueueClipboardOnly;
+
+  /// Setting: where new items join the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'New items go to'**
+  String get pasteQueueInsertTitle;
+
+  /// Description of the insertion position setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Where collected and added items join the queue.'**
+  String get pasteQueueInsertDescription;
+
+  /// Insertion position: at the end (first in, first out).
+  ///
+  /// In en, this message translates to:
+  /// **'End (first in, first out)'**
+  String get pasteQueueInsertEnd;
+
+  /// Insertion position: at the start (last in, first out).
+  ///
+  /// In en, this message translates to:
+  /// **'Start (last in, first out)'**
+  String get pasteQueueInsertStart;
+
+  /// Setting: what happens after the last item was pasted.
+  ///
+  /// In en, this message translates to:
+  /// **'After the last item'**
+  String get pasteQueueEndBehaviorTitle;
+
+  /// Description of the end behavior setting.
+  ///
+  /// In en, this message translates to:
+  /// **'What Paste next does once every item was pasted.'**
+  String get pasteQueueEndBehaviorDescription;
+
+  /// End behavior: stop and finish the queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get pasteQueueEndStop;
+
+  /// End behavior: start over from the first item.
+  ///
+  /// In en, this message translates to:
+  /// **'Start over'**
+  String get pasteQueueEndLoop;
+
+  /// End behavior: keep pasting the last item.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep pasting the last item'**
+  String get pasteQueueEndKeepLast;
+
+  /// Setting: the separator placed between items by Paste all.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste all separator'**
+  String get pasteQueueSeparatorTitle;
+
+  /// Description of the separator setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Placed between items when pasting all at once.'**
+  String get pasteQueueSeparatorDescription;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'New line'**
+  String get pasteQueueSeparatorNewLine;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Blank line'**
+  String get pasteQueueSeparatorBlankLine;
+
+  /// Separator choice: a tab character.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab'**
+  String get pasteQueueSeparatorTab;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Space'**
+  String get pasteQueueSeparatorSpace;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma'**
+  String get pasteQueueSeparatorComma;
+
+  /// Separator choice.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma and space'**
+  String get pasteQueueSeparatorCommaSpace;
+
+  /// Separator choice: nothing between items.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get pasteQueueSeparatorNone;
+
+  /// Separator choice: text the user enters.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get pasteQueueSeparatorCustom;
+
+  /// Placeholder of the custom separator field; \n and \t are typed literally by the user.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to 32 characters; \\n and \\t allowed'**
+  String get pasteQueueCustomSeparatorPlaceholder;
+
+  /// Setting: always paste queue items without formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Always paste as plain text'**
+  String get pasteQueuePlainTextTitle;
+
+  /// Description of the plain-text setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Drops formatting from queued items.'**
+  String get pasteQueuePlainTextDescription;
+
+  /// Setting: stop collecting after a period without copies.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop collecting after'**
+  String get pasteQueueIdleStopTitle;
+
+  /// Description of the idle stop setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop collecting after this long without copies.'**
+  String get pasteQueueIdleStopDescription;
+
+  /// Idle stop choice in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String pasteQueueIdleMinutes(int minutes);
+
+  /// Idle stop choice: never stop on its own.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get pasteQueueIdleNever;
+
+  /// Setting: the queue size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue size limit'**
+  String get pasteQueueMaxEntriesTitle;
+
+  /// Description of the size limit setting.
+  ///
+  /// In en, this message translates to:
+  /// **'When full, new copies aren\'t added.'**
+  String get pasteQueueMaxEntriesDescription;
+
+  /// Setting: restore the clipboard from before the queue started pasting.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore the previous clipboard when finished'**
+  String get pasteQueueRestoreTitle;
+
+  /// Description of the restore clipboard setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Bring back what you copied before pasting.'**
+  String get pasteQueueRestoreDescription;
+
+  /// Search keywords for the Paste Queue settings, space separated.
+  ///
+  /// In en, this message translates to:
+  /// **'paste queue collect sequence order shortcut hotkey separator stack'**
+  String get pasteQueueSettingsKeywords;
+
   /// Settings section name in navigation and as the section heading, about the application.
   ///
   /// In en, this message translates to:
@@ -1585,7 +2323,7 @@ abstract class AppLocalizations {
   /// Android startup setting description.
   ///
   /// In en, this message translates to:
-  /// **'Resume enabled background services after restarting the device.'**
+  /// **'Resume background services after a restart.'**
   String get settingsStartupAndroidDescription;
 
   /// Desktop startup setting description. CopyPaste is the product name.
@@ -1681,7 +2419,7 @@ abstract class AppLocalizations {
   /// Description of the Android background capture row. Full and Limited are capture mode names; Shizuku and ADB are tool names.
   ///
   /// In en, this message translates to:
-  /// **'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.'**
+  /// **'Full or Limited mode and one-time Shizuku or ADB setup.'**
   String get settingsAndroidCaptureDescription;
 
   /// Button that opens the Android background capture setup flow.
@@ -1723,7 +2461,7 @@ abstract class AppLocalizations {
   /// Description of the permission row needed to save screenshots.
   ///
   /// In en, this message translates to:
-  /// **'Allow access to all photos and notifications to save new screenshots in the background.'**
+  /// **'Needed to save screenshots in the background.'**
   String get settingsScreenshotAccessDescription;
 
   /// Button that requests the photo and notification permissions for screenshot saving.
@@ -1837,7 +2575,7 @@ abstract class AppLocalizations {
   /// Description of the maximum file size setting. Download is the name of the History action that transfers a file.
   ///
   /// In en, this message translates to:
-  /// **'Limit for adding and downloading files. File contents transfer only when you choose Download.'**
+  /// **'Largest file you can add or download.'**
   String get settingsMaxFileSizeDescription;
 
   /// Search result title for exporting, backing up, and restoring history.
@@ -1921,7 +2659,7 @@ abstract class AppLocalizations {
   /// Message of the dialog confirming a backup restore.
   ///
   /// In en, this message translates to:
-  /// **'The selected encrypted backup will replace the clipboard history on this device. Current settings and device identity are kept.'**
+  /// **'The backup replaces this device\'s history. Settings are kept.'**
   String get settingsRestoreDialogMessage;
 
   /// Error shown in the restore dialog when restoring fails.
@@ -1939,7 +2677,7 @@ abstract class AppLocalizations {
   /// Description of the master synchronization switch.
   ///
   /// In en, this message translates to:
-  /// **'Master switch for paired-device synchronization.'**
+  /// **'Sync history with paired devices.'**
   String get settingsSyncSwitchDescription;
 
   /// Search result description for the master synchronization switch.
@@ -1969,7 +2707,7 @@ abstract class AppLocalizations {
   /// Description of the instant clipboard setting.
   ///
   /// In en, this message translates to:
-  /// **'Automatically copy newer clips from other devices to this clipboard.'**
+  /// **'Copy new clips from other devices to this clipboard.'**
   String get settingsInstantClipboardDescription;
 
   /// Settings row title for being discoverable on the local network. LAN means local area network.
@@ -2008,22 +2746,16 @@ abstract class AppLocalizations {
   /// **'privacy app identifiers'**
   String get settingsExcludedAppsKeywords;
 
-  /// macOS description of excluded applications.
-  ///
-  /// In en, this message translates to:
-  /// **'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.'**
-  String get settingsExcludedAppsMacDescription;
-
   /// Windows and Linux description of excluded applications.
   ///
   /// In en, this message translates to:
-  /// **'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.'**
+  /// **'Skip automatic capture from these apps.'**
   String get settingsExcludedAppsDesktopDescription;
 
   /// Android description of excluded applications.
   ///
   /// In en, this message translates to:
-  /// **'Android skips automatic capture while exclusions are set because it cannot identify source apps.'**
+  /// **'Automatic capture pauses while any app is excluded.'**
   String get settingsExcludedAppsAndroidDescription;
 
   /// Description of excluded applications on platforms without support.
@@ -2050,29 +2782,17 @@ abstract class AppLocalizations {
   /// **'Remove {app}'**
   String settingsExcludedAppsRemove(String app);
 
-  /// Title of the dialog that adds an excluded application.
+  /// Search field placeholder of the list for choosing an application.
   ///
   /// In en, this message translates to:
-  /// **'Exclude application'**
-  String get settingsExcludeDialogTitle;
+  /// **'Search applications'**
+  String get applicationPickerSearch;
 
-  /// Verb. Confirm button of the dialog that adds an excluded application.
+  /// Shown when no application matches the search in the application list.
   ///
   /// In en, this message translates to:
-  /// **'Exclude'**
-  String get settingsExcludeDialogAction;
-
-  /// Placeholder of the field for the application identifier, such as a bundle ID or executable name.
-  ///
-  /// In en, this message translates to:
-  /// **'Application identifier'**
-  String get settingsExcludeDialogPlaceholder;
-
-  /// Error shown in the exclude application dialog when adding fails.
-  ///
-  /// In en, this message translates to:
-  /// **'The application could not be excluded.'**
-  String get settingsExcludeFailed;
+  /// **'No applications found'**
+  String get applicationPickerEmpty;
 
   /// Settings row title for not capturing clipboard content that the source app marked as confidential.
   ///
@@ -2083,7 +2803,7 @@ abstract class AppLocalizations {
   /// Description of the confidential clipboard setting. History is the clipboard history screen.
   ///
   /// In en, this message translates to:
-  /// **'Keep producer-marked secrets out of History.'**
+  /// **'Don\'t save copies that apps mark as secret.'**
   String get settingsSkipSecretDescription;
 
   /// Space-separated search keywords that find the confidential clipboard setting. Translate each word and keep the English words too.
@@ -2101,7 +2821,7 @@ abstract class AppLocalizations {
   /// Description of the temporary clipboard setting. History is the clipboard history screen.
   ///
   /// In en, this message translates to:
-  /// **'Keep producer-marked temporary copies out of History.'**
+  /// **'Don\'t save copies that apps mark as temporary.'**
   String get settingsSkipTransientDescription;
 
   /// Space-separated search keywords that find the temporary clipboard setting. Translate each word and keep the English words too.
@@ -2437,7 +3157,7 @@ abstract class AppLocalizations {
   /// Description of the Quick Paste shortcut row. CopyPaste is the product name.
   ///
   /// In en, this message translates to:
-  /// **'The shortcut works while CopyPaste is running in the background.'**
+  /// **'Works while CopyPaste runs in the background.'**
   String get settingsQuickPasteShortcutDescription;
 
   /// Description of the Quick Paste shortcut row showing the shortcut registered with the system.
@@ -2494,6 +3214,12 @@ abstract class AppLocalizations {
   /// **'Press shortcut…'**
   String get settingsShortcutRecording;
 
+  /// Label of a global shortcut recorder button when no shortcut is assigned.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get settingsShortcutNotSet;
+
   /// Tooltip of the button that restores the default Quick Paste shortcut.
   ///
   /// In en, this message translates to:
@@ -2541,18 +3267,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No devices nearby'**
   String get devicesNoneNearby;
-
-  /// Empty state title on the Devices screen when no other device has been paired yet.
-  ///
-  /// In en, this message translates to:
-  /// **'No other devices paired yet'**
-  String get devicesEmptyTitle;
-
-  /// Empty state message on the Devices screen explaining what pairing another device gives and requires.
-  ///
-  /// In en, this message translates to:
-  /// **'Pair another device to keep clipboard history in sync between them. Both devices must be on the same network, and every pairing is confirmed on both devices.'**
-  String get devicesEmptyMessage;
 
   /// Label for the device the app is running on, shown on its card and as a badge in its details.
   ///
@@ -3190,12 +3904,6 @@ abstract class AppLocalizations {
   /// **'Pairing failed'**
   String get pairingStateFailed;
 
-  /// Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it.
-  ///
-  /// In en, this message translates to:
-  /// **'Pairing not completed'**
-  String get pairingStateNotCompleted;
-
   /// Pairing status description while the two devices establish a secure connection.
   ///
   /// In en, this message translates to:
@@ -3231,90 +3939,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Start a pairing attempt to connect a device.'**
   String get pairingIdleDescription;
-
-  /// Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Invite'**
-  String get pairingStepInvite;
-
-  /// Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Scan'**
-  String get pairingStepScan;
-
-  /// Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Code'**
-  String get pairingStepCode;
-
-  /// Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Request'**
-  String get pairingStepRequest;
-
-  /// Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Connect'**
-  String get pairingStepConnect;
-
-  /// Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Confirm'**
-  String get pairingStepConfirm;
-
-  /// Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words.
-  ///
-  /// In en, this message translates to:
-  /// **'Paired'**
-  String get pairingStepPaired;
-
-  /// Label for the other device in the pairing confirmation status when its name is not known.
-  ///
-  /// In en, this message translates to:
-  /// **'Other device'**
-  String get pairingOtherDevice;
-
-  /// Pairing confirmation status of this device before the user has confirmed or rejected.
-  ///
-  /// In en, this message translates to:
-  /// **'Not confirmed yet'**
-  String get pairingDecisionNotConfirmed;
-
-  /// Pairing confirmation status of this device while its confirmation or rejection is being sent.
-  ///
-  /// In en, this message translates to:
-  /// **'Sending your decision…'**
-  String get pairingDecisionSending;
-
-  /// Pairing confirmation status of a device that confirmed the pairing.
-  ///
-  /// In en, this message translates to:
-  /// **'Confirmed'**
-  String get pairingDecisionConfirmed;
-
-  /// Pairing confirmation status of a device that rejected the pairing.
-  ///
-  /// In en, this message translates to:
-  /// **'Rejected'**
-  String get pairingDecisionRejected;
-
-  /// Pairing confirmation status of the other device after this device confirmed and the other has not answered yet.
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting for confirmation'**
-  String get pairingDecisionWaiting;
-
-  /// Pairing confirmation status of the other device when this device has not been told its answer.
-  ///
-  /// In en, this message translates to:
-  /// **'Answer not known'**
-  String get pairingDecisionUnknown;
 
   /// Error title when the screen-capture-protected pairing window cannot be used.
   ///
@@ -3549,12 +4173,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Synchronization: {status}'**
   String syncHeaderSemanticsLabel(String status);
-
-  /// Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 device} other{{count} devices}}'**
-  String syncHeaderDeviceCount(int count);
 
   /// Title of the synchronization details panel.
   ///
@@ -4215,12 +4833,6 @@ abstract class AppLocalizations {
   /// **'{kind} clip type'**
   String historyClipKindSemantics(String kind);
 
-  /// Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 line} other{{count} lines}}'**
-  String historyClipLineCount(int count);
-
   /// Empty-state title of the clip details panel when no clip is selected.
   ///
   /// In en, this message translates to:
@@ -4629,12 +5241,6 @@ abstract class AppLocalizations {
   /// **'Window setup needs attention'**
   String get appWindowSetupTitle;
 
-  /// Screen reader label of the application header region that holds the History, Devices and Settings destinations.
-  ///
-  /// In en, this message translates to:
-  /// **'Main navigation'**
-  String get appNavigationLabel;
-
   /// Screen reader label of the app logo button that opens the History screen. History is the name of the clipboard history screen.
   ///
   /// In en, this message translates to:
@@ -4790,18 +5396,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{size} B'**
   String sharedSizeBytes(String size);
-
-  /// Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.
-  ///
-  /// In en, this message translates to:
-  /// **'{step} / {count} · {name}'**
-  String sharedStepPosition(int step, int count, String name);
-
-  /// Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.
-  ///
-  /// In en, this message translates to:
-  /// **'Step {step} of {count}: {name}'**
-  String sharedStepSemantics(int step, int count, String name);
 
   /// Window and header title of the first-run setup flow. CopyPaste is the product name.
   ///
@@ -5571,30 +6165,6 @@ abstract class AppLocalizations {
   /// **'Downloading language model…'**
   String get modulesDownloadingModel;
 
-  /// Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible.
-  ///
-  /// In en, this message translates to:
-  /// **'Download'**
-  String get modulesPhaseDownload;
-
-  /// Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible.
-  ///
-  /// In en, this message translates to:
-  /// **'Install'**
-  String get modulesPhaseInstall;
-
-  /// Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.
-  ///
-  /// In en, this message translates to:
-  /// **'Installing {module}'**
-  String modulesInstallingModule(String module);
-
-  /// Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.
-  ///
-  /// In en, this message translates to:
-  /// **'Updating {module}'**
-  String modulesUpdatingModule(String module);
-
   /// Verb. Button in a module command dialog that runs the command.
   ///
   /// In en, this message translates to:
@@ -6045,6 +6615,216 @@ abstract class AppLocalizations {
   /// **'Tags…'**
   String get historyTagsAction;
 
+  /// Reason shown in the operating system's identity prompt for unlocking secret items for the current surface (Quick Paste, the Android keyboard panel or History). The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{unlock secret items} other{Unlock secret items}}'**
+  String deviceAuthReasonUnlockSecrets(String platform);
+
+  /// Reason shown in the operating system's identity prompt for using a snippet the user marked as concealed. The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{use a concealed snippet} other{Use a concealed snippet}}'**
+  String deviceAuthReasonUseConcealedSnippet(String platform);
+
+  /// Reason shown in the operating system's identity prompt for copying a secret item, for example from the tray Recent menu. The macos form is a lowercase clause that macOS inserts into its own sentence "<App> is trying to <reason>." in the system language; the other form is a standalone phrase.
+  ///
+  /// In en, this message translates to:
+  /// **'{platform, select, macos{copy a secret item} other{Copy a secret item}}'**
+  String deviceAuthReasonCopySecret(String platform);
+
+  /// Status shown for an identity-check setting when the system has no device authentication (for example Linux).
+  ///
+  /// In en, this message translates to:
+  /// **'Not available on this system'**
+  String get deviceAuthUnavailable;
+
+  /// Status shown for an identity-check setting when device authentication exists but no password, PIN or biometrics is set up.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up a device password, PIN or biometrics first'**
+  String get deviceAuthNotConfigured;
+
+  /// State word shown beside a switch that is turned on. Adjective; keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get commonOn;
+
+  /// State word shown beside a switch that is turned off. Adjective; keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get commonOff;
+
+  /// Settings error message, shown with a retry action, when Quick Paste fails to start for a reason other than its shortcut being refused. Quick Paste is a feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Paste could not start, so its shortcut does not work.'**
+  String get settingsQuickPasteStartFailed;
+
+  /// Warning in the Quick Paste shortcut row when the system refuses the global shortcut because another application already uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'{shortcut} is used by another app. Choose another shortcut.'**
+  String settingsQuickPasteShortcutInUse(String shortcut);
+
+  /// Empty state title on the Devices screen when no other device has been paired yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No other devices paired yet'**
+  String get devicesEmptyTitle;
+
+  /// Empty state message on the Devices screen explaining what pairing another device gives and requires.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair a device on the same network to sync history.'**
+  String get devicesEmptyMessage;
+
+  /// Pairing status title when the pairing ended unfinished without this device rejecting it; the other device may have rejected it or stopped pairing, so do not say who ended it.
+  ///
+  /// In en, this message translates to:
+  /// **'Pairing not completed'**
+  String get pairingStateNotCompleted;
+
+  /// Short name of a step in the pairing progress indicator: this device shows a pairing code and QR code and waits for the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Invite'**
+  String get pairingStepInvite;
+
+  /// Short name of a step in the pairing progress indicator: this device scans the QR code shown on the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan'**
+  String get pairingStepScan;
+
+  /// Short name of a step in the pairing progress indicator: the user types the pairing code shown on the other device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Code'**
+  String get pairingStepCode;
+
+  /// Short name of a step in the pairing progress indicator: a connection request is sent to or received from a nearby device. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Request'**
+  String get pairingStepRequest;
+
+  /// Short name of a step in the pairing progress indicator: the two devices establish a secure connection. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get pairingStepConnect;
+
+  /// Short name of a step in the pairing progress indicator: the verification code is compared and both devices confirm. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get pairingStepConfirm;
+
+  /// Short name of a step in the pairing progress indicator: the final step, reached when the device has been paired. Keep it to one or two short words.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired'**
+  String get pairingStepPaired;
+
+  /// Label for the other device in the pairing confirmation status when its name is not known.
+  ///
+  /// In en, this message translates to:
+  /// **'Other device'**
+  String get pairingOtherDevice;
+
+  /// Pairing confirmation status of this device before the user has confirmed or rejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not confirmed yet'**
+  String get pairingDecisionNotConfirmed;
+
+  /// Pairing confirmation status of this device while its confirmation or rejection is being sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending your decision…'**
+  String get pairingDecisionSending;
+
+  /// Pairing confirmation status of a device that confirmed the pairing.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmed'**
+  String get pairingDecisionConfirmed;
+
+  /// Pairing confirmation status of a device that rejected the pairing.
+  ///
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get pairingDecisionRejected;
+
+  /// Pairing confirmation status of the other device after this device confirmed and the other has not answered yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation'**
+  String get pairingDecisionWaiting;
+
+  /// Pairing confirmation status of the other device when this device has not been told its answer.
+  ///
+  /// In en, this message translates to:
+  /// **'Answer not known'**
+  String get pairingDecisionUnknown;
+
+  /// Number of paired devices shown after the synchronization status in the application header, such as: Up to date · 3 devices.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 device} other{{count} devices}}'**
+  String syncHeaderDeviceCount(int count);
+
+  /// Quiet note at the end of a History row's metadata line when the clip has more text lines than the row can show. {count} is the total number of lines in the clip and is always greater than 4.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 line} other{{count} lines}}'**
+  String historyClipLineCount(int count);
+
+  /// Screen reader label of the application header region that holds the History, Devices and Settings destinations.
+  ///
+  /// In en, this message translates to:
+  /// **'Main navigation'**
+  String get appNavigationLabel;
+
+  /// Compact progress of a multi-step operation shown when the step names do not fit, such as '1 / 2 · Download'; {name} is the name of the current step.
+  ///
+  /// In en, this message translates to:
+  /// **'{step} / {count} · {name}'**
+  String sharedStepPosition(int step, int count, String name);
+
+  /// Screen reader description of the current step of a multi-step operation; {name} is the name of the current step.
+  ///
+  /// In en, this message translates to:
+  /// **'Step {step} of {count}: {name}'**
+  String sharedStepSemantics(int step, int count, String name);
+
+  /// Noun. Short name of the first phase of a module install or update, shown in the progress strip on the module card. Keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get modulesPhaseDownload;
+
+  /// Noun. Short name of the phase of a module install or update in which the downloaded package is verified and installed, shown in the progress strip on the module card. Keep it as short as possible.
+  ///
+  /// In en, this message translates to:
+  /// **'Install'**
+  String get modulesPhaseInstall;
+
+  /// Screen reader name of the progress strip on a module card while the module is installed for the first time; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Installing {module}'**
+  String modulesInstallingModule(String module);
+
+  /// Screen reader name of the progress strip on a module card while an installed module is updated to a newer version; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating {module}'**
+  String modulesUpdatingModule(String module);
+
   /// Screen reader name of the button that closes a transient message before it leaves by itself.
   ///
   /// In en, this message translates to:
@@ -6060,7 +6840,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a shorter retention period deletes history. limit is the chosen period, for example '7 days'.
   ///
   /// In en, this message translates to:
-  /// **'New limit: {limit}. Older unpinned items are removed from this device now and cannot be recovered. Pinned items are kept.'**
+  /// **'New limit: {limit}. Older unpinned items are deleted permanently.'**
   String settingsRetentionConfirmMessage(String limit);
 
   /// Title of the confirmation shown before a smaller storage quota deletes history.
@@ -6072,7 +6852,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a smaller storage quota deletes history. size is the chosen quota, for example '5 GiB'.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. If unpinned history uses more, the oldest items are removed now and cannot be recovered. Pinned items are kept.'**
+  /// **'New quota: {size}. The oldest unpinned items over it are deleted permanently.'**
   String settingsStorageQuotaConfirmMessage(String size);
 
   /// Button that confirms a stricter history limit which deletes history.
@@ -6090,13 +6870,13 @@ abstract class AppLocalizations {
   /// Explains that with both visibility settings off the application has no visible icon and how to open it again. Used as a dialog body and as a notice.
   ///
   /// In en, this message translates to:
-  /// **'With both turned off, CopyPaste has no visible icon. To open it again, start CopyPaste again.'**
+  /// **'With both off, there\'s no icon. To open it, start CopyPaste again.'**
   String get settingsHideEverywhereMessage;
 
   /// Same as settingsHideEverywhereMessage, when the Quick Paste shortcut can open the application. shortcut is a key combination.
   ///
   /// In en, this message translates to:
-  /// **'With both turned off, CopyPaste has no visible icon. To open it again, press {shortcut} or start CopyPaste again.'**
+  /// **'With both off, there\'s no icon. To open it, press {shortcut} or start CopyPaste again.'**
   String settingsHideEverywhereShortcutMessage(String shortcut);
 
   /// Verb. Button that confirms hiding the application's last visible icon.
@@ -6216,7 +6996,7 @@ abstract class AppLocalizations {
   /// Body of the confirmation shown before a storage quota smaller than the current usage removes the oldest unpinned clips. size is the chosen quota; used is the storage unpinned history uses now.
   ///
   /// In en, this message translates to:
-  /// **'New quota: {size}. Unpinned history uses {used}, so its oldest clips are removed now until it fits. They cannot be recovered. Pinned items are kept.'**
+  /// **'New quota: {size}. {used} is in use, so the oldest unpinned items are deleted permanently.'**
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used);
 
   /// Number of clips in a History group, shown after the group name and date, such as: Today · Wednesday, November 11 · 14 clips.
@@ -6224,6 +7004,3456 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 clip} other{{count} clips}}'**
   String historySectionClipCount(int count);
+
+  /// Tray and menu-bar menu item that shows the main window.
+  ///
+  /// In en, this message translates to:
+  /// **'Open CopyPaste'**
+  String get trayOpenApp;
+
+  /// Tray and menu-bar menu item that opens the Quick Paste window. Quick Paste is a product name.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Quick Paste'**
+  String get trayOpenQuickPaste;
+
+  /// Same as trayOpenQuickPaste, followed by its global shortcut.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Quick Paste ({shortcut})'**
+  String trayOpenQuickPasteWithShortcut(String shortcut);
+
+  /// Tray and menu-bar menu item that opens the snippet editor for a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'New snippet'**
+  String get trayNewSnippet;
+
+  /// Tray and menu-bar submenu that lists the newest clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get trayRecent;
+
+  /// Shown in the Recent submenu while clips load.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading…'**
+  String get trayRecentLoading;
+
+  /// Shown in the Recent submenu when clips could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load clips'**
+  String get trayRecentFailed;
+
+  /// Shown in the Recent submenu when History is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No clips yet'**
+  String get trayRecentEmpty;
+
+  /// Shown in the Recent submenu when previews are set to Hidden: only the number of clips.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 recent clip hidden} other{{count} recent clips hidden}}'**
+  String trayRecentHidden(int count);
+
+  /// Replaces the content of a secret clip in the Recent submenu, followed by its source and time.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret'**
+  String get trayRecentSecret;
+
+  /// Tray and menu-bar menu item that copies the newest clip received from another device.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy latest from other device'**
+  String get trayCopyLatestFromOtherDevice;
+
+  /// Tray and menu-bar menu item that stores the current clipboard in History now, even while capture is paused.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture now'**
+  String get trayCaptureNow;
+
+  /// Disabled tray row while capture is paused for a while. time is a clock time.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused until {time}'**
+  String trayPausedUntil(String time);
+
+  /// Tray and menu-bar submenu with pause durations.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause for…'**
+  String get trayPauseFor;
+
+  /// Pause duration in the Pause for submenu.
+  ///
+  /// In en, this message translates to:
+  /// **'15 minutes'**
+  String get trayPauseFor15Minutes;
+
+  /// Pause duration in the Pause for submenu.
+  ///
+  /// In en, this message translates to:
+  /// **'1 hour'**
+  String get trayPauseForOneHour;
+
+  /// Pause option in the Pause for submenu: no automatic resume.
+  ///
+  /// In en, this message translates to:
+  /// **'Until I resume'**
+  String get trayPauseUntilResumed;
+
+  /// Tray row with the number of items in the Paste Queue. Paste Queue is a product name.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Paste Queue: 1 item} other{Paste Queue: {count} items}}'**
+  String trayPasteQueue(int count);
+
+  /// Tray row while the Paste Queue collects copies, with its number of items.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Collecting: 1 item} other{Collecting: {count} items}}'**
+  String trayPasteQueueCollecting(int count);
+
+  /// Tray submenu listing captures that content rules did not save, with their number.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently skipped ({count})'**
+  String trayRecentlySkipped(int count);
+
+  /// Item in the Recently skipped submenu that opens the content rules settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open content rules'**
+  String get trayOpenContentRules;
+
+  /// Heading of the settings for the menu-bar (macOS) or tray (Windows, Linux) menu.
+  ///
+  /// In en, this message translates to:
+  /// **'Menu bar and tray'**
+  String get trayRecentSettingsTitle;
+
+  /// Description under trayRecentSettingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What the menu bar or tray menu lists under Recent.'**
+  String get trayRecentSettingsDescription;
+
+  /// Setting title: how many clips the Recent submenu lists.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clips'**
+  String get trayRecentCountTitle;
+
+  /// Description of trayRecentCountTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How many of the newest clips the menu lists.'**
+  String get trayRecentCountDescription;
+
+  /// Setting title: how much of each clip the Recent submenu shows.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clip previews'**
+  String get trayRecentPreviewTitle;
+
+  /// Description of trayRecentPreviewTitle: menu text leaves the encrypted store.
+  ///
+  /// In en, this message translates to:
+  /// **'How much clip text the menu shows.'**
+  String get trayRecentPreviewDescription;
+
+  /// Option of trayRecentPreviewTitle: the beginning of the clip text.
+  ///
+  /// In en, this message translates to:
+  /// **'Full preview'**
+  String get trayRecentPreviewFull;
+
+  /// Option of trayRecentPreviewTitle: clip type, source app and time, no content.
+  ///
+  /// In en, this message translates to:
+  /// **'Type and source only'**
+  String get trayRecentPreviewTitles;
+
+  /// Option of trayRecentPreviewTitle: only the number of clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden'**
+  String get trayRecentPreviewHidden;
+
+  /// Space-separated search keywords for the menu-bar and tray settings.
+  ///
+  /// In en, this message translates to:
+  /// **'tray menu bar recent preview privacy count'**
+  String get trayRecentSettingsKeywords;
+
+  /// Title of the transform palette dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Transform text'**
+  String get transformsPaletteTitle;
+
+  /// Placeholder of the filter field in the transform palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter transforms'**
+  String get transformsFilterPlaceholder;
+
+  /// Shown in the palette list when the filter matches nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'No transforms match'**
+  String get transformsNoMatches;
+
+  /// Palette list group with filtered results.
+  ///
+  /// In en, this message translates to:
+  /// **'Results'**
+  String get transformsGroupResults;
+
+  /// Palette list group with transforms suggested for the content.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggested'**
+  String get transformsGroupSuggested;
+
+  /// Palette list group with recently used transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get transformsGroupRecent;
+
+  /// Palette list group with favorite transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites'**
+  String get transformsGroupFavorites;
+
+  /// Palette list group with saved pipelines (chains of transforms).
+  ///
+  /// In en, this message translates to:
+  /// **'Pipelines'**
+  String get transformsGroupPipelines;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON, YAML, CSV and XML'**
+  String get transformsCategoryStructure;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Encode and decode'**
+  String get transformsCategoryEncode;
+
+  /// Transform category name: letter case changes.
+  ///
+  /// In en, this message translates to:
+  /// **'Case'**
+  String get transformsCategoryCase;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Hashes'**
+  String get transformsCategoryHash;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines and whitespace'**
+  String get transformsCategoryLines;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Clean up'**
+  String get transformsCategoryClean;
+
+  /// Transform category name: URL cleanup.
+  ///
+  /// In en, this message translates to:
+  /// **'Links'**
+  String get transformsCategoryUrl;
+
+  /// Transform category name.
+  ///
+  /// In en, this message translates to:
+  /// **'Rich text and Markdown'**
+  String get transformsCategoryMarkup;
+
+  /// Transform category name: tokens, timestamps, find and replace.
+  ///
+  /// In en, this message translates to:
+  /// **'Developer'**
+  String get transformsCategoryDev;
+
+  /// Transform category name for transforms of an unknown category.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get transformsCategoryOther;
+
+  /// Shown in the palette chain strip when no transform is picked.
+  ///
+  /// In en, this message translates to:
+  /// **'No steps yet'**
+  String get transformsChainEmpty;
+
+  /// Label of one step in a transform chain: its position and transform name.
+  ///
+  /// In en, this message translates to:
+  /// **'{step} · {name}'**
+  String transformsStepLabel(int step, String name);
+
+  /// Label of the highlighted transform that is not yet a step of the chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Then: {name}'**
+  String transformsThenLabel(String name);
+
+  /// Switch label that enables or disables one step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Run this step'**
+  String get transformsStepEnabled;
+
+  /// Button that moves a step or favorite one place earlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Move up'**
+  String get transformsMoveEarlier;
+
+  /// Button that moves a step or favorite one place later.
+  ///
+  /// In en, this message translates to:
+  /// **'Move down'**
+  String get transformsMoveLater;
+
+  /// Button that removes one step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove step'**
+  String get transformsRemoveStep;
+
+  /// Button that saves the current chain as a named pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as pipeline'**
+  String get transformsSavePipeline;
+
+  /// Title of the dialog that names a new pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Save pipeline'**
+  String get transformsSavePipelineTitle;
+
+  /// Error when saving a pipeline fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The pipeline could not be saved.'**
+  String get transformsSavePipelineFailed;
+
+  /// Label of the pipeline name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get transformsPipelineNameLabel;
+
+  /// Label of the pipeline description field.
+  ///
+  /// In en, this message translates to:
+  /// **'Description (optional)'**
+  String get transformsPipelineDescriptionLabel;
+
+  /// Heading of the step list in the pipeline editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Steps'**
+  String get transformsPipelineStepsLabel;
+
+  /// Shown in the pipeline editor when it has no steps.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one step.'**
+  String get transformsPipelineNoSteps;
+
+  /// Validation message when the pipeline name is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a name.'**
+  String get transformsPipelineNameRequired;
+
+  /// Validation message when the pipeline name is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most 80 characters.'**
+  String get transformsPipelineNameTooLong;
+
+  /// Validation message when the pipeline name is already used.
+  ///
+  /// In en, this message translates to:
+  /// **'Another pipeline already has this name.'**
+  String get transformsPipelineNameTaken;
+
+  /// Toast title after saving a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Pipeline saved'**
+  String get transformsPipelineSavedTitle;
+
+  /// Toast message after saving a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is available in every transform palette.'**
+  String transformsPipelineSavedMessage(String name);
+
+  /// Number of steps of a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Steps: {count}'**
+  String transformsPipelineSteps(int count);
+
+  /// Name of a duplicated pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} ({index})'**
+  String transformsPipelineCopyName(String name, int index);
+
+  /// Shown where a favorite or default names a pipeline that no longer exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted pipeline'**
+  String get transformsRemovedPipeline;
+
+  /// Shown for a pipeline or step made by a newer app version; it cannot run here.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs a newer CopyPaste version'**
+  String get transformsNeedsNewerVersion;
+
+  /// Error when the transform catalogue or settings cannot be loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Transforms could not be loaded.'**
+  String get transformsLoadFailed;
+
+  /// Title shown when the palette opens on an image, file or color item.
+  ///
+  /// In en, this message translates to:
+  /// **'Transforms work on text'**
+  String get transformsNotTextTitle;
+
+  /// Explanation shown when the palette opens on a non-text item.
+  ///
+  /// In en, this message translates to:
+  /// **'This item is an image, a file or a color. Pick a text item or copy some text.'**
+  String get transformsNotTextMessage;
+
+  /// Title shown when there is no source text for the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to transform'**
+  String get transformsNothingTitle;
+
+  /// Hint shown when there is no source text for the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy some text or pick a history item.'**
+  String get transformsNothingMessage;
+
+  /// Shown in the preview before any transform is highlighted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a transform'**
+  String get transformsPickTransform;
+
+  /// Keyboard hint in the empty preview on desktop.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab adds it as a step. Enter applies the result.'**
+  String get transformsPickTransformHint;
+
+  /// Status line while the preview is computed.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating preview…'**
+  String get transformsPreviewing;
+
+  /// Counts of the shown output, announced to screen readers when the preview updates.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines: {lines} · Words: {words} · Characters: {chars}'**
+  String transformsCounts(int lines, int words, int chars);
+
+  /// Preview status when the output equals the input.
+  ///
+  /// In en, this message translates to:
+  /// **'No changes'**
+  String get transformsNoChanges;
+
+  /// Preview status when only a prefix of a long text is shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing the first 64 KiB of {size}'**
+  String transformsTruncated(String size);
+
+  /// Preview status when the chain contains a random transform such as shuffle.
+  ///
+  /// In en, this message translates to:
+  /// **'Random'**
+  String get transformsRandom;
+
+  /// Preview of a step after a failed step.
+  ///
+  /// In en, this message translates to:
+  /// **'Not run'**
+  String get transformsNotRun;
+
+  /// Shown instead of a sensitive preview until it is revealed.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is sensitive and hidden.'**
+  String get transformsSensitiveHidden;
+
+  /// Button that shows a hidden sensitive preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Reveal'**
+  String get transformsReveal;
+
+  /// Preview tab with the transform output.
+  ///
+  /// In en, this message translates to:
+  /// **'Output'**
+  String get transformsPaneOutput;
+
+  /// Preview tab with the transform input.
+  ///
+  /// In en, this message translates to:
+  /// **'Input'**
+  String get transformsPaneInput;
+
+  /// Preview tab that highlights what the transform changed.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes'**
+  String get transformsPaneChanges;
+
+  /// Title of an error about the source text.
+  ///
+  /// In en, this message translates to:
+  /// **'Can\'t transform this text'**
+  String get transformsCannotTransform;
+
+  /// Preview error naming the failed step of a chain.
+  ///
+  /// In en, this message translates to:
+  /// **'Step {step} · {name}: {message}'**
+  String transformsStepFailed(int step, String name, String message);
+
+  /// Button offered when decoded data is binary: switch the step to hex output.
+  ///
+  /// In en, this message translates to:
+  /// **'Show as hex'**
+  String get transformsUseHexOutput;
+
+  /// Palette action that pastes the result into the previous app.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get transformsActionPaste;
+
+  /// Palette action that stores the result as a new history item.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as new clip'**
+  String get transformsActionSave;
+
+  /// Toast message after copying a transform result.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is on the clipboard and in history.'**
+  String get transformsCopiedMessage;
+
+  /// Toast title after saving a transform result as a new item.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get transformsSavedTitle;
+
+  /// Toast message after saving a transform result as a new item.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved as a new history item.'**
+  String get transformsSavedMessage;
+
+  /// Toast title when a transformed paste cannot reach the target app.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t paste'**
+  String get transformsPasteFailedTitle;
+
+  /// Toast message when a transformed paste cannot reach the target app.
+  ///
+  /// In en, this message translates to:
+  /// **'The result is on the clipboard. Paste it manually.'**
+  String get transformsPasteFailedMessage;
+
+  /// A transform error with its position in the input.
+  ///
+  /// In en, this message translates to:
+  /// **'{message} at line {line}, column {column}'**
+  String transformsErrorAt(String message, int line, int column);
+
+  /// Transform error: decoded bytes are not text.
+  ///
+  /// In en, this message translates to:
+  /// **'Decoded data is binary, not text'**
+  String get transformsErrorBinary;
+
+  /// Transform error: input or output is over the size limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Too large to transform'**
+  String get transformsErrorTooLarge;
+
+  /// Transform error: a parameter value is refused.
+  ///
+  /// In en, this message translates to:
+  /// **'A setting of this step is not valid'**
+  String get transformsErrorInvalidParam;
+
+  /// Transform error: the computation was cancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get transformsErrorCancelled;
+
+  /// Transform error: a pattern exceeded the time budget.
+  ///
+  /// In en, this message translates to:
+  /// **'Pattern too expensive'**
+  String get transformsErrorTooExpensive;
+
+  /// Transform error: an empty or invalid search pattern.
+  ///
+  /// In en, this message translates to:
+  /// **'The pattern is not valid'**
+  String get transformsErrorPattern;
+
+  /// Transform error: a timestamp needs its unit.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose whether the number is in seconds or milliseconds'**
+  String get transformsErrorTimestampUnit;
+
+  /// Transform error: XML that references external entities.
+  ///
+  /// In en, this message translates to:
+  /// **'External entities are not allowed'**
+  String get transformsErrorExternalEntity;
+
+  /// Transform error: the JWT is encrypted.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted tokens can\'t be decoded'**
+  String get transformsErrorJwtEncrypted;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid JSON'**
+  String get transformsErrorJson;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid YAML'**
+  String get transformsErrorYaml;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid XML'**
+  String get transformsErrorXml;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid CSV'**
+  String get transformsErrorCsv;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid Base64'**
+  String get transformsErrorBase64;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid hex'**
+  String get transformsErrorHex;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid escape sequence'**
+  String get transformsErrorEscape;
+
+  /// Transform error in URL decoding.
+  ///
+  /// In en, this message translates to:
+  /// **'Malformed percent-encoding'**
+  String get transformsErrorUrl;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a valid JWT'**
+  String get transformsErrorJwt;
+
+  /// Transform error.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a recognized date or timestamp'**
+  String get transformsErrorDate;
+
+  /// Transform error with an unknown code.
+  ///
+  /// In en, this message translates to:
+  /// **'This step can\'t transform its input'**
+  String get transformsErrorGeneric;
+
+  /// Transform warning: a signed URL was not modified.
+  ///
+  /// In en, this message translates to:
+  /// **'Signed link left unchanged'**
+  String get transformsWarningSignedLink;
+
+  /// Transform warning: the decoded token has expired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get transformsWarningExpired;
+
+  /// Transform warning: the decoded token is not valid yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not yet valid'**
+  String get transformsWarningNotYetValid;
+
+  /// Transform warning: a decoded token's signature is not checked.
+  ///
+  /// In en, this message translates to:
+  /// **'Signature not verified'**
+  String get transformsWarningSignatureNotVerified;
+
+  /// Transform warning: the input has duplicate keys.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate keys'**
+  String get transformsWarningDuplicateKeys;
+
+  /// Transform warning: trailing commas or comments were accepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted non-standard JSON'**
+  String get transformsWarningLenientJson;
+
+  /// Transform warning.
+  ///
+  /// In en, this message translates to:
+  /// **'The JSON was encoded twice'**
+  String get transformsWarningDoubleEncoded;
+
+  /// Transform warning.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown escape sequences kept as written'**
+  String get transformsWarningEscapes;
+
+  /// Transform warning: a date without a zone was read as local time.
+  ///
+  /// In en, this message translates to:
+  /// **'Local time zone assumed'**
+  String get transformsWarningLocalZone;
+
+  /// Transform warning: an extraction found nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'No matches'**
+  String get transformsWarningNoMatches;
+
+  /// Transform warning with an unknown code.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the result'**
+  String get transformsWarningGeneric;
+
+  /// Settings row title: put the previous clipboard back after a transformed paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore clipboard after paste'**
+  String get transformsRestoreTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Bring back the previous clipboard after pasting.'**
+  String get transformsRestoreDescription;
+
+  /// Settings row title: a pipeline applied when pasting from Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Default paste transform'**
+  String get transformsDefaultTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Applied to text you paste from Quick Paste.'**
+  String get transformsDefaultDescription;
+
+  /// Option meaning no default paste transform.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get transformsNoDefault;
+
+  /// Settings row title: default paste transforms for specific apps.
+  ///
+  /// In en, this message translates to:
+  /// **'Defaults per app'**
+  String get transformsAppDefaultsTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a different default in specific apps.'**
+  String get transformsAppDefaultsDescription;
+
+  /// Marks a per-app default made for another platform.
+  ///
+  /// In en, this message translates to:
+  /// **'only on {platform}'**
+  String transformsOtherPlatform(String platform);
+
+  /// Button that chooses an application to add a per-app default for.
+  ///
+  /// In en, this message translates to:
+  /// **'Add app'**
+  String get transformsAddApp;
+
+  /// Button that removes an entry from a list.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get transformsRemove;
+
+  /// Settings row title: favorite transforms and pipelines.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites'**
+  String get transformsFavoritesTitle;
+
+  /// Settings row description; Mod is Command on macOS and Ctrl elsewhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Shown first in every palette.'**
+  String get transformsFavoritesDescription;
+
+  /// Shortcut of a favorite in the palette; Mod is Command on macOS and Ctrl elsewhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Mod+{number} in the palette'**
+  String transformsFavoriteShortcut(int number);
+
+  /// Placeholder of the selector that adds a favorite.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a favorite'**
+  String get transformsAddFavorite;
+
+  /// Settings row title: saved chains of transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Pipelines'**
+  String get transformsPipelinesTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved chains of transforms.'**
+  String get transformsPipelinesDescription;
+
+  /// Button and drawer title for creating a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'New pipeline'**
+  String get transformsNewPipeline;
+
+  /// Button and drawer title for editing a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit pipeline'**
+  String get transformsEditPipeline;
+
+  /// Button that copies a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate'**
+  String get transformsDuplicatePipeline;
+
+  /// Button that deletes a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get transformsDeletePipeline;
+
+  /// Title of the dialog confirming a pipeline deletion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name}?'**
+  String transformsDeletePipelineTitle(String name);
+
+  /// Explanation in the delete pipeline dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Favorites and paste defaults using it are cleared.'**
+  String get transformsDeletePipelineMessage;
+
+  /// Error when deleting a pipeline fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The pipeline could not be deleted.'**
+  String get transformsDeletePipelineFailed;
+
+  /// Placeholder of the selector that adds a step to a pipeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a step'**
+  String get transformsAddStep;
+
+  /// Settings row title: transforms hidden from the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden transforms'**
+  String get transformsHiddenTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Left out of palettes and suggestions.'**
+  String get transformsHiddenDescription;
+
+  /// Placeholder of the selector that hides a transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide a transform'**
+  String get transformsHideTransform;
+
+  /// Button that shows a hidden transform again.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get transformsShow;
+
+  /// Settings row title: suggested transforms in the palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggestions'**
+  String get transformsSuggestionsTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggest transforms that fit the text.'**
+  String get transformsSuggestionsDescription;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON'**
+  String get transformsDetectorJson;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON Web Tokens'**
+  String get transformsDetectorJwt;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Base64'**
+  String get transformsDetectorBase64;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Links with tracking parameters'**
+  String get transformsDetectorTrackingUrl;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Timestamps'**
+  String get transformsDetectorTimestamp;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'HTML'**
+  String get transformsDetectorHtml;
+
+  /// Content detector name.
+  ///
+  /// In en, this message translates to:
+  /// **'Markdown'**
+  String get transformsDetectorMarkdown;
+
+  /// Settings row title: URL parameters removed by the Remove tracking parameters transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Tracking parameters'**
+  String get transformsTrackingTitle;
+
+  /// Settings row description.
+  ///
+  /// In en, this message translates to:
+  /// **'Link parameters to also remove or always keep.'**
+  String get transformsTrackingDescription;
+
+  /// Label of the custom list of tracking parameters to remove.
+  ///
+  /// In en, this message translates to:
+  /// **'Also remove'**
+  String get transformsTrackingRemoveLabel;
+
+  /// Label of the list of parameters that are never removed.
+  ///
+  /// In en, this message translates to:
+  /// **'Always keep'**
+  String get transformsTrackingAllowLabel;
+
+  /// Placeholder of the tracking parameter field.
+  ///
+  /// In en, this message translates to:
+  /// **'name or name@domain, then Enter'**
+  String get transformsTrackingPlaceholder;
+
+  /// Error title in Android Settings > Quick access when the keyboard, tile and widget status cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick access status unavailable'**
+  String get quickAccessUnavailableTitle;
+
+  /// Error message under quickAccessUnavailableTitle; a Retry button follows.
+  ///
+  /// In en, this message translates to:
+  /// **'CopyPaste couldn\'t read the keyboard, tile, and widget status. Try again.'**
+  String get quickAccessUnavailableMessage;
+
+  /// Notice title in Android Settings > Quick access when a system screen could not be opened or an option could not be saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t complete that'**
+  String get quickAccessActionFailedTitle;
+
+  /// Notice message under quickAccessActionFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Android didn\'t open the requested screen or save the change. Try again.'**
+  String get quickAccessActionFailedMessage;
+
+  /// Setting row title: the CopyPaste clips keyboard panel (an Android input method that inserts saved clips).
+  ///
+  /// In en, this message translates to:
+  /// **'Clips keyboard'**
+  String get quickAccessKeyboardTitle;
+
+  /// Setting row description for the clips keyboard. Explains turning it on and the system warning, and states that the panel never records keystrokes.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on CopyPaste clips in keyboard settings.'**
+  String get quickAccessKeyboardDescription;
+
+  /// Status under the clips keyboard row: the keyboard is turned on in system settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Turned on'**
+  String get quickAccessKeyboardOn;
+
+  /// Status under the clips keyboard row: the keyboard is turned off in system settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Turned off'**
+  String get quickAccessKeyboardOff;
+
+  /// Button that opens the Android system screen where keyboards are turned on.
+  ///
+  /// In en, this message translates to:
+  /// **'Open keyboard settings'**
+  String get quickAccessOpenKeyboardSettings;
+
+  /// Settings search result description for the clips keyboard row.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on the CopyPaste clips keyboard panel.'**
+  String get quickAccessKeyboardSearchDescription;
+
+  /// Space-separated search keywords for the clips keyboard row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'keyboard input method ime panel enable'**
+  String get quickAccessKeyboardKeywords;
+
+  /// Setting row title: make the clips keyboard the current keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch to the clips keyboard'**
+  String get quickAccessSwitchKeyboardTitle;
+
+  /// Setting row description for switching to the clips keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Make CopyPaste clips the current keyboard.'**
+  String get quickAccessSwitchKeyboardDescription;
+
+  /// Button that shows the Android keyboard picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose keyboard'**
+  String get quickAccessSwitchKeyboardAction;
+
+  /// Status: the clips keyboard is the current keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Current keyboard'**
+  String get quickAccessKeyboardCurrent;
+
+  /// Setting row title: how copies made in other apps are saved on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture mode'**
+  String get quickAccessCaptureTierTitle;
+
+  /// Setting row description explaining capture without Shizuku or ADB access.
+  ///
+  /// In en, this message translates to:
+  /// **'How copies from other apps are saved.'**
+  String get quickAccessCaptureTierDescription;
+
+  /// Settings search result description for the capture mode row.
+  ///
+  /// In en, this message translates to:
+  /// **'See how copies from other apps are saved.'**
+  String get quickAccessCaptureTierSearchDescription;
+
+  /// Space-separated search keywords for the capture mode row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'capture tier full panel manual shizuku collect'**
+  String get quickAccessCaptureTierKeywords;
+
+  /// Capture mode status: background capture granted through Shizuku or ADB saves every copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Full: every copy is saved in the background'**
+  String get quickAccessTierFull;
+
+  /// Capture mode status: the clips keyboard is the current keyboard and saves each copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Panel selected: collecting'**
+  String get quickAccessTierPanelCollecting;
+
+  /// Capture mode status: the clips keyboard is turned on and saves the clipboard when it opens.
+  ///
+  /// In en, this message translates to:
+  /// **'Panel mode: catch-up on open'**
+  String get quickAccessTierPanelCatchUp;
+
+  /// Capture mode status: copies are saved only by an explicit action.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual: save from the app, a tile, the widget, or Share'**
+  String get quickAccessTierManual;
+
+  /// Capture mode status: the user paused clipboard capture.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture paused'**
+  String get quickAccessTierPaused;
+
+  /// Switch title: after inserting a clip, the panel switches back to the keyboard used before.
+  ///
+  /// In en, this message translates to:
+  /// **'Return to previous keyboard after inserting'**
+  String get quickAccessAutoReturnTitle;
+
+  /// Switch description for returning to the previous keyboard after inserting.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch back after inserting one clip.'**
+  String get quickAccessAutoReturnDescription;
+
+  /// Space-separated search keywords for the return-to-previous-keyboard switch; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'switch back previous keyboard auto return insert'**
+  String get quickAccessAutoReturnKeywords;
+
+  /// Switch title: the clips panel opens with its search field focused.
+  ///
+  /// In en, this message translates to:
+  /// **'Focus search when the panel opens'**
+  String get quickAccessFocusSearchTitle;
+
+  /// Switch description for focusing search when the clips panel opens.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the panel with search ready.'**
+  String get quickAccessFocusSearchDescription;
+
+  /// Setting row title for the Android Quick Settings tiles; also the search result label.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick Settings tiles'**
+  String get quickAccessTilesTitle;
+
+  /// Settings search result description for the Quick Settings tile rows.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the Save clipboard and Clipboard capture tiles.'**
+  String get quickAccessTilesSearchDescription;
+
+  /// Space-separated search keywords for the Quick Settings tile rows; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'quick settings tile shade save pause'**
+  String get quickAccessTilesKeywords;
+
+  /// How to add a CopyPaste tile by hand, shown when Android cannot or will not show the add-tile prompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Swipe down twice, tap Edit, and add a CopyPaste tile.'**
+  String get quickAccessTileInstructions;
+
+  /// Setting row title for the Save clipboard Quick Settings tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Save clipboard tile'**
+  String get quickAccessSaveTileTitle;
+
+  /// Setting row description for the Save clipboard tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Saves what\'s on the clipboard from Quick Settings.'**
+  String get quickAccessSaveTileDescription;
+
+  /// Setting row title for the Clipboard capture Quick Settings tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Clipboard capture tile'**
+  String get quickAccessCaptureTileTitle;
+
+  /// Setting row description for the Clipboard capture tile.
+  ///
+  /// In en, this message translates to:
+  /// **'Pauses and resumes capture from Quick Settings.'**
+  String get quickAccessCaptureTileDescription;
+
+  /// Button that asks Android to add the tile to Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Add tile'**
+  String get quickAccessAddTile;
+
+  /// Status: the tile is in Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Added to Quick Settings'**
+  String get quickAccessTileAdded;
+
+  /// Setting row title for the Recent clips home-screen widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clips widget'**
+  String get quickAccessWidgetTitle;
+
+  /// Setting row description for the Recent clips widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent clips on your home screen, one tap to copy.'**
+  String get quickAccessWidgetDescription;
+
+  /// How to add the widget by hand, shown when the launcher cannot pin widgets.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold the home screen, tap Widgets, and add Recent clips.'**
+  String get quickAccessWidgetInstructions;
+
+  /// Status: how many Recent clips widgets are on the home screen.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Not added} =1{1 widget added} other{{count} widgets added}}'**
+  String quickAccessWidgetCount(int count);
+
+  /// Button that asks the launcher to add the Recent clips widget.
+  ///
+  /// In en, this message translates to:
+  /// **'Add widget'**
+  String get quickAccessAddWidget;
+
+  /// Space-separated search keywords for the widget row; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'home screen widget launcher recent'**
+  String get quickAccessWidgetKeywords;
+
+  /// Screen-reader label of the abbreviation badge on a snippet row.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation {abbreviation}'**
+  String snippetsAbbreviationBadge(String abbreviation);
+
+  /// Label of the abbreviation field in the snippet editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation'**
+  String get snippetsAbbreviationLabel;
+
+  /// Placeholder of the abbreviation field; "sig" is a sample abbreviation and may be localized.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional, for example sig'**
+  String get snippetsAbbreviationPlaceholder;
+
+  /// Inline error: another snippet already has this abbreviation; title is that snippet's title.
+  ///
+  /// In en, this message translates to:
+  /// **'Already used by “{title}”'**
+  String snippetsAbbreviationTaken(String title);
+
+  /// Inline error: the abbreviation is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most {max} characters.'**
+  String snippetsAbbreviationTooLong(int max);
+
+  /// Inline error: the abbreviation contains whitespace.
+  ///
+  /// In en, this message translates to:
+  /// **'An abbreviation can\'t contain spaces or control characters.'**
+  String get snippetsAbbreviationWhitespace;
+
+  /// Banner above the snippet list: snippets with a duplicate abbreviation or conflict copies created by sync.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No snippets need review} =1{1 snippet needs review after a sync} other{{count} snippets need review after a sync}}'**
+  String snippetsAttention(int count);
+
+  /// Label of the snippet body field.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get snippetsBodyLabel;
+
+  /// Placeholder of the empty snippet body field.
+  ///
+  /// In en, this message translates to:
+  /// **'Type the snippet text'**
+  String get snippetsBodyPlaceholder;
+
+  /// Button that deselects all selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear selection'**
+  String get snippetsClearSelection;
+
+  /// Notice in the clip editor for clips over 256 KB.
+  ///
+  /// In en, this message translates to:
+  /// **'Too large to edit. This clip opens read-only.'**
+  String get snippetsClipTooLarge;
+
+  /// Name of a collection accent color.
+  ///
+  /// In en, this message translates to:
+  /// **'{accent, select, neutral{Neutral} blue{Blue} green{Green} amber{Amber} red{Red} other{Neutral}}'**
+  String snippetsCollectionAccent(String accent);
+
+  /// Label of the collection accent color picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Accent'**
+  String get snippetsCollectionAccentLabel;
+
+  /// Label of the collection icon picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Icon'**
+  String get snippetsCollectionIcon;
+
+  /// Label of the collection picker in the snippet editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Collection'**
+  String get snippetsCollectionLabel;
+
+  /// Label of the collection name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get snippetsCollectionName;
+
+  /// Inline error in the collection editor.
+  ///
+  /// In en, this message translates to:
+  /// **'A collection with this name already exists.'**
+  String get snippetsCollectionNameTaken;
+
+  /// Inline error: the collection name is too long.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at most {max} characters.'**
+  String snippetsCollectionNameTooLong(int max);
+
+  /// Shown instead of the body of a concealed snippet in the editor until the user chooses Show.
+  ///
+  /// In en, this message translates to:
+  /// **'This snippet is concealed.'**
+  String get snippetsConcealedBody;
+
+  /// Confirms the in-app owner check on devices without device authentication.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get snippetsConcealedConfirmAction;
+
+  /// In-app owner check shown when the system cannot verify the device owner.
+  ///
+  /// In en, this message translates to:
+  /// **'This device can\'t verify you. Continue only on your own device.'**
+  String get snippetsConcealedConfirmMessage;
+
+  /// Title of the in-app owner check.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm it\'s you'**
+  String get snippetsConcealedConfirmTitle;
+
+  /// Shown and announced instead of a concealed snippet's text in lists.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed snippet'**
+  String get snippetsConcealedPreview;
+
+  /// Switch in the snippet editor that masks the snippet everywhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed'**
+  String get snippetsConcealedSwitch;
+
+  /// Display title of a concealed snippet without a title.
+  ///
+  /// In en, this message translates to:
+  /// **'Concealed snippet'**
+  String get snippetsConcealedTitle;
+
+  /// Badge on a snippet created by a sync conflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflict copy'**
+  String get snippetsConflictBadge;
+
+  /// Toast title after a snippet was copied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get snippetsCopied;
+
+  /// Empty-state action that opens a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Create snippet'**
+  String get snippetsCreate;
+
+  /// Empty search action that creates a snippet from the query.
+  ///
+  /// In en, this message translates to:
+  /// **'Create snippet “{query}”'**
+  String snippetsCreateNamed(String query);
+
+  /// Action that deletes the selected collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete collection'**
+  String get snippetsDeleteCollection;
+
+  /// Option when deleting a collection (default).
+  ///
+  /// In en, this message translates to:
+  /// **'Move its snippets to Unfiled'**
+  String get snippetsDeleteCollectionMove;
+
+  /// Title of the delete-collection dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete “{name}”?'**
+  String snippetsDeleteCollectionTitle(String name);
+
+  /// Option when deleting a collection; the snippets go to Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete its snippets too'**
+  String get snippetsDeleteCollectionWithSnippets;
+
+  /// Toast message after deleting snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to Recently Deleted.'**
+  String get snippetsDeletedMessage;
+
+  /// Toast title after deleting snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Snippet deleted} other{{count} snippets deleted}}'**
+  String snippetsDeletedTitle(int count);
+
+  /// Label of the destination picker in the new-text editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to'**
+  String get snippetsDestination;
+
+  /// Destination of new text: a one-off history clip or a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'{destination, select, historyClip{History clip} snippet{Snippet} other{History clip}}'**
+  String snippetsDestinationName(String destination);
+
+  /// Unsaved-changes dialog action that closes without saving.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get snippetsDiscard;
+
+  /// Label shown while dragging snippets to a collection.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 snippet} other{{count} snippets}}'**
+  String snippetsDragging(int count);
+
+  /// Hint under the abbreviation of a snippet marked duplicate.
+  ///
+  /// In en, this message translates to:
+  /// **'Another snippet has this abbreviation. Change one.'**
+  String get snippetsDuplicateAbbreviation;
+
+  /// Badge on a snippet whose abbreviation is also used by another snippet after sync.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate abbreviation'**
+  String get snippetsDuplicateBadge;
+
+  /// Title of the clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit clip'**
+  String get snippetsEditClip;
+
+  /// Title and action for editing a collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit collection'**
+  String get snippetsEditCollection;
+
+  /// Title of the snippet editor for an existing snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit snippet'**
+  String get snippetsEditSnippet;
+
+  /// Editor tab with the body field (narrow layouts).
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get snippetsEditTab;
+
+  /// Empty state message of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Give a snippet an abbreviation, then type it in Quick Paste.'**
+  String get snippetsEmptyMessage;
+
+  /// Empty state title of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets yet'**
+  String get snippetsEmptyTitle;
+
+  /// Confirms turning on Template before inserting a placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get snippetsEnableTemplate;
+
+  /// Asked before inserting a placeholder into a literal snippet whose text already contains double braces.
+  ///
+  /// In en, this message translates to:
+  /// **'Text that looks like a placeholder will be filled in.'**
+  String get snippetsEnableTemplateMessage;
+
+  /// Title of the question before turning on Template.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on Template?'**
+  String get snippetsEnableTemplateTitle;
+
+  /// Action that exports snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get snippetsExport;
+
+  /// Action that exports the selected collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Export collection'**
+  String get snippetsExportCollection;
+
+  /// Separate confirmation for concealed snippets in an unencrypted export.
+  ///
+  /// In en, this message translates to:
+  /// **'Include concealed snippets in the readable file'**
+  String get snippetsExportConcealedConfirm;
+
+  /// Toast message after exporting.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No snippets written} =1{1 snippet written} other{{count} snippets written}}'**
+  String snippetsExportCount(int count);
+
+  /// Toast title after exporting.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets exported'**
+  String get snippetsExportDone;
+
+  /// Export switch, on by default.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypt with passphrase'**
+  String get snippetsExportEncrypt;
+
+  /// Error title in the export dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Export failed'**
+  String get snippetsExportFailed;
+
+  /// Required confirmation for an unencrypted export.
+  ///
+  /// In en, this message translates to:
+  /// **'I understand that anyone with the file can read it'**
+  String get snippetsExportPlainConfirm;
+
+  /// What an export contains.
+  ///
+  /// In en, this message translates to:
+  /// **'{scope, select, all{All snippets} collections{This collection} snippets{Selected snippets ({count})} other{All snippets}}'**
+  String snippetsExportScope(String scope, int count);
+
+  /// Title of the export dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Export snippets'**
+  String get snippetsExportTitle;
+
+  /// Title of the dialog that builds a fill-in field placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert field'**
+  String get snippetsFieldBuilderTitle;
+
+  /// Label of the default value of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Default value'**
+  String get snippetsFieldDefault;
+
+  /// Label of the name of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get snippetsFieldName;
+
+  /// Label of the options of a choice field.
+  ///
+  /// In en, this message translates to:
+  /// **'Options, separated by commas'**
+  String get snippetsFieldOptions;
+
+  /// Inline error under an empty required template field.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill in this field.'**
+  String get snippetsFieldRequired;
+
+  /// Label of the kind of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get snippetsFieldType;
+
+  /// Kind of a fill-in field.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, text{Single line} multiline{Multiple lines} choice{Choice} other{Single line}}'**
+  String snippetsFieldTypeName(String kind);
+
+  /// Notice when editing text that has rich formatting.
+  ///
+  /// In en, this message translates to:
+  /// **'Formatting will be removed when you save.'**
+  String get snippetsFormattingNotice;
+
+  /// Link to the snippet that already uses an abbreviation.
+  ///
+  /// In en, this message translates to:
+  /// **'Go to snippet'**
+  String get snippetsGoToSnippet;
+
+  /// Action that imports snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get snippetsImport;
+
+  /// Import policy for snippets whose abbreviation another snippet uses.
+  ///
+  /// In en, this message translates to:
+  /// **'Abbreviation already used'**
+  String get snippetsImportAbbreviationPolicy;
+
+  /// Choices of the abbreviation import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, importWithout{Import without abbreviation} renameWithSuffix{Add a number to the abbreviation} skip{Skip} other{Import without abbreviation}}'**
+  String snippetsImportAbbreviationPolicyName(String policy);
+
+  /// Import policy for collections whose name already exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Collection with the same name'**
+  String get snippetsImportCollectionPolicy;
+
+  /// Choices of the collection import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, merge{Add to the existing one} createNew{Create a new one} other{Add to the existing one}}'**
+  String snippetsImportCollectionPolicyName(String policy);
+
+  /// Import switch that translates recognized foreign placeholders.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert known placeholders'**
+  String get snippetsImportConvert;
+
+  /// Import preview counts.
+  ///
+  /// In en, this message translates to:
+  /// **'New: {added}. Identical, skipped: {identical}. Changed: {updated}. Abbreviation conflicts: {conflicts}. Invalid: {invalid}.'**
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  );
+
+  /// Toast title after importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets imported'**
+  String get snippetsImportDone;
+
+  /// Error title in the import dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Import failed'**
+  String get snippetsImportFailed;
+
+  /// File type label in the file picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippet files'**
+  String get snippetsImportFileType;
+
+  /// Label of the import format picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Format'**
+  String get snippetsImportFormat;
+
+  /// Import file formats.
+  ///
+  /// In en, this message translates to:
+  /// **'{format, select, bundle{CopyPaste bundle} json{JSON list} csv{CSV} other{CopyPaste bundle}}'**
+  String snippetsImportFormatName(String format);
+
+  /// One invalid import row; reason comes from the app.
+  ///
+  /// In en, this message translates to:
+  /// **'Row {row}: {reason}'**
+  String snippetsImportInvalidRow(int row, String reason);
+
+  /// Heading of the invalid rows in the import preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Rows that won\'t be imported'**
+  String get snippetsImportInvalidRows;
+
+  /// Placeholder of the import passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase, if the file is encrypted'**
+  String get snippetsImportPassphraseHint;
+
+  /// Import dialog action that checks the file before importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get snippetsImportPreview;
+
+  /// Toast message after importing.
+  ///
+  /// In en, this message translates to:
+  /// **'Added: {inserted}. Updated: {updated}. Skipped: {skipped}. Abbreviations to review: {flagged}. Unrecognized placeholders: {unrecognized}.'**
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  );
+
+  /// Import policy for snippets that exist with different content.
+  ///
+  /// In en, this message translates to:
+  /// **'Same snippet, different content'**
+  String get snippetsImportSameIdPolicy;
+
+  /// Choices of the same-snippet import policy.
+  ///
+  /// In en, this message translates to:
+  /// **'{policy, select, keepBoth{Keep both} replace{Replace existing} skip{Skip} other{Keep both}}'**
+  String snippetsImportSameIdPolicyName(String policy);
+
+  /// Title of the import dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Import snippets'**
+  String get snippetsImportTitle;
+
+  /// Action that inserts the built placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert'**
+  String get snippetsInsert;
+
+  /// Editor action that opens the placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert placeholder'**
+  String get snippetsInsertPlaceholder;
+
+  /// Keeps other templates unchanged after an abbreviation rename.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep them'**
+  String get snippetsKeepReferences;
+
+  /// Settings search description of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse, organize and edit snippets and collections.'**
+  String get snippetsLibraryDescription;
+
+  /// Space-separated search keywords for the snippet library; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'snippets templates abbreviations collections text'**
+  String get snippetsLibraryKeywords;
+
+  /// Settings search title of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippet library'**
+  String get snippetsLibraryTitle;
+
+  /// Template problem shown in the editor lint list and above the fill-in preview; detail is a name, option, number or loop from the template.
+  ///
+  /// In en, this message translates to:
+  /// **'{code, select, unclosed{This placeholder is never closed.} malformed{This placeholder can\'t be read.} unknownPlaceholder{Unknown placeholder “{detail}”. It is pasted as typed.} unknownParameter{Unknown option “{detail}”.} duplicateParameter{Option “{detail}” is set twice.} missingParameter{Option “{detail}” is missing.} invalidValue{Option “{detail}” has an invalid value.} conflictingParameters{These options can\'t be used together.} unknownLocale{Unknown language.} unknownTimeZone{Unknown time zone.} invalidPattern{Invalid date pattern.} dateOutOfRange{The date is out of range.} unknownModifier{Unknown modifier “{detail}”.} modifierFailed{Modifier “{detail}” couldn\'t be applied.} emptyClipboard{Clipboard item {detail} is empty.} extraCursor{Only the first cursor placeholder is used.} nestedCursor{A cursor inside an inserted snippet is ignored.} tooManyFields{Field “{detail}” is over the limit of 10 fields.} conflictingField{Field “{detail}” is defined twice with different settings.} choiceDefaultNotOption{The default of “{detail}” is not one of its options.} cycle{Snippets insert each other in a loop: {detail}.} depthExceeded{Snippets are inserted more than 3 levels deep.} nestingLimit{Too many inserted snippets.} unknownSnippet{No snippet has this abbreviation.} containsPlaceholders{The text contains placeholders. Turn on Template to fill them in.} other{This placeholder has a problem.}}'**
+  String snippetsLint(String code, String detail);
+
+  /// Error state of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load snippets'**
+  String get snippetsLoadFailed;
+
+  /// Loads the next page of snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get snippetsLoadMore;
+
+  /// Confirms merging two collections.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge'**
+  String get snippetsMerge;
+
+  /// Action that merges the selected collection into another.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge into another collection'**
+  String get snippetsMergeCollection;
+
+  /// Title of the merge dialog; followed by the target collection picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Merge “{name}” into'**
+  String snippetsMergeCollectionTitle(String name);
+
+  /// Placeholder of the picker that moves selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to'**
+  String get snippetsMoveTo;
+
+  /// Action and title for a new collection.
+  ///
+  /// In en, this message translates to:
+  /// **'New collection'**
+  String get snippetsNewCollection;
+
+  /// Action and title for a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'New snippet'**
+  String get snippetsNewSnippet;
+
+  /// Title of the editor for new text without a source clip.
+  ///
+  /// In en, this message translates to:
+  /// **'New text'**
+  String get snippetsNewText;
+
+  /// Empty search state of the snippet library.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets match “{query}”'**
+  String snippetsNoMatch(String query);
+
+  /// Placeholder of the passphrase confirmation field.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat passphrase'**
+  String get snippetsPassphraseConfirm;
+
+  /// Placeholder of the export passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase, at least {min} characters'**
+  String snippetsPassphraseHint(int min);
+
+  /// Label of the import passphrase field.
+  ///
+  /// In en, this message translates to:
+  /// **'Passphrase'**
+  String get snippetsPassphraseLabel;
+
+  /// Warning under the export passphrase.
+  ///
+  /// In en, this message translates to:
+  /// **'A forgotten passphrase can\'t be recovered.'**
+  String get snippetsPassphraseNoRecovery;
+
+  /// Passphrase strength meter label.
+  ///
+  /// In en, this message translates to:
+  /// **'{score, select, tooShort{Too short} weak{Weak} fair{Fair} good{Good} other{Strong}}'**
+  String snippetsPassphraseStrength(String score);
+
+  /// Switch in the snippet editor that shows the snippet in the Pinned section.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get snippetsPinnedSwitch;
+
+  /// Group of placeholders in the Insert placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Placeholders'**
+  String get snippetsPlaceholderGroup;
+
+  /// Entries of the Insert placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, today{Date} dateShort{Date, short} dateLong{Date, long} dateIso{Date, ISO 8601} dateNextWeek{Date in one week} now{Time} dateTime{Date and time} clipboard{Clipboard} clipboardPrevious{Previous clipboard item} field{Fill-in field…} cursor{Cursor position} uuid{UUID} random{Random number} upper{Modifier: uppercase} lower{Modifier: lowercase} trim{Modifier: trim spaces} other{Placeholder}}'**
+  String snippetsPlaceholderKind(String kind);
+
+  /// Group of snippets that can be inserted into a template.
+  ///
+  /// In en, this message translates to:
+  /// **'Insert another snippet'**
+  String get snippetsPlaceholderNestedGroup;
+
+  /// Empty search state of the placeholder palette.
+  ///
+  /// In en, this message translates to:
+  /// **'No placeholders match'**
+  String get snippetsPlaceholderNoMatch;
+
+  /// Preview of an empty body.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to preview'**
+  String get snippetsPreviewEmpty;
+
+  /// Editor tab and heading of the rendered preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get snippetsPreviewTab;
+
+  /// Action that erases snippets from Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete permanently'**
+  String get snippetsPurge;
+
+  /// Message of the permanent delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'They will be erased on all your devices. This can\'t be undone.'**
+  String get snippetsPurgeMessage;
+
+  /// Title of the permanent delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Delete snippet permanently?} other{Delete {count} snippets permanently?}}'**
+  String snippetsPurgeTitle(int count);
+
+  /// Empty state of Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently Deleted is empty'**
+  String get snippetsRecentlyDeletedEmpty;
+
+  /// Description of the record pasted snippets setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Add pasted snippets to History.'**
+  String get snippetsRecordPastedDescription;
+
+  /// Space-separated search keywords for the record pasted snippets setting; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'history record pasted snippets'**
+  String get snippetsRecordPastedKeywords;
+
+  /// Title of the record pasted snippets setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Record pasted snippets in History'**
+  String get snippetsRecordPastedTitle;
+
+  /// Clip editor switch that deletes the original clip after saving.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace original'**
+  String get snippetsReplaceOriginal;
+
+  /// Hint under the Replace original switch.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletes the original clip after saving.'**
+  String get snippetsReplaceOriginalHint;
+
+  /// Description of the device authentication setting for concealed snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask for your password or biometrics first.'**
+  String get snippetsRequireAuthDescription;
+
+  /// Space-separated search keywords for the device authentication setting; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'concealed password biometrics fingerprint face lock verify'**
+  String get snippetsRequireAuthKeywords;
+
+  /// Title of the device authentication setting for concealed snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify before using concealed snippets'**
+  String get snippetsRequireAuthTitle;
+
+  /// Restores snippets from Recently Deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get snippetsRestore;
+
+  /// Why Save is disabled: the body is too large.
+  ///
+  /// In en, this message translates to:
+  /// **'The text is longer than 64 KB.'**
+  String get snippetsSaveBlockTooLarge;
+
+  /// Error title in editors.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t save'**
+  String get snippetsSaveFailed;
+
+  /// Scope with all snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get snippetsScopeAll;
+
+  /// Empty state of a collection or Unfiled.
+  ///
+  /// In en, this message translates to:
+  /// **'No snippets here'**
+  String get snippetsScopeEmpty;
+
+  /// Scope and section with pinned snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get snippetsScopePinned;
+
+  /// Scope with snippets deleted in the last 30 days.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently Deleted'**
+  String get snippetsScopeRecentlyDeleted;
+
+  /// Placeholder of the snippet search field.
+  ///
+  /// In en, this message translates to:
+  /// **'Search snippets'**
+  String get snippetsSearchPlaceholder;
+
+  /// Number of selected snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 selected} other{{count} selected}}'**
+  String snippetsSelected(int count);
+
+  /// Reveals a concealed snippet in the editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get snippetsShow;
+
+  /// Leaves the review filter of the attention banner.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all'**
+  String get snippetsShowAll;
+
+  /// Shows only snippets that need review.
+  ///
+  /// In en, this message translates to:
+  /// **'Review'**
+  String get snippetsShowAttention;
+
+  /// Warning shown from 10,000 snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'You have {count} snippets. Up to 20,000 are allowed.'**
+  String snippetsSoftLimit(int count);
+
+  /// Badge on a template snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Template'**
+  String get snippetsTemplateBadge;
+
+  /// Switch that turns on placeholders for the snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Template'**
+  String get snippetsTemplateSwitch;
+
+  /// Label of the snippet title field.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get snippetsTitleLabel;
+
+  /// Placeholder of the snippet title field.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional'**
+  String get snippetsTitlePlaceholder;
+
+  /// Description of the import and export row.
+  ///
+  /// In en, this message translates to:
+  /// **'Back up snippets or move them between apps.'**
+  String get snippetsTransferDescription;
+
+  /// Space-separated search keywords for import and export; translate and add local synonyms.
+  ///
+  /// In en, this message translates to:
+  /// **'import export backup bundle json csv passphrase'**
+  String get snippetsTransferKeywords;
+
+  /// Title of the import and export row.
+  ///
+  /// In en, this message translates to:
+  /// **'Import and export'**
+  String get snippetsTransferTitle;
+
+  /// Toast action that restores deleted snippets.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get snippetsUndo;
+
+  /// Snippets that belong to no collection.
+  ///
+  /// In en, this message translates to:
+  /// **'Unfiled'**
+  String get snippetsUnfiled;
+
+  /// Warning above a preview: placeholders that cannot be filled in.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 placeholder is pasted as typed} other{{count} placeholders are pasted as typed}}'**
+  String snippetsUnfilledWarning(int count);
+
+  /// Removes a snippet from Pinned.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get snippetsUnpin;
+
+  /// Message of the unsaved changes dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Save your changes before closing?'**
+  String get snippetsUnsavedMessage;
+
+  /// Title of the unsaved changes dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsaved changes'**
+  String get snippetsUnsavedTitle;
+
+  /// Display title of a snippet without title or text.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled snippet'**
+  String get snippetsUntitled;
+
+  /// Rewrites other templates after an abbreviation rename.
+  ///
+  /// In en, this message translates to:
+  /// **'Update'**
+  String get snippetsUpdateReferences;
+
+  /// Asked when an abbreviation is renamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Other templates may insert “{from}”. Update them to use “{to}”?'**
+  String snippetsUpdateReferencesMessage(String from, String to);
+
+  /// Title of the abbreviation rename question.
+  ///
+  /// In en, this message translates to:
+  /// **'Update references?'**
+  String get snippetsUpdateReferencesTitle;
+
+  /// Error title of the fill-in form.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t use the snippet'**
+  String get snippetsUseFailed;
+
+  /// Quick Paste tab that shows the paste queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue'**
+  String get quickPasteTabQueue;
+
+  /// Notice in Quick Paste while the paste target is a password field, so every preview is masked.
+  ///
+  /// In en, this message translates to:
+  /// **'Password field: previews are hidden'**
+  String get quickPasteMaskedMode;
+
+  /// Masked row label in Quick Paste; the content is hidden and only its kind is named.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden: {kind}'**
+  String quickPasteMaskedItem(String kind);
+
+  /// Button label in Quick Paste that verifies the device owner to show and paste secret items.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock secret items'**
+  String get quickPasteUnlockSecrets;
+
+  /// Chip in Quick Paste naming the transform pipeline that Enter pastes text through.
+  ///
+  /// In en, this message translates to:
+  /// **'Pasting with: {name}'**
+  String quickPastePastingWith(String name);
+
+  /// Hint next to the default transform chip naming the shortcut that pastes the original instead.
+  ///
+  /// In en, this message translates to:
+  /// **'{shortcut} pastes the original'**
+  String quickPastePasteOriginalHint(String shortcut);
+
+  /// Toast title when the default paste transform failed on an item.
+  ///
+  /// In en, this message translates to:
+  /// **'Default transform skipped'**
+  String get quickPasteDefaultSkipped;
+
+  /// Toast message when the default paste transform failed and the original item was used.
+  ///
+  /// In en, this message translates to:
+  /// **'The original was used instead.'**
+  String get quickPasteDefaultSkippedMessage;
+
+  /// Toast message when Quick Paste put content on the clipboard but could not paste it.
+  ///
+  /// In en, this message translates to:
+  /// **'The content is on the clipboard. Paste it manually.'**
+  String get quickPastePasteManually;
+
+  /// Primary button of the template fill-in form inside Quick Paste.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste'**
+  String get quickPastePaste;
+
+  /// Error state of the Quick Paste snippet results.
+  ///
+  /// In en, this message translates to:
+  /// **'Snippets are unavailable'**
+  String get quickPasteSnippetsUnavailable;
+
+  /// Error title when the content rules cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Content rules could not be loaded.'**
+  String get rulesLoadFailed;
+
+  /// Button and editor title that creates a content rule.
+  ///
+  /// In en, this message translates to:
+  /// **'New rule'**
+  String get rulesNewRule;
+
+  /// Title of the rule editor for an existing rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit rule'**
+  String get rulesEditRule;
+
+  /// Shown for a rule without a name.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled rule'**
+  String get rulesUntitled;
+
+  /// Heading of the device Privacy settings that guard capture before any content rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy defaults'**
+  String get rulesPrivacyDefaultsTitle;
+
+  /// Description of the Privacy defaults row. The built-in rules are listed below it.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy settings apply before any rule.'**
+  String get rulesPrivacyDefaultsDescription;
+
+  /// Search keywords for the Privacy defaults row of Content rules.
+  ///
+  /// In en, this message translates to:
+  /// **'privacy concealed temporary excluded apps built-in credentials passwords payment cards'**
+  String get rulesPrivacyDefaultsKeywords;
+
+  /// Button that opens the Privacy settings section.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Privacy'**
+  String get rulesOpenPrivacy;
+
+  /// Heading of the list of rules the user created.
+  ///
+  /// In en, this message translates to:
+  /// **'My rules'**
+  String get rulesMyRulesTitle;
+
+  /// Description of the user rules list.
+  ///
+  /// In en, this message translates to:
+  /// **'Run in order on new copies.'**
+  String get rulesMyRulesDescription;
+
+  /// Search keywords for the user rules list.
+  ///
+  /// In en, this message translates to:
+  /// **'content rules automation tag skip secret expire delete pattern regex'**
+  String get rulesMyRulesKeywords;
+
+  /// Empty state title when the user has no rules.
+  ///
+  /// In en, this message translates to:
+  /// **'No rules yet'**
+  String get rulesEmptyTitle;
+
+  /// Empty state message when the user has no rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Rules tag, protect, expire or skip new copies.'**
+  String get rulesEmptyMessage;
+
+  /// Heading of the rules deleted within 30 days.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently deleted'**
+  String get rulesDeletedTitle;
+
+  /// Description of the recently deleted rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore within 30 days.'**
+  String get rulesDeletedDescription;
+
+  /// When a recently deleted rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {time}'**
+  String rulesDeletedAt(String time);
+
+  /// Button that restores a deleted rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get rulesRestore;
+
+  /// Toast title after a rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Rule deleted'**
+  String get rulesDeletedToast;
+
+  /// Toast message after a rule was deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'You can restore it for 30 days.'**
+  String get rulesDeletedToastMessage;
+
+  /// Toast action that undoes deleting a rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get rulesUndo;
+
+  /// Notice that a concurrent edit of a rule from another device lost and can be restored.
+  ///
+  /// In en, this message translates to:
+  /// **'A concurrent edit of “{rule}” from {device} was replaced by a newer one.'**
+  String rulesConflictMessage(String rule, String device);
+
+  /// Used in rulesConflictMessage when the device name is unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'another device'**
+  String get rulesAnotherDevice;
+
+  /// Button that restores the version of a rule that lost a concurrent edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Use that version'**
+  String get rulesRestoreConflict;
+
+  /// Title of the list of copies content rules did not save.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently skipped'**
+  String get rulesSkipLogTitle;
+
+  /// Description of the skip log row.
+  ///
+  /// In en, this message translates to:
+  /// **'Copies your rules didn\'t save on this device.'**
+  String get rulesSkipLogDescription;
+
+  /// Search keywords for the skip log row.
+  ///
+  /// In en, this message translates to:
+  /// **'skipped ignored not saved log'**
+  String get rulesSkipLogKeywords;
+
+  /// Button that shows the skip log.
+  ///
+  /// In en, this message translates to:
+  /// **'Show'**
+  String get rulesSkipLogShow;
+
+  /// Skip log text when no copy was skipped.
+  ///
+  /// In en, this message translates to:
+  /// **'No copies were skipped.'**
+  String get rulesSkipLogEmpty;
+
+  /// Skip log entry when the source app is not known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown app'**
+  String get rulesUnknownApp;
+
+  /// Condition part of a rule summary when the rule has no conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Any copy'**
+  String get rulesMatchesEverything;
+
+  /// One-line rule summary: its conditions, an arrow, its actions.
+  ///
+  /// In en, this message translates to:
+  /// **'{conditions} → {actions}'**
+  String rulesSummary(String conditions, String actions);
+
+  /// A rule summary for a rule that stops later rules.
+  ///
+  /// In en, this message translates to:
+  /// **'{summary}, then stop'**
+  String rulesSummaryStop(String summary);
+
+  /// Separator between conditions in a rule summary, by match mode (any or all). Keep the spaces.
+  ///
+  /// In en, this message translates to:
+  /// **'{mode, select, any{ or } other{ and }}'**
+  String rulesConditionJoin(String mode);
+
+  /// One condition in a rule summary, such as "Source app is Terminal".
+  ///
+  /// In en, this message translates to:
+  /// **'{attribute} {operator} {value}'**
+  String rulesConditionSummary(String attribute, String operator, String value);
+
+  /// One action with its value in a rule summary, such as "Delete after 15 minutes".
+  ///
+  /// In en, this message translates to:
+  /// **'{action} {value}'**
+  String rulesActionSummary(String action, String value);
+
+  /// The devices a rule runs on.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs on {devices}'**
+  String rulesRunsOn(String devices);
+
+  /// Badge on a rule another device added or changed in the last 7 days.
+  ///
+  /// In en, this message translates to:
+  /// **'New from {device}'**
+  String rulesNewFromDevice(String device);
+
+  /// Badge on a rule written by a newer CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs update'**
+  String get rulesNeedsUpdateBadge;
+
+  /// Shown for a rule this version cannot run.
+  ///
+  /// In en, this message translates to:
+  /// **'Update CopyPaste to run this rule.'**
+  String get rulesUpdateRequired;
+
+  /// Badge on a rule that cannot run on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get rulesErrorBadge;
+
+  /// Explains the error badge. problem is the reason, a full sentence.
+  ///
+  /// In en, this message translates to:
+  /// **'{problem} Until fixed, matches are protected.'**
+  String rulesErrorHint(String problem);
+
+  /// Drag handle of a rule row.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag to reorder'**
+  String get rulesReorder;
+
+  /// Menu button of a rule row.
+  ///
+  /// In en, this message translates to:
+  /// **'More actions'**
+  String get rulesMoreActions;
+
+  /// Menu item that opens the rule editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get rulesEdit;
+
+  /// Menu item and screen reader action that moves a rule in the list.
+  ///
+  /// In en, this message translates to:
+  /// **'{direction, select, up{Move up} down{Move down} top{Move to top} other{Move to bottom}}'**
+  String rulesMove(String direction);
+
+  /// Menu item that previews a rule against history and applies it to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to existing items…'**
+  String get rulesApplyToItems;
+
+  /// Menu item that resets a built-in rule to its shipped definition.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to default'**
+  String get rulesResetBuiltin;
+
+  /// Label of the rule name field.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get rulesNameLabel;
+
+  /// Placeholder of the rule name field.
+  ///
+  /// In en, this message translates to:
+  /// **'For example, Work links'**
+  String get rulesNamePlaceholder;
+
+  /// Editor section with the rule conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'When'**
+  String get rulesWhenTitle;
+
+  /// Choice of how conditions combine.
+  ///
+  /// In en, this message translates to:
+  /// **'{mode, select, any{Any condition matches} other{All conditions match}}'**
+  String rulesMatchMode(String mode);
+
+  /// Editor label of a rule without conditions, which applies to every copy.
+  ///
+  /// In en, this message translates to:
+  /// **'No conditions: this rule applies to every copy.'**
+  String get rulesNoConditions;
+
+  /// Button that adds a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Add condition'**
+  String get rulesAddCondition;
+
+  /// Button that removes a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove condition'**
+  String get rulesRemoveCondition;
+
+  /// Name of a condition attribute.
+  ///
+  /// In en, this message translates to:
+  /// **'{type, select, content_text{Text} content_type{Content type} detected_kind{Detected kind} source_app{Source app} size{Size} privacy_marker{Privacy marker} capture_origin{Origin} other{Unknown condition}}'**
+  String rulesConditionType(String type);
+
+  /// Operator of a text condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, contains{contains} equals{is} starts_with{starts with} ends_with{ends with} matches_regex{matches the pattern} other{matches}}'**
+  String rulesTextOperator(String op);
+
+  /// Negated operator of a text condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, contains{does not contain} equals{is not} starts_with{does not start with} ends_with{does not end with} matches_regex{does not match the pattern} other{does not match}}'**
+  String rulesTextOperatorNegated(String op);
+
+  /// Operator of a choice condition: is or is not one of the chosen values.
+  ///
+  /// In en, this message translates to:
+  /// **'{negate, select, true{is not} other{is}}'**
+  String rulesListOperator(String negate);
+
+  /// Operator of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, less_than{is less than} other{is more than}}'**
+  String rulesSizeOperator(String op);
+
+  /// Negated operator of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{op, select, less_than{is not less than} other{is not more than}}'**
+  String rulesSizeOperatorNegated(String op);
+
+  /// Unit of a size condition.
+  ///
+  /// In en, this message translates to:
+  /// **'{unit, select, lines{lines} bytes{bytes} other{characters}}'**
+  String rulesSizeUnit(String unit);
+
+  /// A size with its unit in a rule summary.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} {unit, select, lines{lines} bytes{bytes} other{characters}}'**
+  String rulesSizeValue(int count, String unit);
+
+  /// A content type a condition can match.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, plain_text{Plain text} rich_text{Rich text} image{Image} files{Files} color{Color} link{Link} other{Other}}'**
+  String rulesContentKind(String kind);
+
+  /// A kind of content the built-in detector finds.
+  ///
+  /// In en, this message translates to:
+  /// **'{kind, select, credential{Password or secret} url{Web address} email{Email address} phone{Phone number} code{Code} color{Color value} json{JSON} file_path{File path} number{Number} one_time_code{One-time code} payment_card{Payment card number} other{Other}}'**
+  String rulesDetectedKind(String kind);
+
+  /// A privacy marker the copying app or system sets.
+  ///
+  /// In en, this message translates to:
+  /// **'{marker, select, concealed{Concealed} transient{Temporary} auto_generated{Auto-generated} excluded_from_history{Excluded from history} other{Other}}'**
+  String rulesPrivacyMarker(String marker);
+
+  /// Where a copy came from.
+  ///
+  /// In en, this message translates to:
+  /// **'{origin, select, local_copy{Copied on this device} received{Received from another device} created_in_app{Created in CopyPaste} other{Other}}'**
+  String rulesCaptureOrigin(String origin);
+
+  /// Placeholder of the text value of a condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Text to look for'**
+  String get rulesValuePlaceholder;
+
+  /// Placeholder of a pattern (regular expression) value. Keep the example pattern unchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Pattern, for example ^ticket-[0-9]+'**
+  String get rulesPatternPlaceholder;
+
+  /// Hint under a pattern value.
+  ///
+  /// In en, this message translates to:
+  /// **'Look-around and backreferences aren\'t supported.'**
+  String get rulesPatternHint;
+
+  /// Switch that makes a text condition case-sensitive.
+  ///
+  /// In en, this message translates to:
+  /// **'Match case'**
+  String get rulesCaseSensitive;
+
+  /// Placeholder of a multi-choice field.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose'**
+  String get rulesChooseValues;
+
+  /// Shown on a condition from a newer version, which this version keeps unchanged.
+  ///
+  /// In en, this message translates to:
+  /// **'This condition comes from a newer version of CopyPaste.'**
+  String get rulesUnknownConditionNotice;
+
+  /// Inline notice on a source app condition: Android cannot evaluate it outside the CopyPaste keyboard.
+  ///
+  /// In en, this message translates to:
+  /// **'On Android, only copies made with the clips keyboard match.'**
+  String get rulesSourceAppNotice;
+
+  /// Inline notice on a privacy marker condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Not every system reports every marker.'**
+  String get rulesPrivacyMarkerNotice;
+
+  /// Editor section with the rule actions.
+  ///
+  /// In en, this message translates to:
+  /// **'Then'**
+  String get rulesThenTitle;
+
+  /// Shown when a rule has no actions yet.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one action.'**
+  String get rulesNoActions;
+
+  /// Button that adds an action.
+  ///
+  /// In en, this message translates to:
+  /// **'Add action'**
+  String get rulesAddAction;
+
+  /// Button that removes an action.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove action'**
+  String get rulesRemoveAction;
+
+  /// Name of a rule action.
+  ///
+  /// In en, this message translates to:
+  /// **'{type, select, dont_save{Don\'t save} mark_secret{Mark as secret} delete_after{Delete after} add_tags{Add tags} transform{Transform} other{Unknown action}}'**
+  String rulesActionType(String type);
+
+  /// Why an action cannot be added to the rule.
+  ///
+  /// In en, this message translates to:
+  /// **'{reason, select, dont_save_alone{“Don\'t save” can\'t be combined with other actions.} present{This rule already has this action.} other{A rule can have up to 8 actions.}}'**
+  String rulesActionBlock(String reason);
+
+  /// Shown on an action from a newer version.
+  ///
+  /// In en, this message translates to:
+  /// **'This action comes from a newer version of CopyPaste.'**
+  String get rulesUnknownActionNotice;
+
+  /// Shown under the Don't save action.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching copies are never stored, indexed or synced.'**
+  String get rulesDontSaveWarning;
+
+  /// A duration in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 minute} other{{count} minutes}}'**
+  String rulesMinutes(int count);
+
+  /// A duration in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 hour} other{{count} hours}}'**
+  String rulesHours(int count);
+
+  /// A duration in days.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 day} other{{count} days}}'**
+  String rulesDays(int count);
+
+  /// Option of the Delete after action.
+  ///
+  /// In en, this message translates to:
+  /// **'Also clear the clipboard if it still holds this copy.'**
+  String get rulesClearClipboardAtExpiry;
+
+  /// Shown in the Add tags action when no tags exist.
+  ///
+  /// In en, this message translates to:
+  /// **'Create tags in History to use them here.'**
+  String get rulesNoTags;
+
+  /// Shown in the Transform action when no transform is available.
+  ///
+  /// In en, this message translates to:
+  /// **'No transforms are available.'**
+  String get rulesNoTransforms;
+
+  /// Option of the Transform action.
+  ///
+  /// In en, this message translates to:
+  /// **'Also replace the clipboard with the result'**
+  String get rulesReplaceClipboard;
+
+  /// Editor section with rule options.
+  ///
+  /// In en, this message translates to:
+  /// **'Options'**
+  String get rulesOptionsTitle;
+
+  /// Switch that turns a rule on.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get rulesEnabledSwitch;
+
+  /// Switch that stops later rules when this rule matches.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop processing later rules when this one matches'**
+  String get rulesStopProcessing;
+
+  /// Label of the device scope field.
+  ///
+  /// In en, this message translates to:
+  /// **'Runs on'**
+  String get rulesRunsOnLabel;
+
+  /// Device scope choice: all devices.
+  ///
+  /// In en, this message translates to:
+  /// **'All devices'**
+  String get rulesAllDevices;
+
+  /// Device scope choice: chosen devices.
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen devices'**
+  String get rulesChosenDevices;
+
+  /// Editor section that tests the rule on a sample.
+  ///
+  /// In en, this message translates to:
+  /// **'Test'**
+  String get rulesTestTitle;
+
+  /// Description of the rule test.
+  ///
+  /// In en, this message translates to:
+  /// **'Try the rule on sample text.'**
+  String get rulesTestDescription;
+
+  /// Placeholder of the test sample field.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste or type sample text'**
+  String get rulesSamplePlaceholder;
+
+  /// Switch that tests the rule together with every other rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Test together with all rules'**
+  String get rulesTestFullSet;
+
+  /// Button that runs the rule test.
+  ///
+  /// In en, this message translates to:
+  /// **'Run test'**
+  String get rulesRunTest;
+
+  /// Shown when the rule test fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The test could not run.'**
+  String get rulesTestFailed;
+
+  /// Button that previews the rule against recent history.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview against history'**
+  String get rulesPreviewHistory;
+
+  /// Alert title when saving a rule fails.
+  ///
+  /// In en, this message translates to:
+  /// **'The rule could not be saved.'**
+  String get rulesSaveFailed;
+
+  /// Editor notice for a rule a newer version wrote.
+  ///
+  /// In en, this message translates to:
+  /// **'Made by a newer CopyPaste. Update to edit or run it.'**
+  String get rulesReadOnlyNotice;
+
+  /// A problem the runtime found in a rule, by error code.
+  ///
+  /// In en, this message translates to:
+  /// **'{code, select, invalid_definition{The rule could not be read.} unsupported_schema{This rule needs a newer version of CopyPaste.} unknown_condition_type{This condition needs a newer version of CopyPaste.} unknown_action_type{This action needs a newer version of CopyPaste.} too_many_conditions{A rule can have up to 20 conditions.} too_many_actions{A rule can have up to 8 actions.} too_many_rules{Only the first 200 rules run.} no_actions{Add at least one action.} conflicting_actions{“Don\'t save” can\'t be combined with other actions.} duplicate_action{Each action can be used only once.} empty_value{Enter a value.} empty_list{Choose at least one value.} too_many_values{Choose up to 64 values.} invalid_value{This value is not valid.} pattern_too_long{Patterns can be up to 2,000 characters.} unsupported_look_around{Look-ahead and look-behind are not supported. Use two conditions with “All conditions match” instead.} unsupported_backreference{Backreferences are not supported.} pattern_too_large{This pattern is too complex. Simplify its repetitions.} invalid_pattern{This pattern is not valid.} invalid_duration{Choose a duration from 1 minute to 90 days.} invalid_tags{Choose at least one tag.} invalid_transform{Choose a transform.} other{This rule has a problem.}}'**
+  String rulesProblem(String code);
+
+  /// One line of a rule trace: a rule or condition and its result.
+  ///
+  /// In en, this message translates to:
+  /// **'{label}: {result}'**
+  String rulesTraceLine(String label, String result);
+
+  /// Result of a rule or condition in a trace.
+  ///
+  /// In en, this message translates to:
+  /// **'{result, select, matched{matched} not_matched{not matched} unknown{unknown} skipped{not run} other{error}}'**
+  String rulesTraceResult(String result);
+
+  /// A condition in a trace, by its number.
+  ///
+  /// In en, this message translates to:
+  /// **'Condition {number}'**
+  String rulesTraceCondition(int number);
+
+  /// Trace when no rule was evaluated.
+  ///
+  /// In en, this message translates to:
+  /// **'No rule was evaluated.'**
+  String get rulesTraceNoRules;
+
+  /// Trace note under a rule that stopped later rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Later rules did not run.'**
+  String get rulesTraceStopped;
+
+  /// Trace note under a condition whose attribute is unknown for the copy.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown for this copy, so it doesn\'t match.'**
+  String get rulesTraceUnknownReason;
+
+  /// Trace note under a rule that could not run on this device.
+  ///
+  /// In en, this message translates to:
+  /// **'This rule couldn\'t run, so matches are protected.'**
+  String get rulesTraceRuleError;
+
+  /// Heading of the combined result in a trace.
+  ///
+  /// In en, this message translates to:
+  /// **'Result'**
+  String get rulesTraceOutcomeTitle;
+
+  /// Trace result when no rule changes the copy.
+  ///
+  /// In en, this message translates to:
+  /// **'No rule changes this copy.'**
+  String get rulesTraceNoEffect;
+
+  /// Trace result: the copy is not saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Not saved'**
+  String get rulesTraceSkipped;
+
+  /// Trace result: the copy is saved as secret.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved as secret'**
+  String get rulesTraceSecret;
+
+  /// Trace result: the copy is deleted after a duration.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted after {duration}'**
+  String rulesTraceExpires(String duration);
+
+  /// Trace result: the copy gets tags.
+  ///
+  /// In en, this message translates to:
+  /// **'Tagged {tags}'**
+  String rulesTraceTags(String tags);
+
+  /// Trace result: the copy is transformed.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed with {names}'**
+  String rulesTraceTransforms(String names);
+
+  /// Heading of the sample text after the rules' transforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed text'**
+  String get rulesTraceOutput;
+
+  /// Title of the dialog that previews and applies a rule to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to existing items'**
+  String get rulesPreviewTitle;
+
+  /// Shown while the preview checks recent clips.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking the latest {count} clips…'**
+  String rulesPreviewRunning(int count);
+
+  /// Preview result when no recent clip matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent clip matches this rule.'**
+  String get rulesPreviewNone;
+
+  /// Number of recent clips the rule matches.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip matches} other{{count} clips match}}'**
+  String rulesPreviewMatched(int count);
+
+  /// Preview effect: clips that applying would delete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be deleted} other{{count} would be deleted}}'**
+  String rulesPreviewDeleted(int count);
+
+  /// Preview effect: clips that applying would mark secret.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be marked secret} other{{count} would be marked secret}}'**
+  String rulesPreviewSecret(int count);
+
+  /// Preview effect: clips that applying would give a deletion time.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would get a deletion time} other{{count} would get a deletion time}}'**
+  String rulesPreviewExpiring(int count);
+
+  /// Preview effect: clips that applying would tag.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 would be tagged} other{{count} would be tagged}}'**
+  String rulesPreviewTagged(int count);
+
+  /// Preview note: older clips past the limit were not checked.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the latest {count} clips were checked.'**
+  String rulesPreviewTruncated(int count);
+
+  /// Preview list note: more matching clips than the list shows.
+  ///
+  /// In en, this message translates to:
+  /// **'and {count} more'**
+  String rulesPreviewMore(int count);
+
+  /// Preview note about when changes happen.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changes until you apply.'**
+  String get rulesPreviewNote;
+
+  /// A secret clip in the preview list; its content is never shown.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret item'**
+  String get rulesSecretItem;
+
+  /// A secret clip from an app in the preview list.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret item from {app}'**
+  String rulesSecretItemFrom(String app);
+
+  /// Shown after a preview was stopped.
+  ///
+  /// In en, this message translates to:
+  /// **'The preview was stopped. Nothing changed.'**
+  String get rulesPreviewCancelled;
+
+  /// Shown when the preview cannot run.
+  ///
+  /// In en, this message translates to:
+  /// **'The preview could not run.'**
+  String get rulesPreviewFailed;
+
+  /// Confirmation title before applying a rule that deletes clips.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Delete 1 clip?} other{Delete {count} clips?}}'**
+  String rulesApplyDeleteTitle(int count);
+
+  /// Explains that applying a Don't save rule deletes matching clips everywhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching clips are deleted on all your devices. This can\'t be undone.'**
+  String get rulesApplyDeleteMessage;
+
+  /// Confirmation button that deletes clips and applies the rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete and apply'**
+  String get rulesApplyDeleteConfirm;
+
+  /// Progress while a rule is applied to existing items.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying: {done} of {total}'**
+  String rulesApplyProgress(int done, int total);
+
+  /// Apply report: clips changed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip changed} other{{count} clips changed}}'**
+  String rulesApplyChanged(int count);
+
+  /// Apply report: clips deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip deleted} other{{count} clips deleted}}'**
+  String rulesApplyDeleted(int count);
+
+  /// Apply report: clips that could not be changed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip could not be changed} other{{count} clips could not be changed}}'**
+  String rulesApplyFailed(int count);
+
+  /// Shown after applying was stopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped. Changes made so far stay.'**
+  String get rulesApplyCancelled;
+
+  /// History clip action that opens the text editor; saving creates a new clip.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get historyActionEdit;
+
+  /// History clip action that saves the clip text as a new snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as snippet'**
+  String get historyActionSaveAsSnippet;
+
+  /// History action that adds the clip, or the selected clips, to the paste queue. Paste Queue is the feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to Paste Queue'**
+  String get historyActionAddToQueue;
+
+  /// History clip action that opens the text transform palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Transform…'**
+  String get historyActionTransform;
+
+  /// History clip action that explains which content rules made the clip stored, secret or expiring.
+  ///
+  /// In en, this message translates to:
+  /// **'Why is this here?'**
+  String get historyActionExplain;
+
+  /// History clip action that cancels the automatic deletion of an expiring clip.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep'**
+  String get historyActionKeep;
+
+  /// Button and tooltip that opens the editor for a new clip the user types.
+  ///
+  /// In en, this message translates to:
+  /// **'New clip'**
+  String get historyNewClip;
+
+  /// Toast title after an edited clip, a new clip or a snippet was saved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get historySavedTitle;
+
+  /// Toast message after saving an edited clip, which creates a new clip.
+  ///
+  /// In en, this message translates to:
+  /// **'The edited text is a new clip at the top of History.'**
+  String get historyEditSaved;
+
+  /// Toast message after saving text typed in the new clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Your text was saved.'**
+  String get historyNewClipSaved;
+
+  /// Toast message after a clip was saved as a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'The clip\'s text is now a snippet.'**
+  String get historySnippetSaved;
+
+  /// Error toast when a clip could not be saved as a snippet.
+  ///
+  /// In en, this message translates to:
+  /// **'This clip could not be saved as a snippet.'**
+  String get historySnippetSaveFailed;
+
+  /// Toast message after clips were added to the paste queue; several clips keep the order in which they were selected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 clip joined the queue.} other{{count} clips joined the queue.}}'**
+  String historyQueueAddedInOrder(int count);
+
+  /// Error toast when clips could not be added to the paste queue. Paste Queue is the feature name.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t add to Paste Queue. Check that it is turned on.'**
+  String get historyQueueAddFailed;
+
+  /// Error toast when an expiring clip could not be kept.
+  ///
+  /// In en, this message translates to:
+  /// **'This clip could not be kept.'**
+  String get historyKeepFailed;
+
+  /// Error shown when the content-rule explanation of a clip could not be loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'The explanation could not be loaded.'**
+  String get historyExplainFailed;
+
+  /// Countdown of an expiring clip with less than one minute left.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletes in less than a minute'**
+  String get historyDeletesSoon;
+
+  /// Countdown of an expiring clip, in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 min} other{Deletes in {count} min}}'**
+  String historyDeletesInMinutes(int count);
+
+  /// Countdown of an expiring clip, in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 h} other{Deletes in {count} h}}'**
+  String historyDeletesInHours(int count);
+
+  /// Countdown of an expiring clip, in days.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Deletes in 1 day} other{Deletes in {count} days}}'**
+  String historyDeletesInDays(int count);
+
+  /// Marker next to the source app of a clip the user typed in CopyPaste.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get historyProvenanceManual;
+
+  /// Marker next to the source app of a clip saved from the clip editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited'**
+  String get historyProvenanceEdited;
+
+  /// Marker next to the source app of a clip created by a text transform.
+  ///
+  /// In en, this message translates to:
+  /// **'Transformed'**
+  String get historyProvenanceTransformed;
+
+  /// Marker next to the source app for a clip written by an installed module.
+  ///
+  /// In en, this message translates to:
+  /// **'Module'**
+  String get historyProvenanceModule;
+
+  /// A tag that a content rule assigned automatically.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} (auto)'**
+  String historyRuleTag(String name);
+
+  /// Clip details label for when an expiring clip is deleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletion'**
+  String get historyMetadataExpiry;
+
+  /// Clip details label for tags assigned by content rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic tags'**
+  String get historyMetadataRuleTags;
+
+  /// Title of the dialog confirming what a module may access before it is enabled; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable {module}?'**
+  String modulesEnableTitle(String module);
+
+  /// Lead-in above the list of what a module may access.
+  ///
+  /// In en, this message translates to:
+  /// **'It will be able to:'**
+  String get modulesEnableAccess;
+
+  /// One line naming a host service a module asks for; {capability} is its identifier.
+  ///
+  /// In en, this message translates to:
+  /// **'{capability, select, history_read{Read your clipboard history} clipboard_write{Copy to your clipboard} library_write{Save snippets and pin clips} snippets{Read your snippets} synced_records{Sync its data across your devices} local_state{Keep its data on this device} prompts{Ask you to confirm actions} endpoints{Accept connections from local apps} other{Use a CopyPaste service}}'**
+  String modulesCapability(String capability);
+
+  /// Line naming the module that asks a question; {module} is the module name.
+  ///
+  /// In en, this message translates to:
+  /// **'From {module}'**
+  String modulesPromptFrom(String module);
+
+  /// Shown instead of a module name that is no longer known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown module'**
+  String get modulesUnknownModule;
+
+  /// Error when an answer to a module question could not be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Your answer was not sent.'**
+  String get modulesPromptAnswerFailed;
+
+  /// System notification text for a module question that arrives while the app is hidden.
+  ///
+  /// In en, this message translates to:
+  /// **'Open CopyPaste to answer.'**
+  String get modulesPromptNotificationBody;
+
+  /// Shown instead of a device name that is no longer known.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown device'**
+  String get modulesUnknownDevice;
+
+  /// Placeholder of a device picker in module settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose devices'**
+  String get modulesChooseDevices;
+
+  /// Button that adds an application to a module setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Add app'**
+  String get modulesAddApp;
+
+  /// Tooltip of the button that removes an application from a module setting; {app} is the application name.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove {app}'**
+  String modulesRemoveApp(String app);
+
+  /// Shown when a module application list is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No apps chosen'**
+  String get modulesNoApps;
 }
 
 class _AppLocalizationsDelegate

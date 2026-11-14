@@ -43,7 +43,12 @@ abstract final class AppOverlays {
     required Widget child,
   }) => _DrawerDismissal(onDismiss: onDismiss, child: child);
 
-  static DrawerConfiguration drawerConfiguration(BuildContext context) {
+  /// [guarded] drawers close only through their own dismissal, so an
+  /// unsaved-changes prompt cannot be skipped by a barrier tap or a drag.
+  static DrawerConfiguration drawerConfiguration(
+    BuildContext context, {
+    bool guarded = false,
+  }) {
     final registry = OverlayAnchorRegistry.of(context);
     final side =
         MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector;
@@ -54,10 +59,10 @@ abstract final class AppOverlays {
           : LinkedAnchor(drawerBodyAnchor, registry: registry),
       position: side ? OverlayPosition.right : OverlayPosition.bottom,
       expands: true,
-      draggable: !side,
-      barrierDismissible: true,
+      draggable: !side && !guarded,
+      barrierDismissible: !guarded,
       transformBackdrop: false,
-      showDragHandle: !side,
+      showDragHandle: !side && !guarded,
       dragHandleSize: const Size(
         AppOverlaySize.dragHandleWidth,
         AppOverlaySize.dragHandleHeight,
@@ -65,11 +70,25 @@ abstract final class AppOverlays {
       surfaceOpacity: 1,
       surfaceBlur: 0,
       barrierColor: scrimColor,
-      borderRadius: side
-          ? const BorderRadius.horizontal(left: Radius.circular(AppRadius.xl))
-          : const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      // A side drawer sits flush under the header, so only its free bottom
+      // corner is rounded.
+      borderRadius: side ? _sideDrawerRadius : _bottomDrawerRadius,
+      // Content is clipped to the corners it reaches; a drag handle keeps it
+      // clear of a bottom drawer's corners.
+      contentRadius: side
+          ? _sideDrawerRadius
+          : guarded
+          ? _bottomDrawerRadius
+          : BorderRadius.zero,
     );
   }
+
+  static const _sideDrawerRadius = BorderRadius.only(
+    bottomLeft: Radius.circular(AppRadius.xl),
+  );
+  static const _bottomDrawerRadius = BorderRadius.vertical(
+    top: Radius.circular(AppRadius.xl),
+  );
 
   static BoxConstraints drawerContentConstraints(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
@@ -120,6 +139,7 @@ abstract final class AppOverlays {
     required WidgetBuilder builder,
     bool useRootNavigator = true,
     bool barrierDismissible = true,
+    double width = AppOverlaySize.dialogMaxWidth,
   }) {
     return showOverlay<T>(
       context,
@@ -132,10 +152,7 @@ abstract final class AppOverlays {
       ),
       builder: (dialogContext) => AppMotion.keyboardInsets(
         dialogContext,
-        child: SizedBox(
-          width: AppOverlaySize.dialogMaxWidth,
-          child: builder(dialogContext),
-        ),
+        child: SizedBox(width: width, child: builder(dialogContext)),
       ),
     ).future;
   }
@@ -218,11 +235,14 @@ abstract final class AppOverlays {
       action: onConfirm,
       failureMessage: failureMessage,
     );
+    // One listenable, so a rebuild while the dialog exits does not listen to
+    // the controller again after it is disposed.
+    final animation = Listenable.merge([controller, ?changes]);
     try {
       return await showDialog<bool>(
         context,
         builder: (context) => AnimatedBuilder(
-          animation: Listenable.merge([controller, ?changes]),
+          animation: animation,
           builder: (context, _) {
             final submitting = controller.submitting;
             void cancel() {
@@ -513,7 +533,11 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
     super.surfaceBlur,
     super.barrierColor,
     super.borderRadius,
+    this.contentRadius = BorderRadius.zero,
   });
+
+  /// The library paints square content over the drawer's rounded corners.
+  final BorderRadius contentRadius;
 
   static final _sessions = Expando<_DrawerSession>();
 
@@ -541,10 +565,15 @@ class _AppDrawerConfiguration extends DrawerConfiguration {
         : focused;
     if (previous != null && !previous.isCompleted) previous.remove();
     final scope = GlobalKey<_DrawerFocusScopeState>();
-    final drawer = super.show<T>(
-      context,
-      (context) => _DrawerFocusScope(key: scope, child: builder(context)),
-    );
+    final drawer = super.show<T>(context, (context) {
+      final content = builder(context);
+      return _DrawerFocusScope(
+        key: scope,
+        child: contentRadius == BorderRadius.zero
+            ? content
+            : ClipRRect(borderRadius: contentRadius, child: content),
+      );
+    });
     session.active = drawer;
     session.scope = scope;
     session.opener = opener;

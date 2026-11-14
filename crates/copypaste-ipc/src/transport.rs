@@ -160,6 +160,19 @@ impl Stream {
         self.0.server_process_id()
     }
 
+    /// Returns the connected named-pipe client's process id, for the server
+    /// end deciding who it is talking to.
+    #[cfg(windows)]
+    pub fn client_process_id(&self) -> io::Result<u32> {
+        self.0.client_process_id()
+    }
+
+    /// Returns the peer's process id as the kernel recorded it at connect time.
+    #[cfg(unix)]
+    pub fn peer_pid(&self) -> io::Result<Option<i32>> {
+        Ok(self.0.peer_cred()?.pid())
+    }
+
     pub fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
         #[cfg(unix)]
         {
@@ -192,6 +205,15 @@ impl Stream {
     pub async fn pair() -> io::Result<(Self, Self)> {
         let (a, b) = pipe::pair().await?;
         Ok((Self(a), Self(b)))
+    }
+}
+
+/// The socket itself, for peer lookups the transport does not wrap (the macOS
+/// audit token).
+#[cfg(unix)]
+impl std::os::fd::AsFd for Stream {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        std::os::fd::AsFd::as_fd(&self.0)
     }
 }
 

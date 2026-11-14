@@ -9,6 +9,16 @@ mod tests {
     use copypaste_core::{storage::open_validated, MAX_IMPORT_ITEMS};
     use copypaste_ipc::{ExportData, Method};
 
+    /// The clips cloud push would offer from `since`, leaving out the
+    /// built-in rule records the first request seeds.
+    fn offered_clips(state: &AppState, since: i64) -> usize {
+        let offered = state.store.versions_since(since, 100).unwrap();
+        offered
+            .iter()
+            .filter(|version| version.content_type == copypaste_ipc::content_type::TEXT)
+            .count()
+    }
+
     fn seed_legacy_text(state: &AppState, id: &str, content: &str) {
         let key = state.keyring.item_key();
         let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
@@ -107,8 +117,11 @@ mod tests {
                 .unwrap(),
             old
         );
-        let offered = state.store.versions_since(old, 100).unwrap();
-        assert_eq!(offered.len(), 2, "the imported history was not offered");
+        assert_eq!(
+            offered_clips(&state, old),
+            2,
+            "the imported history was not offered"
+        );
     }
 
     #[test]
@@ -160,7 +173,7 @@ mod tests {
             oldest,
             "the committed item must be offered to cloud sync",
         );
-        assert_eq!(state.store.versions_since(oldest, 100).unwrap().len(), 1);
+        assert_eq!(offered_clips(&state, oldest), 1);
     }
 
     /// An import that inserted nothing must not drag the floor back and make

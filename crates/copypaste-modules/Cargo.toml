@@ -24,6 +24,12 @@ semver = "1"
 libloading = "0.9"
 minisign-verify = "0.3"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+minisign = { version = "0.9", optional = true }
+
+[features]
+# Lets tests trust a developer key and sign packages with it. Never enabled
+# by product builds.
+test-support = ["dep:minisign"]
 
 [dev-dependencies]
 copypaste-p2p = { path = "../copypaste-p2p" }

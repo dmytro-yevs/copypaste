@@ -11,9 +11,11 @@
 #include <optional>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "win32_window.h"
 #include "app_update_channel.h"
+#include "device_authentication.h"
 #include "memory_pressure_monitor.h"
 #include "startup_channel.h"
 
@@ -71,6 +73,9 @@ class QuickPasteTargetSession {
   void Close(int64_t id, HWND popup);
   bool Paste(int64_t id, HWND popup);
   int64_t id() const { return id_; }
+  std::optional<DWORD> target_pid() const {
+    return target_ ? std::optional<DWORD>(target_->pid) : std::nullopt;
+  }
   bool internally_hiding() const { return internally_hiding_; }
 
  private:
@@ -85,6 +90,20 @@ class QuickPasteTargetSession {
   bool pasting_ = false;
   bool internally_hiding_ = false;
 };
+
+enum class NeutralPasteResult { kSent, kCancelled, kFailed };
+
+// Sends Ctrl+V so held hotkey modifiers cannot change the command. `ready`
+// runs after the chord is built and before it is sent; false cancels it.
+NeutralPasteResult SendNeutralPaste(const QuickPasteTargetApi& api,
+                                    const std::function<bool()>& ready);
+
+// The Dart PasteOutcome name when the foreground window cannot receive
+// synthesized input, or nullopt when it can.
+std::optional<std::string> ForegroundInputBlocked(const QuickPasteTargetApi& api,
+                                                  HWND* target_root = nullptr);
+
+bool SendCaretLeft(const QuickPasteTargetApi& api, int count);
 
 bool ShowQuickPastePresentation(
     HWND window, QuickPasteTargetSession& session, int64_t id,
@@ -131,6 +150,13 @@ class FlutterWindow : public Win32Window {
   void BeginQuickPasteShutdown();
   void ShowMainWindow(bool open_settings);
   void NotifyMemoryPressure();
+  // Foreground input for actions that bypass a Quick Paste presentation.
+  bool HandleForegroundInputCall(
+      const flutter::MethodCall<flutter::EncodableValue>& call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>& result);
+  void ContinueCaretMove();
+  void StartSecureFieldQuery();
+  void CompleteSecureFieldQuery(uint64_t generation, LPARAM state);
 
   // The project to run.
   flutter::DartProject project_;
@@ -153,6 +179,19 @@ class FlutterWindow : public Win32Window {
   HWND quick_paste_pending_foreground_ = nullptr;
   uint64_t pairing_generation_ = 0;
   bool pairing_cancellation_approved_ = false;
+  struct PendingCaretMove {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result;
+    int count = 0;
+    int attempts = 0;
+  };
+  std::optional<PendingCaretMove> pending_caret_move_;
+  // The Quick Paste context samples the field once per presentation; the main
+  // window samples it on each request.
+  std::optional<flutter::EncodableValue> secure_field_state_;
+  std::vector<std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>
+      secure_field_waiters_;
+  uint64_t secure_field_generation_ = 0;
+  bool secure_field_query_pending_ = false;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
@@ -164,6 +203,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       quick_paste_channel_;
   std::unique_ptr<AppUpdateChannel> app_update_channel_;
+  std::unique_ptr<DeviceAuthentication> device_authentication_;
   std::unique_ptr<MemoryPressureMonitor> memory_pressure_monitor_;
   std::unique_ptr<FlutterWindow> protected_pairing_window_;
   std::unique_ptr<FlutterWindow> quick_paste_window_;

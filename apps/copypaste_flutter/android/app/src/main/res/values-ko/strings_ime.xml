@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">패널 크기 조정</string>
+    <string name="ime_search_hint">클립 검색</string>
+    <string name="ime_backspace">삭제</string>
+    <string name="ime_undo_insert">삽입 실행 취소</string>
+    <string name="ime_enter">Enter</string>
+    <string name="ime_keypad_switch_layout">레이아웃 전환</string>
+    <string name="ime_keypad_space">스페이스</string>
+    <string name="ime_keypad_done">완료</string>
+    <string name="ime_keypad_backspace">백스페이스</string>
+    <string name="ime_kind_text">텍스트</string>
+    <string name="ime_kind_link">링크</string>
+    <string name="ime_kind_email">이메일</string>
+    <string name="ime_kind_phone">전화번호</string>
+    <string name="ime_kind_color">색상</string>
+    <string name="ime_kind_code">코드</string>
+    <string name="ime_kind_image">이미지</string>
+    <string name="ime_kind_file">파일</string>
+    <string name="ime_current_clipboard">현재 클립보드</string>
+    <string name="ime_secret_item">비밀 항목, 두 번 탭하고 인증하면 삽입됩니다</string>
+    <string name="ime_pinned">고정됨</string>
+    <string name="ime_loading">클립을 불러오는 중…</string>
+    <string name="ime_locked">클립을 보려면 기기 잠금을 해제하세요</string>
+    <string name="ime_error">클립을 열 수 없습니다</string>
+    <string name="ime_retry">다시 시도</string>
+    <string name="ime_no_results">‘%1$s’에 대한 결과가 없습니다</string>
+    <string name="ime_empty_history">아직 아무것도 없습니다. 무언가를 복사하거나 클립보드 저장을 탭하세요.</string>
+    <string name="ime_empty_pinned">아직 고정된 클립이 없습니다</string>
+    <string name="ime_tab_history">기록</string>
+    <string name="ime_tab_pinned">고정됨</string>
+    <string name="ime_tab_snippets">스니펫</string>
+    <string name="ime_tab_queue">대기열</string>
+    <string name="ime_action_cancel">취소</string>
+    <string name="ime_action_insert">삽입</string>
+    <string name="ime_action_insert_plain">일반 텍스트로 삽입</string>
+    <string name="ime_action_copy">클립보드에 복사</string>
+    <string name="ime_action_pin">고정</string>
+    <string name="ime_action_unpin">고정 해제</string>
+    <string name="ime_action_delete">삭제</string>
+    <string name="ime_action_reveal">표시</string>
+    <string name="ime_delete_confirm">이 클립을 삭제할까요?</string>
+    <string name="ime_delete_failed">클립을 삭제할 수 없습니다</string>
+    <string name="ime_inserted">삽입됨</string>
+    <string name="ime_copied">복사됨</string>
+    <string name="ime_copy_failed">클립을 복사할 수 없습니다</string>
+    <string name="ime_insert_failed">여기에 삽입할 수 없습니다</string>
+    <string name="ime_insert_too_large">너무 커서 여기에 삽입할 수 없습니다</string>
+    <string name="ime_paste_via_clipboard">클립보드로 붙여넣기</string>
+    <string name="ime_image_not_accepted">이 입력란은 이미지를 받지 않습니다</string>
+    <string name="ime_file_not_accepted">이 입력란은 파일을 받지 않습니다</string>
+    <string name="ime_item_unavailable">이 클립은 더 이상 사용할 수 없습니다</string>
+    <string name="ime_unlock_failed">비밀 항목의 잠금을 해제할 수 없습니다</string>
+    <string name="ime_masked_mode">비밀번호 입력란: 미리보기 숨김</string>
+    <string name="ime_private_field">비공개 입력란: 아무것도 저장되지 않습니다</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="other">%d자</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="other">대기열 %d개</item>
+    </plurals>
+</resources>

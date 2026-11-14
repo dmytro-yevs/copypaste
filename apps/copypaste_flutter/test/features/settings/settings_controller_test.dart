@@ -901,16 +901,13 @@ void main() {
   );
 
   for (final entry in <TargetPlatform, String>{
-    TargetPlatform.macOS:
-        'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
-    TargetPlatform.windows:
-        'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+    TargetPlatform.macOS: 'Skip automatic capture from these apps.',
+    TargetPlatform.windows: 'Skip automatic capture from these apps.',
     TargetPlatform.android:
-        'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+        'Automatic capture pauses while any app is excluded.',
     TargetPlatform.iOS:
         'Application exclusions are supported on macOS, Windows, Android, and Linux.',
-    TargetPlatform.linux:
-        'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+    TargetPlatform.linux: 'Skip automatic capture from these apps.',
     TargetPlatform.fuchsia:
         'Application exclusions are supported on macOS, Windows, Android, and Linux.',
   }.entries) {

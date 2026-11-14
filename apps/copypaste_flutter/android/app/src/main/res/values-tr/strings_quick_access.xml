@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quick_access_ime_label">CopyPaste öğeleri</string>
+    <string name="quick_access_ime_switch_back">Klavyeyi değiştir</string>
+    <string name="quick_access_tile_save_label">Panoyu kaydet</string>
+    <string name="quick_access_tile_capture_label">Pano yakalama</string>
+    <string name="quick_access_widget_label">Son öğeler</string>
+    <string name="quick_access_widget_description">En son öğeleriniz. Kopyalamak için birine dokunun.</string>
+    <string name="quick_access_queue_intake_label">Yapıştırma kuyruğuna ekle</string>
+    <string name="quick_access_transform_label">Dönüştür</string>
+</resources>

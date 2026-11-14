@@ -62,6 +62,7 @@ pub(crate) mod source_coverage;
 ))]
 mod file_materialize;
 pub(crate) mod format;
+pub use copypaste_runtime::WriteOptions;
 /// Windows source-app attribution is crate-visible for platform tests.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod windows_attribution;
@@ -134,10 +135,9 @@ impl<'a> CapturePolicy<'a> {
         {
             return false;
         }
-        let detected =
-            copypaste_core::classify_credentials(&capture.content_type, &capture.content)
-                .unwrap_or_default();
-        capture.privacy.union(detected).allows(self.settings)
+        // Detected credentials are stored and masked at ingest; only
+        // user settings may keep a capture out of History.
+        true
     }
 }
 
@@ -288,9 +288,10 @@ pub trait ClipboardSource: Send {
     }
 
     /// Write text to the clipboard. Must suppress the resulting self-write so
-    /// the next poll does not re-capture our own content. `concealed` adds the
-    /// platform's secret marker, the one capture reads as `privacy.secret`.
-    fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()>;
+    /// the next poll does not re-capture our own content. `options.secret`
+    /// adds the platform's secret marker, the one capture reads as
+    /// `privacy.secret`; `options.transient` adds its do-not-record marker.
+    fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()>;
 
     /// Write one authenticated history payload without consulting its display
     /// label. The payload enum is shared with Android's embedded backend, so
@@ -300,7 +301,7 @@ pub trait ClipboardSource: Send {
         item_id: &str,
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
-        concealed: bool,
+        options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 
@@ -311,21 +312,21 @@ pub trait ClipboardSource: Send {
                     copypaste_ipc::content_type::HTML | copypaste_ipc::content_type::RICH_TEXT
                 ) =>
             {
-                self.set_binary_contents(item_id, content_type, text.as_bytes(), None, concealed)
+                self.set_binary_contents(item_id, content_type, text.as_bytes(), None, options)
             }
             ClipboardPayload::Text(text) => self
-                .set_contents(text, concealed)
+                .set_contents(text, options)
                 .map_err(|_| ClipboardWriteError::Failed),
             ClipboardPayload::Image {
                 content_type,
                 bytes,
-            } => self.set_binary_contents(item_id, content_type, bytes, None, concealed),
+            } => self.set_binary_contents(item_id, content_type, bytes, None, options),
             ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
                 item_id,
                 copypaste_ipc::content_type::FILE,
                 bytes,
                 metadata.as_ref(),
-                concealed,
+                options,
             ),
             ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
         }
@@ -340,7 +341,7 @@ pub trait ClipboardSource: Send {
         _content_type: &str,
         _bytes: &[u8],
         _metadata: Option<&copypaste_core::FileMetadata>,
-        _concealed: bool,
+        _options: WriteOptions,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
     }
@@ -443,7 +444,7 @@ pub fn new_source_for_settings(
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturePolicy, MAX_CAPTURE_BYTES};
+    use super::{CapturePolicy, WriteOptions, MAX_CAPTURE_BYTES};
     use copypaste_ipc::ConfigData;
 
     #[test]
@@ -483,11 +484,10 @@ mod tests {
     }
 
     #[test]
-    fn detected_credentials_obey_the_secret_capture_setting() {
+    fn detected_credentials_are_always_captured() {
         let capture = super::Capture::text("-----BEGIN OPENSSH PRIVATE KEY-----\npartial".into());
-        let mut settings = ConfigData::default();
-        assert!(!CapturePolicy::new(&settings).allows_materialized(&capture));
-        settings.skip_secret = false;
+        let settings = ConfigData::default();
+        assert!(settings.skip_secret);
         assert!(CapturePolicy::new(&settings).allows_materialized(&capture));
     }
 
@@ -583,7 +583,7 @@ mod tests {
         struct Writes {
             text: Option<String>,
             binary: Option<Vec<u8>>,
-            concealed: Option<bool>,
+            options: Option<WriteOptions>,
         }
         impl super::ClipboardSource for Writes {
             fn poll(&mut self) -> Option<super::Capture> {
@@ -592,9 +592,9 @@ mod tests {
             fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<super::Capture> {
                 None
             }
-            fn set_contents(&mut self, text: &str, concealed: bool) -> anyhow::Result<()> {
+            fn set_contents(&mut self, text: &str, options: WriteOptions) -> anyhow::Result<()> {
                 self.text = Some(text.into());
-                self.concealed = Some(concealed);
+                self.options = Some(options);
                 Ok(())
             }
             fn set_binary_contents(
@@ -603,7 +603,7 @@ mod tests {
                 _: &str,
                 bytes: &[u8],
                 _: Option<&copypaste_core::FileMetadata>,
-                _: bool,
+                _: WriteOptions,
             ) -> Result<(), copypaste_core::ClipboardWriteError> {
                 self.binary = Some(bytes.to_vec());
                 Ok(())
@@ -626,7 +626,7 @@ mod tests {
                     ),
                 },
                 copypaste_ipc::content_type::FILE,
-                false,
+                WriteOptions::default(),
             )
             .unwrap();
         assert!(writes.text.is_none());
@@ -639,7 +639,7 @@ mod tests {
                     metadata: copypaste_core::FileMetadata::new("file", "application/octet-stream"),
                 },
                 copypaste_ipc::content_type::FILE,
-                false,
+                WriteOptions::default(),
             )
             .unwrap();
         assert_eq!(writes.binary, Some(vec![8]));
@@ -648,13 +648,19 @@ mod tests {
                 "id",
                 &copypaste_core::ClipboardPayload::Text("secret".to_owned().into()),
                 copypaste_ipc::content_type::TEXT,
-                true,
+                WriteOptions {
+                    secret: true,
+                    transient: true,
+                },
             )
             .unwrap();
         assert_eq!(
-            writes.concealed,
-            Some(true),
-            "a secret copy keeps its marker"
+            writes.options,
+            Some(WriteOptions {
+                secret: true,
+                transient: true,
+            }),
+            "a secret transient delivery keeps both markers"
         );
     }
 }

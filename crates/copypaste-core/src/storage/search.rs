@@ -3,6 +3,7 @@
 use rusqlite::{params, Connection};
 
 use super::fuzzy_search;
+use super::local_state::unexpired;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
@@ -11,8 +12,9 @@ const SEARCH_SQL: &str = concat!(
     item_columns_ci!(),
     " FROM clipboard_fts fts \
               JOIN clipboard_items ci ON ci.id = fts.id \
-              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 \
-                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
+              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ",
+    unexpired!("ci."),
+    " AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
               ORDER BY rank LIMIT ?2"
 );
 
@@ -56,13 +58,14 @@ impl Store {
                  SELECT ci.id, ci.created_at, clipboard_fts.rowid AS search_rowid, \
                  bm25(clipboard_fts) AS search_rank \
                  FROM clipboard_fts JOIN clipboard_items ci ON ci.id = clipboard_fts.id \
-                 WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 \
+                 WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND {} \
                  AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')), \
                  matches AS MATERIALIZED (SELECT id, created_at, {} AS relevance FROM indexed \
                  ORDER BY relevance, created_at DESC, id DESC LIMIT ?3) \
                  SELECT {} FROM matches JOIN clipboard_items ci ON ci.id = matches.id \
                  ORDER BY matches.relevance, matches.created_at DESC, matches.id DESC",
                 expression.exact_cte(2),
+                unexpired!("ci."),
                 expression.relevance_sql(),
                 item_columns_ci!(),
             );

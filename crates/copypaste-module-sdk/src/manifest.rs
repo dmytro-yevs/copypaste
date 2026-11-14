@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MANIFEST_VERSION: u32 = 5;
+pub const MANIFEST_VERSION: u32 = 6;
 
 /// Events are delivered by the host only to explicitly enabled modules.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -101,6 +101,15 @@ pub struct ModuleManifest {
     pub event_handlers: Vec<ModuleEventHandler>,
     #[serde(default)]
     pub unload_policy: ModuleUnloadPolicy,
+    /// Host services the user confirms when enabling the module (schema 6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<crate::ModuleCapability>,
+    /// Long-lived connections a local client may open (schema 6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<crate::ModuleEndpoint>,
+    /// Translations of manifest strings by locale; English fields are the fallback.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub localizations: crate::ModuleLocalizations,
     pub schema_version: u32,
     pub api_version: u32,
     pub id: String,
@@ -139,12 +148,21 @@ pub struct ModuleCommand {
     pub description: String,
     #[serde(default)]
     pub arguments: Vec<ModuleField>,
+    /// Not listed in host UI or CLI command lists; still invocable (schema 6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    /// Refused unless the caller is the CopyPaste app itself (schema 6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub app_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModuleField {
     pub id: String,
     pub title: String,
+    /// Preferences only: the value follows the user across paired devices (schema 6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub synced: bool,
     #[serde(flatten)]
     pub value: ModuleFieldValue,
 }
@@ -175,7 +193,14 @@ pub enum ModuleFieldValue {
         #[serde(default = "default_input_file_bytes")]
         max_bytes: u64,
     },
+    /// Device ids chosen by the user from a host picker; defaults to none (schema 6).
+    DeviceSet {},
+    /// Source application ids chosen from a host picker; defaults to none (schema 6).
+    SourceAppSet {},
 }
+
+/// The most members a device or source application set may hold.
+pub const MAX_SET_MEMBERS: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -195,6 +220,9 @@ impl ModuleField {
             ModuleFieldValue::Text { default, .. } => Value::String(default.clone()),
             ModuleFieldValue::Boolean { default } => Value::Bool(*default),
             ModuleFieldValue::File { .. } => Value::String(String::new()),
+            ModuleFieldValue::DeviceSet {} | ModuleFieldValue::SourceAppSet {} => {
+                Value::Array(Vec::new())
+            }
         }
     }
     pub fn accepts(&self, value: &Value) -> bool {
@@ -230,6 +258,17 @@ impl ModuleField {
                 value.len() <= 64 * 1024
                     && (value.is_empty() || std::path::Path::new(value).is_absolute())
             }),
+            ModuleFieldValue::DeviceSet {} | ModuleFieldValue::SourceAppSet {} => {
+                value.as_array().is_some_and(|values| {
+                    values.len() <= MAX_SET_MEMBERS
+                        && values.iter().enumerate().all(|(index, value)| {
+                            value
+                                .as_str()
+                                .is_some_and(|id| !id.is_empty() && id.len() <= 256)
+                                && !values[..index].contains(value)
+                        })
+                })
+            }
         }
     }
 }
@@ -257,6 +296,7 @@ impl ModuleManifest {
             || self.api_version != MODULE_API_VERSION
             || (self.schema_version == 1
                 && (!self.event_handlers.is_empty() || !self.supported_platforms.is_empty()))
+            || (self.schema_version < 6 && self.uses_schema_six())
         {
             return Err("This module uses an unsupported API version.".into());
         }
@@ -401,6 +441,15 @@ impl ModuleManifest {
             }
             validate_fields(&command.arguments)?;
         }
+        if self
+            .commands
+            .iter()
+            .any(|command| command.arguments.iter().any(|field| field.synced))
+        {
+            return Err("Only preferences can be synced.".into());
+        }
+        self.validate_capabilities()?;
+        crate::localization::validate(self)?;
         let mut events = BTreeSet::new();
         for handler in &self.event_handlers {
             let command = self
@@ -422,6 +471,62 @@ impl ModuleManifest {
             }
         }
         Ok(())
+    }
+}
+
+impl ModuleManifest {
+    fn uses_schema_six(&self) -> bool {
+        !self.capabilities.is_empty()
+            || !self.endpoints.is_empty()
+            || !self.localizations.is_empty()
+            || self.commands.iter().any(|command| {
+                command.hidden
+                    || command.app_only
+                    || command.arguments.iter().any(ModuleField::uses_schema_six)
+            })
+            || self.preferences.iter().any(ModuleField::uses_schema_six)
+    }
+
+    fn validate_capabilities(&self) -> Result<(), String> {
+        let mut capabilities = BTreeSet::new();
+        if self
+            .capabilities
+            .iter()
+            .any(|capability| !capabilities.insert(*capability))
+        {
+            return Err("The module capabilities are invalid.".into());
+        }
+        let declares_endpoints = capabilities.contains(&crate::ModuleCapability::Endpoints);
+        if declares_endpoints == self.endpoints.is_empty()
+            || self.endpoints.len() > crate::MAX_ENDPOINTS
+        {
+            return Err("Endpoints require the endpoints capability.".into());
+        }
+        let mut ids = BTreeSet::new();
+        for endpoint in &self.endpoints {
+            let platforms = &endpoint.platforms;
+            if !valid_id(&endpoint.id)
+                || !ids.insert(&endpoint.id)
+                || platforms.is_empty()
+                || platforms.iter().enumerate().any(|(index, platform)| {
+                    platforms[..index].contains(platform)
+                        || !self.supported_platforms.contains(platform)
+                })
+            {
+                return Err("The module endpoint inventory is invalid.".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ModuleField {
+    fn uses_schema_six(&self) -> bool {
+        self.synced
+            || matches!(
+                self.value,
+                ModuleFieldValue::DeviceSet {} | ModuleFieldValue::SourceAppSet {}
+            )
     }
 }
 
@@ -589,6 +694,8 @@ mod tests {
             title: "Sync".into(),
             description: "Synchronize".into(),
             arguments: Vec::new(),
+            hidden: false,
+            app_only: false,
         });
         assert!(module.validate("1.0.10", module.target).is_ok());
         module.schema_version = 3;
@@ -600,6 +707,7 @@ mod tests {
         module.preferences.push(ModuleField {
             id: "password".into(),
             title: "Password".into(),
+            synced: false,
             value: ModuleFieldValue::Text {
                 default: String::new(),
                 required: false,
@@ -667,6 +775,108 @@ mod tests {
                 vec![ModulePlatform::Linux]
             };
             assert!(module.validate("1.0.6", module.target).is_err());
+        }
+    }
+
+    fn schema_six() -> ModuleManifest {
+        serde_json::from_value(serde_json::json!({
+            "schema_version":6, "api_version":1, "id":"copypaste.ai-tools", "title":"AI Tools",
+            "description":"Clipboard tools for AI assistants", "version":"0.1.0",
+            "app_versions":">=1.0.0, <2.0.0", "target":{"platform":"macos","architecture":"aarch64"},
+            "supported_platforms":["macos","windows"], "entrypoint":"bin/module.dylib",
+            "files":[{"path":"bin/module.dylib","sha256":"0".repeat(64),"size_bytes":1}],
+            "capabilities":["history_read","prompts","endpoints"],
+            "endpoints":[{"id":"mcp","platforms":["macos","windows"]}],
+            "commands":[
+                {"id":"status","title":"Status","description":"Show status","app_only":true},
+                {"id":"tool","title":"Tool","description":"","hidden":true,"arguments":[
+                    {"id":"apps","title":"Apps","kind":"source_app_set"}]}],
+            "preferences":[
+                {"id":"devices","title":"Devices","kind":"device_set","synced":true},
+                {"id":"mode","title":"Mode","kind":"choices","default":["ask"],
+                 "options":[{"id":"ask","title":"Ask"}]}],
+            "localizations":{"uk":{"title":"ШІ-інструменти",
+                "commands/status/title":"Стан",
+                "preferences/mode/options/ask/title":"Питати"}}
+        })).unwrap()
+    }
+
+    #[test]
+    fn schema_six_round_trips_and_validates_its_new_contract() {
+        let module = schema_six();
+        module.validate("1.3.0", module.target).unwrap();
+        let encoded = serde_json::to_value(&module).unwrap();
+        assert_eq!(
+            serde_json::from_value::<ModuleManifest>(encoded).unwrap(),
+            module
+        );
+        assert!(module.preferences[0].accepts(&serde_json::json!(["a", "b"])));
+        assert!(!module.preferences[0].accepts(&serde_json::json!(["a", "a"])));
+
+        let localized = module.localized("uk_UA");
+        assert_eq!(localized.title, "ШІ-інструменти");
+        assert_eq!(localized.commands[0].title, "Стан");
+        assert_eq!(localized.commands[1].title, "Tool");
+        assert_eq!(module.localized("de").title, "AI Tools");
+
+        for change in 0..6 {
+            let mut invalid = module.clone();
+            match change {
+                0 => invalid.schema_version = 5,
+                1 => invalid
+                    .capabilities
+                    .retain(|c| *c != crate::ModuleCapability::Endpoints),
+                2 => invalid.endpoints[0].platforms.push(ModulePlatform::Android),
+                3 => invalid.commands[1].arguments[0].synced = true,
+                4 => invalid.capabilities.push(crate::ModuleCapability::Prompts),
+                _ => {
+                    invalid
+                        .localizations
+                        .get_mut("uk")
+                        .unwrap()
+                        .insert("commands/missing/title".into(), "x".into());
+                }
+            }
+            assert!(
+                invalid.validate("1.3.0", invalid.target).is_err(),
+                "{change}"
+            );
+        }
+    }
+
+    #[test]
+    fn first_party_manifests_validate_and_schema_five_ones_omit_new_keys() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut templates: Vec<_> = std::fs::read_dir(root.join("modules"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path().join("module.json"))
+            .collect();
+        templates.push(root.join("examples/modules/text-tools/module.json"));
+        for path in templates {
+            let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let platform = value["supported_platforms"][0].clone();
+            let platform: ModulePlatform =
+                serde_json::from_value(platform).unwrap_or(ModulePlatform::Macos);
+            let entrypoint = format!("bin/module.{}", platform.dynamic_library_extension());
+            value["target"] = serde_json::json!({"platform": platform, "architecture": "aarch64"});
+            value["entrypoint"] = entrypoint.clone().into();
+            value["files"] = serde_json::json!([{"path": entrypoint, "sha256": "0".repeat(64), "size_bytes": 1}]);
+            let module: ModuleManifest = serde_json::from_value(value).unwrap();
+            module.validate("1.3.0", module.target).unwrap();
+            if module.schema_version > 5 {
+                continue;
+            }
+            let encoded = serde_json::to_string(&module).unwrap();
+            for key in [
+                "capabilities",
+                "endpoints",
+                "localizations",
+                "hidden",
+                "app_only",
+                "synced",
+            ] {
+                assert!(!encoded.contains(&format!("\"{key}\"")), "{key}");
+            }
         }
     }
 }

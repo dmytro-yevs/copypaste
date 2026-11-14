@@ -592,6 +592,7 @@ class RunnerTests: XCTestCase {
 
 private final class FakeQuickPasteTarget: QuickPasteApplicationTarget {
   let processIdentifier: pid_t
+  var bundleIdentifier: String?
   var isTerminated = false
   var activationSucceeds = true
   var activations = 0
@@ -858,5 +859,29 @@ final class QuickPasteOpeningTests: XCTestCase {
     XCTAssertNil(owner.target)
     XCTAssertEqual(hides, 1)
     XCTAssertEqual(opened, 0)
+  }
+}
+
+final class MacosForegroundInputTests: XCTestCase {
+  func testForegroundInputNeedsAnExternalTrustedTarget() {
+    func outcome(_ frontmost: pid_t?, trusted: Bool = true, secure: Bool = false) -> String? {
+      MacosForegroundInput.blockedOutcome(
+        frontmost: frontmost, ownPID: 1, trusted: trusted, secureInput: secure)
+    }
+    XCTAssertEqual(outcome(nil), "noTarget")
+    XCTAssertEqual(outcome(1), "noTarget")
+    XCTAssertEqual(outcome(2, trusted: false), "copiedOnly")
+    XCTAssertEqual(outcome(2, secure: true), "copiedOnly")
+    XCTAssertNil(outcome(2))
+  }
+
+  func testCaretMoveSendsArrowsWithoutHeldModifiers() {
+    var posted: [CGEvent] = []
+    let submit = MacosAccessibility.prepareCaretMove(count: 3, post: { posted.append($0) })
+    XCTAssertNotNil(submit)
+    submit?()
+    XCTAssertEqual(posted.count, 6)
+    XCTAssertTrue(posted.allSatisfy { $0.flags == [.maskNumericPad, .maskSecondaryFn] })
+    XCTAssertNil(MacosAccessibility.prepareCaretMove(count: 0))
   }
 }

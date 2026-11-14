@@ -1,0 +1,30 @@
+[package]
+name = "copypaste-module-ai-tools"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "MCP server that lets approved AI tools read clipboard history and snippets."
+
+[workspace]
+members = []
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copypaste-module-sdk = { path = "../../crates/copypaste-module-sdk" }
+# The same pinned MCP implementation the CLI used before AI tools left the core.
+rmcp = { version = "=3.9.0", default-features = false, features = ["server"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tz-fat", "tzdb-zoneinfo", "tzdb-concatenated", "tzdb-bundle-platform"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

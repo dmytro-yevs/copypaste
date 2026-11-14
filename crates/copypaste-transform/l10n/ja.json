@@ -1,0 +1,741 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON を整形",
+      "description": "数値、エスケープ、キーの順序を書かれたとおりに保ったまま JSON をインデントします。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        },
+        "sort_keys": {
+          "label": "キーを並べ替え"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON を圧縮",
+      "description": "JSON から不要な空白をすべて削除します。"
+    },
+    "structure.json_validate": {
+      "name": "JSON を検証",
+      "description": "テキストが有効な JSON かを確認し、問題の位置を示します。テキストは変更しません。",
+      "params": {
+        "lenient": {
+          "label": "コメントと末尾のカンマを許可"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON のキーを並べ替え",
+      "description": "オブジェクトのキーをコードポイント順に並べ替えます。配列の順序は保たれます。",
+      "params": {
+        "recursive": {
+          "label": "入れ子のオブジェクトも含める"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON 文字列として引用",
+      "description": "テキストを JSON 文字列リテラルで囲み、引用符と改行をエスケープします。"
+    },
+    "structure.json_unquote": {
+      "name": "JSON 文字列を復元",
+      "description": "JSON 文字列リテラルをプレーンテキストに戻します。二重にエンコードされた JSON にも対応します。"
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML から JSON",
+      "description": "1 つの YAML ドキュメントを JSON に変換します。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON から YAML",
+      "description": "JSON をブロックスタイルの YAML に変換します。"
+    },
+    "structure.csv_to_json": {
+      "name": "CSV から JSON",
+      "description": "CSV または TSV の行を JSON に変換します。値はテキストのままです。",
+      "params": {
+        "header": {
+          "label": "1 行目をヘッダーにする"
+        },
+        "delimiter": {
+          "label": "区切り文字",
+          "options": {
+            "auto": "自動検出",
+            "comma": "カンマ",
+            "semicolon": "セミコロン",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML を整形",
+      "description": "テキストを変えずに XML 要素をインデントします。外部エンティティは読み込みません。",
+      "params": {
+        "indent": {
+          "label": "インデント",
+          "options": {
+            "2": "スペース 2 個",
+            "4": "スペース 4 個",
+            "tab": "タブ"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML を圧縮",
+      "description": "XML 要素間の空白を削除します。"
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 エンコード",
+      "description": "テキストの UTF-8 バイト列を Base64 にエンコードします。",
+      "params": {
+        "variant": {
+          "label": "アルファベット",
+          "options": {
+            "standard": "標準",
+            "url_safe": "URL セーフ"
+          }
+        },
+        "padding": {
+          "label": "パディング (=) を付ける"
+        },
+        "wrap": {
+          "label": "76 文字で改行"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 デコード",
+      "description": "標準または URL セーフの Base64 をデコードします。改行、パディングの欠落、data: URI の接頭辞は無視します。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "text": "テキスト",
+            "hex": "16 進バイト"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL コンポーネントをエンコード",
+      "description": "英数字と - . _ ~ 以外をすべてパーセントエンコードします。クエリ値やパスの一部に使います。",
+      "params": {
+        "space": {
+          "label": "スペースの表記",
+          "options": {
+            "percent": "%20",
+            "plus": "+(フォーム形式)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "URL 全体をエンコード",
+      "description": "URL で使えない文字だけをエンコードし、構造と既存の %XX はそのまま残します。"
+    },
+    "encode.url_decode": {
+      "name": "URL デコード",
+      "description": "%XX をデコードし、不正なシーケンスはその位置を示します。",
+      "params": {
+        "plus_as_space": {
+          "label": "+ をスペースとして扱う"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "16 進エンコード",
+      "description": "テキストの UTF-8 バイト列を 16 進数で書き出します。",
+      "params": {
+        "separator": {
+          "label": "区切り",
+          "options": {
+            "none": "なし",
+            "space": "スペース"
+          }
+        },
+        "case": {
+          "label": "大文字・小文字",
+          "options": {
+            "lower": "小文字",
+            "upper": "大文字"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "16 進デコード",
+      "description": "16 進数をテキストに戻します。スペースと 0x 接頭辞は無視します。"
+    },
+    "encode.html_encode": {
+      "name": "HTML エンティティにエンコード",
+      "description": "& < > \" ' を HTML エンティティに置き換えます。必要に応じて ASCII 以外の文字も数値参照にします。",
+      "params": {
+        "scope": {
+          "label": "エンコードする文字",
+          "options": {
+            "minimal": "& < > \" ' のみ",
+            "non_ascii": "ASCII 以外もすべて"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML エンティティをデコード",
+      "description": "HTML5 のすべての名前付きエンティティと数値参照をデコードします。不明なエンティティはそのまま残します。"
+    },
+    "encode.backslash_escape": {
+      "name": "バックスラッシュでエスケープ",
+      "description": "バックスラッシュ、二重引用符、改行、タブ、制御文字を C や JSON の形式でエスケープします。"
+    },
+    "encode.backslash_unescape": {
+      "name": "バックスラッシュのエスケープを解除",
+      "description": "\\n、\\t、\\\"、\\uXXXX、\\xXX などを文字に戻します。不明なエスケープは警告付きでそのまま残します。"
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode エスケープ",
+      "description": "ASCII 以外の文字を \\uXXXX 形式で書き出します。",
+      "params": {
+        "astral": {
+          "label": "U+FFFF を超える文字",
+          "options": {
+            "surrogate_pair": "サロゲートペア (\\uD83D\\uDE00)",
+            "braces": "波括弧 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode エスケープを解除",
+      "description": "\\uXXXX と \\u{...} を文字に戻し、それ以外のテキストは変更しません。"
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "大文字",
+      "description": "Unicodeの完全な規則ですべての文字を大文字にします。",
+      "params": {
+        "locale": {
+          "label": "言語の規則",
+          "options": {
+            "invariant": "言語に依存しない",
+            "system": "デバイスの言語"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "小文字",
+      "description": "Unicodeの完全な規則ですべての文字を小文字にします。",
+      "params": {
+        "locale": {
+          "label": "言語の規則",
+          "options": {
+            "invariant": "言語に依存しない",
+            "system": "デバイスの言語"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "タイトルケース",
+      "description": "各単語の先頭を大文字にします。見出しスタイルでは短い語を小文字のままにします。",
+      "params": {
+        "style": {
+          "label": "スタイル",
+          "options": {
+            "headline": "見出し",
+            "all_words": "すべての単語"
+          }
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "文頭のみ大文字",
+      "description": "各文の最初の単語を大文字で始め、残りを小文字にします。",
+      "params": {
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "単語を小文字で始まる識別子にまとめます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "各単語を大文字で始める識別子にまとめます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        },
+        "keep_acronyms": {
+          "label": "略語を保持"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "小文字の単語をアンダースコアでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "小文字の単語をハイフンでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "大文字の単語をアンダースコアでつなぎます。",
+      "params": {
+        "per_line": {
+          "label": "行ごとに変換"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "大文字と小文字を反転",
+      "description": "大文字を小文字に、小文字を大文字にします。"
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 ハッシュ",
+      "description": "MD5 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 ハッシュ",
+      "description": "SHA-1 ダイジェスト。セキュリティ用途には使えません。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 ハッシュ",
+      "description": "SHA-256 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 ハッシュ",
+      "description": "SHA-512 ダイジェスト。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex_lower": "16 進(小文字)",
+            "hex_upper": "16 進(大文字)",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 チェックサム",
+      "description": "ZIP や PNG で使われる IEEE 多項式の CRC-32 です。 表示どおりのテキストを UTF-8 としてハッシュし、改行は追加しません。",
+      "params": {
+        "output": {
+          "label": "出力",
+          "options": {
+            "hex": "16 進(8 桁)",
+            "decimal": "10 進"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "前後の空白を削除",
+      "description": "テキストの先頭と末尾の空白と改行を削除します。"
+    },
+    "lines.trim_each": {
+      "name": "各行の空白を削除",
+      "description": "各行の先頭、末尾、または両端の空白を削除します。",
+      "params": {
+        "sides": {
+          "label": "対象",
+          "options": {
+            "both": "両端",
+            "start": "先頭",
+            "end": "末尾"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "空白をまとめる",
+      "description": "連続するスペースとタブを1つのスペースにします。",
+      "params": {
+        "keep_line_breaks": {
+          "label": "改行を保持"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "空行を削除",
+      "description": "空の行や空白だけの行を削除します。",
+      "params": {
+        "whitespace_only": {
+          "label": "空白だけの行を空行とみなす"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "行を並べ替え",
+      "description": "行をアルファベット順、自然順、数値順、または長さ順に並べ替えます。",
+      "params": {
+        "order": {
+          "label": "順序",
+          "options": {
+            "asc": "昇順",
+            "desc": "降順"
+          }
+        },
+        "mode": {
+          "label": "比較方法",
+          "options": {
+            "natural": "自然順",
+            "code_point": "コードポイント",
+            "case_insensitive": "大文字小文字を無視",
+            "numeric": "数値",
+            "length": "長さ"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "重複行を削除",
+      "description": "各行の最初の出現を元の順序のまま残します。",
+      "params": {
+        "case_sensitive": {
+          "label": "大文字と小文字を区別"
+        },
+        "compare_trimmed": {
+          "label": "前後の空白を無視"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "行を逆順にする",
+      "description": "行の順序を逆にします。"
+    },
+    "lines.join": {
+      "name": "行を結合",
+      "description": "すべての行を区切り文字で1行に結合します。",
+      "params": {
+        "separator": {
+          "label": "区切り文字",
+          "options": {
+            "space": "スペース",
+            "comma": "カンマ",
+            "none": "なし",
+            "custom": "カスタム"
+          }
+        },
+        "custom_separator": {
+          "label": "カスタム区切り文字"
+        },
+        "drop_empty": {
+          "label": "空行を除外"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "段落の改行を解除",
+      "description": "PDFからコピーしたテキストのように、段落内で折り返された行をつなぎます。",
+      "params": {
+        "dehyphenate": {
+          "label": "ハイフンで分割された単語をつなぐ"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "行頭に文字を追加",
+      "description": "各行の先頭に箇条書き記号、番号、引用符、または任意の文字列を追加します。",
+      "params": {
+        "style": {
+          "label": "スタイル",
+          "options": {
+            "dash": "ダッシュ",
+            "asterisk": "アスタリスク",
+            "number": "番号",
+            "quote": "引用",
+            "custom": "カスタム"
+          }
+        },
+        "custom_prefix": {
+          "label": "カスタム接頭辞"
+        },
+        "skip_empty": {
+          "label": "空行をスキップ"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "不可視文字を削除",
+      "description": "ゼロ幅文字、双方向制御文字、ソフトハイフンを削除し、ノーブレークスペースを通常のスペースにします。"
+    },
+    "clean.quotes": {
+      "name": "引用符をまっすぐにする",
+      "description": "曲がった引用符をまっすぐな引用符に置き換え、必要に応じてダッシュをハイフンにします。",
+      "params": {
+        "dashes": {
+          "label": "ダッシュもまっすぐにする"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "トラッキングパラメータを削除",
+      "description": "すべてのリンクから utm_ やクリック ID のパラメータを取り除きます。署名付きリンクは変更しません。",
+      "keywords": [
+        "トラッキング",
+        "リンクを整理",
+        "プライバシー"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "リダイレクトリンクを展開",
+      "description": "検索エンジン、SNS、Safe Links のリダイレクトを、オフラインで実際のリンク先に置き換えます。",
+      "keywords": [
+        "リダイレクト"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "リッチテキストをプレーンテキストに",
+      "description": "書式付きの内容から段落と改行を保ったままテキストを取り出します。",
+      "keywords": [
+        "プレーンテキスト",
+        "書式を削除"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML を Markdown に",
+      "description": "見出し、リンク、リスト、表、コードブロックを Markdown に変換します。コードの空白は保持されます。",
+      "keywords": [
+        "変換"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown をプレーンテキストに",
+      "description": "Markdown の記法を取り除いてテキストを残します。表はタブ区切りになります。",
+      "keywords": [
+        "プレーンテキスト"
+      ],
+      "params": {
+        "link_style": {
+          "label": "リンク",
+          "options": {
+            "text": "テキストのみ",
+            "text_url": "テキストと URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "リスト記号を残す"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: デコード",
+      "description": "トークンのヘッダーとペイロードを JSON で表示します。署名は検証しません。",
+      "keywords": [
+        "トークン"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "タイムスタンプを日付に",
+      "description": "Unix タイムスタンプを日付に変換します。秒、ミリ秒、マイクロ秒、ナノ秒を自動判別します。",
+      "keywords": [
+        "タイムスタンプ",
+        "時刻"
+      ],
+      "params": {
+        "unit": {
+          "label": "単位",
+          "options": {
+            "auto": "自動判別",
+            "seconds": "秒",
+            "milliseconds": "ミリ秒",
+            "microseconds": "マイクロ秒",
+            "nanoseconds": "ナノ秒"
+          }
+        },
+        "format": {
+          "label": "形式",
+          "options": {
+            "iso_utc": "ISO 8601（UTC）",
+            "iso_local": "ISO 8601（現地時刻）",
+            "rfc2822": "RFC 2822 形式"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "日付をタイムスタンプに",
+      "description": "ISO 8601、RFC 2822、または一般的な日付を Unix タイムスタンプに変換します。オフセットがなければ現地時刻とみなします。",
+      "keywords": [
+        "タイムスタンプ",
+        "時刻"
+      ],
+      "params": {
+        "unit": {
+          "label": "単位",
+          "options": {
+            "seconds": "秒",
+            "milliseconds": "ミリ秒"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "検索と置換",
+      "description": "テキストまたは正規表現の一致を置換します。置換文字列の $1 はグループを挿入します。",
+      "keywords": [
+        "置換",
+        "検索"
+      ],
+      "params": {
+        "find": {
+          "label": "検索"
+        },
+        "replace": {
+          "label": "置換後"
+        },
+        "regex": {
+          "label": "正規表現"
+        },
+        "case_sensitive": {
+          "label": "大文字と小文字を区別"
+        },
+        "whole_word": {
+          "label": "単語単位"
+        },
+        "multiline": {
+          "label": "^ と $ を行ごとに適用"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "一致を抽出",
+      "description": "URL、メール、数値、アドレス、色、UUID、パターンの一致をすべて 1 行に 1 つずつ並べます。",
+      "keywords": [
+        "抽出"
+      ],
+      "params": {
+        "preset": {
+          "label": "抽出対象",
+          "options": {
+            "urls": "リンク",
+            "emails": "メールアドレス",
+            "numbers": "数値",
+            "ipv4": "IPv4 アドレス",
+            "ipv6": "IPv6 アドレス",
+            "hex_colors": "16 進カラー",
+            "uuids": "UUID 値",
+            "custom": "カスタムパターン"
+          }
+        },
+        "pattern": {
+          "label": "パターン"
+        },
+        "dedupe": {
+          "label": "重複を削除"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "文字を削除",
+      "description": "数字、句読点、ASCII 以外の文字、絵文字、または指定した文字を削除します。",
+      "keywords": [
+        "削除",
+        "数字"
+      ],
+      "params": {
+        "class": {
+          "label": "削除する文字",
+          "options": {
+            "digits": "数字",
+            "punctuation": "句読点",
+            "non_ascii": "ASCII 以外の文字",
+            "emoji": "絵文字",
+            "custom": "指定した文字"
+          }
+        },
+        "chars": {
+          "label": "文字"
+        }
+      }
+    }
+  }
+}

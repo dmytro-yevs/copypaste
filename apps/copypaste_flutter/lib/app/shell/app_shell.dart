@@ -9,6 +9,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../theme/app_motion.dart';
 import '../theme/app_overlays.dart';
+import '../theme/app_theme.dart';
 import 'app_header.dart';
 import 'app_mobile_navigation.dart';
 import 'header_action_content.dart';
@@ -119,6 +120,37 @@ class _AppShellState extends State<AppShell> {
               !widget.controller.bottomOverlayOpen &&
               !drawerVisibility.value;
           final systemBottomPadding = MediaQuery.paddingOf(context).bottom;
+          final destinations = OverlayAnchor(
+            anchor: AppOverlays.drawerBodyAnchor,
+            child: Builder(
+              builder: (context) {
+                final media = MediaQuery.of(context);
+                // The floating footer already includes the system safe area.
+                final bottom =
+                    (media.padding.bottom -
+                            (mobileNavigationVisible ? systemBottomPadding : 0))
+                        .clamp(0.0, double.infinity)
+                        .toDouble();
+                return MediaQuery(
+                  data: media.copyWith(
+                    padding: media.padding.copyWith(bottom: bottom),
+                  ),
+                  child: Semantics(
+                    container: true,
+                    explicitChildNodes: true,
+                    child: AppNavigationHost(
+                      controller: widget.controller,
+                      child: AppDestinationViewport(
+                        controller: widget.controller,
+                        swipeEnabled: bottomNavigation,
+                        children: _destinationChildren,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
           final content = Scaffold(
             // Keep floating-footer padding visible to scrollables when the
             // scaffold does not need to consume keyboard insets.
@@ -132,46 +164,33 @@ class _AppShellState extends State<AppShell> {
             ],
             // Drawer barriers may paint outside their bounds; keep the
             // header visible as well as outside the modal hit-test region.
+            // The drawer layer starts one header divider higher, so the clip
+            // cuts a side drawer's top border and the divider stays the only
+            // line between them.
             child: ClipRect(
               key: _bodyKey,
-              // Scaffold owns another overlay; body drawers must be roots.
-              child: Data<DrawerLayerData>.boundary(
-                child: DrawerOverlay(
-                  key: const ValueKey('app-body-drawer-overlay'),
-                  child: OverlayAnchor(
-                    anchor: AppOverlays.drawerBodyAnchor,
-                    child: Builder(
-                      builder: (context) {
-                        final media = MediaQuery.of(context);
-                        // The floating footer already includes the system safe area.
-                        final bottom =
-                            (media.padding.bottom -
-                                    (mobileNavigationVisible
-                                        ? systemBottomPadding
-                                        : 0))
-                                .clamp(0.0, double.infinity)
-                                .toDouble();
-                        return MediaQuery(
-                          data: media.copyWith(
-                            padding: media.padding.copyWith(bottom: bottom),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    top: -AppTheme.headerDividerWidth,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    // Scaffold owns another overlay; body drawers must be roots.
+                    child: Data<DrawerLayerData>.boundary(
+                      child: DrawerOverlay(
+                        key: const ValueKey('app-body-drawer-overlay'),
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                            top: AppTheme.headerDividerWidth,
                           ),
-                          child: Semantics(
-                            container: true,
-                            explicitChildNodes: true,
-                            child: AppNavigationHost(
-                              controller: widget.controller,
-                              child: AppDestinationViewport(
-                                controller: widget.controller,
-                                swipeEnabled: bottomNavigation,
-                                children: _destinationChildren,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                          child: destinations,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           );

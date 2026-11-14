@@ -1,6 +1,7 @@
 //! Native qualification of production-signed packages in an isolated host.
 #![deny(unsafe_code)]
 
+mod ai_tools;
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 mod android;
@@ -83,6 +84,7 @@ pub(crate) fn qualify_with_inference(
         "copypaste.semantic-search" => semantic::qualify(&manager, fixtures, data, &installed.id)?,
         "copypaste.supabase" => supabase::qualify(&manager, &installed.id)?,
         "copypaste.sms-codes" => qualify_sms(&manager, &installed.id)?,
+        "copypaste.ai-tools" => ai_tools::qualify(&manager, &installed, target)?,
         _ => return Err("No native qualification scenario exists for this module.".into()),
     };
     manager
@@ -131,10 +133,10 @@ pub(crate) fn qualify_with_inference(
 
 fn qualify_ocr(manager: &ModuleManager, fixtures: &Path, id: &str) -> Result<usize, String> {
     manager
-        .set_enabled(id, false)
+        .set_enabled(id, false, &[])
         .map_err(|error| error.to_string())?;
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     let cases: Vec<Fixture> = serde_json::from_slice(
         &fs::read(fixtures.join("fixtures.json")).map_err(|error| error.to_string())?,
@@ -186,7 +188,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
         return Err("A newly installed SMS module accepted an incoming message.".into());
     }
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     if !manager
         .has_sms_handler()
@@ -218,7 +220,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
     }
 
     manager
-        .set_enabled(id, false)
+        .set_enabled(id, false, &[])
         .map_err(|error| error.to_string())?;
     if manager
         .has_sms_handler()
@@ -234,7 +236,7 @@ fn qualify_sms(manager: &ModuleManager, id: &str) -> Result<usize, String> {
         return Err("A disabled SMS module accepted an incoming message.".into());
     }
     manager
-        .set_enabled(id, true)
+        .set_enabled(id, true, &[])
         .map_err(|error| error.to_string())?;
     if !manager
         .dispatch_sms("Your verification code is 765432.", |code| {

@@ -13,13 +13,30 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
+use copypaste_ipc::{ErrorCode, Method, OpGates, Request, Response, PROTOCOL_VERSION};
 use tracing::{debug, error};
 
 use super::listener::WireLease;
-use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
+use super::messages::{MSG_FORBIDDEN, MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
 use crate::AppState;
 use copypaste_runtime::Route;
+
+/// What the daemon knows about a connected peer, settled once per connection.
+///
+/// `is_app` is true only for a peer verified as the CopyPaste app
+/// (`peer_identity`); every other peer is refused privileged operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CallerIdentity {
+    pub(crate) is_app: bool,
+}
+
+/// Whether a request turns its connection into a subscription.
+pub(super) fn is_watch(method: &Method) -> bool {
+    matches!(
+        method,
+        Method::Watch | Method::WatchRuntime | Method::WatchEvents { .. }
+    )
+}
 
 /// A pre-handler rejection and whether the rejected request was a subscription.
 pub(super) struct GateRejection {
@@ -81,34 +98,45 @@ pub(super) fn parse(line: &str) -> Result<Request, GateRejection> {
 }
 
 /// Everything that can reject a parsed request before a handler sees it.
-pub(super) fn gate(state: &AppState, request: &Request) -> Option<GateRejection> {
+pub(super) fn gate(
+    state: &AppState,
+    request: &Request,
+    caller: CallerIdentity,
+) -> Option<GateRejection> {
+    let reject = |response| {
+        Some(GateRejection {
+            response: Box::new(response),
+            was_watch: is_watch(&request.method),
+        })
+    };
     if let Some(rejection) = protocol_gate(request) {
-        return Some(GateRejection {
-            response: Box::new(rejection),
-            was_watch: matches!(request.method, Method::Watch | Method::WatchRuntime),
-        });
+        return reject(rejection);
     }
     if state.is_draining() && !matches!(request.method, Method::Status) {
-        return Some(GateRejection {
-            response: Box::new(Response::err(
-                request.id,
-                ErrorCode::NotReady,
-                MSG_NOT_READY,
-            )),
-            was_watch: matches!(request.method, Method::Watch | Method::WatchRuntime),
-        });
+        return reject(Response::err(
+            request.id,
+            ErrorCode::NotReady,
+            MSG_NOT_READY,
+        ));
+    }
+    if let Some(rejection) = privileged_gate(request, caller) {
+        return reject(rejection);
     }
     if requires_ready(&request.method) && !state.is_ready() {
-        return Some(GateRejection {
-            response: Box::new(Response::err(
-                request.id,
-                ErrorCode::NotReady,
-                MSG_NOT_READY,
-            )),
-            was_watch: matches!(request.method, Method::Watch | Method::WatchRuntime),
-        });
+        return reject(Response::err(
+            request.id,
+            ErrorCode::NotReady,
+            MSG_NOT_READY,
+        ));
     }
     None
+}
+
+/// Privileged operations such as un-hiding are served only to the CopyPaste
+/// app, so another local client cannot widen what integrations may see.
+fn privileged_gate(request: &Request, caller: CallerIdentity) -> Option<Response> {
+    (request.method.privileged() && !caller.is_app)
+        .then(|| Response::err(request.id, ErrorCode::Forbidden, MSG_FORBIDDEN))
 }
 
 /// Best-effort id recovery for a request that did not deserialise.
@@ -252,8 +280,13 @@ fn requires_ready(method: &Method) -> bool {
         //
         // `Shutdown` would be exempt anyway: a daemon whose database will not
         // open is exactly the one a user needs to be able to stop.
-        Method::Watch | Method::WatchRuntime => true,
+        Method::Watch | Method::WatchRuntime | Method::WatchEvents { .. } => true,
         Method::Shutdown => false,
+        Method::Snippets { .. }
+        | Method::Clips { .. }
+        | Method::PasteQueue { .. }
+        | Method::Transforms { .. }
+        | Method::Rules { .. } => method.feature_op().is_some_and(OpGates::requires_ready),
     }
 }
 
@@ -284,10 +317,13 @@ pub(super) fn interactive(method: &Method) -> bool {
             | Method::Delete { .. }
             | Method::Pin { .. }
             | Method::SetSecret { .. }
-    )
+    ) || method.feature_op().is_some_and(OpGates::interactive)
 }
 
 fn blocking_weight(method: &Method) -> u32 {
+    if let Some(op) = method.feature_op() {
+        return op.blocking_weight();
+    }
     match method {
         Method::Export { .. } | Method::Import { .. } | Method::ImportFile { .. } => {
             (2 * copypaste_ipc::MAX_FRAME_BYTES / MIB) as u32
@@ -355,14 +391,20 @@ where
 pub(super) async fn dispatch_request(
     state: &Arc<AppState>,
     request: Request,
+    caller: CallerIdentity,
     wire_lease: Option<WireLease>,
 ) -> AdmittedResponse {
     let id = request.id;
     let method = request.method;
     let admission = match state.runtime.route(&method).await {
         Route::Reactor => {
+            let caller = if caller.is_app {
+                copypaste_modules::ModuleCaller::App
+            } else {
+                copypaste_modules::ModuleCaller::Client
+            };
             return AdmittedResponse {
-                response: state.runtime.request(id, method).await,
+                response: state.runtime.request_from(id, method, caller).await,
                 _lease: None,
                 _wire_lease: wire_lease,
             };
@@ -433,10 +475,10 @@ mod tests {
     #[test]
     fn request_decoder_preserves_wire_formats_and_field_order() {
         for line in [
-            r#"{"id":1,"protocol_version":6,"method":"status"}"#,
-            r#"{"params":{"content":"hello"},"method":"add","protocol_version":6,"id":2}"#,
-            r#"{"method":"list","id":3,"unknown":[1,2,{"x":[4]}],"params":{"limit":5},"protocol_version":6}"#,
-            r#"{"id":4,"protocol_version":6,"method":"watch","params":null}"#,
+            r#"{"id":1,"protocol_version":7,"method":"status"}"#,
+            r#"{"params":{"content":"hello"},"method":"add","protocol_version":7,"id":2}"#,
+            r#"{"method":"list","id":3,"unknown":[1,2,{"x":[4]}],"params":{"limit":5},"protocol_version":7}"#,
+            r#"{"id":4,"protocol_version":7,"method":"watch","params":null}"#,
         ] {
             let expected: Request = serde_json::from_str(line).unwrap();
             let actual = decode_request(line).unwrap();
@@ -453,6 +495,49 @@ mod tests {
         let line = r#"{"id":1,"ignored":[{"a":[1,2,3]}],"id":42,"method":"missing"}"#;
         assert_eq!(recover_id(line), 42);
         assert_eq!(recover_id(r#"{"id":"bad"}"#), 0);
+    }
+
+    #[test]
+    fn privileged_operations_are_refused_unless_the_caller_is_the_app() {
+        let request = |method| Request {
+            id: 9,
+            protocol_version: PROTOCOL_VERSION,
+            method,
+        };
+        let hidden = |hidden| {
+            request(Method::Clips {
+                op: copypaste_ipc::clips::ClipOp::SetHiddenFromIntegrations {
+                    ids: vec!["a".into()],
+                    hidden,
+                },
+            })
+        };
+        let unhide = hidden(false);
+        let refused = privileged_gate(&unhide, CallerIdentity::default()).expect("refused");
+        assert_eq!(refused.id, 9);
+        assert_eq!(refused.error_code, Some(ErrorCode::Forbidden));
+        assert!(privileged_gate(&unhide, CallerIdentity { is_app: true }).is_none());
+        assert!(privileged_gate(&hidden(true), CallerIdentity::default()).is_none());
+    }
+
+    #[test]
+    fn feature_operations_take_their_own_gate_answers() {
+        let deliver = Method::PasteQueue {
+            op: copypaste_ipc::paste_queue::PasteQueueOp::Deliver {
+                target: copypaste_ipc::paste_queue::QueueTarget::Next,
+                plain_text: None,
+                mode: copypaste_ipc::paste_queue::QueueDeliveryMode::Clipboard,
+            },
+        };
+        assert!(interactive(&deliver));
+        assert!(blocking_weight(&deliver) as usize <= INTERACTIVE_PAYLOAD_UNITS);
+        let catalogue = Method::Transforms {
+            op: copypaste_ipc::transforms::TransformOp::Catalogue {
+                locale: "en".into(),
+            },
+        };
+        assert!(!requires_ready(&catalogue));
+        assert!(requires_ready(&Method::WatchEvents { kinds: Vec::new() }));
     }
 
     #[test]
@@ -650,7 +735,12 @@ mod tests {
                 bounds: None,
             },
         };
-        let mut preview = Box::pin(dispatch_request(&state, request, None));
+        let mut preview = Box::pin(dispatch_request(
+            &state,
+            request,
+            CallerIdentity::default(),
+            None,
+        ));
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut preview)
                 .await
@@ -663,7 +753,7 @@ mod tests {
         };
         let response = tokio::time::timeout(
             Duration::from_secs(2),
-            dispatch_request(&state, status, None),
+            dispatch_request(&state, status, CallerIdentity::default(), None),
         )
         .await
         .expect("queued preview must not block status");

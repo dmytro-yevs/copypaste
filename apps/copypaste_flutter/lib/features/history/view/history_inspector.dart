@@ -30,6 +30,8 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../presentation/secret_spoiler.dart';
 
 import '../presentation/history_color_swatch.dart';
+import '../presentation/history_expiry_text.dart';
+import 'history_clip_menu.dart';
 import 'history_delete_dialog.dart';
 import 'history_ocr_dialog.dart';
 
@@ -206,6 +208,10 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                   context,
                   constraints.maxWidth,
                 );
+                final actions = historyClipActions(controller, clip);
+                final menuActions = actions
+                    .where((action) => !_footerActions.contains(action))
+                    .toList(growable: false);
                 final pinIcon = AppIconFrame(
                   child: Icon(
                     clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
@@ -457,6 +463,10 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                         ),
                       ),
                     ),
+                    if (actions.contains(HistoryClipAction.transform))
+                      _iconAction(context, clip, HistoryClipAction.transform),
+                    if (menuActions.isNotEmpty)
+                      _moreActions(context, clip, menuActions),
                     if (clip.contentKind == HistoryClipKind.image &&
                         controller.ocr?.available == true)
                       Tooltip(
@@ -530,7 +540,7 @@ class _HistoryInspectorState extends State<HistoryInspector> {
                 AppSpacing.xs,
                 AppSpacing.xs,
               ),
-              child: clip.secret
+              child: clip.masked
                   ? SecretSpoiler(
                       key: ValueKey(
                         'inspector-metadata-spoiler-${clip.id}-$presentationRevision',
@@ -600,6 +610,14 @@ class _HistoryInspectorState extends State<HistoryInspector> {
       (const ButtonStyle.primary(), context.l10n.commonCopy),
       (const ButtonStyle.secondary(), context.l10n.historyPinnedButton),
       (const ButtonStyle.destructive(), context.l10n.commonDelete),
+      // Capability actions are icon-only; they depend on the repository,
+      // not on the clip, so the budget stays the same for every clip.
+      if (controller.capabilities.annotations != null)
+        (const ButtonStyle.outlineIcon(), null),
+      if (controller.capabilities.edits != null ||
+          controller.capabilities.queue != null ||
+          controller.capabilities.annotations != null)
+        (const ButtonStyle.outlineIcon(), null),
     ];
     final theme = Theme.of(context);
     double widthOf(ButtonStyle buttonStyle, String? label) {
@@ -636,6 +654,77 @@ class _HistoryInspectorState extends State<HistoryInspector> {
     }
     return requiredWidth > availableWidth;
   }
+
+  /// Feature actions shown as their own footer buttons; the rest are in the
+  /// footer's More menu.
+  static const _footerActions = {HistoryClipAction.transform};
+
+  Widget _iconAction(
+    BuildContext context,
+    HistoryClip clip,
+    HistoryClipAction action,
+  ) {
+    final label = action.label(context, clip);
+    return Tooltip(
+      tooltip: (_) => TooltipContainer(child: Text(label)),
+      child: Semantics(
+        label: label,
+        button: true,
+        child: Button.outline(
+          key: ValueKey<String>('history-detail-action-${action.id}'),
+          style: AppTheme.actionButtonStyle(const ButtonStyle.outlineIcon()),
+          onPressed: () => unawaited(
+            runHistoryClipAction(
+              context,
+              controller: controller,
+              clip: clip,
+              action: action,
+            ),
+          ),
+          child: AppIconFrame(child: Icon(action.icon(clip))),
+        ),
+      ),
+    );
+  }
+
+  Widget _moreActions(
+    BuildContext context,
+    HistoryClip clip,
+    List<HistoryClipAction> actions,
+  ) => Tooltip(
+    tooltip: (_) =>
+        TooltipContainer(child: Text(context.l10n.historyMoreActions)),
+    child: Semantics(
+      label: context.l10n.historyMoreActions,
+      button: true,
+      child: Builder(
+        builder: (anchor) => Button.outline(
+          key: const ValueKey<String>('history-detail-more'),
+          style: AppTheme.actionButtonStyle(const ButtonStyle.outlineIcon()),
+          onPressed: () => unawaited(
+            showDropdown<void>(
+              context: anchor,
+              alignment: AlignmentDirectional.bottomEnd,
+              anchorAlignment: AlignmentDirectional.topEnd,
+              builder: (popupContext) => AppTheme.popupSurface(
+                popupContext,
+                child: DropdownMenu(
+                  children: historyClipActionMenuItems(
+                    context,
+                    controller: controller,
+                    clip: clip,
+                    actions: actions,
+                    keyPrefix: 'history-detail-action',
+                  ),
+                ),
+              ),
+            ).future,
+          ),
+          child: const AppIconFrame(child: Icon(LucideIcons.ellipsis)),
+        ),
+      ),
+    ),
+  );
 
   Future<void> _copy(BuildContext context, {required bool plainText}) async {
     final copied = await controller.transfers.copySelected(
@@ -839,7 +928,7 @@ class _HistoryDetailContent extends StatelessWidget {
   final int presentationRevision;
 
   Widget _conceal(Widget child, {String keyPrefix = 'inspector-spoiler'}) =>
-      clip.secret
+      clip.masked
       ? SecretSpoiler(
           key: ValueKey('$keyPrefix-${clip.id}-$presentationRevision'),
           clipId: clip.id,
@@ -936,7 +1025,7 @@ class _HistoryDetailContent extends StatelessWidget {
 
   Widget _sizedBody(BuildContext context) {
     final content = _body(context);
-    if (!clip.secret ||
+    if (!clip.masked ||
         body.length > 256 ||
         clip.contentKind == HistoryClipKind.image ||
         clip.contentKind == HistoryClipKind.color) {
@@ -1022,22 +1111,22 @@ class _HistoryMetadataTable extends StatelessWidget {
         for (final row in rows)
           (
             label: row.label,
-            value: _historyMetadataHasIdentity(context, row)
-                ? _historyMetadataIdentityLabel(
-                    context,
-                    row: row,
-                    clip: clip,
-                    controller: controller,
-                    style: textStyle,
-                  )
-                : HistorySelectableText(
-                    row.value,
-                    onCopy: (text) =>
-                        controller.transfers.copyTextFrom(clip.id, text),
-                    style: textStyle.copyWith(
-                      color: row.warning ? theme.colorScheme.destructive : null,
-                    ),
+            value:
+                _historyMetadataValue(
+                  context,
+                  row: row,
+                  clip: clip,
+                  controller: controller,
+                  style: textStyle,
+                ) ??
+                HistorySelectableText(
+                  row.value,
+                  onCopy: (text) =>
+                      controller.transfers.copyTextFrom(clip.id, text),
+                  style: textStyle.copyWith(
+                    color: row.warning ? theme.colorScheme.destructive : null,
                   ),
+                ),
           ),
       ],
     );
@@ -1081,14 +1170,8 @@ class _HistoryMetadataTable extends StatelessWidget {
 
 typedef _HistoryMetadataRow = ({String label, String value, bool warning});
 
-bool _historyMetadataHasIdentity(
-  BuildContext context,
-  _HistoryMetadataRow row,
-) =>
-    row.label == context.l10n.historyMetadataObservedApp ||
-    row.label == context.l10n.historyMetadataDevice;
-
-Widget _historyMetadataIdentityLabel(
+/// Rows whose value is more than selectable text; null for plain rows.
+Widget? _historyMetadataValue(
   BuildContext context, {
   required _HistoryMetadataRow row,
   required HistoryClip clip,
@@ -1097,11 +1180,30 @@ Widget _historyMetadataIdentityLabel(
 }) {
   final strings = context.l10n;
   if (row.label == strings.historyMetadataObservedApp) {
-    return SourceAppLabel(
-      key: const ValueKey<String>('history-detail-source-app'),
-      name: row.value,
-      icon: controller.media.requestSourceIcon(clip.sourceAppIconId),
-      style: style,
+    final provenance = HistoryClipPresentation.provenance(
+      context.l10n,
+      clip.annotations.provenance,
+    );
+    final source = row.value.isEmpty
+        ? null
+        : SourceAppLabel(
+            key: const ValueKey<String>('history-detail-source-app'),
+            name: row.value,
+            icon: controller.media.requestSourceIcon(clip.sourceAppIconId),
+            style: style,
+          );
+    if (provenance == null) return source;
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.xs,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        ?source,
+        SecondaryBadge(
+          key: const ValueKey<String>('history-detail-provenance'),
+          child: Text(provenance),
+        ),
+      ],
     );
   }
   if (row.label == strings.historyMetadataDevice) {
@@ -1112,7 +1214,24 @@ Widget _historyMetadataIdentityLabel(
       style: style,
     );
   }
-  throw StateError('Metadata row has no identity presentation.');
+  if (row.label == strings.historyMetadataExpiry) {
+    return HistoryExpiryText(
+      expiresAt: clip.annotations.expiresAt!,
+      style: style.copyWith(color: Theme.of(context).colorScheme.destructive),
+    );
+  }
+  if (row.label == strings.historyMetadataRuleTags) {
+    return Wrap(
+      key: const ValueKey<String>('history-detail-rule-tags'),
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        for (final name in controller.tags.names(clip.annotations.ruleTagIds))
+          SecondaryBadge(child: Text(strings.historyRuleTag(name))),
+      ],
+    );
+  }
+  return null;
 }
 
 List<_HistoryMetadataRow> _historyMetadataRows(
@@ -1121,7 +1240,7 @@ List<_HistoryMetadataRow> _historyMetadataRows(
   bool revealConfidential = false,
 }) {
   final strings = context.l10n;
-  if (clip.secret && !revealConfidential) {
+  if (clip.masked && !revealConfidential) {
     return [
       (
         label: strings.historyMetadataPrivacy,
@@ -1132,16 +1251,19 @@ List<_HistoryMetadataRow> _historyMetadataRows(
   }
   final type = clip.file?.mimeType ?? clip.contentType;
   final sizeBytes = clip.image?.sizeBytes ?? clip.file?.sizeBytes;
+  final annotations = clip.annotations;
   return [
     (
       label: strings.historyMetadataCaptured,
       value: formatSystemDateTime(context, clip.createdAt),
       warning: false,
     ),
-    if (clip.sourceApp != null)
+    if (annotations.expiresAt != null && !annotations.keep)
+      (label: strings.historyMetadataExpiry, value: '', warning: true),
+    if (clip.sourceApp != null || annotations.provenance != null)
       (
         label: strings.historyMetadataObservedApp,
-        value: clip.sourceApp!,
+        value: clip.sourceApp ?? '',
         warning: false,
       ),
     if (clip.origin != null)
@@ -1188,6 +1310,8 @@ List<_HistoryMetadataRow> _historyMetadataRows(
         value: '${clip.file!.fileCount}',
         warning: false,
       ),
+    if (annotations.ruleTagIds.isNotEmpty)
+      (label: strings.historyMetadataRuleTags, value: '', warning: false),
     if (clip.tooLargeToSync)
       (
         label: strings.historyMetadataSync,

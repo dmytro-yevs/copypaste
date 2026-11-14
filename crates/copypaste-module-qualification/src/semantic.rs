@@ -55,7 +55,9 @@ pub(super) fn qualify(
         manager
             .set_preferences(id, BTreeMap::from([("languages".into(), json!(languages))]))
             .map_err(|e| e.to_string())?;
-        manager.set_enabled(id, true).map_err(|e| e.to_string())?;
+        manager
+            .set_enabled(id, true, &[])
+            .map_err(|e| e.to_string())?;
         let query = vector(manager, id, "query", query)?;
         let relevant = vector(manager, id, "passage", relevant)?;
         let unrelated = vector(manager, id, "passage", unrelated)?;
@@ -68,11 +70,15 @@ pub(super) fn qualify(
             ));
         }
     }
-    manager.set_enabled(id, false).map_err(|e| e.to_string())?;
+    manager
+        .set_enabled(id, false, &[])
+        .map_err(|e| e.to_string())?;
     if vector(manager, id, "query", "disabled").is_ok() {
         return Err("Disabled semantic module accepted inference.".into());
     }
-    manager.set_enabled(id, true).map_err(|e| e.to_string())?;
+    manager
+        .set_enabled(id, true, &[])
+        .map_err(|e| e.to_string())?;
     vector(manager, id, "query", "оплата житла")?;
     Ok(3)
 }

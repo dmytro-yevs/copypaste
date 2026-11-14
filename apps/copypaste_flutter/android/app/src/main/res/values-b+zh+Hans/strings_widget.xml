@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">历史记录</string>
+    <string name="widget_filter_pinned">已固定</string>
+    <string name="widget_filter_snippets">片段</string>
+    <string name="widget_filter_description">正在显示%1$s。轻点以更改。</string>
+    <string name="widget_privacy_full">完整预览</string>
+    <string name="widget_privacy_titles">仅标题</string>
+    <string name="widget_privacy_hidden">隐藏</string>
+    <string name="widget_privacy_description">预览：%1$s。轻点以更改。</string>
+    <string name="widget_search">在 CopyPaste 中搜索</string>
+    <string name="widget_paused">已暂停捕获 · 继续</string>
+    <string name="widget_empty">还没有剪贴项 · 保存剪贴板</string>
+    <string name="widget_empty_pinned">没有已固定的剪贴项</string>
+    <string name="widget_empty_snippets">还没有片段</string>
+    <string name="widget_setup">设置捕获</string>
+    <string name="widget_unavailable">解锁后显示剪贴项</string>
+    <string name="widget_error">无法加载剪贴项 · 轻点重试</string>
+    <string name="widget_hidden">预览已隐藏</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="other">%d 个剪贴项</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="other">%d 个片段</item>
+    </plurals>
+    <string name="widget_kind_text">文本</string>
+    <string name="widget_kind_link">链接</string>
+    <string name="widget_kind_image">图片</string>
+    <string name="widget_kind_file">文件</string>
+    <string name="widget_kind_color">颜色</string>
+    <string name="widget_kind_code">代码</string>
+    <string name="widget_kind_snippet">片段</string>
+    <string name="widget_secret_item">机密项目</string>
+    <string name="widget_secret_description">%1$s，机密。轻点两下并验证身份以复制。</string>
+    <string name="widget_concealed_snippet">已隐藏的片段</string>
+    <string name="widget_copied">已复制</string>
+    <string name="widget_copy_failed">无法复制</string>
+    <string name="widget_auth_reason">复制机密项目</string>
+</resources>

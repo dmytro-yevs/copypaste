@@ -26,7 +26,9 @@ pub(super) fn qualify(manager: &ModuleManager, id: &str) -> Result<usize, String
             |_| {},
         )))
         .map_err(|e| e.to_string())?;
-    manager.set_enabled(id, true).map_err(|e| e.to_string())?;
+    manager
+        .set_enabled(id, true, &[])
+        .map_err(|e| e.to_string())?;
     signed_out(manager, id, false)?;
     manager
         .set_preferences(
@@ -60,11 +62,15 @@ pub(super) fn qualify(manager: &ModuleManager, id: &str) -> Result<usize, String
         .invoke(id, "sign-out", BTreeMap::new())
         .map_err(|e| e.to_string())?;
     signed_out(manager, id, true)?;
-    manager.set_enabled(id, false).map_err(|e| e.to_string())?;
+    manager
+        .set_enabled(id, false, &[])
+        .map_err(|e| e.to_string())?;
     if manager.invoke(id, "status", BTreeMap::new()).is_ok() {
         return Err("Disabled sync module accepted commands.".into());
     }
-    manager.set_enabled(id, true).map_err(|e| e.to_string())?;
+    manager
+        .set_enabled(id, true, &[])
+        .map_err(|e| e.to_string())?;
     signed_out(manager, id, true)?;
     Ok(3)
 }

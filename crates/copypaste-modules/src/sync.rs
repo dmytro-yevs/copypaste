@@ -63,13 +63,8 @@ impl SyncServices {
         (self.enabled)()
     }
     fn key(id: &str, key: &str) -> Result<String, ModuleError> {
-        if key.is_empty()
-            || key.len() > 96
-            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        {
-            return Err(ModuleError::Invalid("Invalid sync state key.".into()));
-        }
-        Ok(format!("module:{id}:{key}"))
+        copypaste_core::storage::module_state_key(id, key)
+            .map_err(|_| ModuleError::Invalid("Invalid sync state key.".into()))
     }
     fn floor(&self, id: &str) -> Result<UploadFloor, ModuleError> {
         Ok(UploadFloor {
@@ -121,9 +116,38 @@ impl SyncServices {
         }
         Ok(())
     }
+    /// Offers rows to every cloud provider again although its upload floor
+    /// has passed them: they join the retry set the next scan reads first.
+    pub fn reoffer(&self, item_ids: &[String]) -> Result<(), ModuleError> {
+        if item_ids.is_empty() {
+            return Ok(());
+        }
+        let _progress = self.progress.lock().map_err(|_| ModuleError::State)?;
+        for id in self
+            .store
+            .sync_provider_ids()
+            .map_err(|_| ModuleError::State)?
+        {
+            let key = Self::key(&id, UNREADABLE_UPLOADS)?;
+            let previous = self.store.state(&key).map_err(|_| ModuleError::State)?;
+            let mut retry = UnreadableUploads::decode(previous.as_deref());
+            if retry.reset_floor {
+                // The next scan starts from the beginning and reaches them.
+                continue;
+            }
+            retry.ids.extend(item_ids.iter().cloned());
+            self.store
+                .set_state(&key, &retry.encode())
+                .map_err(|_| ModuleError::State)?;
+        }
+        Ok(())
+    }
     pub(crate) fn clear(&self, id: &str) -> Result<(), ModuleError> {
         self.store
             .clear_module_state(id)
+            .map_err(|_| ModuleError::State)?;
+        self.store
+            .forget_module_records(id)
             .map_err(|_| ModuleError::State)?;
         self.store
             .clear_semantic_index(id)
@@ -184,50 +208,22 @@ impl SyncServices {
                 .map_or(0, |entry| entry.epoch)
                 .wrapping_add(self.group.as_ref().map_or(0, |group| (group.revision)())))),
             SyncHostRequest::ReadState { keys } => {
-                if keys.len() > 64 {
-                    return Err(ModuleError::State);
-                }
-                let values = keys
-                    .into_iter()
-                    .map(|key| {
-                        let value = self
-                            .store
-                            .state(&Self::key(id, &key)?)
-                            .map_err(|_| ModuleError::State)?;
-                        Ok((key, value))
-                    })
-                    .collect::<Result<BTreeMap<_, _>, ModuleError>>()?;
+                let values = self
+                    .store
+                    .module_state(id, &keys)
+                    .map_err(|_| ModuleError::State)?;
                 serde_json::to_value(values).map_err(|_| ModuleError::State)
             }
             SyncHostRequest::WriteState { values } => {
-                if values.len() > 64 || values.values().any(|v| v.len() > 128 * 1024) {
-                    return Err(ModuleError::State);
-                }
-                let values = values
-                    .into_iter()
-                    .map(|(key, value)| Ok((Self::key(id, &key)?, value)))
-                    .collect::<Result<Vec<_>, ModuleError>>()?;
                 let _progress = self.progress.lock().map_err(|_| ModuleError::State)?;
                 self.store
-                    .set_state_all(
-                        &values
-                            .iter()
-                            .map(|(k, v)| (k.as_str(), v.as_str()))
-                            .collect::<Vec<_>>(),
-                    )
+                    .set_module_state(id, &values)
                     .map_err(|_| ModuleError::State)?;
                 Ok(Value::Null)
             }
             SyncHostRequest::ClearState { keys } => {
-                if keys.len() > 64 {
-                    return Err(ModuleError::State);
-                }
-                let keys = keys
-                    .iter()
-                    .map(|key| Self::key(id, key))
-                    .collect::<Result<Vec<_>, _>>()?;
                 self.store
-                    .clear_state(&keys.iter().map(String::as_str).collect::<Vec<_>>())
+                    .clear_module_state_keys(id, &keys)
                     .map_err(|_| ModuleError::State)?;
                 Ok(Value::Null)
             }
@@ -328,21 +324,20 @@ mod tests {
     use super::*;
     use copypaste_core::{compute_content_hash, Keyring, NewItem, StoreSource};
     fn service() -> SyncServices {
-        let keyring = Arc::new(Keyring::from_secret(&[5; 32]));
+        device(5, "device").0
+    }
+    fn device(secret: u8, id: &str) -> (SyncServices, Arc<Keyring>) {
+        let keyring = Arc::new(Keyring::from_secret(&[secret; 32]));
         let store = Store::open_in_memory(&keyring.db_key()).unwrap();
         let source = StoreSource::new(
             store.clone(),
-            keyring,
-            "device".into(),
+            Arc::clone(&keyring),
+            id.into(),
             "test".into(),
             Default::default(),
         );
-        SyncServices::new(
-            store,
-            StoreView::new(source, "device".into()),
-            || true,
-            |_| {},
-        )
+        let services = SyncServices::new(store, StoreView::new(source, id.into()), || true, |_| {});
+        (services, keyring)
     }
     use std::sync::Arc;
     #[test]
@@ -461,5 +456,163 @@ mod tests {
             .unwrap()
             .scores
             .is_empty());
+    }
+
+    /// The shipped cloud module rejects any `item_id` outside this pattern
+    /// (its validator and the server check constraint), failing the batch.
+    fn crosses_cloud_id_contract(id: &str) -> bool {
+        (1..=128).contains(&id.len())
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    }
+
+    #[test]
+    fn organization_records_round_trip_through_the_cloud_host_path() {
+        const MODULE: &str = "copypaste.supabase";
+        let (sender, sender_keys) = device(61, "sender");
+        let (receiver, _) = device(62, "receiver");
+        let key = sender_keys.item_key();
+        let clip = copypaste_core::ingest::ingest_into(
+            &sender.store,
+            &sender_keys,
+            "pinned and tagged",
+            "text",
+            100,
+            &Default::default(),
+        )
+        .unwrap()
+        .into_item()
+        .id;
+        sender.store.set_pinned_synced(&clip, true, &key).unwrap();
+        sender
+            .store
+            .mutate_history_tags(
+                &key,
+                &copypaste_ipc::HistoryTagMutation::Save {
+                    id: None,
+                    name: "Work".into(),
+                },
+            )
+            .unwrap();
+        let tag = sender.store.history_tags(&[]).unwrap().tags.remove(0).id;
+        sender
+            .store
+            .mutate_history_tags(
+                &key,
+                &copypaste_ipc::HistoryTagMutation::Assign {
+                    clip_ids: vec![clip.clone()],
+                    tag_ids: vec![tag.clone()],
+                    assigned: true,
+                },
+            )
+            .unwrap();
+
+        let scan: copypaste_sync::scan::Scan = serde_json::from_value(
+            sender
+                .request(
+                    MODULE,
+                    SyncHostRequest::Scan {
+                        since_ms: 0,
+                        after_item_id: None,
+                    },
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            scan.items.len(),
+            4,
+            "one clip and three organization records"
+        );
+        for item in &scan.items {
+            assert!(
+                crosses_cloud_id_contract(&item.item_id),
+                "{} cannot be uploaded",
+                item.item_id
+            );
+        }
+
+        let applied: Vec<Applied> = serde_json::from_value(
+            receiver
+                .request(MODULE, SyncHostRequest::Apply { items: scan.items })
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(applied.iter().all(|item| matches!(item, Applied::Merged)));
+        assert!(receiver.store.get(&clip).unwrap().unwrap().pinned);
+        let tags = receiver
+            .store
+            .history_tags(std::slice::from_ref(&clip))
+            .unwrap();
+        assert_eq!(tags.tags.len(), 1);
+        assert_eq!(tags.tags[0].name, "Work");
+        assert_eq!(tags.assignments[&clip], vec![tag]);
+    }
+
+    #[test]
+    fn short_lived_clips_and_their_tombstones_stay_out_of_cloud_until_kept() {
+        use copypaste_core::storage::expiry::Clocks;
+        const MODULE: &str = "copypaste.supabase";
+        const MIN: i64 = 60 * 1000;
+        let (service, keys) = device(63, "here");
+        let key = keys.item_key();
+        let now = copypaste_core::now_ms();
+        let capture = |text: &str| {
+            copypaste_core::ingest::ingest_into(
+                &service.store,
+                &keys,
+                text,
+                "text",
+                now,
+                &Default::default(),
+            )
+            .unwrap()
+            .into_item()
+            .id
+        };
+        let (short, gone, long) = (capture("482913"), capture("gone"), capture("long"));
+        for (id, duration) in [(&short, 10 * MIN), (&gone, 10 * MIN), (&long, 120 * MIN)] {
+            service
+                .store
+                .set_clip_expiry(&key, id, duration, false, Clocks::at(now))
+                .unwrap()
+                .unwrap();
+        }
+        service.store.delete(&gone).unwrap();
+        let scan = |since_ms| -> Vec<String> {
+            let scan: copypaste_sync::scan::Scan = serde_json::from_value(
+                service
+                    .request(
+                        MODULE,
+                        SyncHostRequest::Scan {
+                            since_ms,
+                            after_item_id: None,
+                        },
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+            scan.items.into_iter().map(|item| item.item_id).collect()
+        };
+
+        let first = scan(0);
+        assert_eq!(first.len(), 2, "the long-lived clip and its note");
+        assert!(first.contains(&long));
+        let started_ms = copypaste_core::now_ms();
+        service
+            .request(MODULE, SyncHostRequest::CommitUpload { started_ms })
+            .unwrap();
+
+        let kept = service
+            .store
+            .keep_clip(&key, &short, false)
+            .unwrap()
+            .unwrap();
+        service.reoffer(&kept.reoffer).unwrap();
+        let second = scan(service.floor(MODULE).unwrap().created_at);
+        assert!(second.contains(&short), "offered again after keep");
+        assert_eq!(second.len(), 2, "the kept clip and its new note");
+        assert!(!second.contains(&gone));
     }
 }

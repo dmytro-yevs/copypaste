@@ -23,12 +23,34 @@
 //! laxer one.
 
 use copypaste_ipc::transport::OwnedWriteHalf;
-use copypaste_ipc::{EventData, Response, ResponseData};
+use copypaste_ipc::{
+    EventData, EventKindFilter, Response, ResponseData, RuntimeEventData, MAX_EVENT_FILTERS,
+};
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 use tokio::sync::watch;
 use tracing::debug;
 
 use super::listener::{send, Reader};
+
+/// What a `watch_events` subscription receives.
+pub(super) struct WatchFilter {
+    kinds: Vec<EventKindFilter>,
+}
+
+impl WatchFilter {
+    /// `None` when the kind list is empty or longer than the shared cap.
+    pub(super) fn new(kinds: Vec<EventKindFilter>) -> Option<Self> {
+        (!kinds.is_empty() && kinds.len() <= MAX_EVENT_FILTERS).then_some(Self { kinds })
+    }
+
+    fn admits(filter: Option<&Self>, event: &RuntimeEventData) -> bool {
+        filter.is_none_or(|filter| EventKindFilter::admits(&filter.kinds, event))
+    }
+
+    fn wants_transfers(filter: Option<&Self>) -> bool {
+        filter.is_none_or(|filter| filter.kinds.contains(&EventKindFilter::Transfers))
+    }
+}
 
 /// Send events until the client hangs up or the daemon stops.
 ///
@@ -77,6 +99,10 @@ pub(super) async fn pump(
 
 /// Opt-in stream: legacy changes and separate runtime-only payloads share one
 /// connection, while legacy watchers never see progress events.
+///
+/// With a [`WatchFilter`] (`watch_events`) only the requested kinds are sent,
+/// and file-operation changes are not even received unless asked for.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn pump_runtime(
     state: std::sync::Arc<crate::AppState>,
     mut events: Receiver<EventData>,
@@ -85,9 +111,11 @@ pub(super) async fn pump_runtime(
     reader: &mut Reader,
     writer: &mut OwnedWriteHalf,
     shutdown: &mut watch::Receiver<bool>,
+    filter: Option<&WatchFilter>,
 ) {
-    let mut transfers = state.store.subscribe_file_operations();
-    if !send_capture_snapshot(&state, id, writer).await {
+    let mut transfers =
+        WatchFilter::wants_transfers(filter).then(|| state.store.subscribe_file_operations());
+    if !send_capture_snapshot(&state, id, writer, filter).await {
         return;
     }
     loop {
@@ -101,37 +129,58 @@ pub(super) async fn pump_runtime(
             received = events.recv() => match received {
                 Ok(change) => copypaste_ipc::RuntimeEventData { file_operation: None, change: Some(change), progress: None, capture: None },
                 Err(RecvError::Lagged(_)) => {
-                    if !send_recovery(&state, id, writer).await { break; }
+                    if !send_recovery(&state, id, writer, filter).await { break; }
                     continue;
                 },
                 Err(RecvError::Closed) => break,
             },
-            changed = transfers.recv() => {
+            changed = async {
+                match transfers.as_mut() {
+                    Some(transfers) => transfers.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 if matches!(changed, Err(RecvError::Closed)) { break; }
                 copypaste_ipc::RuntimeEventData { file_operation: Some(changed.unwrap_or_default()), change: None, capture: None, progress: None }
             },
             received = runtime_events.recv() => match received {
                 Ok(event) => event,
                 Err(RecvError::Lagged(_)) => {
-                    if !send_recovery(&state, id, writer).await { break; }
+                    if !send_recovery(&state, id, writer, filter).await { break; }
                     continue;
                 },
                 Err(RecvError::Closed) => break,
             },
         };
-        if send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
-            .await
-            .is_err()
-        {
+        if !send_runtime_event(writer, id, event, filter).await {
             break;
         }
     }
+}
+
+/// Send one frame unless the subscription filters it out.
+async fn send_runtime_event(
+    writer: &mut OwnedWriteHalf,
+    id: u64,
+    event: RuntimeEventData,
+    filter: Option<&WatchFilter>,
+) -> bool {
+    if !WatchFilter::admits(filter, &event) {
+        return true;
+    }
+    send(
+        writer,
+        &Response::ok(id, ResponseData::RuntimeEvent(Box::new(event))),
+    )
+    .await
+    .is_ok()
 }
 
 async fn send_capture_snapshot(
     state: &std::sync::Arc<crate::AppState>,
     id: u64,
     writer: &mut OwnedWriteHalf,
+    filter: Option<&WatchFilter>,
 ) -> bool {
     let state = std::sync::Arc::clone(state);
     let snapshot = tokio::task::spawn_blocking(move || {
@@ -147,17 +196,16 @@ async fn send_capture_snapshot(
         progress: None,
         capture: Some(status),
     };
-    send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
-        .await
-        .is_ok()
+    send_runtime_event(writer, id, event, filter).await
 }
 
 async fn send_recovery(
     state: &std::sync::Arc<crate::AppState>,
     id: u64,
     writer: &mut OwnedWriteHalf,
+    filter: Option<&WatchFilter>,
 ) -> bool {
-    if !send_capture_snapshot(state, id, writer).await {
+    if !send_capture_snapshot(state, id, writer, filter).await {
         return false;
     }
     let state = std::sync::Arc::clone(state);
@@ -173,17 +221,18 @@ async fn send_recovery(
     else {
         return false;
     };
-    // A lost invalidation can cover both history and peers. Re-read both once.
+    // A lost invalidation can cover any kind. Ask for each to be re-read once.
     for kind in [
         copypaste_ipc::EventKind::Items,
         copypaste_ipc::EventKind::Peers,
+        copypaste_ipc::EventKind::PasteQueue,
+        copypaste_ipc::EventKind::Library,
     ] {
         let change = EventData {
-            event: kind,
-            item_count,
-            captured: false,
-            captured_item_id: None,
             sync_status: (kind == copypaste_ipc::EventKind::Peers).then(|| sync_status.clone()),
+            library: (kind == copypaste_ipc::EventKind::Library)
+                .then(copypaste_ipc::LibraryKinds::all),
+            ..EventData::change(kind, item_count)
         };
         let event = copypaste_ipc::RuntimeEventData {
             file_operation: None,
@@ -191,10 +240,7 @@ async fn send_recovery(
             progress: None,
             capture: None,
         };
-        if send(writer, &Response::ok(id, ResponseData::RuntimeEvent(event)))
-            .await
-            .is_err()
-        {
+        if !send_runtime_event(writer, id, event, filter).await {
             return false;
         }
     }

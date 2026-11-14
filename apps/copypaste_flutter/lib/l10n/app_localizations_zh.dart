@@ -57,12 +57,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get commonEnable => '启用';
 
   @override
-  String get commonOn => '已开启';
-
-  @override
-  String get commonOff => '已关闭';
-
-  @override
   String get settingsLanguageTitle => '语言';
 
   @override
@@ -117,14 +111,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsRuntimeExcludedAppsLimit => '最多可排除 256 个应用。';
-
-  @override
-  String get settingsQuickPasteStartFailed => '无法启动 Quick Paste，因此其快捷键不起作用。';
-
-  @override
-  String settingsQuickPasteShortcutInUse(String shortcut) {
-    return '$shortcut 已被其他应用占用。请选择其他快捷键。';
-  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed => '无法更新自动粘贴设置。';
@@ -714,6 +700,446 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSectionModulesSummary => '安装和管理可选模块。';
 
   @override
+  String get settingsSectionRules => '内容规则';
+
+  @override
+  String get settingsSectionRulesSummary => '自动为剪贴项添加标签、跳过、保护或设置过期。';
+
+  @override
+  String get settingsSectionQuickAccess => '快速访问';
+
+  @override
+  String get settingsSectionQuickAccessSummary => '键盘、快捷设置图块和主屏幕小组件。';
+
+  @override
+  String get settingsSectionSnippets => '片段';
+
+  @override
+  String get settingsSectionSnippetsSummary => '可重复使用的文本和模板。';
+
+  @override
+  String get settingsSectionTransforms => '文本转换';
+
+  @override
+  String get settingsSectionTransformsSummary => '收藏、流程和粘贴时的默认转换。';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary => '收集多次复制的内容并按顺序粘贴。';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return '已粘贴第 $position 项，共 $total 项';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '第 $position 项（共 $total 项）已在剪贴板中';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已粘贴 $count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项已在剪贴板中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => '队列已完成';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '已添加，队列中有 $total 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => '队列为空，未粘贴任何内容';
+
+  @override
+  String get pasteQueueMixed => '“全部粘贴”仅适用于纯文本或纯文件的队列';
+
+  @override
+  String get pasteQueueSeveralFiles => '请逐个粘贴文件。';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项已不可用',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '“粘贴下一项”仅复制';
+
+  @override
+  String get pasteQueueAccessibilityMessage => '已复制项目。允许“辅助功能”即可自动粘贴。';
+
+  @override
+  String get pasteQueuePasteUnsupported => '无法自动粘贴，已改为复制项目。';
+
+  @override
+  String get pasteQueueTargetElevated => '无法粘贴到管理员应用，已改为复制项目。';
+
+  @override
+  String get pasteQueueNoTarget => '没有可粘贴的应用，已改为复制项目。';
+
+  @override
+  String get pasteQueueCollectingStarted => '正在收集复制内容';
+
+  @override
+  String get pasteQueueCollectingStopped => '已停止收集';
+
+  @override
+  String get pasteQueueFailed => '无法完成 Paste Queue 操作';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项待粘贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 项待粘贴 · 收集中',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => '收集中';
+
+  @override
+  String get pasteQueueFinishedSummary => '已完成';
+
+  @override
+  String pasteQueueFull(int max) {
+    return '队列已满（$max）';
+  }
+
+  @override
+  String get pasteQueueFullMessage => '不再添加新的复制内容。';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue 为空';
+
+  @override
+  String get pasteQueueEmptyMessage => '收集复制内容，或从历史记录添加项目。';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => '复制内容即可添加';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage => '在停止收集之前，每次复制的内容都会加入队列。';
+
+  @override
+  String get pasteQueueStartCollecting => '开始收集';
+
+  @override
+  String get pasteQueueStopCollecting => '停止收集';
+
+  @override
+  String get pasteQueueLoading => '正在加载队列…';
+
+  @override
+  String get pasteQueueLoadFailed => '无法加载队列';
+
+  @override
+  String get pasteQueuePasteNext => '粘贴下一项';
+
+  @override
+  String get pasteQueueCopyNext => '复制下一项';
+
+  @override
+  String get pasteQueuePasteAll => '全部粘贴';
+
+  @override
+  String get pasteQueueCopyAll => '全部复制';
+
+  @override
+  String get pasteQueueReverse => '反转顺序';
+
+  @override
+  String get pasteQueueStepBack => '退回一项';
+
+  @override
+  String get pasteQueueSkip => '跳过';
+
+  @override
+  String get pasteQueueRemovePasted => '移除已粘贴项';
+
+  @override
+  String get pasteQueueCleared => '队列已清空';
+
+  @override
+  String get pasteQueueUndo => '撤销';
+
+  @override
+  String get pasteQueueStartFresh => '重新开始';
+
+  @override
+  String get pasteQueueAppend => '追加';
+
+  @override
+  String get pasteQueueRestartTitle => '开始新的收集？';
+
+  @override
+  String get pasteQueueRestartMessage => '“重新开始”会移除已粘贴项，“追加”会保留它们。';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time 的队列';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => '已粘贴';
+
+  @override
+  String get pasteQueueStatusSkipped => '已跳过';
+
+  @override
+  String get pasteQueueStatusUnavailable => '已不可用';
+
+  @override
+  String get pasteQueueEdited => '已编辑';
+
+  @override
+  String get pasteQueueSecret => '机密';
+
+  @override
+  String get pasteQueueKindImage => '图片';
+
+  @override
+  String get pasteQueueKindFiles => '文件';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '生成于 $time';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return '第 $position 项：$content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '已移到第 $position 位';
+  }
+
+  @override
+  String get pasteQueueMoveUp => '上移';
+
+  @override
+  String get pasteQueueMoveDown => '下移';
+
+  @override
+  String get pasteQueueMoveToTop => '移到顶部';
+
+  @override
+  String get pasteQueueMoveToBottom => '移到底部';
+
+  @override
+  String get pasteQueueReorder => '拖动以重新排序';
+
+  @override
+  String get pasteQueueMoreActions => '更多操作';
+
+  @override
+  String get pasteQueuePasteNow => '立即粘贴';
+
+  @override
+  String get pasteQueueEdit => '编辑文本';
+
+  @override
+  String get pasteQueueUseOriginal => '使用原始文本';
+
+  @override
+  String get pasteQueueRemove => '从队列中移除';
+
+  @override
+  String get pasteQueueEditTitle => '编辑队列中的文本';
+
+  @override
+  String get pasteQueueEditMessage => '更改仅应用于此队列。';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => '设置快捷键';
+
+  @override
+  String get pasteQueueShortcutPromptMessage => '无需打开 CopyPaste 即可收集和粘贴。';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => '开始或停止收集';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => '以纯文本粘贴下一项';
+
+  @override
+  String get pasteQueueShortcutDescription => '在任何应用中都可用的全局快捷键。';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      '另一个 CopyPaste 快捷键已使用此组合。已保留之前的快捷键。';
+
+  @override
+  String get pasteQueueShortcutInUse => '其他应用正在使用此组合键。';
+
+  @override
+  String get pasteQueueShortcutRejected => '系统拒绝了此组合。已保留之前的快捷键。';
+
+  @override
+  String get pasteQueueShortcutAltGr => 'Ctrl+Alt 在许多键盘布局中用于输入字符。请另选组合。';
+
+  @override
+  String get pasteQueueShortcutUnavailable => '此会话中无法使用全局快捷键。';
+
+  @override
+  String get pasteQueueShortcutFailed => '无法设置此快捷键。';
+
+  @override
+  String get pasteQueueEnableTitle => '启用 Paste Queue';
+
+  @override
+  String get pasteQueueEnableDescription => '关闭后，快捷键和收集都会停止。';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '“粘贴下一项”的操作';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription => '自动粘贴，或仅复制到剪贴板。';
+
+  @override
+  String get pasteQueuePasteIntoApp => '粘贴到前台应用';
+
+  @override
+  String get pasteQueueClipboardOnly => '仅放入剪贴板';
+
+  @override
+  String get pasteQueueInsertTitle => '新项目添加到';
+
+  @override
+  String get pasteQueueInsertDescription => '收集和添加的项目加入队列的位置。';
+
+  @override
+  String get pasteQueueInsertEnd => '末尾（先进先出）';
+
+  @override
+  String get pasteQueueInsertStart => '开头（后进先出）';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => '最后一项之后';
+
+  @override
+  String get pasteQueueEndBehaviorDescription => '所有项目粘贴完成后“粘贴下一项”的操作。';
+
+  @override
+  String get pasteQueueEndStop => '停止';
+
+  @override
+  String get pasteQueueEndLoop => '从头开始';
+
+  @override
+  String get pasteQueueEndKeepLast => '继续粘贴最后一项';
+
+  @override
+  String get pasteQueueSeparatorTitle => '“全部粘贴”分隔符';
+
+  @override
+  String get pasteQueueSeparatorDescription => '一次粘贴全部时放在各项之间。';
+
+  @override
+  String get pasteQueueSeparatorNewLine => '换行';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => '空行';
+
+  @override
+  String get pasteQueueSeparatorTab => '制表符';
+
+  @override
+  String get pasteQueueSeparatorSpace => '空格';
+
+  @override
+  String get pasteQueueSeparatorComma => '逗号';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => '逗号和空格';
+
+  @override
+  String get pasteQueueSeparatorNone => '无';
+
+  @override
+  String get pasteQueueSeparatorCustom => '自定义';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder => '最多 32 个字符；可使用 \\n 和 \\t';
+
+  @override
+  String get pasteQueuePlainTextTitle => '始终以纯文本粘贴';
+
+  @override
+  String get pasteQueuePlainTextDescription => '去除队列项目的格式。';
+
+  @override
+  String get pasteQueueIdleStopTitle => '停止收集的时间';
+
+  @override
+  String get pasteQueueIdleStopDescription => '在此时间内没有复制时停止收集。';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes 分钟';
+  }
+
+  @override
+  String get pasteQueueIdleNever => '从不';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => '队列大小上限';
+
+  @override
+  String get pasteQueueMaxEntriesDescription => '队列已满时不再添加新的复制内容。';
+
+  @override
+  String get pasteQueueRestoreTitle => '完成后恢复之前的剪贴板';
+
+  @override
+  String get pasteQueueRestoreDescription => '恢复粘贴前复制的内容。';
+
+  @override
+  String get pasteQueueSettingsKeywords => 'paste queue 队列 收集 顺序 快捷键 分隔符';
+
+  @override
   String get settingsSectionAbout => '关于';
 
   @override
@@ -791,7 +1217,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStartupUnavailable => '此安装不支持自动启动。';
 
   @override
-  String get settingsStartupAndroidDescription => '重新启动设备后恢复已启用的后台服务。';
+  String get settingsStartupAndroidDescription => '重启后恢复后台服务。';
 
   @override
   String get settingsStartupDesktopDescription => '登录时自动打开 CopyPaste。';
@@ -844,7 +1270,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      '选择“完整”或“受限”模式，并管理一次性的 Shizuku 或 ADB 设置。';
+      '完整或受限模式，以及 Shizuku 或 ADB 一次性设置。';
 
   @override
   String get settingsOpenSetup => '打开设置向导';
@@ -867,7 +1293,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsScreenshotAccessTitle => '截屏访问权限';
 
   @override
-  String get settingsScreenshotAccessDescription => '允许访问所有照片和通知，以便在后台保存新截屏。';
+  String get settingsScreenshotAccessDescription => '用于在后台保存屏幕截图。';
 
   @override
   String get settingsAllowAccess => '允许访问';
@@ -925,8 +1351,7 @@ class AppLocalizationsZh extends AppLocalizations {
       '导入 下载 传输 大小 限制 import download transfer size limit';
 
   @override
-  String get settingsMaxFileSizeDescription =>
-      '添加和下载文件的大小限制。仅当你选择“下载”时才会传输文件内容。';
+  String get settingsMaxFileSizeDescription => '可添加或下载的最大文件。';
 
   @override
   String get settingsHistoryFilesTitle => '历史记录文件';
@@ -969,8 +1394,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRestoreDialogTitle => '替换本地历史记录？';
 
   @override
-  String get settingsRestoreDialogMessage =>
-      '所选加密备份将替换此设备上的剪贴板历史记录。当前设置和设备身份将保留。';
+  String get settingsRestoreDialogMessage => '备份将替换此设备上的历史记录。设置会保留。';
 
   @override
   String get settingsRestoreFailed => '无法恢复备份。';
@@ -979,7 +1403,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSyncSwitchTitle => '同步';
 
   @override
-  String get settingsSyncSwitchDescription => '已配对设备同步的总开关。';
+  String get settingsSyncSwitchDescription => '与已配对设备同步历史记录。';
 
   @override
   String get settingsSyncSearchDescription => '已配对设备同步。';
@@ -995,7 +1419,7 @@ class AppLocalizationsZh extends AppLocalizations {
       '自动 复制 粘贴 同步 接收 automatic copy paste sync received';
 
   @override
-  String get settingsInstantClipboardDescription => '自动将其他设备上较新的剪贴项复制到此设备的剪贴板。';
+  String get settingsInstantClipboardDescription => '将其他设备的新剪贴项复制到此剪贴板。';
 
   @override
   String get settingsLanVisibilityTitle => '局域网可见性';
@@ -1018,16 +1442,10 @@ class AppLocalizationsZh extends AppLocalizations {
       '隐私 应用 标识符 privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      '这些应用处于活动状态时跳过自动捕获。后台复制可能会绕过排除规则。';
+  String get settingsExcludedAppsDesktopDescription => '不自动捕获来自这些应用的内容。';
 
   @override
-  String get settingsExcludedAppsDesktopDescription =>
-      '根据可识别的剪贴板所有者跳过自动捕获。设置了排除规则但无法识别来源时，将暂停捕获。';
-
-  @override
-  String get settingsExcludedAppsAndroidDescription =>
-      '由于 Android 无法识别来源应用，设置排除规则后将跳过自动捕获。';
+  String get settingsExcludedAppsAndroidDescription => '存在排除的应用时，自动捕获会暂停。';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1045,22 +1463,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => '排除应用';
+  String get applicationPickerSearch => '搜索应用';
 
   @override
-  String get settingsExcludeDialogAction => '排除';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => '应用标识符';
-
-  @override
-  String get settingsExcludeFailed => '无法排除该应用。';
+  String get applicationPickerEmpty => '未找到应用';
 
   @override
   String get settingsSkipSecretTitle => '跳过机密剪贴板内容';
 
   @override
-  String get settingsSkipSecretDescription => '不将来源应用标记为机密的内容存入历史记录。';
+  String get settingsSkipSecretDescription => '不保存应用标记为机密的复制内容。';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1070,7 +1482,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkipTransientTitle => '跳过临时剪贴板内容';
 
   @override
-  String get settingsSkipTransientDescription => '不将来源应用标记为临时的副本存入历史记录。';
+  String get settingsSkipTransientDescription => '不保存应用标记为临时的复制内容。';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1255,8 +1667,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsQuickPasteShortcutKeywords => '键盘 快捷键 热键 keyboard hotkey';
 
   @override
-  String get settingsQuickPasteShortcutDescription =>
-      'CopyPaste 在后台运行时，即可使用该快捷键。';
+  String get settingsQuickPasteShortcutDescription => 'CopyPaste 在后台运行时可用。';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -1288,6 +1699,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsShortcutRecording => '请按快捷键…';
 
   @override
+  String get settingsShortcutNotSet => '未设置';
+
+  @override
   String get settingsShortcutReset => '重置快捷键';
 
   @override
@@ -1317,13 +1731,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => '附近没有设备';
-
-  @override
-  String get devicesEmptyTitle => '尚未配对其他设备';
-
-  @override
-  String get devicesEmptyMessage =>
-      '配对另一台设备，即可在设备之间同步剪贴板历史记录。两台设备必须处于同一网络，且每次配对都需要在两台设备上确认。';
 
   @override
   String get devicesThisDevice => '此设备';
@@ -1657,9 +2064,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pairingStateFailed => '配对失败';
 
   @override
-  String get pairingStateNotCompleted => '配对未完成';
-
-  @override
   String get pairingHandshakingDescription => '设备正在建立安全通道。';
 
   @override
@@ -1676,48 +2080,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pairingIdleDescription => '开始配对以连接设备。';
-
-  @override
-  String get pairingStepInvite => '邀请';
-
-  @override
-  String get pairingStepScan => '扫描';
-
-  @override
-  String get pairingStepCode => '代码';
-
-  @override
-  String get pairingStepRequest => '请求';
-
-  @override
-  String get pairingStepConnect => '连接';
-
-  @override
-  String get pairingStepConfirm => '确认';
-
-  @override
-  String get pairingStepPaired => '已配对';
-
-  @override
-  String get pairingOtherDevice => '另一台设备';
-
-  @override
-  String get pairingDecisionNotConfirmed => '尚未确认';
-
-  @override
-  String get pairingDecisionSending => '正在发送您的决定…';
-
-  @override
-  String get pairingDecisionConfirmed => '已确认';
-
-  @override
-  String get pairingDecisionRejected => '已拒绝';
-
-  @override
-  String get pairingDecisionWaiting => '正在等待确认';
-
-  @override
-  String get pairingDecisionUnknown => '答复未知';
 
   @override
   String get pairingProtectedUnavailableTitle => '受保护的配对不可用';
@@ -1881,16 +2243,6 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return '同步：$status';
-  }
-
-  @override
-  String syncHeaderDeviceCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count 台设备',
-    );
-    return '$_temp0';
   }
 
   @override
@@ -2258,16 +2610,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String historyClipLineCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count 行',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get historyInspectorEmptyTitle => '选择一个剪贴项';
 
   @override
@@ -2501,9 +2843,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appWindowSetupTitle => '窗口设置需要处理';
 
   @override
-  String get appNavigationLabel => '主导航';
-
-  @override
   String get appOpenHistory => '打开历史记录';
 
   @override
@@ -2583,16 +2922,6 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedStepPosition(int step, int count, String name) {
-    return '$step / $count · $name';
-  }
-
-  @override
-  String sharedStepSemantics(int step, int count, String name) {
-    return '第 $step 步，共 $count 步：$name';
   }
 
   @override
@@ -3003,22 +3332,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modulesDownloadingModel => '正在下载语言模型…';
 
   @override
-  String get modulesPhaseDownload => '下载';
-
-  @override
-  String get modulesPhaseInstall => '安装';
-
-  @override
-  String modulesInstallingModule(String module) {
-    return '正在安装 $module';
-  }
-
-  @override
-  String modulesUpdatingModule(String module) {
-    return '正在更新 $module';
-  }
-
-  @override
   String get modulesRun => '运行';
 
   @override
@@ -3263,6 +3576,153 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyTagsAction => '标签…';
 
   @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '解锁机密项目',
+      'other': '解锁机密项目',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '使用隐藏的片段',
+      'other': '使用隐藏的片段',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '复制机密项目',
+      'other': '复制机密项目',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => '此系统不支持';
+
+  @override
+  String get deviceAuthNotConfigured => '请先设置设备密码、PIN 或生物识别';
+
+  @override
+  String get commonOn => '已开启';
+
+  @override
+  String get commonOff => '已关闭';
+
+  @override
+  String get settingsQuickPasteStartFailed => '无法启动 Quick Paste，因此其快捷键不起作用。';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut 已被其他应用占用。请选择其他快捷键。';
+  }
+
+  @override
+  String get devicesEmptyTitle => '尚未配对其他设备';
+
+  @override
+  String get devicesEmptyMessage => '与同一网络中的设备配对以同步历史记录。';
+
+  @override
+  String get pairingStateNotCompleted => '配对未完成';
+
+  @override
+  String get pairingStepInvite => '邀请';
+
+  @override
+  String get pairingStepScan => '扫描';
+
+  @override
+  String get pairingStepCode => '代码';
+
+  @override
+  String get pairingStepRequest => '请求';
+
+  @override
+  String get pairingStepConnect => '连接';
+
+  @override
+  String get pairingStepConfirm => '确认';
+
+  @override
+  String get pairingStepPaired => '已配对';
+
+  @override
+  String get pairingOtherDevice => '另一台设备';
+
+  @override
+  String get pairingDecisionNotConfirmed => '尚未确认';
+
+  @override
+  String get pairingDecisionSending => '正在发送您的决定…';
+
+  @override
+  String get pairingDecisionConfirmed => '已确认';
+
+  @override
+  String get pairingDecisionRejected => '已拒绝';
+
+  @override
+  String get pairingDecisionWaiting => '正在等待确认';
+
+  @override
+  String get pairingDecisionUnknown => '答复未知';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 台设备',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 行',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => '主导航';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return '第 $step 步，共 $count 步：$name';
+  }
+
+  @override
+  String get modulesPhaseDownload => '下载';
+
+  @override
+  String get modulesPhaseInstall => '安装';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '正在安装 $module';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '正在更新 $module';
+  }
+
+  @override
   String get commonDismiss => '关闭';
 
   @override
@@ -3270,7 +3730,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return '新的期限：$limit。更早的未置顶剪贴项将立即从此设备移除，且无法恢复。已置顶的剪贴项会保留。';
+    return '新上限：$limit。较早的未置顶项目将被永久删除。';
   }
 
   @override
@@ -3278,7 +3738,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return '新的配额：$size。如果未置顶的历史记录占用更多空间，最早的剪贴项将立即被移除，且无法恢复。已置顶的剪贴项会保留。';
+    return '新的配额：$size。超出部分将从最早的未置顶项目开始永久删除。';
   }
 
   @override
@@ -3289,11 +3749,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请重新启动 CopyPaste。';
+      '两项都关闭后将没有图标。要打开，请再次启动 CopyPaste。';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return '两项都关闭时，CopyPaste 没有任何可见图标。要再次打开，请按 $shortcut 或重新启动 CopyPaste。';
+    return '两项都关闭后将没有图标。要打开，请按 $shortcut 或再次启动 CopyPaste。';
   }
 
   @override
@@ -3391,7 +3851,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return '新的配额：$size。未置顶的历史记录占用 $used，因此最早的剪贴项将立即被移除，直到符合配额。移除后无法恢复。已置顶的剪贴项会保留。';
+    return '新的配额：$size。当前已用 $used，将从最早的未置顶项目开始永久删除。';
   }
 
   @override
@@ -3403,4 +3863,2355 @@ class AppLocalizationsZh extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => '打开 CopyPaste';
+
+  @override
+  String get trayOpenQuickPaste => '打开 Quick Paste';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return '打开 Quick Paste ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => '新建片段';
+
+  @override
+  String get trayRecent => '最近';
+
+  @override
+  String get trayRecentLoading => '正在加载…';
+
+  @override
+  String get trayRecentFailed => '无法加载剪贴';
+
+  @override
+  String get trayRecentEmpty => '还没有剪贴';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已隐藏 $count 条最近剪贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => '机密';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => '复制其他设备上的最新剪贴';
+
+  @override
+  String get trayCaptureNow => '立即捕获';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '已暂停至 $time';
+  }
+
+  @override
+  String get trayPauseFor => '暂停…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 分钟';
+
+  @override
+  String get trayPauseForOneHour => '1 小时';
+
+  @override
+  String get trayPauseUntilResumed => '直到我恢复';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue：$count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '正在收集：$count 项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return '最近跳过 ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => '打开内容规则';
+
+  @override
+  String get trayRecentSettingsTitle => '菜单栏和托盘';
+
+  @override
+  String get trayRecentSettingsDescription => '菜单栏或托盘菜单在“最近”下显示的内容。';
+
+  @override
+  String get trayRecentCountTitle => '最近剪贴';
+
+  @override
+  String get trayRecentCountDescription => '菜单显示的最新剪贴数量。';
+
+  @override
+  String get trayRecentPreviewTitle => '最近剪贴预览';
+
+  @override
+  String get trayRecentPreviewDescription => '菜单显示的剪贴文本量。';
+
+  @override
+  String get trayRecentPreviewFull => '完整预览';
+
+  @override
+  String get trayRecentPreviewTitles => '仅类型和来源';
+
+  @override
+  String get trayRecentPreviewHidden => '隐藏';
+
+  @override
+  String get trayRecentSettingsKeywords => '托盘 菜单栏 最近 预览 隐私 数量';
+
+  @override
+  String get transformsPaletteTitle => '转换文本';
+
+  @override
+  String get transformsFilterPlaceholder => '筛选转换';
+
+  @override
+  String get transformsNoMatches => '没有匹配的转换';
+
+  @override
+  String get transformsGroupResults => '结果';
+
+  @override
+  String get transformsGroupSuggested => '建议';
+
+  @override
+  String get transformsGroupRecent => '最近';
+
+  @override
+  String get transformsGroupFavorites => '收藏';
+
+  @override
+  String get transformsGroupPipelines => '流水线';
+
+  @override
+  String get transformsCategoryStructure => 'JSON、YAML、CSV 和 XML';
+
+  @override
+  String get transformsCategoryEncode => '编码与解码';
+
+  @override
+  String get transformsCategoryCase => '大小写';
+
+  @override
+  String get transformsCategoryHash => '哈希';
+
+  @override
+  String get transformsCategoryLines => '行与空白';
+
+  @override
+  String get transformsCategoryClean => '清理';
+
+  @override
+  String get transformsCategoryUrl => '链接';
+
+  @override
+  String get transformsCategoryMarkup => '富文本与 Markdown';
+
+  @override
+  String get transformsCategoryDev => '开发者';
+
+  @override
+  String get transformsCategoryOther => '其他';
+
+  @override
+  String get transformsChainEmpty => '尚无步骤';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return '然后：$name';
+  }
+
+  @override
+  String get transformsStepEnabled => '运行此步骤';
+
+  @override
+  String get transformsMoveEarlier => '上移';
+
+  @override
+  String get transformsMoveLater => '下移';
+
+  @override
+  String get transformsRemoveStep => '移除步骤';
+
+  @override
+  String get transformsSavePipeline => '另存为流水线';
+
+  @override
+  String get transformsSavePipelineTitle => '保存流水线';
+
+  @override
+  String get transformsSavePipelineFailed => '无法保存流水线。';
+
+  @override
+  String get transformsPipelineNameLabel => '名称';
+
+  @override
+  String get transformsPipelineDescriptionLabel => '描述（可选）';
+
+  @override
+  String get transformsPipelineStepsLabel => '步骤';
+
+  @override
+  String get transformsPipelineNoSteps => '请至少添加一个步骤。';
+
+  @override
+  String get transformsPipelineNameRequired => '请输入名称。';
+
+  @override
+  String get transformsPipelineNameTooLong => '最多 80 个字符。';
+
+  @override
+  String get transformsPipelineNameTaken => '已有同名流水线。';
+
+  @override
+  String get transformsPipelineSavedTitle => '流水线已保存';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name 已可在所有转换面板中使用。';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return '步骤：$count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => '已删除的流水线';
+
+  @override
+  String get transformsNeedsNewerVersion => '需要更新版本的 CopyPaste';
+
+  @override
+  String get transformsLoadFailed => '无法加载转换。';
+
+  @override
+  String get transformsNotTextTitle => '转换仅适用于文本';
+
+  @override
+  String get transformsNotTextMessage => '此项目是图片、文件或颜色。请选择文本项目或复制一些文本。';
+
+  @override
+  String get transformsNothingTitle => '没有可转换的内容';
+
+  @override
+  String get transformsNothingMessage => '复制一些文本，或选择一个历史项目。';
+
+  @override
+  String get transformsPickTransform => '选择一个转换';
+
+  @override
+  String get transformsPickTransformHint => 'Tab 将其添加为步骤，Enter 应用结果。';
+
+  @override
+  String get transformsPreviewing => '正在更新预览…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return '行：$lines · 词：$words · 字符：$chars';
+  }
+
+  @override
+  String get transformsNoChanges => '无更改';
+
+  @override
+  String transformsTruncated(String size) {
+    return '显示 $size 中的前 64 KiB';
+  }
+
+  @override
+  String get transformsRandom => '随机';
+
+  @override
+  String get transformsNotRun => '未运行';
+
+  @override
+  String get transformsSensitiveHidden => '结果为敏感内容，已隐藏。';
+
+  @override
+  String get transformsReveal => '显示';
+
+  @override
+  String get transformsPaneOutput => '输出';
+
+  @override
+  String get transformsPaneInput => '输入';
+
+  @override
+  String get transformsPaneChanges => '更改';
+
+  @override
+  String get transformsCannotTransform => '无法转换此文本';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return '步骤 $step · $name：$message';
+  }
+
+  @override
+  String get transformsUseHexOutput => '以十六进制显示';
+
+  @override
+  String get transformsActionPaste => '粘贴';
+
+  @override
+  String get transformsActionSave => '另存为新项目';
+
+  @override
+  String get transformsCopiedMessage => '结果已在剪贴板和历史记录中。';
+
+  @override
+  String get transformsSavedTitle => '已保存';
+
+  @override
+  String get transformsSavedMessage => '已保存为新的历史记录项目。';
+
+  @override
+  String get transformsPasteFailedTitle => '无法粘贴';
+
+  @override
+  String get transformsPasteFailedMessage => '结果已在剪贴板中，请手动粘贴。';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message（第 $line 行，第 $column 列）';
+  }
+
+  @override
+  String get transformsErrorBinary => '解码后的数据是二进制而非文本';
+
+  @override
+  String get transformsErrorTooLarge => '内容过大，无法转换';
+
+  @override
+  String get transformsErrorInvalidParam => '此步骤的设置无效';
+
+  @override
+  String get transformsErrorCancelled => '已取消';
+
+  @override
+  String get transformsErrorTooExpensive => '模式开销过大';
+
+  @override
+  String get transformsErrorPattern => '模式无效';
+
+  @override
+  String get transformsErrorTimestampUnit => '请选择该数字的单位是秒还是毫秒';
+
+  @override
+  String get transformsErrorExternalEntity => '不允许外部实体';
+
+  @override
+  String get transformsErrorJwtEncrypted => '无法解码加密令牌';
+
+  @override
+  String get transformsErrorJson => '无效的 JSON';
+
+  @override
+  String get transformsErrorYaml => '无效的 YAML';
+
+  @override
+  String get transformsErrorXml => '无效的 XML';
+
+  @override
+  String get transformsErrorCsv => '无效的 CSV';
+
+  @override
+  String get transformsErrorBase64 => '无效的 Base64';
+
+  @override
+  String get transformsErrorHex => '无效的十六进制';
+
+  @override
+  String get transformsErrorEscape => '无效的转义序列';
+
+  @override
+  String get transformsErrorUrl => '百分号编码格式错误';
+
+  @override
+  String get transformsErrorJwt => '不是有效的 JWT';
+
+  @override
+  String get transformsErrorDate => '无法识别的日期或时间戳';
+
+  @override
+  String get transformsErrorGeneric => '此步骤无法转换其输入';
+
+  @override
+  String get transformsWarningSignedLink => '已签名链接保持不变';
+
+  @override
+  String get transformsWarningExpired => '已过期';
+
+  @override
+  String get transformsWarningNotYetValid => '尚未生效';
+
+  @override
+  String get transformsWarningSignatureNotVerified => '签名未验证';
+
+  @override
+  String get transformsWarningDuplicateKeys => '重复的键';
+
+  @override
+  String get transformsWarningLenientJson => '已接受非标准 JSON';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON 被编码了两次';
+
+  @override
+  String get transformsWarningEscapes => '未知转义序列已按原样保留';
+
+  @override
+  String get transformsWarningLocalZone => '已假定为本地时区';
+
+  @override
+  String get transformsWarningNoMatches => '无匹配项';
+
+  @override
+  String get transformsWarningGeneric => '请检查结果';
+
+  @override
+  String get transformsRestoreTitle => '粘贴后恢复剪贴板';
+
+  @override
+  String get transformsRestoreDescription => '粘贴后恢复之前的剪贴板内容。';
+
+  @override
+  String get transformsDefaultTitle => '默认粘贴转换';
+
+  @override
+  String get transformsDefaultDescription => '应用于从 Quick Paste 粘贴的文本。';
+
+  @override
+  String get transformsNoDefault => '无';
+
+  @override
+  String get transformsAppDefaultsTitle => '按应用设置默认值';
+
+  @override
+  String get transformsAppDefaultsDescription => '为特定应用使用不同的默认设置。';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return '仅限 $platform';
+  }
+
+  @override
+  String get transformsAddApp => '添加应用';
+
+  @override
+  String get transformsRemove => '移除';
+
+  @override
+  String get transformsFavoritesTitle => '收藏';
+
+  @override
+  String get transformsFavoritesDescription => '在每个面板中优先显示。';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return '面板中按 Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => '添加收藏';
+
+  @override
+  String get transformsPipelinesTitle => '流水线';
+
+  @override
+  String get transformsPipelinesDescription => '已保存的转换组合。';
+
+  @override
+  String get transformsNewPipeline => '新建流水线';
+
+  @override
+  String get transformsEditPipeline => '编辑流水线';
+
+  @override
+  String get transformsDuplicatePipeline => '复制';
+
+  @override
+  String get transformsDeletePipeline => '删除';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '删除 $name？';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage => '使用它的收藏和粘贴默认设置将被清除。';
+
+  @override
+  String get transformsDeletePipelineFailed => '无法删除流水线。';
+
+  @override
+  String get transformsAddStep => '添加步骤';
+
+  @override
+  String get transformsHiddenTitle => '隐藏的转换';
+
+  @override
+  String get transformsHiddenDescription => '不在面板和建议中显示。';
+
+  @override
+  String get transformsHideTransform => '隐藏转换';
+
+  @override
+  String get transformsShow => '显示';
+
+  @override
+  String get transformsSuggestionsTitle => '建议';
+
+  @override
+  String get transformsSuggestionsDescription => '推荐适合文本的转换。';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web 令牌';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => '带跟踪参数的链接';
+
+  @override
+  String get transformsDetectorTimestamp => '时间戳';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => '跟踪参数';
+
+  @override
+  String get transformsTrackingDescription => '额外移除或始终保留的链接参数。';
+
+  @override
+  String get transformsTrackingRemoveLabel => '额外移除';
+
+  @override
+  String get transformsTrackingAllowLabel => '始终保留';
+
+  @override
+  String get transformsTrackingPlaceholder => '名称或 名称@域名，然后按 Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => '快速访问状态不可用';
+
+  @override
+  String get quickAccessUnavailableMessage => 'CopyPaste 无法读取键盘、图块和小组件的状态。请重试。';
+
+  @override
+  String get quickAccessActionFailedTitle => '无法完成操作';
+
+  @override
+  String get quickAccessActionFailedMessage => 'Android 未打开所请求的界面或未保存更改。请重试。';
+
+  @override
+  String get quickAccessKeyboardTitle => '剪贴项键盘';
+
+  @override
+  String get quickAccessKeyboardDescription => '在键盘设置中开启“CopyPaste 剪贴项”。';
+
+  @override
+  String get quickAccessKeyboardOn => '已开启';
+
+  @override
+  String get quickAccessKeyboardOff => '已关闭';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => '打开键盘设置';
+
+  @override
+  String get quickAccessKeyboardSearchDescription => '开启“CopyPaste 剪贴项”键盘面板。';
+
+  @override
+  String get quickAccessKeyboardKeywords => '键盘 输入法 ime 面板 开启';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => '切换到剪贴项键盘';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription => '将“CopyPaste 剪贴项”设为当前键盘。';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => '选择键盘';
+
+  @override
+  String get quickAccessKeyboardCurrent => '当前键盘';
+
+  @override
+  String get quickAccessCaptureTierTitle => '捕获模式';
+
+  @override
+  String get quickAccessCaptureTierDescription => '其他应用中的复制内容如何保存。';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription => '查看如何保存来自其他应用的复制内容。';
+
+  @override
+  String get quickAccessCaptureTierKeywords => '捕获 级别 完整 面板 手动 shizuku 收集';
+
+  @override
+  String get quickAccessTierFull => '完整：在后台保存每次复制';
+
+  @override
+  String get quickAccessTierPanelCollecting => '已选中面板：正在收集';
+
+  @override
+  String get quickAccessTierPanelCatchUp => '面板模式：打开时补存';
+
+  @override
+  String get quickAccessTierManual => '手动：通过应用、图块、小组件或分享保存';
+
+  @override
+  String get quickAccessTierPaused => '捕获已暂停';
+
+  @override
+  String get quickAccessAutoReturnTitle => '插入后返回上一个键盘';
+
+  @override
+  String get quickAccessAutoReturnDescription => '插入一个剪贴项后切换回来。';
+
+  @override
+  String get quickAccessAutoReturnKeywords => '返回 上一个键盘 自动 插入';
+
+  @override
+  String get quickAccessFocusSearchTitle => '打开面板时聚焦搜索';
+
+  @override
+  String get quickAccessFocusSearchDescription => '打开面板时聚焦搜索。';
+
+  @override
+  String get quickAccessTilesTitle => '快捷设置图块';
+
+  @override
+  String get quickAccessTilesSearchDescription => '添加“保存剪贴板”和“剪贴板捕获”图块。';
+
+  @override
+  String get quickAccessTilesKeywords => '快捷设置 图块 通知栏 保存 暂停';
+
+  @override
+  String get quickAccessTileInstructions => '向下滑动两次，点按“编辑”，然后添加 CopyPaste 图块。';
+
+  @override
+  String get quickAccessSaveTileTitle => '“保存剪贴板”图块';
+
+  @override
+  String get quickAccessSaveTileDescription => '从快捷设置保存剪贴板中的内容。';
+
+  @override
+  String get quickAccessCaptureTileTitle => '“剪贴板捕获”图块';
+
+  @override
+  String get quickAccessCaptureTileDescription => '从快捷设置暂停和恢复捕获。';
+
+  @override
+  String get quickAccessAddTile => '添加图块';
+
+  @override
+  String get quickAccessTileAdded => '已添加到快捷设置';
+
+  @override
+  String get quickAccessWidgetTitle => '“最近的剪贴项”小组件';
+
+  @override
+  String get quickAccessWidgetDescription => '主屏幕上的最近剪贴项，轻点即可复制。';
+
+  @override
+  String get quickAccessWidgetInstructions => '长按主屏幕，点按“小组件”，然后添加“最近的剪贴项”。';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已添加 $count 个小组件',
+      zero: '未添加',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => '添加小组件';
+
+  @override
+  String get quickAccessWidgetKeywords => '主屏幕 小组件 启动器 最近';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return '缩写 $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => '缩写';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => '可选，例如 sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return '已被“$title”使用';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return '最多使用 $max 个字符。';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace => '缩写不能包含空格或控制字符。';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '同步后有 $count 个片段需要检查',
+      zero: '没有需要检查的片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => '文本';
+
+  @override
+  String get snippetsBodyPlaceholder => '输入片段文本';
+
+  @override
+  String get snippetsClearSelection => '清除选择';
+
+  @override
+  String get snippetsClipTooLarge => '内容过大，无法编辑。此剪贴项以只读方式打开。';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': '中性',
+      'blue': '蓝色',
+      'green': '绿色',
+      'amber': '琥珀色',
+      'red': '红色',
+      'other': '中性',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => '强调色';
+
+  @override
+  String get snippetsCollectionIcon => '图标';
+
+  @override
+  String get snippetsCollectionLabel => '收藏夹';
+
+  @override
+  String get snippetsCollectionName => '名称';
+
+  @override
+  String get snippetsCollectionNameTaken => '已存在同名收藏夹。';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return '最多使用 $max 个字符。';
+  }
+
+  @override
+  String get snippetsConcealedBody => '此片段已隐藏。';
+
+  @override
+  String get snippetsConcealedConfirmAction => '继续';
+
+  @override
+  String get snippetsConcealedConfirmMessage => '此设备无法验证你的身份。仅在你自己的设备上继续。';
+
+  @override
+  String get snippetsConcealedConfirmTitle => '确认是你本人';
+
+  @override
+  String get snippetsConcealedPreview => '隐藏的片段';
+
+  @override
+  String get snippetsConcealedSwitch => '隐藏';
+
+  @override
+  String get snippetsConcealedTitle => '隐藏的片段';
+
+  @override
+  String get snippetsConflictBadge => '冲突副本';
+
+  @override
+  String get snippetsCopied => '已复制';
+
+  @override
+  String get snippetsCreate => '创建片段';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '创建片段“$query”';
+  }
+
+  @override
+  String get snippetsDeleteCollection => '删除收藏夹';
+
+  @override
+  String get snippetsDeleteCollectionMove => '将其中的片段移到“未分类”';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '删除“$name”？';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => '同时删除其中的片段';
+
+  @override
+  String get snippetsDeletedMessage => '已移到“最近删除”。';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已删除 $count 个片段',
+      one: '已删除片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => '保存到';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': '历史记录中的剪贴项',
+      'snippet': '片段',
+      'other': '历史记录中的剪贴项',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => '放弃';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation => '另一个片段使用了相同的缩写。请修改其中一个。';
+
+  @override
+  String get snippetsDuplicateBadge => '缩写重复';
+
+  @override
+  String get snippetsEditClip => '编辑剪贴项';
+
+  @override
+  String get snippetsEditCollection => '编辑收藏夹';
+
+  @override
+  String get snippetsEditSnippet => '编辑片段';
+
+  @override
+  String get snippetsEditTab => '编辑';
+
+  @override
+  String get snippetsEmptyMessage => '为片段设置缩写，然后在 Quick Paste 中输入它。';
+
+  @override
+  String get snippetsEmptyTitle => '还没有片段';
+
+  @override
+  String get snippetsEnableTemplate => '开启';
+
+  @override
+  String get snippetsEnableTemplateMessage => '看起来像占位符的文本也会被填充。';
+
+  @override
+  String get snippetsEnableTemplateTitle => '开启“模板”？';
+
+  @override
+  String get snippetsExport => '导出';
+
+  @override
+  String get snippetsExportCollection => '导出收藏夹';
+
+  @override
+  String get snippetsExportConcealedConfirm => '在可读文件中包含隐藏的片段';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已写入 $count 个片段',
+      zero: '未写入任何片段',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => '已导出片段';
+
+  @override
+  String get snippetsExportEncrypt => '使用密码短语加密';
+
+  @override
+  String get snippetsExportFailed => '导出失败';
+
+  @override
+  String get snippetsExportPlainConfirm => '我了解任何拿到该文件的人都能读取它';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': '所有片段',
+      'collections': '此收藏夹',
+      'snippets': '所选片段 ($count)',
+      'other': '所有片段',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => '导出片段';
+
+  @override
+  String get snippetsFieldBuilderTitle => '插入字段';
+
+  @override
+  String get snippetsFieldDefault => '默认值';
+
+  @override
+  String get snippetsFieldName => '名称';
+
+  @override
+  String get snippetsFieldOptions => '选项，用逗号分隔';
+
+  @override
+  String get snippetsFieldRequired => '请填写此字段。';
+
+  @override
+  String get snippetsFieldType => '类型';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': '单行',
+      'multiline': '多行',
+      'choice': '选择',
+      'other': '单行',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => '保存时将移除格式。';
+
+  @override
+  String get snippetsGoToSnippet => '转到片段';
+
+  @override
+  String get snippetsImport => '导入';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => '缩写已被使用';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': '不带缩写导入',
+      'renameWithSuffix': '在缩写后添加数字',
+      'skip': '跳过',
+      'other': '不带缩写导入',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => '同名收藏夹';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': '添加到现有收藏夹',
+      'createNew': '新建一个',
+      'other': '添加到现有收藏夹',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => '转换已知占位符';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return '新增：$added。相同，已跳过：$identical。已更改：$updated。缩写冲突：$conflicts。无效：$invalid。';
+  }
+
+  @override
+  String get snippetsImportDone => '已导入片段';
+
+  @override
+  String get snippetsImportFailed => '导入失败';
+
+  @override
+  String get snippetsImportFileType => '片段文件';
+
+  @override
+  String get snippetsImportFormat => '格式';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste 包',
+      'json': 'JSON 列表',
+      'csv': 'CSV',
+      'other': 'CopyPaste 包',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return '第 $row 行：$reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => '不会导入的行';
+
+  @override
+  String get snippetsImportPassphraseHint => '密码短语（如果文件已加密）';
+
+  @override
+  String get snippetsImportPreview => '预览';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return '已添加：$inserted。已更新：$updated。已跳过：$skipped。待检查的缩写：$flagged。无法识别的占位符：$unrecognized。';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => '同一片段，内容不同';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': '保留两者',
+      'replace': '替换现有片段',
+      'skip': '跳过',
+      'other': '保留两者',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => '导入片段';
+
+  @override
+  String get snippetsInsert => '插入';
+
+  @override
+  String get snippetsInsertPlaceholder => '插入占位符';
+
+  @override
+  String get snippetsKeepReferences => '保持不变';
+
+  @override
+  String get snippetsLibraryDescription => '浏览、整理和编辑片段与收藏夹。';
+
+  @override
+  String get snippetsLibraryKeywords => '片段 模板 缩写 收藏夹 文本 snippets';
+
+  @override
+  String get snippetsLibraryTitle => '片段库';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': '此占位符没有闭合。',
+      'malformed': '无法读取此占位符。',
+      'unknownPlaceholder': '未知占位符“$detail”。将按原样粘贴。',
+      'unknownParameter': '未知选项“$detail”。',
+      'duplicateParameter': '选项“$detail”设置了两次。',
+      'missingParameter': '缺少选项“$detail”。',
+      'invalidValue': '选项“$detail”的值无效。',
+      'conflictingParameters': '这些选项不能同时使用。',
+      'unknownLocale': '未知语言。',
+      'unknownTimeZone': '未知时区。',
+      'invalidPattern': '日期格式无效。',
+      'dateOutOfRange': '日期超出范围。',
+      'unknownModifier': '未知修饰符“$detail”。',
+      'modifierFailed': '无法应用修饰符“$detail”。',
+      'emptyClipboard': '剪贴板项目 $detail 为空。',
+      'extraCursor': '仅使用第一个光标占位符。',
+      'nestedCursor': '插入片段中的光标将被忽略。',
+      'tooManyFields': '字段“$detail”超出 10 个字段的限制。',
+      'conflictingField': '字段“$detail”以不同设置定义了两次。',
+      'choiceDefaultNotOption': '“$detail”的默认值不在其选项中。',
+      'cycle': '片段相互循环插入：$detail。',
+      'depthExceeded': '片段插入层级超过 3 层。',
+      'nestingLimit': '插入的片段过多。',
+      'unknownSnippet': '没有片段使用此缩写。',
+      'containsPlaceholders': '文本包含占位符。开启“模板”即可填充。',
+      'other': '此占位符有问题。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => '无法加载片段';
+
+  @override
+  String get snippetsLoadMore => '加载更多';
+
+  @override
+  String get snippetsMerge => '合并';
+
+  @override
+  String get snippetsMergeCollection => '合并到另一个收藏夹';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '将“$name”合并到';
+  }
+
+  @override
+  String get snippetsMoveTo => '移到';
+
+  @override
+  String get snippetsNewCollection => '新建收藏夹';
+
+  @override
+  String get snippetsNewSnippet => '新建片段';
+
+  @override
+  String get snippetsNewText => '新建文本';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '没有与“$query”匹配的片段';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => '再次输入密码短语';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return '密码短语，至少 $min 个字符';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => '密码短语';
+
+  @override
+  String get snippetsPassphraseNoRecovery => '忘记的密码短语无法恢复。';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': '太短',
+      'weak': '弱',
+      'fair': '一般',
+      'good': '良好',
+      'other': '强',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => '置顶';
+
+  @override
+  String get snippetsPlaceholderGroup => '占位符';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': '日期',
+      'dateShort': '日期（短格式）',
+      'dateLong': '日期（长格式）',
+      'dateIso': '日期（ISO 8601）',
+      'dateNextWeek': '一周后的日期',
+      'now': '时间',
+      'dateTime': '日期和时间',
+      'clipboard': '剪贴板',
+      'clipboardPrevious': '上一个剪贴板项目',
+      'field': '填写字段…',
+      'cursor': '光标位置',
+      'uuid': 'UUID',
+      'random': '随机数',
+      'upper': '修饰符：大写',
+      'lower': '修饰符：小写',
+      'trim': '修饰符：去除空格',
+      'other': '占位符',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => '插入另一个片段';
+
+  @override
+  String get snippetsPlaceholderNoMatch => '没有匹配的占位符';
+
+  @override
+  String get snippetsPreviewEmpty => '没有可预览的内容';
+
+  @override
+  String get snippetsPreviewTab => '预览';
+
+  @override
+  String get snippetsPurge => '永久删除';
+
+  @override
+  String get snippetsPurgeMessage => '它们将从你的所有设备上清除。此操作无法撤销。';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '永久删除 $count 个片段？',
+      one: '永久删除片段？',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '“最近删除”为空';
+
+  @override
+  String get snippetsRecordPastedDescription => '将粘贴的片段添加到历史记录。';
+
+  @override
+  String get snippetsRecordPastedKeywords => '历史记录 记录 粘贴 片段';
+
+  @override
+  String get snippetsRecordPastedTitle => '在历史记录中记录粘贴的片段';
+
+  @override
+  String get snippetsReplaceOriginal => '替换原剪贴项';
+
+  @override
+  String get snippetsReplaceOriginalHint => '保存后删除原始剪贴项。';
+
+  @override
+  String get snippetsRequireAuthDescription => '先要求输入密码或使用生物识别。';
+
+  @override
+  String get snippetsRequireAuthKeywords => '隐藏 密码 生物识别 指纹 面容 锁定 验证';
+
+  @override
+  String get snippetsRequireAuthTitle => '使用隐藏的片段前验证身份';
+
+  @override
+  String get snippetsRestore => '恢复';
+
+  @override
+  String get snippetsSaveBlockTooLarge => '文本超过 64 KB。';
+
+  @override
+  String get snippetsSaveFailed => '无法保存';
+
+  @override
+  String get snippetsScopeAll => '全部';
+
+  @override
+  String get snippetsScopeEmpty => '这里没有片段';
+
+  @override
+  String get snippetsScopePinned => '置顶';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => '最近删除';
+
+  @override
+  String get snippetsSearchPlaceholder => '搜索片段';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已选择 $count 个',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => '显示';
+
+  @override
+  String get snippetsShowAll => '全部显示';
+
+  @override
+  String get snippetsShowAttention => '检查';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '你有 $count 个片段。最多允许 20,000 个。';
+  }
+
+  @override
+  String get snippetsTemplateBadge => '模板';
+
+  @override
+  String get snippetsTemplateSwitch => '模板';
+
+  @override
+  String get snippetsTitleLabel => '标题';
+
+  @override
+  String get snippetsTitlePlaceholder => '可选';
+
+  @override
+  String get snippetsTransferDescription => '备份片段，或在应用之间迁移。';
+
+  @override
+  String get snippetsTransferKeywords => '导入 导出 备份 包 json csv 密码短语';
+
+  @override
+  String get snippetsTransferTitle => '导入和导出';
+
+  @override
+  String get snippetsUndo => '撤销';
+
+  @override
+  String get snippetsUnfiled => '未分类';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个占位符将按原样粘贴',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => '取消置顶';
+
+  @override
+  String get snippetsUnsavedMessage => '关闭前保存更改吗？';
+
+  @override
+  String get snippetsUnsavedTitle => '未保存的更改';
+
+  @override
+  String get snippetsUntitled => '无标题片段';
+
+  @override
+  String get snippetsUpdateReferences => '更新';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return '其他模板可能会插入“$from”。要更新它们以使用“$to”吗？';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '更新引用？';
+
+  @override
+  String get snippetsUseFailed => '无法使用片段';
+
+  @override
+  String get quickPasteTabQueue => '队列';
+
+  @override
+  String get quickPasteMaskedMode => '密码字段：预览已隐藏';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return '已隐藏：$kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => '解锁机密项目';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return '粘贴时使用：$name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut 粘贴原始内容';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => '已跳过默认转换';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => '已改用原始内容。';
+
+  @override
+  String get quickPastePasteManually => '内容已在剪贴板中，请手动粘贴。';
+
+  @override
+  String get quickPastePaste => '粘贴';
+
+  @override
+  String get quickPasteSnippetsUnavailable => '片段不可用';
+
+  @override
+  String get rulesLoadFailed => '无法加载内容规则。';
+
+  @override
+  String get rulesNewRule => '新建规则';
+
+  @override
+  String get rulesEditRule => '编辑规则';
+
+  @override
+  String get rulesUntitled => '未命名规则';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => '隐私默认设置';
+
+  @override
+  String get rulesPrivacyDefaultsDescription => '隐私设置先于所有规则生效。';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords => '隐私 隐藏 临时 排除的应用 内置 凭据 密码 银行卡';
+
+  @override
+  String get rulesOpenPrivacy => '打开隐私';
+
+  @override
+  String get rulesMyRulesTitle => '我的规则';
+
+  @override
+  String get rulesMyRulesDescription => '按顺序作用于新的复制内容。';
+
+  @override
+  String get rulesMyRulesKeywords => '规则 自动化 标签 跳过 机密 过期 删除 模式 正则';
+
+  @override
+  String get rulesEmptyTitle => '还没有规则';
+
+  @override
+  String get rulesEmptyMessage => '规则可为新复制内容加标签、保护、设置过期或跳过。';
+
+  @override
+  String get rulesDeletedTitle => '最近删除';
+
+  @override
+  String get rulesDeletedDescription => '可在 30 天内恢复。';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return '删除于 $time';
+  }
+
+  @override
+  String get rulesRestore => '恢复';
+
+  @override
+  String get rulesDeletedToast => '规则已删除';
+
+  @override
+  String get rulesDeletedToastMessage => '你可以在 30 天内恢复它。';
+
+  @override
+  String get rulesUndo => '撤销';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return '来自 $device 的“$rule”的同时编辑已被更新的编辑替换。';
+  }
+
+  @override
+  String get rulesAnotherDevice => '另一台设备';
+
+  @override
+  String get rulesRestoreConflict => '使用该版本';
+
+  @override
+  String get rulesSkipLogTitle => '最近跳过';
+
+  @override
+  String get rulesSkipLogDescription => '你的规则在此设备上未保存的复制内容。';
+
+  @override
+  String get rulesSkipLogKeywords => '跳过 忽略 未保存 日志';
+
+  @override
+  String get rulesSkipLogShow => '显示';
+
+  @override
+  String get rulesSkipLogEmpty => '没有跳过任何复制内容。';
+
+  @override
+  String get rulesUnknownApp => '未知应用';
+
+  @override
+  String get rulesMatchesEverything => '任何复制内容';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary，然后停止';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {'any': ' 或 ', 'other': ' 且 '});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action：$value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return '运行于 $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return '来自 $device 的新规则';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => '需要更新';
+
+  @override
+  String get rulesUpdateRequired => '更新 CopyPaste 以运行此规则。';
+
+  @override
+  String get rulesErrorBadge => '错误';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem 修复前，匹配的内容会受到保护。';
+  }
+
+  @override
+  String get rulesReorder => '拖动以重新排序';
+
+  @override
+  String get rulesMoreActions => '更多操作';
+
+  @override
+  String get rulesEdit => '编辑';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': '上移',
+      'down': '下移',
+      'top': '移到顶部',
+      'other': '移到底部',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => '应用到现有项目…';
+
+  @override
+  String get rulesResetBuiltin => '恢复默认';
+
+  @override
+  String get rulesNameLabel => '名称';
+
+  @override
+  String get rulesNamePlaceholder => '例如：工作链接';
+
+  @override
+  String get rulesWhenTitle => '条件';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': '满足任一条件',
+      'other': '满足所有条件',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions => '无条件：此规则适用于所有复制内容。';
+
+  @override
+  String get rulesAddCondition => '添加条件';
+
+  @override
+  String get rulesRemoveCondition => '移除条件';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': '文本',
+      'content_type': '内容类型',
+      'detected_kind': '检测到的类型',
+      'source_app': '来源应用',
+      'size': '大小',
+      'privacy_marker': '隐私标记',
+      'capture_origin': '来源',
+      'other': '未知条件',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '包含',
+      'equals': '等于',
+      'starts_with': '开头是',
+      'ends_with': '结尾是',
+      'matches_regex': '匹配模式',
+      'other': '匹配',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '不包含',
+      'equals': '不等于',
+      'starts_with': '开头不是',
+      'ends_with': '结尾不是',
+      'matches_regex': '不匹配模式',
+      'other': '不匹配',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {'true': '不是', 'other': '是'});
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '小于',
+      'other': '大于',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '不小于',
+      'other': '不大于',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '行',
+      'bytes': '字节',
+      'other': '字符',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '行',
+      'bytes': '字节',
+      'other': '个字符',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': '纯文本',
+      'rich_text': '富文本',
+      'image': '图片',
+      'files': '文件',
+      'color': '颜色',
+      'link': '链接',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': '密码或机密',
+      'url': '网址',
+      'email': '电子邮件地址',
+      'phone': '电话号码',
+      'code': '代码',
+      'color': '颜色值',
+      'json': 'JSON',
+      'file_path': '文件路径',
+      'number': '数字',
+      'one_time_code': '一次性验证码',
+      'payment_card': '银行卡号',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': '隐藏',
+      'transient': '临时',
+      'auto_generated': '自动生成',
+      'excluded_from_history': '不计入历史记录',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': '在此设备上复制',
+      'received': '从其他设备接收',
+      'created_in_app': '在 CopyPaste 中创建',
+      'other': '其他',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => '要查找的文本';
+
+  @override
+  String get rulesPatternPlaceholder => '模式，例如 ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint => '不支持环视和反向引用。';
+
+  @override
+  String get rulesCaseSensitive => '区分大小写';
+
+  @override
+  String get rulesChooseValues => '选择';
+
+  @override
+  String get rulesUnknownConditionNotice => '此条件来自较新版本的 CopyPaste。';
+
+  @override
+  String get rulesSourceAppNotice => '在 Android 上，仅匹配通过剪贴项键盘复制的内容。';
+
+  @override
+  String get rulesPrivacyMarkerNotice => '并非所有系统都会报告所有标记。';
+
+  @override
+  String get rulesThenTitle => '操作';
+
+  @override
+  String get rulesNoActions => '请至少添加一个操作。';
+
+  @override
+  String get rulesAddAction => '添加操作';
+
+  @override
+  String get rulesRemoveAction => '移除操作';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': '不保存',
+      'mark_secret': '标记为机密',
+      'delete_after': '在此时间后删除',
+      'add_tags': '添加标签',
+      'transform': '转换',
+      'other': '未知操作',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“不保存”不能与其他操作组合。',
+      'present': '此规则已包含此操作。',
+      'other': '一条规则最多可有 8 个操作。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice => '此操作来自较新版本的 CopyPaste。';
+
+  @override
+  String get rulesDontSaveWarning => '匹配的复制内容永远不会被存储、索引或同步。';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 分钟',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 小时',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 天',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry => '如果剪贴板仍是此内容，也一并清除。';
+
+  @override
+  String get rulesNoTags => '在历史记录中创建标签后即可在此使用。';
+
+  @override
+  String get rulesNoTransforms => '没有可用的转换。';
+
+  @override
+  String get rulesReplaceClipboard => '同时用结果替换剪贴板';
+
+  @override
+  String get rulesOptionsTitle => '选项';
+
+  @override
+  String get rulesEnabledSwitch => '已启用';
+
+  @override
+  String get rulesStopProcessing => '此规则匹配时停止处理后续规则';
+
+  @override
+  String get rulesRunsOnLabel => '运行于';
+
+  @override
+  String get rulesAllDevices => '所有设备';
+
+  @override
+  String get rulesChosenDevices => '所选设备';
+
+  @override
+  String get rulesTestTitle => '测试';
+
+  @override
+  String get rulesTestDescription => '用示例文本试用规则。';
+
+  @override
+  String get rulesSamplePlaceholder => '粘贴或输入示例文本';
+
+  @override
+  String get rulesTestFullSet => '与所有规则一起测试';
+
+  @override
+  String get rulesRunTest => '运行测试';
+
+  @override
+  String get rulesTestFailed => '无法运行测试。';
+
+  @override
+  String get rulesPreviewHistory => '在历史记录上预览';
+
+  @override
+  String get rulesSaveFailed => '无法保存规则。';
+
+  @override
+  String get rulesReadOnlyNotice => '由较新版本的 CopyPaste 创建。请更新后再编辑或运行。';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': '无法读取此规则。',
+      'unsupported_schema': '此规则需要较新版本的 CopyPaste。',
+      'unknown_condition_type': '此条件需要较新版本的 CopyPaste。',
+      'unknown_action_type': '此操作需要较新版本的 CopyPaste。',
+      'too_many_conditions': '一条规则最多可有 20 个条件。',
+      'too_many_actions': '一条规则最多可有 8 个操作。',
+      'too_many_rules': '只会运行前 200 条规则。',
+      'no_actions': '请至少添加一个操作。',
+      'conflicting_actions': '“不保存”不能与其他操作组合。',
+      'duplicate_action': '每个操作只能使用一次。',
+      'empty_value': '请输入一个值。',
+      'empty_list': '请至少选择一个值。',
+      'too_many_values': '最多选择 64 个值。',
+      'invalid_value': '此值无效。',
+      'pattern_too_long': '模式最多 2,000 个字符。',
+      'unsupported_look_around': '不支持前瞻和后顾。请改用“满足所有条件”搭配两个条件。',
+      'unsupported_backreference': '不支持反向引用。',
+      'pattern_too_large': '此模式过于复杂。请简化其重复部分。',
+      'invalid_pattern': '此模式无效。',
+      'invalid_duration': '请选择 1 分钟到 90 天之间的时长。',
+      'invalid_tags': '请至少选择一个标签。',
+      'invalid_transform': '请选择一个转换。',
+      'other': '此规则有问题。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label：$result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': '匹配',
+      'not_matched': '不匹配',
+      'unknown': '未知',
+      'skipped': '未运行',
+      'other': '错误',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return '条件 $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => '未评估任何规则。';
+
+  @override
+  String get rulesTraceStopped => '后续规则未运行。';
+
+  @override
+  String get rulesTraceUnknownReason => '此复制内容的该项未知，因此不匹配。';
+
+  @override
+  String get rulesTraceRuleError => '此规则无法运行，因此匹配内容会受到保护。';
+
+  @override
+  String get rulesTraceOutcomeTitle => '结果';
+
+  @override
+  String get rulesTraceNoEffect => '没有规则会更改此复制内容。';
+
+  @override
+  String get rulesTraceSkipped => '不保存';
+
+  @override
+  String get rulesTraceSecret => '保存为机密';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return '$duration后删除';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return '标签：$tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return '转换：$names';
+  }
+
+  @override
+  String get rulesTraceOutput => '转换后的文本';
+
+  @override
+  String get rulesPreviewTitle => '应用到现有项目';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return '正在检查最近的 $count 个剪贴项…';
+  }
+
+  @override
+  String get rulesPreviewNone => '没有最近的剪贴项匹配此规则。';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个剪贴项匹配',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将删除 $count 个',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个标记为机密',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个设置删除时间',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '将有 $count 个添加标签',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return '仅检查了最近的 $count 个剪贴项。';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return '以及另外 $count 个';
+  }
+
+  @override
+  String get rulesPreviewNote => '应用之前不会有任何更改。';
+
+  @override
+  String get rulesSecretItem => '机密项目';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return '来自 $app 的机密项目';
+  }
+
+  @override
+  String get rulesPreviewCancelled => '预览已停止。未做任何更改。';
+
+  @override
+  String get rulesPreviewFailed => '无法运行预览。';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '删除 $count 个剪贴项？',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage => '匹配的剪贴项将从你的所有设备中删除。此操作无法撤销。';
+
+  @override
+  String get rulesApplyDeleteConfirm => '删除并应用';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return '正在应用：$done/$total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已更改 $count 个剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已删除 $count 个剪贴项',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '有 $count 个剪贴项无法更改',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled => '已停止。已完成的更改会保留。';
+
+  @override
+  String get historyActionEdit => '编辑';
+
+  @override
+  String get historyActionSaveAsSnippet => '存为片段';
+
+  @override
+  String get historyActionAddToQueue => '添加到 Paste Queue';
+
+  @override
+  String get historyActionTransform => '转换…';
+
+  @override
+  String get historyActionExplain => '为什么会在这里？';
+
+  @override
+  String get historyActionKeep => '保留';
+
+  @override
+  String get historyNewClip => '新建剪贴项';
+
+  @override
+  String get historySavedTitle => '已保存';
+
+  @override
+  String get historyEditSaved => '编辑后的文本已作为新剪贴项放在历史记录顶部。';
+
+  @override
+  String get historyNewClipSaved => '你的文本已保存。';
+
+  @override
+  String get historySnippetSaved => '剪贴项的文本现在是一个片段。';
+
+  @override
+  String get historySnippetSaveFailed => '无法将此剪贴项存为片段。';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '已将 $count 个剪贴项加入队列。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed => '无法添加到 Paste Queue。请确认它已开启。';
+
+  @override
+  String get historyKeepFailed => '无法保留此剪贴项。';
+
+  @override
+  String get historyExplainFailed => '无法加载说明。';
+
+  @override
+  String get historyDeletesSoon => '不到一分钟后删除';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 分钟后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 小时后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 天后删除',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => '手动';
+
+  @override
+  String get historyProvenanceEdited => '已编辑';
+
+  @override
+  String get historyProvenanceTransformed => '已转换';
+
+  @override
+  String get historyProvenanceModule => '模块';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name（自动）';
+  }
+
+  @override
+  String get historyMetadataExpiry => '删除';
+
+  @override
+  String get historyMetadataRuleTags => '自动标签';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '启用 $module？';
+  }
+
+  @override
+  String get modulesEnableAccess => '它将能够：';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': '读取剪贴板历史',
+      'clipboard_write': '复制到剪贴板',
+      'library_write': '保存片段并置顶条目',
+      'snippets': '读取你的片段',
+      'synced_records': '在你的设备间同步其数据',
+      'local_state': '在此设备上保存其数据',
+      'prompts': '请你确认操作',
+      'endpoints': '接受本地应用的连接',
+      'other': '使用 CopyPaste 服务',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return '来自 $module';
+  }
+
+  @override
+  String get modulesUnknownModule => '未知模块';
+
+  @override
+  String get modulesPromptAnswerFailed => '你的回答未发送。';
+
+  @override
+  String get modulesPromptNotificationBody => '打开 CopyPaste 以回复。';
+
+  @override
+  String get modulesUnknownDevice => '未知设备';
+
+  @override
+  String get modulesChooseDevices => '选择设备';
+
+  @override
+  String get modulesAddApp => '添加应用';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '移除 $app';
+  }
+
+  @override
+  String get modulesNoApps => '未选择应用';
 }

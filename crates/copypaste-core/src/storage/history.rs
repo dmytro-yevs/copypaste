@@ -11,6 +11,8 @@ use rusqlite::{params_from_iter, types::Value};
 use sha2::{Digest, Sha256};
 
 use super::fuzzy_search;
+use super::integration_view::IntegrationView;
+use super::local_state::{self, unexpired};
 use super::model::{
     item_columns_ci, item_columns_preview_ci, row_to_item, ItemColumns, StoreError, StoredItem,
 };
@@ -64,6 +66,19 @@ impl HistoryCursor {
             .then_some(cursor)
             .ok_or(StoreError::InvalidCursor)
     }
+
+    /// [`Self::parse_for`] for a cursor of an integration history read.
+    pub fn parse_scoped(
+        token: &str,
+        query: &HistoryQuery,
+        view: &IntegrationView,
+    ) -> Result<Self, StoreError> {
+        let bytes = hex::decode(token).map_err(|_| StoreError::InvalidCursor)?;
+        let cursor: Self = serde_json::from_slice(&bytes).map_err(|_| StoreError::InvalidCursor)?;
+        (cursor.fingerprint == scoped_fingerprint(query, Some(view)))
+            .then_some(cursor)
+            .ok_or(StoreError::InvalidCursor)
+    }
 }
 
 /// A result page and its query-bound continuation marker.
@@ -79,6 +94,8 @@ pub struct HistoryPreviewRow {
     pub row: StoredItem,
     /// None indicates that the original payload failed authentication.
     pub preview: Option<crate::history_item::StaticHistoryPreview>,
+    /// Per-clip state outside the payload, already bounded for the wire.
+    pub annotations: Option<copypaste_ipc::ItemAnnotations>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +107,7 @@ pub struct HistoryPreviewPage {
 struct QueryPage {
     items: Vec<StoredItem>,
     previews: Vec<Option<crate::history_item::StaticHistoryPreview>>,
+    annotations: Vec<Option<copypaste_ipc::ItemAnnotations>>,
     next: Option<HistoryCursor>,
 }
 
@@ -108,6 +126,16 @@ struct FingerprintQuery<'a> {
     tag_ids: Vec<String>,
     untagged_only: bool,
     sort: HistorySort,
+}
+
+fn scoped_fingerprint(query: &HistoryQuery, view: Option<&IntegrationView>) -> String {
+    let fingerprint = query_fingerprint(query);
+    match view {
+        None => fingerprint,
+        Some(view) => hex::encode(Sha256::digest(
+            format!("{fingerprint}:{}", view.fingerprint()).as_bytes(),
+        )),
+    }
 }
 
 fn class_key(class: copypaste_ipc::ContentClass) -> &'static str {
@@ -229,21 +257,29 @@ pub(super) fn validate_filters(query: &HistoryQuery) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Tag filters select pinned clips only. Shared by the list and its counts so
+/// Manual tag assignments select pinned clips only; tags from content rules,
+/// a local projection, select any clip. Shared by the list and its counts so
 /// both read the same assignments.
 pub(super) fn push_tag_filter(filters: &mut String, values: &mut Vec<Value>, query: &HistoryQuery) {
+    const MANUAL: &str = "SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0";
+    const RULE: &str = "SELECT 1 FROM clip_rule_tags rt JOIN history_tags rtt ON rtt.id = rt.tag_id WHERE rt.clip_id = ci.id AND rtt.deleted = 0";
     if query.untagged_only {
-        filters.push_str(" AND ci.pinned = 1 AND NOT EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0)");
+        filters.push_str(&format!(
+            " AND ci.pinned = 1 AND NOT EXISTS ({MANUAL}) AND NOT EXISTS ({RULE})"
+        ));
     } else if !query.tag_ids.is_empty() {
-        filters.push_str(" AND ci.pinned = 1 AND EXISTS (SELECT 1 FROM history_clip_tags ct JOIN history_tags t ON t.id = ct.tag_id WHERE ct.clip_id = ci.id AND ct.assigned = 1 AND t.deleted = 0 AND ct.tag_id IN (");
+        let mut list = String::new();
         for (index, id) in query.tag_ids.iter().enumerate() {
             if index > 0 {
-                filters.push(',');
+                list.push(',');
             }
             values.push(Value::Text(id.clone()));
-            filters.push_str(&format!("?{}", values.len()));
+            list.push_str(&format!("?{}", values.len()));
         }
-        filters.push_str("))");
+        filters.push_str(&format!(
+            " AND ((ci.pinned = 1 AND EXISTS ({MANUAL} AND ct.tag_id IN ({list}))) \
+             OR EXISTS ({RULE} AND rt.tag_id IN ({list})))"
+        ));
     }
 }
 
@@ -461,6 +497,27 @@ impl Store {
         Ok(facets)
     }
 
+    /// The id, origin device and capture time of the newest live clip that
+    /// another device captured. Local captures store an empty origin, and
+    /// synced versions may carry the explicit local id; both are excluded.
+    pub fn latest_from_other_device(
+        &self,
+        local_device_id: &str,
+    ) -> Result<Option<(String, String, i64)>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ci.id, ci.origin_device_id, ci.created_at FROM clipboard_items ci \
+             WHERE ci.deleted = 0 AND ci.origin_device_id NOT IN ('', ?1) AND ",
+            unexpired!("ci."),
+            " ORDER BY ci.created_at DESC, ci.id DESC LIMIT 1"
+        ))?;
+        let mut rows = stmt.query([local_device_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some((row.get(0)?, row.get(1)?, row.get(2)?))),
+            None => Ok(None),
+        }
+    }
+
     /// Read a byte-bounded page of the whole history after applying `query`.
     ///
     /// Search runs against FTS before filtering and pagination. Every other
@@ -504,8 +561,16 @@ impl Store {
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
     ) -> Result<HistoryPage, StoreError> {
-        let page =
-            self.query_history_inner(query, after, limit, budget, local_device_id, semantic, None)?;
+        let page = self.query_history_inner(
+            query,
+            after,
+            limit,
+            budget,
+            local_device_id,
+            semantic,
+            None,
+            None,
+        )?;
         Ok(HistoryPage {
             items: page.items,
             next: page.next,
@@ -530,18 +595,62 @@ impl Store {
             local_device_id,
             semantic,
             Some(preview_keys),
+            None,
         )?;
         Ok(HistoryPreviewPage {
             items: page
                 .items
                 .into_iter()
                 .zip(page.previews)
-                .map(|(row, preview)| HistoryPreviewRow { row, preview })
+                .zip(page.annotations)
+                .map(|((row, preview), annotations)| HistoryPreviewRow {
+                    row,
+                    preview,
+                    annotations,
+                })
                 .collect(),
             next: page.next,
         })
     }
 
+    /// A page of the history `view` shows, filtered by `query` (never by
+    /// semantic matches), with authenticated previews.
+    pub fn query_integration_history(
+        &self,
+        query: &HistoryQuery,
+        view: &IntegrationView,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        preview_keys: (&crate::ItemKey, &crate::crypto::PreviewKey),
+    ) -> Result<HistoryPreviewPage, StoreError> {
+        let page = self.query_history_inner(
+            query,
+            after,
+            limit,
+            budget,
+            Some(&view.local_device_id),
+            None,
+            Some(preview_keys),
+            Some(view),
+        )?;
+        Ok(HistoryPreviewPage {
+            items: page
+                .items
+                .into_iter()
+                .zip(page.previews)
+                .zip(page.annotations)
+                .map(|((row, preview), annotations)| HistoryPreviewRow {
+                    row,
+                    preview,
+                    annotations,
+                })
+                .collect(),
+            next: page.next,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn query_history_inner(
         &self,
         query: &HistoryQuery,
@@ -551,17 +660,19 @@ impl Store {
         local_device_id: Option<&str>,
         semantic: Option<&super::SemanticMatches>,
         preview_keys: Option<(&crate::ItemKey, &crate::crypto::PreviewKey)>,
+        view: Option<&IntegrationView>,
     ) -> Result<QueryPage, StoreError> {
         validate_filters(query)?;
         if limit == 0 {
             return Ok(QueryPage {
                 items: Vec::new(),
                 previews: Vec::new(),
+                annotations: Vec::new(),
                 next: None,
             });
         }
         if after.is_some_and(|cursor| {
-            cursor.fingerprint != query_fingerprint(query)
+            cursor.fingerprint != scoped_fingerprint(query, view)
                 || cursor.sort != query.sort
                 || cursor.semantic_scope.as_deref()
                     != semantic.map(|matches| matches.scope.as_str())
@@ -585,6 +696,7 @@ impl Store {
             return Ok(QueryPage {
                 items: Vec::new(),
                 previews: Vec::new(),
+                annotations: Vec::new(),
                 next: None,
             });
         }
@@ -593,7 +705,7 @@ impl Store {
         }
         let classes = normalized_classes(query);
         let semantic_kinds = normalized_semantic_kinds(query);
-        let fingerprint = query_fingerprint(query);
+        let fingerprint = scoped_fingerprint(query, view);
         let mut values = Vec::<Value>::new();
         if query.sort == HistorySort::Relevance {
             if let Some(expression) = &search {
@@ -603,7 +715,7 @@ impl Store {
                 }
             }
         }
-        let mut filters = String::from("ci.deleted = 0");
+        let mut filters = String::from(concat!("ci.deleted = 0 AND ", unexpired!("ci.")));
         let match_parameter = if let Some(search) = &search {
             filters.push_str(" AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')");
             values.push(Value::Text(search.expanded.clone()));
@@ -658,6 +770,9 @@ impl Store {
             filters.push_str(&format!(" AND ci.app_bundle_id = ?{}", values.len()));
         }
 
+        if let Some(view) = view {
+            view.push_filter(&mut filters, &mut values)?;
+        }
         let common_filters = filters.clone();
         if let Some(parameter) = match_parameter {
             if semantic.is_some() && query.sort != HistorySort::Relevance {
@@ -793,6 +908,7 @@ impl Store {
         let mut items = Vec::with_capacity(limit as usize);
         let mut bytes = 0usize;
         let mut previews = Vec::new();
+        let mut annotations = Vec::new();
         let mut pending = Vec::new();
         let mut more = false;
         let mut last_relevance = None;
@@ -802,13 +918,20 @@ impl Store {
                 break;
             }
             let item = row_to_item(row, &columns)?;
-            let item_bytes = if preview_keys.is_some() {
-                let logical: i64 = row.get("logical_cipher_bytes")?;
-                usize::try_from(logical).unwrap_or(usize::MAX)
-            } else {
-                item.content_ciphertext.len()
-            }
-            .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
+            let annotated = match preview_keys {
+                Some(_) => local_state::annotations(&tx, &item.id)?,
+                None => None,
+            };
+            let item_bytes = copypaste_ipc::limits::page_item_bytes(
+                if preview_keys.is_some() {
+                    let logical: i64 = row.get("logical_cipher_bytes")?;
+                    usize::try_from(logical).unwrap_or(usize::MAX)
+                } else {
+                    item.content_ciphertext.len()
+                }
+                .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len)),
+                annotated.as_ref(),
+            );
             if !items.is_empty() && bytes.saturating_add(item_bytes) > budget {
                 more = true;
                 break;
@@ -821,6 +944,7 @@ impl Store {
                 let resolved =
                     super::history_preview::resolve(&tx, row, &item, item_key, preview_key)?;
                 previews.push(resolved.preview);
+                annotations.push(annotated);
                 if let Some(write) = resolved.pending {
                     pending.push(write);
                 }
@@ -849,6 +973,7 @@ impl Store {
         Ok(QueryPage {
             items,
             previews,
+            annotations,
             next,
         })
     }

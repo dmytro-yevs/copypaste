@@ -32,6 +32,8 @@ REQUIRED_TARGETS = {
 LEGACY_PLATFORMS = {"macos", "windows", "android"}
 SUPPORTED_PLATFORMS = LEGACY_PLATFORMS | {"linux"}
 MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024
+LISTED_STRINGS = ("title", "description")
+LOCALE = re.compile(r"[a-z]{2,3}(-[A-Za-z0-9]{1,8})*")
 
 
 class VerifiedPackage(NamedTuple):
@@ -105,7 +107,7 @@ def read_package(path, public_key=PUBLIC_KEY):
         manifest_bytes = archive.read("manifest.json")
         verify_signature(manifest_bytes, archive.read("manifest.json.sig"), "manifest.json", public_key)
         manifest = json.loads(manifest_bytes)
-        if manifest["schema_version"] not in (1, 2, 3, 4, 5) or manifest["api_version"] != 1:
+        if manifest["schema_version"] not in (1, 2, 3, 4, 5, 6) or manifest["api_version"] != 1:
             raise ValueError("Unsupported module manifest")
         if not re.fullmatch(r"copypaste\.[a-z0-9][a-z0-9.-]*", manifest["id"]):
             raise ValueError("Invalid first-party module ID")
@@ -170,6 +172,24 @@ def supported_platforms(manifest):
     return sorted(platforms)
 
 
+def listed_localizations(manifest):
+    """The translated marketplace title and description of each locale."""
+    localizations = manifest.get("localizations", {})
+    if not isinstance(localizations, dict) or len(localizations) > 64:
+        raise ValueError("Invalid module localizations")
+    listed = {}
+    for locale, strings in sorted(localizations.items()):
+        if not isinstance(strings, dict) or len(locale) > 35 or not LOCALE.fullmatch(locale):
+            raise ValueError("Invalid module localizations")
+        values = {key: strings[key] for key in LISTED_STRINGS if key in strings}
+        if (not all(isinstance(value, str) and value.strip() for value in values.values())
+                or len(values.get("title", "")) > 200 or len(values.get("description", "")) > 4000):
+            raise ValueError("Invalid module localizations")
+        if values:
+            listed[locale] = values
+    return listed
+
+
 def required_targets(manifest):
     return {target for target in REQUIRED_TARGETS if target[0] in supported_platforms(manifest)}
 
@@ -193,11 +213,14 @@ def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
             raise ValueError("All release packages must use the same module schema")
         metadata = {key: manifest[key] for key in ("id", "title", "description", "version", "app_versions")}
         metadata["supported_platforms"] = supported_platforms(manifest)
+        localizations = listed_localizations(manifest)
+        if localizations:
+            metadata["localizations"] = localizations
         if not metadata["title"].strip() or len(metadata["title"]) > 200 or not metadata["description"].strip() or len(metadata["description"]) > 4000:
             raise ValueError("Invalid module description")
         if module is None:
             module = {**metadata, "artifacts": []}
-        elif metadata != {key: module[key] for key in metadata}:
+        elif metadata != {key: module[key] for key in module if key != "artifacts"}:
             raise ValueError("All release packages must describe the same module version")
         target = manifest["target"]
         target_key = (target["platform"], target["architecture"])

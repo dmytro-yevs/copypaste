@@ -1,0 +1,1063 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "Format JSON",
+      "description": "Indents JSON and keeps numbers, escapes and key order exactly as written.",
+      "keywords": [
+        "pretty print",
+        "beautify",
+        "indent",
+        "json lines"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        },
+        "sort_keys": {
+          "label": "Sort keys"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "Minify JSON",
+      "description": "Removes all insignificant whitespace from JSON.",
+      "keywords": [
+        "compact",
+        "compress",
+        "one line"
+      ]
+    },
+    "structure.json_validate": {
+      "name": "Validate JSON",
+      "description": "Checks that the text is valid JSON and shows where it is not, without changing it.",
+      "keywords": [
+        "check",
+        "lint",
+        "syntax",
+        "jsonc"
+      ],
+      "params": {
+        "lenient": {
+          "label": "Allow comments and trailing commas"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "Sort JSON keys",
+      "description": "Orders object keys by code point; arrays keep their order.",
+      "keywords": [
+        "order",
+        "alphabetical",
+        "canonical"
+      ],
+      "params": {
+        "recursive": {
+          "label": "Include nested objects"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "Quote as JSON string",
+      "description": "Wraps the text in a JSON string literal, escaping quotes and line breaks.",
+      "keywords": [
+        "escape",
+        "stringify",
+        "string literal"
+      ]
+    },
+    "structure.json_unquote": {
+      "name": "Unquote JSON string",
+      "description": "Decodes a JSON string literal back to plain text, including double-encoded JSON.",
+      "keywords": [
+        "unescape",
+        "parse string",
+        "double encoded"
+      ]
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML to JSON",
+      "description": "Converts a single YAML document to JSON.",
+      "keywords": [
+        "convert",
+        "yml"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON to YAML",
+      "description": "Converts JSON to block-style YAML.",
+      "keywords": [
+        "convert",
+        "yml"
+      ]
+    },
+    "structure.csv_to_json": {
+      "name": "CSV to JSON",
+      "description": "Converts CSV or TSV rows to JSON; values stay text.",
+      "keywords": [
+        "tsv",
+        "spreadsheet",
+        "table",
+        "convert"
+      ],
+      "params": {
+        "header": {
+          "label": "First row is a header"
+        },
+        "delimiter": {
+          "label": "Delimiter",
+          "options": {
+            "auto": "Detect",
+            "comma": "Comma",
+            "semicolon": "Semicolon",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "Format XML",
+      "description": "Indents XML elements without changing text; external entities are never loaded.",
+      "keywords": [
+        "pretty print",
+        "beautify",
+        "indent"
+      ],
+      "params": {
+        "indent": {
+          "label": "Indentation",
+          "options": {
+            "2": "2 spaces",
+            "4": "4 spaces",
+            "tab": "Tab"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "Minify XML",
+      "description": "Removes whitespace between XML elements.",
+      "keywords": [
+        "compact",
+        "compress"
+      ]
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 encode",
+      "description": "Encodes the UTF-8 bytes of the text as Base64.",
+      "keywords": [
+        "base64",
+        "b64",
+        "encode",
+        "mime"
+      ],
+      "params": {
+        "variant": {
+          "label": "Alphabet",
+          "options": {
+            "standard": "Standard",
+            "url_safe": "URL-safe"
+          }
+        },
+        "padding": {
+          "label": "Add padding (=)"
+        },
+        "wrap": {
+          "label": "Wrap lines at 76 characters"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 decode",
+      "description": "Decodes Base64 or URL-safe Base64, ignoring line breaks, missing padding and a data: URI prefix.",
+      "keywords": [
+        "base64",
+        "b64",
+        "decode",
+        "data uri"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "text": "Text",
+            "hex": "Hex bytes"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL encode component",
+      "description": "Percent-encodes everything except letters, digits and - . _ ~, for use inside a query value or path segment.",
+      "keywords": [
+        "url",
+        "percent",
+        "encode",
+        "uri",
+        "query",
+        "escape"
+      ],
+      "params": {
+        "space": {
+          "label": "Encode spaces as",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (form style)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "URL encode full URL",
+      "description": "Encodes only characters that are not allowed in a URL and keeps its structure and existing %XX sequences.",
+      "keywords": [
+        "url",
+        "uri",
+        "percent",
+        "encode",
+        "link"
+      ]
+    },
+    "encode.url_decode": {
+      "name": "URL decode",
+      "description": "Decodes %XX sequences and reports a malformed sequence at its position.",
+      "keywords": [
+        "url",
+        "percent",
+        "decode",
+        "unescape",
+        "uri"
+      ],
+      "params": {
+        "plus_as_space": {
+          "label": "Treat + as a space"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Hex encode",
+      "description": "Writes the UTF-8 bytes of the text as hexadecimal digits.",
+      "keywords": [
+        "hex",
+        "hexadecimal",
+        "bytes",
+        "encode"
+      ],
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "none": "None",
+            "space": "Space"
+          }
+        },
+        "case": {
+          "label": "Letter case",
+          "options": {
+            "lower": "Lowercase",
+            "upper": "Uppercase"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Hex decode",
+      "description": "Turns hexadecimal digits back into text, ignoring spaces and 0x prefixes.",
+      "keywords": [
+        "hex",
+        "hexadecimal",
+        "bytes",
+        "decode"
+      ]
+    },
+    "encode.html_encode": {
+      "name": "HTML entities encode",
+      "description": "Replaces & < > \" and ' with HTML entities, and optionally every non-ASCII character with a numeric reference.",
+      "keywords": [
+        "html",
+        "entities",
+        "escape",
+        "encode",
+        "xml"
+      ],
+      "params": {
+        "scope": {
+          "label": "Characters to encode",
+          "options": {
+            "minimal": "Only & < > \" '",
+            "non_ascii": "Also all non-ASCII"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML entities decode",
+      "description": "Decodes all HTML5 named entities and numeric references; unknown entities stay as written.",
+      "keywords": [
+        "html",
+        "entities",
+        "unescape",
+        "decode",
+        "amp"
+      ]
+    },
+    "encode.backslash_escape": {
+      "name": "Backslash escape",
+      "description": "Escapes backslashes, double quotes, line breaks, tabs and control characters, C and JSON style.",
+      "keywords": [
+        "escape",
+        "backslash",
+        "string",
+        "json",
+        "c",
+        "quote"
+      ]
+    },
+    "encode.backslash_unescape": {
+      "name": "Backslash unescape",
+      "description": "Turns \\n, \\t, \\\", \\uXXXX, \\xXX and similar escapes back into characters; unknown escapes stay as written with a warning.",
+      "keywords": [
+        "unescape",
+        "backslash",
+        "string",
+        "json",
+        "c"
+      ]
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode escape",
+      "description": "Writes every non-ASCII character as a \\uXXXX escape.",
+      "keywords": [
+        "unicode",
+        "escape",
+        "\\u",
+        "code point",
+        "java",
+        "javascript"
+      ],
+      "params": {
+        "astral": {
+          "label": "Characters beyond U+FFFF",
+          "options": {
+            "surrogate_pair": "Surrogate pair (\\uD83D\\uDE00)",
+            "braces": "Braces (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode unescape",
+      "description": "Turns \\uXXXX and \\u{...} escapes back into characters and leaves other text unchanged.",
+      "keywords": [
+        "unicode",
+        "unescape",
+        "\\u",
+        "code point"
+      ]
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "UPPERCASE",
+      "description": "Converts all letters to capitals with full Unicode rules.",
+      "keywords": [
+        "caps",
+        "capital",
+        "uppercase"
+      ],
+      "params": {
+        "locale": {
+          "label": "Language rules",
+          "options": {
+            "invariant": "Language-neutral",
+            "system": "Device language"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "lowercase",
+      "description": "Converts all letters to lowercase with full Unicode rules.",
+      "keywords": [
+        "small",
+        "lowercase"
+      ],
+      "params": {
+        "locale": {
+          "label": "Language rules",
+          "options": {
+            "invariant": "Language-neutral",
+            "system": "Device language"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Title Case",
+      "description": "Capitalizes words; headline style keeps short words lowercase.",
+      "keywords": [
+        "capitalize",
+        "headline",
+        "title"
+      ],
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "headline": "Headline",
+            "all_words": "Every word"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Sentence case",
+      "description": "Capitalizes the first word of each sentence and lowercases the rest.",
+      "keywords": [
+        "capitalize",
+        "sentence"
+      ],
+      "params": {
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Joins words into an identifier that starts lowercase.",
+      "keywords": [
+        "identifier",
+        "variable",
+        "camel"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Joins words into an identifier with every word capitalized.",
+      "keywords": [
+        "identifier",
+        "class",
+        "upper camel"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        },
+        "keep_acronyms": {
+          "label": "Keep acronyms"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Joins lowercase words with underscores.",
+      "keywords": [
+        "identifier",
+        "underscore",
+        "snake"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Joins lowercase words with hyphens.",
+      "keywords": [
+        "identifier",
+        "hyphen",
+        "slug"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Joins uppercase words with underscores.",
+      "keywords": [
+        "identifier",
+        "screaming",
+        "upper snake"
+      ],
+      "params": {
+        "per_line": {
+          "label": "Each line separately"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Swap case",
+      "description": "Turns uppercase letters lowercase and lowercase letters uppercase.",
+      "keywords": [
+        "invert",
+        "toggle",
+        "case"
+      ]
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 hash",
+      "description": "MD5 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "md5",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 hash",
+      "description": "SHA-1 digest, not for security. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha1",
+        "sha-1",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 hash",
+      "description": "SHA-256 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha256",
+        "sha-256",
+        "sha2",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 hash",
+      "description": "SHA-512 digest. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "sha512",
+        "sha-512",
+        "sha2",
+        "hash",
+        "checksum",
+        "digest"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex_lower": "Hex, lowercase",
+            "hex_upper": "Hex, uppercase",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 checksum",
+      "description": "CRC-32 with the IEEE polynomial used by zip and PNG. Hashes the text as UTF-8 exactly as shown, with no newline added.",
+      "keywords": [
+        "crc",
+        "crc32",
+        "checksum",
+        "zip"
+      ],
+      "params": {
+        "output": {
+          "label": "Output",
+          "options": {
+            "hex": "Hex (8 digits)",
+            "decimal": "Decimal"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "Trim",
+      "description": "Removes spaces and line breaks from the start and end of the text.",
+      "keywords": [
+        "strip",
+        "whitespace",
+        "spaces"
+      ]
+    },
+    "lines.trim_each": {
+      "name": "Trim each line",
+      "description": "Removes spaces at the start, end or both sides of every line.",
+      "keywords": [
+        "strip",
+        "whitespace",
+        "trailing spaces"
+      ],
+      "params": {
+        "sides": {
+          "label": "Sides",
+          "options": {
+            "both": "Both",
+            "start": "Start",
+            "end": "End"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Collapse whitespace",
+      "description": "Turns runs of spaces and tabs into a single space.",
+      "keywords": [
+        "spaces",
+        "tabs",
+        "squeeze",
+        "normalize"
+      ],
+      "params": {
+        "keep_line_breaks": {
+          "label": "Keep line breaks"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Remove empty lines",
+      "description": "Deletes lines that are empty or hold only spaces.",
+      "keywords": [
+        "blank lines",
+        "empty"
+      ],
+      "params": {
+        "whitespace_only": {
+          "label": "Whitespace-only lines are empty"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Sort lines",
+      "description": "Sorts lines alphabetically, naturally, numerically or by length.",
+      "keywords": [
+        "order",
+        "alphabetical",
+        "natural sort"
+      ],
+      "params": {
+        "order": {
+          "label": "Order",
+          "options": {
+            "asc": "A to Z",
+            "desc": "Z to A"
+          }
+        },
+        "mode": {
+          "label": "Compare",
+          "options": {
+            "natural": "Natural",
+            "code_point": "Code point",
+            "case_insensitive": "Ignore case",
+            "numeric": "Numeric",
+            "length": "Length"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Remove duplicate lines",
+      "description": "Keeps the first occurrence of each line in the original order.",
+      "keywords": [
+        "unique",
+        "duplicates",
+        "distinct"
+      ],
+      "params": {
+        "case_sensitive": {
+          "label": "Case-sensitive"
+        },
+        "compare_trimmed": {
+          "label": "Ignore surrounding spaces"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Reverse lines",
+      "description": "Puts the lines in the opposite order.",
+      "keywords": [
+        "flip",
+        "invert",
+        "order"
+      ]
+    },
+    "lines.join": {
+      "name": "Join lines",
+      "description": "Combines all lines into one with a separator.",
+      "keywords": [
+        "merge",
+        "single line",
+        "concatenate"
+      ],
+      "params": {
+        "separator": {
+          "label": "Separator",
+          "options": {
+            "space": "Space",
+            "comma": "Comma",
+            "none": "None",
+            "custom": "Custom"
+          }
+        },
+        "custom_separator": {
+          "label": "Custom separator"
+        },
+        "drop_empty": {
+          "label": "Skip empty lines"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Unwrap paragraphs",
+      "description": "Joins hard-wrapped lines inside paragraphs, as in text copied from PDFs.",
+      "keywords": [
+        "pdf",
+        "line breaks",
+        "reflow",
+        "hyphenation"
+      ],
+      "params": {
+        "dehyphenate": {
+          "label": "Rejoin hyphenated words"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Prefix lines",
+      "description": "Adds a bullet, number, quote mark or custom text to each line.",
+      "keywords": [
+        "bullet",
+        "list",
+        "number",
+        "quote"
+      ],
+      "params": {
+        "style": {
+          "label": "Style",
+          "options": {
+            "dash": "Dash",
+            "asterisk": "Asterisk",
+            "number": "Numbers",
+            "quote": "Quote",
+            "custom": "Custom"
+          }
+        },
+        "custom_prefix": {
+          "label": "Custom prefix"
+        },
+        "skip_empty": {
+          "label": "Skip empty lines"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Remove invisible characters",
+      "description": "Deletes zero-width, bidi and soft-hyphen characters and turns no-break spaces into spaces.",
+      "keywords": [
+        "zero width",
+        "zwsp",
+        "bom",
+        "nbsp",
+        "hidden"
+      ]
+    },
+    "clean.quotes": {
+      "name": "Straighten quotes",
+      "description": "Replaces curly quotes with straight ones, and optionally dashes with hyphens.",
+      "keywords": [
+        "smart quotes",
+        "curly",
+        "typographic",
+        "dashes"
+      ],
+      "params": {
+        "dashes": {
+          "label": "Also straighten dashes"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "Remove tracking parameters",
+      "description": "Strips utm_ and click-ID parameters from every link and leaves signed links untouched.",
+      "keywords": [
+        "utm",
+        "fbclid",
+        "gclid",
+        "clean link",
+        "privacy"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Unwrap redirect links",
+      "description": "Replaces search, social and Safe Links redirect wrappers with their real target, offline.",
+      "keywords": [
+        "redirect",
+        "safe links",
+        "outlook",
+        "google url",
+        "unwrap"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Rich text to plain text",
+      "description": "Keeps the text of formatted content with its paragraphs and line breaks.",
+      "keywords": [
+        "plain",
+        "unformatted",
+        "strip formatting",
+        "html"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML to Markdown",
+      "description": "Converts headings, links, lists, tables and code blocks to Markdown, keeping code whitespace.",
+      "keywords": [
+        "markdown",
+        "md",
+        "html",
+        "convert"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown to plain text",
+      "description": "Removes Markdown syntax and keeps the text; tables become tab-separated.",
+      "keywords": [
+        "markdown",
+        "md",
+        "strip",
+        "plain"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Links",
+          "options": {
+            "text": "Text only",
+            "text_url": "Text and URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Keep list markers"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Decode",
+      "description": "Shows the token header and payload as JSON. The signature is not verified.",
+      "keywords": [
+        "jwt",
+        "token",
+        "bearer",
+        "claims"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Timestamp to date",
+      "description": "Turns a Unix timestamp into a date, detecting seconds, milliseconds, microseconds or nanoseconds.",
+      "keywords": [
+        "epoch",
+        "unix",
+        "time",
+        "iso 8601"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unit",
+          "options": {
+            "auto": "Detect",
+            "seconds": "Seconds",
+            "milliseconds": "Milliseconds",
+            "microseconds": "Microseconds",
+            "nanoseconds": "Nanoseconds"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (local time)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Date to timestamp",
+      "description": "Turns an ISO 8601, RFC 2822 or plain date into a Unix timestamp; dates without an offset use local time.",
+      "keywords": [
+        "epoch",
+        "unix",
+        "time",
+        "iso 8601"
+      ],
+      "params": {
+        "unit": {
+          "label": "Unit",
+          "options": {
+            "seconds": "Seconds",
+            "milliseconds": "Milliseconds"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Find and replace",
+      "description": "Replaces text or regular-expression matches; $1 in the replacement inserts a group.",
+      "keywords": [
+        "replace",
+        "regex",
+        "substitute",
+        "search"
+      ],
+      "params": {
+        "find": {
+          "label": "Find"
+        },
+        "replace": {
+          "label": "Replace with"
+        },
+        "regex": {
+          "label": "Regular expression"
+        },
+        "case_sensitive": {
+          "label": "Match case"
+        },
+        "whole_word": {
+          "label": "Whole words only"
+        },
+        "multiline": {
+          "label": "^ and $ match at line breaks"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Extract matches",
+      "description": "Lists every URL, email, number, address, color, UUID or pattern match, one per line.",
+      "keywords": [
+        "extract",
+        "grep",
+        "emails",
+        "urls",
+        "regex"
+      ],
+      "params": {
+        "preset": {
+          "label": "Find",
+          "options": {
+            "urls": "Links",
+            "emails": "Email addresses",
+            "numbers": "Numbers",
+            "ipv4": "IPv4 addresses",
+            "ipv6": "IPv6 addresses",
+            "hex_colors": "Hex colors",
+            "uuids": "UUIDs",
+            "custom": "Custom pattern"
+          }
+        },
+        "pattern": {
+          "label": "Pattern"
+        },
+        "dedupe": {
+          "label": "Remove duplicates"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Remove characters",
+      "description": "Deletes digits, punctuation, non-ASCII characters, emoji or characters you list.",
+      "keywords": [
+        "delete",
+        "strip",
+        "digits",
+        "emoji",
+        "punctuation"
+      ],
+      "params": {
+        "class": {
+          "label": "Remove",
+          "options": {
+            "digits": "Digits",
+            "punctuation": "Punctuation",
+            "non_ascii": "Non-ASCII characters",
+            "emoji": "Emoji",
+            "custom": "Characters I list"
+          }
+        },
+        "chars": {
+          "label": "Characters"
+        }
+      }
+    }
+  }
+}

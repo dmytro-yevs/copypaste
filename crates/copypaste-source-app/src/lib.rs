@@ -4,12 +4,15 @@
 
 #[cfg(target_os = "windows")]
 mod gdi;
+mod installed;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
 #[cfg(target_os = "windows")]
 pub mod registry;
 #[cfg(target_os = "windows")]
 mod win_icon;
+#[cfg(any(target_os = "windows", test))]
+mod windows_programs;
 
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -18,6 +21,8 @@ use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{DynamicImage, ImageFormat, ImageReader, Limits};
+
+pub use installed::{app_icon, installed_app, installed_apps, InstalledApp, MAX_INSTALLED_APPS};
 
 const MAX_CACHE_ENTRIES: usize = 64;
 const CACHE_TTL: Duration = Duration::from_secs(10 * 60);

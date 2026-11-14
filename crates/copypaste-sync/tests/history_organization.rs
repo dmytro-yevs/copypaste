@@ -73,7 +73,21 @@ fn cloud_provider_scan_and_apply_carry_independent_organization_versions() {
         4,
         "one clip and three organization records"
     );
+    let mut pin = scan
+        .items
+        .iter()
+        .find(|item| item.content.windows(5).any(|w| w == b"\"pin\""))
+        .expect("a pin record")
+        .clone();
+    assert!(pin.item_id.starts_with("org-v1-"), "{}", pin.item_id);
     receiver.apply_page(scan.items).unwrap();
+    // An older provider copy of the pin is declined; its local winner must
+    // be found under the local id, or it is never republished.
+    pin.created_at -= 1;
+    assert_eq!(
+        receiver.requeue_stamp(&pin).unwrap(),
+        Some(pin.created_at + 1)
+    );
     let stored = target.get(&id).unwrap().unwrap();
     assert!(stored.pinned);
     assert_eq!(stored.created_at, 100);

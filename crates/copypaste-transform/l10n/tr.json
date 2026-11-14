@@ -1,0 +1,741 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "JSON biçimlendir",
+      "description": "Sayıları, kaçış dizilerini ve anahtar sırasını yazıldığı gibi koruyarak JSON’u girintiler.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        },
+        "sort_keys": {
+          "label": "Anahtarları sırala"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "JSON küçült",
+      "description": "JSON’daki gereksiz tüm boşlukları kaldırır."
+    },
+    "structure.json_validate": {
+      "name": "JSON doğrula",
+      "description": "Metnin geçerli JSON olup olmadığını denetler ve hatanın yerini gösterir; metni değiştirmez.",
+      "params": {
+        "lenient": {
+          "label": "Yorumlara ve sondaki virgüllere izin ver"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "JSON anahtarlarını sırala",
+      "description": "Nesne anahtarlarını kod noktasına göre sıralar; diziler sırasını korur.",
+      "params": {
+        "recursive": {
+          "label": "İç içe nesneleri dahil et"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "JSON dizesi olarak tırnakla",
+      "description": "Metni bir JSON dize sabitine sarar; tırnakları ve satır sonlarını kaçışlar."
+    },
+    "structure.json_unquote": {
+      "name": "JSON dizesini çöz",
+      "description": "Bir JSON dize sabitini düz metne geri çevirir; iki kez kodlanmış JSON’u da işler."
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML’dan JSON’a",
+      "description": "Tek bir YAML belgesini JSON’a dönüştürür.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON’dan YAML’a",
+      "description": "JSON’u blok stilinde YAML’a dönüştürür."
+    },
+    "structure.csv_to_json": {
+      "name": "CSV’den JSON’a",
+      "description": "CSV veya TSV satırlarını JSON’a dönüştürür; değerler metin olarak kalır.",
+      "params": {
+        "header": {
+          "label": "İlk satır başlıktır"
+        },
+        "delimiter": {
+          "label": "Ayırıcı",
+          "options": {
+            "auto": "Algıla",
+            "comma": "Virgül",
+            "semicolon": "Noktalı virgül",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "XML biçimlendir",
+      "description": "Metni değiştirmeden XML öğelerini girintiler; dış varlıklar asla yüklenmez.",
+      "params": {
+        "indent": {
+          "label": "Girinti",
+          "options": {
+            "2": "2 boşluk",
+            "4": "4 boşluk",
+            "tab": "Sekme"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "XML küçült",
+      "description": "XML öğeleri arasındaki boşlukları kaldırır."
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 kodla",
+      "description": "Metnin UTF-8 baytlarını Base64 olarak kodlar.",
+      "params": {
+        "variant": {
+          "label": "Alfabe",
+          "options": {
+            "standard": "Standart",
+            "url_safe": "URL için güvenli"
+          }
+        },
+        "padding": {
+          "label": "Dolgu (=) ekle"
+        },
+        "wrap": {
+          "label": "Satırları 76 karakterde kaydır"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 çöz",
+      "description": "Standart veya URL için güvenli Base64'ü çözer; satır sonlarını, eksik dolguyu ve data: URI önekini yok sayar.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "text": "Metin",
+            "hex": "Onaltılık baytlar"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL bileşenini kodla",
+      "description": "Harfler, rakamlar ve - . _ ~ dışındaki her şeyi yüzde kodlamasıyla kodlar; sorgu değerleri veya yol parçaları içindir.",
+      "params": {
+        "space": {
+          "label": "Boşlukları şöyle kodla",
+          "options": {
+            "percent": "%20",
+            "plus": "+ (form biçimi)"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "Tam URL'yi kodla",
+      "description": "Yalnızca URL'de izin verilmeyen karakterleri kodlar; yapıyı ve mevcut %XX dizilerini korur."
+    },
+    "encode.url_decode": {
+      "name": "URL çöz",
+      "description": "%XX dizilerini çözer ve hatalı bir diziyi konumuyla bildirir.",
+      "params": {
+        "plus_as_space": {
+          "label": "+ işaretini boşluk say"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "Onaltılık kodla",
+      "description": "Metnin UTF-8 baytlarını onaltılık rakamlarla yazar.",
+      "params": {
+        "separator": {
+          "label": "Ayırıcı",
+          "options": {
+            "none": "Yok",
+            "space": "Boşluk"
+          }
+        },
+        "case": {
+          "label": "Harf büyüklüğü",
+          "options": {
+            "lower": "Küçük harf",
+            "upper": "Büyük harf"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "Onaltılık çöz",
+      "description": "Onaltılık rakamları yeniden metne çevirir; boşlukları ve 0x öneklerini yok sayar."
+    },
+    "encode.html_encode": {
+      "name": "HTML varlıklarını kodla",
+      "description": "& < > \" ve ' karakterlerini HTML varlıklarıyla, isteğe bağlı olarak ASCII dışı her karakteri sayısal referansla değiştirir.",
+      "params": {
+        "scope": {
+          "label": "Kodlanacak karakterler",
+          "options": {
+            "minimal": "Yalnızca & < > \" '",
+            "non_ascii": "ASCII dışındakilerin tümü de"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML varlıklarını çöz",
+      "description": "Tüm HTML5 adlandırılmış varlıklarını ve sayısal referansları çözer; bilinmeyen varlıklar olduğu gibi kalır."
+    },
+    "encode.backslash_escape": {
+      "name": "Ters eğik çizgiyle kaçışla",
+      "description": "Ters eğik çizgileri, çift tırnakları, satır sonlarını, sekmeleri ve denetim karakterlerini C ve JSON biçiminde kaçışlar."
+    },
+    "encode.backslash_unescape": {
+      "name": "Ters eğik çizgi kaçışlarını çöz",
+      "description": "\\n, \\t, \\\", \\uXXXX, \\xXX ve benzeri kaçışları karakterlere çevirir; bilinmeyenler uyarıyla olduğu gibi kalır."
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode kaçışla",
+      "description": "ASCII dışı her karakteri \\uXXXX kaçışı olarak yazar.",
+      "params": {
+        "astral": {
+          "label": "U+FFFF üzerindeki karakterler",
+          "options": {
+            "surrogate_pair": "Vekil çift (\\uD83D\\uDE00)",
+            "braces": "Süslü ayraç (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode kaçışlarını çöz",
+      "description": "\\uXXXX ve \\u{...} kaçışlarını karakterlere çevirir, diğer metni değiştirmez."
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "BÜYÜK HARF",
+      "description": "Tüm harfleri tam Unicode kurallarıyla büyük harfe çevirir.",
+      "params": {
+        "locale": {
+          "label": "Dil kuralları",
+          "options": {
+            "invariant": "Dilden bağımsız",
+            "system": "Cihaz dili"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "küçük harf",
+      "description": "Tüm harfleri tam Unicode kurallarıyla küçük harfe çevirir.",
+      "params": {
+        "locale": {
+          "label": "Dil kuralları",
+          "options": {
+            "invariant": "Dilden bağımsız",
+            "system": "Cihaz dili"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "Başlık Biçimi",
+      "description": "Sözcüklerin ilk harfini büyütür; başlık stili kısa sözcükleri küçük bırakır.",
+      "params": {
+        "style": {
+          "label": "Stil",
+          "options": {
+            "headline": "Başlık",
+            "all_words": "Her sözcük"
+          }
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "Cümle biçimi",
+      "description": "Her cümlenin ilk sözcüğünü büyük harfle başlatır, gerisini küçültür.",
+      "params": {
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "Sözcükleri küçük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "Sözcükleri her biri büyük harfle başlayan bir tanımlayıcıda birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        },
+        "keep_acronyms": {
+          "label": "Kısaltmaları koru"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "Küçük harfli sözcükleri alt çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "Küçük harfli sözcükleri kısa çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "Büyük harfli sözcükleri alt çizgiyle birleştirir.",
+      "params": {
+        "per_line": {
+          "label": "Her satır ayrı"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "Harf büyüklüğünü değiştir",
+      "description": "Büyük harfleri küçük, küçük harfleri büyük yapar."
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 özeti",
+      "description": "MD5 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 özeti",
+      "description": "SHA-1 özeti, güvenlik için uygun değildir. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 özeti",
+      "description": "SHA-256 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 özeti",
+      "description": "SHA-512 özeti. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex_lower": "Onaltılık, küçük harf",
+            "hex_upper": "Onaltılık, büyük harf",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 sağlama toplamı",
+      "description": "ZIP ve PNG'nin kullandığı IEEE polinomuyla CRC-32. Metni gösterildiği gibi UTF-8 olarak özetler, satır sonu eklemez.",
+      "params": {
+        "output": {
+          "label": "Çıktı",
+          "options": {
+            "hex": "Onaltılık (8 basamak)",
+            "decimal": "Ondalık"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "Kırp",
+      "description": "Metnin başındaki ve sonundaki boşlukları ve satır sonlarını kaldırır."
+    },
+    "lines.trim_each": {
+      "name": "Her satırı kırp",
+      "description": "Her satırın başındaki, sonundaki ya da iki yanındaki boşlukları kaldırır.",
+      "params": {
+        "sides": {
+          "label": "Kenarlar",
+          "options": {
+            "both": "İkisi de",
+            "start": "Baş",
+            "end": "Son"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "Boşlukları daralt",
+      "description": "Art arda gelen boşluk ve sekmeleri tek boşluğa indirir.",
+      "params": {
+        "keep_line_breaks": {
+          "label": "Satır sonlarını koru"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "Boş satırları kaldır",
+      "description": "Boş ya da yalnızca boşluk içeren satırları siler.",
+      "params": {
+        "whitespace_only": {
+          "label": "Yalnızca boşluk içeren satırlar boş sayılır"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "Satırları sırala",
+      "description": "Satırları alfabetik, doğal, sayısal ya da uzunluğa göre sıralar.",
+      "params": {
+        "order": {
+          "label": "Sıra",
+          "options": {
+            "asc": "A'dan Z'ye",
+            "desc": "Z'den A'ya"
+          }
+        },
+        "mode": {
+          "label": "Karşılaştırma",
+          "options": {
+            "natural": "Doğal",
+            "code_point": "Kod noktası",
+            "case_insensitive": "Harf büyüklüğünü yok say",
+            "numeric": "Sayısal",
+            "length": "Uzunluk"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "Yinelenen satırları kaldır",
+      "description": "Her satırın ilk geçtiği yeri özgün sırayla korur.",
+      "params": {
+        "case_sensitive": {
+          "label": "Büyük/küçük harf duyarlı"
+        },
+        "compare_trimmed": {
+          "label": "Çevredeki boşlukları yok say"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "Satırları ters çevir",
+      "description": "Satırları ters sıraya koyar."
+    },
+    "lines.join": {
+      "name": "Satırları birleştir",
+      "description": "Tüm satırları bir ayırıcıyla tek satırda birleştirir.",
+      "params": {
+        "separator": {
+          "label": "Ayırıcı",
+          "options": {
+            "space": "Boşluk",
+            "comma": "Virgül",
+            "none": "Yok",
+            "custom": "Özel"
+          }
+        },
+        "custom_separator": {
+          "label": "Özel ayırıcı"
+        },
+        "drop_empty": {
+          "label": "Boş satırları atla"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "Paragrafları düzelt",
+      "description": "PDF'den kopyalanan metindeki gibi paragraf içinde bölünmüş satırları birleştirir.",
+      "params": {
+        "dehyphenate": {
+          "label": "Tireyle bölünmüş sözcükleri birleştir"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "Satırlara önek ekle",
+      "description": "Her satırın başına madde işareti, numara, alıntı işareti ya da özel metin ekler.",
+      "params": {
+        "style": {
+          "label": "Stil",
+          "options": {
+            "dash": "Tire",
+            "asterisk": "Yıldız",
+            "number": "Numaralar",
+            "quote": "Alıntı",
+            "custom": "Özel"
+          }
+        },
+        "custom_prefix": {
+          "label": "Özel önek"
+        },
+        "skip_empty": {
+          "label": "Boş satırları atla"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "Görünmez karakterleri kaldır",
+      "description": "Sıfır genişlikli, bidi ve yumuşak tire karakterlerini siler, bölünmez boşlukları normal boşluğa çevirir."
+    },
+    "clean.quotes": {
+      "name": "Tırnakları düzleştir",
+      "description": "Kıvrık tırnakları düz tırnakla, isteğe bağlı olarak uzun çizgileri kısa çizgiyle değiştirir.",
+      "params": {
+        "dashes": {
+          "label": "Çizgileri de düzleştir"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "İzleme parametrelerini kaldır",
+      "description": "Tüm bağlantılardan utm_ ve tıklama kimliği parametrelerini kaldırır; imzalı bağlantılara dokunmaz.",
+      "keywords": [
+        "izleme",
+        "bağlantıyı temizle",
+        "gizlilik"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "Yönlendirme bağlantılarını aç",
+      "description": "Arama motoru, sosyal ağ ve Safe Links yönlendirmelerini çevrimdışı olarak gerçek hedefle değiştirir.",
+      "keywords": [
+        "yönlendirme"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "Zengin metni düz metne",
+      "description": "Biçimli içeriğin metnini paragraflar ve satır sonlarıyla birlikte korur.",
+      "keywords": [
+        "düz metin",
+        "biçimi kaldır"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML'den Markdown'a",
+      "description": "Başlıkları, bağlantıları, listeleri, tabloları ve kod bloklarını Markdown'a çevirir; koddaki boşluklar korunur.",
+      "keywords": [
+        "dönüştür"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown'dan düz metne",
+      "description": "Markdown sözdizimini kaldırıp metni korur; tablolar sekmeyle ayrılır.",
+      "keywords": [
+        "düz metin"
+      ],
+      "params": {
+        "link_style": {
+          "label": "Bağlantılar",
+          "options": {
+            "text": "Yalnızca metin",
+            "text_url": "Metin ve URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "Liste işaretlerini koru"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT: Çöz",
+      "description": "Belirtecin başlığını ve yükünü JSON olarak gösterir. İmza doğrulanmaz.",
+      "keywords": [
+        "belirteç"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "Zaman damgasından tarihe",
+      "description": "Unix zaman damgasını tarihe çevirir; saniye, milisaniye, mikrosaniye veya nanosaniyeyi algılar.",
+      "keywords": [
+        "zaman damgası",
+        "saat"
+      ],
+      "params": {
+        "unit": {
+          "label": "Birim",
+          "options": {
+            "auto": "Algıla",
+            "seconds": "Saniye",
+            "milliseconds": "Milisaniye",
+            "microseconds": "Mikrosaniye",
+            "nanoseconds": "Nanosaniye"
+          }
+        },
+        "format": {
+          "label": "Biçim",
+          "options": {
+            "iso_utc": "ISO 8601 (UTC)",
+            "iso_local": "ISO 8601 (yerel saat)",
+            "rfc2822": "RFC 2822"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "Tarihten zaman damgasına",
+      "description": "ISO 8601, RFC 2822 veya basit bir tarihi Unix zaman damgasına çevirir; fark belirtilmezse yerel saat kullanılır.",
+      "keywords": [
+        "zaman damgası",
+        "saat"
+      ],
+      "params": {
+        "unit": {
+          "label": "Birim",
+          "options": {
+            "seconds": "Saniye",
+            "milliseconds": "Milisaniye"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "Bul ve değiştir",
+      "description": "Metni veya düzenli ifade eşleşmelerini değiştirir; değiştirme metnindeki $1 bir grubu ekler.",
+      "keywords": [
+        "değiştir",
+        "ara"
+      ],
+      "params": {
+        "find": {
+          "label": "Bul"
+        },
+        "replace": {
+          "label": "Şununla değiştir"
+        },
+        "regex": {
+          "label": "Düzenli ifade"
+        },
+        "case_sensitive": {
+          "label": "Büyük/küçük harf duyarlı"
+        },
+        "whole_word": {
+          "label": "Yalnızca tam sözcükler"
+        },
+        "multiline": {
+          "label": "^ ve $ her satırda geçerli"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "Eşleşmeleri çıkar",
+      "description": "Her URL, e-posta, sayı, adres, renk, UUID veya desen eşleşmesini satır başına bir tane listeler.",
+      "keywords": [
+        "çıkar"
+      ],
+      "params": {
+        "preset": {
+          "label": "Aranacak",
+          "options": {
+            "urls": "Bağlantılar",
+            "emails": "E-posta adresleri",
+            "numbers": "Sayılar",
+            "ipv4": "IPv4 adresleri",
+            "ipv6": "IPv6 adresleri",
+            "hex_colors": "Onaltılık renkler",
+            "uuids": "UUID değerleri",
+            "custom": "Özel desen"
+          }
+        },
+        "pattern": {
+          "label": "Desen"
+        },
+        "dedupe": {
+          "label": "Yinelenenleri kaldır"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "Karakterleri kaldır",
+      "description": "Rakamları, noktalama işaretlerini, ASCII dışı karakterleri, emojileri veya belirttiğiniz karakterleri siler.",
+      "keywords": [
+        "sil",
+        "rakamlar"
+      ],
+      "params": {
+        "class": {
+          "label": "Kaldırılacak",
+          "options": {
+            "digits": "Rakamlar",
+            "punctuation": "Noktalama",
+            "non_ascii": "ASCII dışı karakterler",
+            "emoji": "Emojiler",
+            "custom": "Belirtilen karakterler"
+          }
+        },
+        "chars": {
+          "label": "Karakterler"
+        }
+      }
+    }
+  }
+}

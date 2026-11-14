@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-11-11",
+  "date": "2026-11-13",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -4723,6 +4723,577 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-107",
+      "title": "One wall-clock deadline task with resume sweeps",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime deadlines",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/deadlines.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-daemon/src/power.rs",
+        "crates/copypaste-daemon/src/macos_workspace.rs",
+        "crates/copypaste-daemon/src/main.rs"
+      ],
+      "invariant": "Every feature deadline (item expiry, paste-queue idle stop and undo, import and rule-preview plans) goes through one deadline task per runtime. It holds a timer only for the earliest deadline due within 1 h; later deadlines and an empty schedule hold no timer. Long-horizon deadlines are swept at task start, on resume, on sync receipt (coalesced into the 500 ms library flush) and on the first request after 15 quiet minutes, which covers the Android foreground and IME-only processes without an alarm. Resume signals: the macOS wake notification, Windows PowerRegisterSuspendResumeNotification and Linux logind PrepareForSleep. A 60 s re-arm cap applies only when the resume subscription failed and a short-horizon deadline exists.",
+      "next_step": "Record daemon and Android runtime wakeups over a 10-minute idle trace with no deadlines, with one 30-day deadline and with one 5-minute deadline on release builds of every listed platform, and observe a sleep across a deadline (content-rules AC20). feature_budgets.paste_queue_idle_wakeups_per_hour is unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-108",
+      "title": "Read-time expiry filtering without an Android alarm job",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/expiry.rs",
+        "crates/copypaste-core/src/storage/history.rs",
+        "crates/copypaste-core/src/storage/search.rs",
+        "crates/copypaste-core/src/storage/page.rs",
+        "crates/copypaste-runtime/src/features/clips/expiry.rs"
+      ],
+      "invariant": "History, search, list and every surface built on them filter rows whose expires_at has passed at read time, through the partial index on clip_local_state(expires_at), so a late purge never shows an expired item. The purge runs from the deadline sweep only while a runtime is running; Android schedules no alarm or job for expiry, and nothing runs when no expiring item exists.",
+      "next_step": "Measure history page and search latency with 10,000 rows of which 1,000 expire, and confirm on Android with dumpsys jobscheduler and alarm that no CopyPaste job or alarm exists (content-rules AC38). No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-109",
+      "title": "Content rules compiled once per revision with bounded inputs",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core rules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/rules/compile.rs",
+        "crates/copypaste-core/src/rules/evaluate.rs",
+        "crates/copypaste-core/src/rules/detect.rs",
+        "crates/copypaste-runtime/src/capture_rules.rs",
+        "crates/copypaste-runtime/src/features/rules.rs"
+      ],
+      "invariant": "The rule set is compiled into one immutable evaluator per rules revision and shared by every capture until a Library rules change invalidates it. Detection runs only when an enabled rule needs a detected kind, and regular expressions only for enabled rules. Detection reads at most a 64 KiB prefix and regex conditions at most a 1 MiB prefix; regex programs are capped at 512 KiB and their lazy DFA at 1 MiB, with no backreferences or look-around.",
+      "next_step": "Measure capture latency and runtime memory with no user rules, with the shipped built-ins and with 50 regex rules on release builds of every listed platform (content-rules AC37). feature_budgets.rules_capture_evaluation_ms and rules_evaluator_bytes are unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-110",
+      "title": "Receipt-side protection reuses the compiled evaluator",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-core storage receipt",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/receipt.rs",
+        "crates/copypaste-core/src/storage/rules.rs",
+        "crates/copypaste-core/src/storage/local_state.rs",
+        "crates/copypaste-runtime/src/lib.rs"
+      ],
+      "invariant": "Items received through sync are evaluated for protection actions (secret mask, hide from integrations, expiry) and auto-tags with the same compiled evaluator as local captures, inside the apply transaction. Rule tags and derived expiry are a local projection in clip_rule_tags and clip_local_state, never synced records, so receipt adds no outgoing versions or sync traffic.",
+      "next_step": "Measure sync apply throughput and peak memory for a 5,000-item P2P catch-up with and without enabled rules on release builds of every listed platform. No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-111",
+      "title": "Paste queue holds references and idles without timers",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime paste_queue",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/features/paste_queue.rs",
+        "crates/copypaste-core/src/storage/paste_queue.rs",
+        "apps/copypaste_flutter/lib/features/paste_queue/controller/paste_queue_controller.dart",
+        "apps/copypaste_flutter/lib/app/app_features.dart"
+      ],
+      "invariant": "Queue entries reference history items by id; shared and selected text is captured into history first, and a sealed snapshot is stored only for rendered snippet output. A payload is decrypted only at delivery. With the queue empty and Collecting off there is no timer, thread or subscription; the idle stop and the 10 s undo window are one-shot deadlines on the shared deadline task. The app keeps counts for the header and tray and holds entries only while the drawer, Quick Paste Queue tab or IME Queue tab is shown.",
+      "next_step": "Run the paste-queue AC31 10-minute idle trace (queue empty, Collecting off) against the feature disabled on release builds of every listed platform, recording app, daemon and workers separately. feature_budgets.paste_queue_idle_wakeups_per_hour is unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-112",
+      "title": "Snippet search projection and bounded template cache",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime snippets",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/storage/snippets.rs",
+        "crates/copypaste-core/src/snippets/ranking.rs",
+        "crates/copypaste-runtime/src/features/snippets.rs",
+        "crates/copypaste-runtime/src/features/snippets/render.rs",
+        "crates/copypaste-runtime/src/features/snippets/usage.rs",
+        "apps/copypaste_flutter/lib/features/snippets/controller/snippets_controller.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart"
+      ],
+      "invariant": "Snippet search reads the snippets projection and its FTS table, never decrypting organization records per query. Templates are parsed once per revision into a cache of at most 32 entries that is dropped by SnippetOp::Release when a surface closes (Settings section detach, Quick Paste presentation end, IME panel hide). Usage counters are local only, and the editor writes organization records only on Save, in one transaction. Snippet content is held by the app only while a snippet surface is attached; editor lint and preview pauses (300 ms) stop when the editor closes.",
+      "next_step": "Measure snippet search and 64 KiB template render latency and the 10,000-snippet import peak on release builds of every listed platform, and confirm no snippet timers or wakeups while idle (snippets AC43). feature_budgets.snippets_render_64k_ms, snippets_search_ms and snippets_import_10k_peak_bytes are unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-113",
+      "title": "Template date formatters built only when a date renders",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-template",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-template/src/dates.rs",
+        "crates/copypaste-template/src/render.rs"
+      ],
+      "invariant": "ICU4X date formatters and jiff zone data are touched only when a date, time or datetime placeholder renders, and the formatters are not retained after the expansion. The compiled ICU data is embedded in the binary, so this bounds memory, not binary size.",
+      "next_step": "Measure the binary-size delta of ICU compiled data, the bundled Windows tzdb, the YAML parser for the daemon, CLI and Android library (feature_budgets.binary_size_delta_bytes, unresolved) and switch to datagen-baked data for the 12 locales if it is material (risk K3).",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-114",
+      "title": "Lazy transform catalogue with bounded, cancellable previews",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-transform",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-transform/src/catalogue.rs",
+        "crates/copypaste-transform/src/lib.rs",
+        "crates/copypaste-runtime/src/features/transforms/preview.rs",
+        "apps/copypaste_flutter/lib/features/transforms/controller/transform_controller.dart"
+      ],
+      "invariant": "The transform catalogue and its localized names are built once on first use. Previews run on at most 64 KiB of input, are debounced by 120 ms in the app and are cancellable; a superseded preview is dropped. Input above 16 MiB is refused before any work. Recents are device-local preferences. Transforms open no network connection.",
+      "next_step": "Open and close the palette 50 times and run Format JSON on 16 MiB input on release builds of every listed platform, recording app and daemon retained memory (transforms AC43, AC44). feature_budgets.transforms_palette_open_peak_delta_bytes and transforms_16mib_peak_bytes are unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-115",
+      "title": "AI Tools MCP endpoint that runs only while a client is connected",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "modules/ai-tools",
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
+      "source_references": [
+        "modules/ai-tools/src/endpoint.rs",
+        "modules/ai-tools/src/service.rs",
+        "modules/ai-tools/src/limits.rs",
+        "modules/ai-tools/src/tools.rs",
+        "modules/ai-tools/src/access_log.rs"
+      ],
+      "invariant": "AI tools are an optional module that is not installed by default. MCP clients reach it only through the module's host endpoint (copypaste module connect relays stdio), so the daemon opens no port. A one-thread runtime with a bounded blocking pool (8 workers that exit after 10 idle seconds) starts with the first connection and stops after the last one closes; connection state and the in-memory access log are released then. Prompts and tool calls never run on the host's delivery thread, at most four prompts are pending, and each connection queues at most 64 inbound frames. Replies are bounded to 64 KB of text in 16,000-character chunks and 640 KB images, and a connection reads at most 2 MB before the user allows more. The access log is written to local state in batches of 16 and bounded to 500 entries, 96 KB and 30 days. The host hides sensitive history before the module reads it.",
+      "next_step": "Measure daemon steady and peak memory, idle CPU and wakeups with the module absent, installed without a connection, and serving one idle and one active MCP client on macOS, Windows and Linux (MCP AC31). feature_budgets.all.ai_tools_mcp_steady_delta_bytes and ai_tools_mcp_peak_delta_bytes are unresolved, and the module library size per target is unmeasured.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established",
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-116",
+      "title": "Engine-free IME panel over a blocking runtime facade",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android host IME",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardInputMethodService.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/RuntimeAccess.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/NativeRuntimeAccess.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ime/PanelController.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ime/PanelFeatureViews.kt",
+        "crates/copypaste-flutter-bridge/src/runtime_android.rs"
+      ],
+      "invariant": "The keyboard panel is built from framework Views in the main process without a Flutter engine. It reaches the runtime through one blocking JNI facade (Runtime::request_blocking) that refuses reactor methods and never starts the P2P listener, so opening the panel causes no network activity. Calls run on one worker thread that exits after 30 idle seconds. Feature tabs keep no state once the panel hides, the template cache is released on hide when anything rendered, and collect mode is an event-driven clipboard listener registered only while the IME is selected.",
+      "next_step": "Measure ime_panel_visible_peak_bytes, ime_hidden_selected_steady_bytes, ime_cold_open_ms and ime_warm_open_ms on physical devices with app, runtime and worker breakdowns (quick-access AC38). All are unresolved in feature_budgets.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-117",
+      "title": "Event-driven home widget and active-mode tiles",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Android host widget and tiles",
+      "platforms": [
+        "Android"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/RecentClipsWidgetProvider.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/widget/WidgetRefresh.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/quickaccess/QuickAccessTiles.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/CaptureToggleTileService.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/SaveClipboardTileService.kt",
+        "apps/copypaste_flutter/android/app/src/main/res/xml/recent_clips_widget_info.xml",
+        "apps/copypaste_flutter/android/app/src/main/AndroidManifest.xml"
+      ],
+      "invariant": "The widget declares updatePeriodMillis=0 and refreshes only on runtime change events, coalesced so a burst of changes costs one refresh, and only while widget instances exist. Both tiles declare ACTIVE_TILE and are updated through requestListeningState on state changes, so opening the shade performs no store access.",
+      "next_step": "Count widget refreshes for a 50-item sync burst and over 24 h without changes, and tile store accesses over 20 shade openings, on physical devices (quick-access AC24, AC26, AC27). widget_refresh_cpu_ms and tile_action_latency_ms are unresolved in feature_budgets.",
+      "native_resource_qualification": {
+        "Android": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-118",
+      "title": "Cloud withholds items expiring within one hour",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-sync store",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-sync/src/store.rs",
+        "crates/copypaste-core/src/storage/expiry.rs",
+        "crates/copypaste-core/src/storage/migrations/010_feature_package.sql"
+      ],
+      "invariant": "An item whose expiry is at most 1 h after creation is recorded in cloud_withheld and skipped by the cloud scan, and so is its later tombstone, so short-lived ciphertext is neither uploaded nor downloaded and no deletion hint reaches the server. P2P is unaffected.",
+      "next_step": "Record cloud upload bytes and request counts for a capture burst under the shipped credential rule template with the template enabled and disabled. No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-119",
+      "title": "Tray Recent section built on menu open",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "Flutter desktop tray",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/tray/controller/tray_menu_controller.dart",
+        "apps/copypaste_flutter/lib/features/tray/controller/tray_recent_section.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart"
+      ],
+      "invariant": "The tray Recent rows and the latest clip from another device are read only when the menu opens and their previews are dropped when it closes; a superseded load is discarded. Tray menu glyphs are rendered once per icon and reused across menu rebuilds.",
+      "next_step": "Measure app memory and CPU for 20 tray menu openings with Recent enabled on release builds of macOS and Windows. No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-120",
+      "title": "P2P withholds new library record kinds from legacy peers",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-p2p sync",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-p2p/src/device_profile.rs",
+        "crates/copypaste-p2p/src/sync/session.rs",
+        "crates/copypaste-p2p/src/peers/cursor.rs",
+        "crates/copypaste-core/src/storage/versions.rs"
+      ],
+      "invariant": "A peer whose device profile has no organization_kinds is offered only legacy organization records (kind_class = 1), served by idx_organization_kind_versions, so an older peer never receives and re-requests records it would decline every session. After an upgrade, a cursor stored without organization_kinds is reset once, costing one full summary re-exchange per peer.",
+      "next_step": "Measure P2P session bytes and duration for a mixed-version pair with 1,200 library records and 50 clips, before and after the newer peer upgrades (risk K2). No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-121",
+      "title": "Coalesced library and progress events",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime events",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/lib.rs",
+        "crates/copypaste-daemon/src/server/watch.rs"
+      ],
+      "invariant": "Library change events are coalesced to at most one per 500 ms window and progress events to one per operation per 250 ms. Watchers subscribe with WatchEvents to the kinds they need, so a copy never wakes a watcher that did not ask for history events.",
+      "next_step": "Count daemon event deliveries during a 100-copy burst and a 1,000-row snippet import on release builds of every listed platform. No budget exists.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-122",
+      "title": "One import plan and one rule-preview plan, released promptly",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P1",
+      "owner_module": "copypaste-runtime snippets and rules",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-runtime/src/features/snippets/transfer.rs",
+        "crates/copypaste-runtime/src/features/rules/preview.rs",
+        "apps/copypaste_flutter/lib/features/content_rules/view/rule_preview_dialog.dart"
+      ],
+      "invariant": "At most one snippet import plan and one rule-preview plan exist per runtime. A plan holds ids and effects only, and is released by commit or apply, by cancel (the preview dialog sends Cancel with its request id on close), by a newer plan of the same kind, or by a 10-minute deadline. A rule preview examines at most 1,000 items in batches of 50 and holds one decrypted text at a time.",
+      "next_step": "Measure peak runtime memory for a 10,000-row import preview and a 1,000-item rule preview on release builds of every listed platform. feature_budgets.snippets_import_10k_peak_bytes is unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-123",
+      "title": "Installed applications load only while the application picker is open",
+      "domain": "runtime",
+      "implementation_status": "implemented_pending_native_evidence",
+      "priority": "P2",
+      "owner_module": "copypaste-source-app installed applications and the Flutter application picker",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-source-app/src/installed.rs",
+        "crates/copypaste-source-app/src/windows_programs.rs",
+        "crates/copypaste-flutter-bridge/src/api/applications.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/InstalledAppsChannel.kt",
+        "apps/copypaste_flutter/lib/features/applications/controller/application_directory.dart",
+        "apps/copypaste_flutter/lib/features/applications/view/application_picker.dart"
+      ],
+      "invariant": "The installed-application list (at most 1,024 entries, names and identifiers only) is read when the picker opens and dropped when it closes. Icons are rendered on demand for visible rows at 64 px and 32 KiB at most, are never cached natively, and are memoized only by the view that requested them; misses are retried after a minute and the History source-app list is held only while a lookup runs. On Windows one uninstall-registry listing (at most 1,024 entries with executable paths) answers listing, lookups and icons for 30 seconds and is dropped on the next call after that; the daemon capture path never scans uninstall registrations. Nothing is loaded by the daemon. The Android worker queues at most 64 requests, pending icon renders are dropped when the picker closes, and its thread exits after 30 idle seconds.",
+      "next_step": "Measure application RSS while the picker lists every installed application and after it closes on release builds of every listed platform.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "targeted_tests_passed_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-124",
+      "title": "Bounded module endpoint connections",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "owner_module": "Module endpoints",
+      "source_references": [
+        "crates/copypaste-modules/src/endpoints.rs",
+        "crates/copypaste-daemon/src/server/endpoint.rs",
+        "crates/copypaste-daemon/src/server/listener.rs"
+      ],
+      "invariant": "At most 8 connections per module and 16 endpoint streams per daemon; 1 MiB frames; at most 2 MiB queued per connection before endpoint_send returns busy. An open connection keeps its module instance loaded; closing it delivers EndpointClose and releases the queue and the instance lease, so idle eviction applies again. Desktop only.",
+      "next_step": "Measure daemon plus loaded module with idle and busy connections, and release after the last close, on macOS and Windows.",
+      "functional_validation": "unit and lifecycle tests",
+      "bounds": {
+        "connections_per_module": 8,
+        "endpoint_streams": 16,
+        "frame_bytes": 1048576,
+        "queued_bytes_per_connection": 2097152
+      }
+    },
+    {
+      "id": "RUN-125",
+      "title": "Module prompts wait without polling",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "owner_module": "Module prompts",
+      "source_references": [
+        "crates/copypaste-modules/src/prompts.rs"
+      ],
+      "invariant": "At most 4 pending prompts per module; the asking module thread blocks on a one-slot channel with the prompt deadline (1-300 s), so no timer or poll runs. Stopping the module dismisses its prompts before teardown waits for it.",
+      "next_step": "None beyond the module host measurements.",
+      "functional_validation": "unit tests",
+      "bounds": {
+        "pending_per_module": 4,
+        "timeout_seconds_max": 300
+      }
     }
   ]
 }

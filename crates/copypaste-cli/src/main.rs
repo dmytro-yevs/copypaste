@@ -25,7 +25,9 @@ mod shutdown;
 
 #[cfg(test)]
 use clap::Parser;
-use cli::{config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, PairAction};
+use cli::{
+    config_patch, parse_cli, Cli, CloudAction, Command, ConfigAction, ModuleAction, PairAction,
+};
 use copypaste_ipc::{ExportData, Method, Response};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
@@ -52,6 +54,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     // before the mapping below rather than bent into it.
     if let Command::Watch = &cli.command {
         return watch(cli.json).await;
+    }
+    if let Command::Module {
+        action: ModuleAction::Connect { id, endpoint },
+    } = &cli.command
+    {
+        return client::connect_endpoint(id, endpoint).await;
     }
 
     #[cfg(windows)]
@@ -160,7 +168,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 patch: config_patch(action),
             },
         },
-        Command::Watch => unreachable!("handled above"),
+        Command::Watch | Command::Module { .. } => unreachable!("handled above"),
         Command::Cloud { action } => match action {
             CloudAction::SignIn { email } => {
                 let (password, passphrase) = cloud::read_credentials()?;

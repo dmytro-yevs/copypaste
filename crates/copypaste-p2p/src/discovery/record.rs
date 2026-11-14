@@ -268,6 +268,7 @@ fn parse_profile(txt: &HashMap<String, String>) -> Option<DeviceProfile> {
         os_name,
         os_version,
         model,
+        organization_kinds: None,
     })
 }
 

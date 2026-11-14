@@ -46,6 +46,61 @@ abstract final class AppTheme {
         ),
       );
 
+  /// [Command] has no component theme and fixes its own container theme, so
+  /// palettes get the shared popup border and elevation from this wrapper.
+  static Widget commandSurface(BuildContext context, {required Widget child}) =>
+      Theme(
+        data: popupTheme(context),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Theme.of(context).radiusXl),
+            boxShadow: popupSurfaceTheme(context).boxShadow,
+          ),
+          child: child,
+        ),
+      );
+
+  /// A count badge on an icon control, such as a queue length.
+  static final AbstractButtonStyle countBadgeStyle =
+      const ButtonStyle.primary(density: ButtonDensity.dense).copyWith(
+        padding: (context, states, value) =>
+            const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        margin: (context, states, value) => EdgeInsets.zero,
+        textStyle: (context, states, value) => value.copyWith(
+          color: Colors.white,
+          fontSize: AppTypographySize.navigationCompact,
+          fontWeight: FontWeight.w600,
+          height: AppIconSize.sm / AppTypographySize.navigationCompact,
+        ),
+        decoration: (context, states, value) => const BoxDecoration(
+          color: navigationAccent,
+          borderRadius: BorderRadius.all(Radius.circular(AppRadius.full)),
+        ),
+      );
+
+  static const chipInputTheme = ChipInputTheme(
+    spacing: AppSpacing.xs,
+    useChips: true,
+  );
+
+  static const stepperTheme = StepperTheme(
+    size: StepSize.small,
+    variant: StepVariant.circle,
+  );
+
+  static CodeSnippetTheme codeSnippetTheme(BuildContext context) =>
+      CodeSnippetTheme(
+        backgroundColor: Theme.of(context).colorScheme.muted,
+        borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+        // The end inset keeps text clear of the overlaid copy action.
+        padding: const EdgeInsetsDirectional.fromSTEB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.huge,
+          AppSpacing.md,
+        ),
+      );
+
   static OutlinedContainerTheme popupSurfaceTheme(BuildContext context) =>
       OutlinedContainerTheme(
         boxShadow: [
@@ -227,9 +282,16 @@ abstract final class AppTheme {
     return height < AppControlSize.touch ? AppControlSize.touch : height;
   }
 
+  /// The header's bottom border; a side drawer's top border hides under it
+  /// instead of doubling it.
+  static const double headerDividerWidth = 1;
+
   static BoxDecoration headerDecoration(BuildContext context) => BoxDecoration(
     border: Border(
-      bottom: BorderSide(color: Theme.of(context).colorScheme.border),
+      bottom: BorderSide(
+        color: Theme.of(context).colorScheme.border,
+        width: headerDividerWidth,
+      ),
     ),
   );
 
@@ -1193,7 +1255,16 @@ abstract final class AppTheme {
                 data: tabsTheme,
                 child: ComponentTheme<SwitchTheme>(
                   data: switchTheme(context),
-                  child: buttonThemedChild,
+                  child: ComponentTheme<ChipInputTheme>(
+                    data: chipInputTheme,
+                    child: ComponentTheme<StepperTheme>(
+                      data: stepperTheme,
+                      child: ComponentTheme<CodeSnippetTheme>(
+                        data: codeSnippetTheme(context),
+                        child: buttonThemedChild,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),

@@ -1,4 +1,7 @@
-use crate::{ModuleError, ModuleManager, MODULE_RELEASE_PUBLIC_KEY};
+use crate::{
+    EndpointSession, ModuleError, ModuleHostServices, ModuleManager, PromptListener,
+    MODULE_RELEASE_PUBLIC_KEY,
+};
 use copypaste_module_sdk::{ModuleOperation, ModuleTarget, MAX_INVOCATION_BYTES};
 use std::{
     path::{Path, PathBuf},
@@ -11,9 +14,12 @@ pub struct ModuleHost {
     root: PathBuf,
     manager: Mutex<Option<Arc<ModuleManager>>>,
     sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
+    host: Mutex<HostSettings>,
     wake: tokio::sync::Notify,
     binding: Mutex<Option<crate::semantic_search::SearchBinding>>,
     search: Mutex<Option<Arc<crate::semantic_search::SemanticSearch>>>,
+    /// A developer key replacing the release key; set only by tests.
+    package_key: Mutex<Option<String>>,
 }
 
 impl ModuleHost {
@@ -22,10 +28,22 @@ impl ModuleHost {
             root: application_data.join("modules"),
             manager: Mutex::new(None),
             sync_services: Mutex::new(None),
+            host: Mutex::default(),
             wake: tokio::sync::Notify::new(),
             binding: Mutex::new(None),
             search: Mutex::new(None),
+            package_key: Mutex::new(None),
         }
+    }
+
+    /// Trusts packages signed by `public_key` instead of the release key.
+    /// Takes effect only before the registry first opens.
+    #[cfg(feature = "test-support")]
+    pub fn trust_package_key(&self, public_key: &str) {
+        *self
+            .package_key
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(public_key.into());
     }
 
     pub(crate) fn manager(&self) -> Result<Arc<ModuleManager>, ModuleError> {
@@ -36,11 +54,16 @@ impl ModuleHost {
         let target = ModuleTarget::current().ok_or_else(|| {
             ModuleError::Invalid("Modules are unavailable on this platform.".into())
         })?;
+        let key = self
+            .package_key
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .clone();
         let manager = Arc::new(ModuleManager::open(
             &self.root,
             env!("CARGO_PKG_VERSION"),
             target,
-            MODULE_RELEASE_PUBLIC_KEY,
+            key.as_deref().unwrap_or(MODULE_RELEASE_PUBLIC_KEY),
         )?);
         if let Some(services) = self
             .sync_services
@@ -50,8 +73,54 @@ impl ModuleHost {
         {
             manager.set_sync_services(services)?;
         }
+        self.host
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .apply(&manager)?;
         *initialized = Some(Arc::clone(&manager));
         Ok(manager)
+    }
+
+    /// Settings applied to the registry when it opens, and at once if it is open.
+    fn configure(&self, change: impl FnOnce(&mut HostSettings)) -> Result<(), ModuleError> {
+        // Same lock order as `manager()`.
+        let manager = self.manager.lock().map_err(|_| ModuleError::State)?;
+        let mut settings = self.host.lock().map_err(|_| ModuleError::State)?;
+        change(&mut settings);
+        if let Some(manager) = manager.as_ref() {
+            settings.apply(manager)?;
+        }
+        Ok(())
+    }
+
+    /// The application services schema 6 modules reach.
+    pub fn set_host_services(
+        &self,
+        services: Arc<dyn ModuleHostServices>,
+    ) -> Result<(), ModuleError> {
+        self.configure(|settings| settings.services = Some(services))
+    }
+
+    /// Called with the pending prompt count whenever it changes.
+    pub fn set_prompt_listener(&self, listener: PromptListener) -> Result<(), ModuleError> {
+        self.configure(|settings| settings.prompt_listener = Some(listener))
+    }
+
+    /// Opens a module endpoint connection; desktop only. Blocks while the
+    /// module loads and receives `EndpointOpen`.
+    pub fn connect(
+        &self,
+        id: &str,
+        endpoint: &str,
+        caller: ModuleCaller,
+    ) -> Result<EndpointSession, ModuleError> {
+        if cfg!(target_os = "android") {
+            return Err(ModuleError::Invalid(
+                "Module endpoints are unavailable on this platform.".into(),
+            ));
+        }
+        self.manager()?
+            .connect(id, endpoint, caller == ModuleCaller::App)
     }
 
     pub fn bind_search(&self, store: copypaste_core::Store, changed: Arc<dyn Fn() + Send + Sync>) {
@@ -203,6 +272,15 @@ impl ModuleHost {
         }
         self.wake_sync();
     }
+    /// See [`crate::SyncServices::reoffer`].
+    pub fn reoffer(&self, item_ids: &[String]) {
+        if let Ok(services) = self.sync_services.lock() {
+            if let Some(services) = services.as_ref() {
+                let _ = services.reoffer(item_ids);
+            }
+        }
+        self.wake_sync();
+    }
     pub fn sync_enabled_changed(&self, enabled: bool) {
         if !enabled {
             if let Ok(manager) = self.manager() {
@@ -336,6 +414,7 @@ impl ModuleHost {
     pub async fn request(
         self: &Arc<Self>,
         operation: ModuleOperation,
+        caller: ModuleCaller,
     ) -> Result<String, ModuleError> {
         let host = Arc::clone(self);
         tokio::task::spawn_blocking(move || {
@@ -345,6 +424,10 @@ impl ModuleHost {
                 ModuleOperation::List
                     | ModuleOperation::Invoke { .. }
                     | ModuleOperation::StageUpdate { .. }
+                    | ModuleOperation::Connect { .. }
+                    | ModuleOperation::SetLocale { .. }
+                    | ModuleOperation::Prompts
+                    | ModuleOperation::AnswerPrompt { .. }
             );
             let result = match operation {
                 ModuleOperation::List => {
@@ -362,8 +445,12 @@ impl ModuleHost {
                     manager.stage_update(&id, Path::new(&package_path), &app_version)?;
                     serde_json::Value::Null
                 }
-                ModuleOperation::SetEnabled { id, enabled } => {
-                    manager.set_enabled(&id, enabled)?;
+                ModuleOperation::SetEnabled {
+                    id,
+                    enabled,
+                    capabilities,
+                } => {
+                    manager.set_enabled(&id, enabled, &capabilities)?;
                     serde_json::Value::Null
                 }
                 ModuleOperation::SetPreferences { id, values_json } => {
@@ -378,12 +465,31 @@ impl ModuleHost {
                     id,
                     command,
                     arguments_json,
-                } => serde_json::to_value(manager.invoke(
+                } => serde_json::to_value(manager.invoke_as(
                     &id,
                     &command,
                     decode_values(&arguments_json)?,
+                    caller == ModuleCaller::App,
                 )?)
                 .map_err(|_| ModuleError::State)?,
+                ModuleOperation::Connect { .. } => {
+                    return Err(ModuleError::Invalid(
+                        "Module endpoints need a dedicated connection.".into(),
+                    ))
+                }
+                ModuleOperation::SetLocale { locale } => {
+                    // Validated before it is kept for a registry opened later.
+                    manager.set_locale(&locale)?;
+                    host.configure(|settings| settings.locale = Some(locale))?;
+                    serde_json::Value::Null
+                }
+                ModuleOperation::Prompts => {
+                    serde_json::to_value(manager.prompts()).map_err(|_| ModuleError::State)?
+                }
+                ModuleOperation::AnswerPrompt { prompt_id, choice } => {
+                    manager.answer_prompt(&prompt_id, choice)?;
+                    serde_json::Value::Null
+                }
             };
             if changed {
                 if let Some(service) = host.search_service() {
@@ -409,6 +515,36 @@ impl ModuleHost {
         })
         .await
         .map_err(|_| ModuleError::State)?
+    }
+}
+
+/// Who sent a module operation. Only the app may run `app_only` commands,
+/// and only it opens privileged endpoint connections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleCaller {
+    App,
+    Client,
+}
+
+#[derive(Default)]
+struct HostSettings {
+    services: Option<Arc<dyn ModuleHostServices>>,
+    prompt_listener: Option<PromptListener>,
+    locale: Option<String>,
+}
+
+impl HostSettings {
+    fn apply(&self, manager: &ModuleManager) -> Result<(), ModuleError> {
+        if let Some(services) = &self.services {
+            manager.set_host_services(Arc::clone(services));
+        }
+        if let Some(listener) = &self.prompt_listener {
+            manager.set_prompt_listener(Arc::clone(listener));
+        }
+        if let Some(locale) = &self.locale {
+            manager.set_locale(locale)?;
+        }
+        Ok(())
     }
 }
 
@@ -669,7 +805,9 @@ mod tests {
                 ]),
             )
             .unwrap();
-        manager.set_enabled("copypaste.supabase", true).unwrap();
+        manager
+            .set_enabled("copypaste.supabase", true, &[])
+            .unwrap();
         let host = Arc::new(ModuleHost::new(directory.path()));
         *host.manager.lock().unwrap() = Some(Arc::clone(&manager));
         host.set_sync_services(Arc::clone(&services)).unwrap();
@@ -808,9 +946,12 @@ mod tests {
             )
             .unwrap();
 
-        host.request(ModuleOperation::Remove {
-            id: MODULE_ID.into(),
-        })
+        host.request(
+            ModuleOperation::Remove {
+                id: MODULE_ID.into(),
+            },
+            ModuleCaller::App,
+        )
         .await
         .unwrap();
         let pending = manager.list().unwrap();

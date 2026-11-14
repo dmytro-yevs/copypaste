@@ -116,7 +116,9 @@ fn staged_updates_wait_for_new_app_and_preserve_preferences_and_enabled_state() 
     manager
         .install(&fixture.package("0.1.0", b"old", |_| {}, None))
         .unwrap();
-    manager.set_enabled("copypaste.text-tools", false).unwrap();
+    manager
+        .set_enabled("copypaste.text-tools", false, &[])
+        .unwrap();
     manager
         .set_preferences(
             "copypaste.text-tools",
@@ -400,7 +402,7 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
             Ok(())
         })
         .unwrap());
-    manager.set_enabled(&installed.id, true).unwrap();
+    manager.set_enabled(&installed.id, true, &[]).unwrap();
     assert!(manager.has_sms_handler().unwrap());
     assert!(manager
         .dispatch_sms("123456", |code| {
@@ -414,7 +416,7 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
             "invalid output"
         ))
         .is_err());
-    manager.set_enabled(&installed.id, false).unwrap();
+    manager.set_enabled(&installed.id, false, &[]).unwrap();
     drop(manager);
     let manager = open();
     assert!(!manager.has_sms_handler().unwrap());
@@ -474,7 +476,7 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
             text: "  УКРАЇНА Ї Ґ Є І  ".into()
         }
     );
-    manager.set_enabled(&installed.id, false).unwrap();
+    manager.set_enabled(&installed.id, false, &[]).unwrap();
     assert!(matches!(
         manager.invoke(&installed.id, "transform", input.clone()),
         Err(ModuleError::Disabled)
@@ -488,7 +490,7 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
     assert_eq!(updated.version, "1.1.0");
     assert!(!updated.enabled);
     assert_eq!(updated.preferences["uppercase"], json!(true));
-    manager.set_enabled(&installed.id, true).unwrap();
+    manager.set_enabled(&installed.id, true, &[]).unwrap();
     manager.invoke(&installed.id, "transform", input).unwrap();
     let data = fixture
         .directory
@@ -505,6 +507,187 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
         .exists());
     drop(manager);
     assert!(fixture.manager().list().unwrap().is_empty());
+}
+
+#[test]
+fn endpoint_connections_need_confirmed_capabilities_and_end_with_the_module() {
+    use copypaste_module_sdk::ModuleCapability::{Endpoints, Prompts};
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let library = fs::read(native_library()).unwrap();
+    let declare = |capabilities: serde_json::Value| {
+        move |manifest: &mut serde_json::Value| {
+            manifest["schema_version"] = json!(6);
+            manifest["supported_platforms"] = json!([target().platform]);
+            manifest["capabilities"] = capabilities;
+            manifest["endpoints"] = json!([{"id": "echo", "platforms": [target().platform]}]);
+            manifest["commands"][0]["app_only"] = json!(true);
+        }
+    };
+    let id = "copypaste.text-tools";
+    let installed = manager
+        .install(&fixture.package("1.0.0", &library, declare(json!(["endpoints"])), None))
+        .unwrap();
+    assert!(!installed.enabled, "capabilities wait for confirmation");
+    assert!(matches!(
+        manager.connect(id, "echo", false),
+        Err(ModuleError::Disabled)
+    ));
+    assert!(manager.set_enabled(id, true, &[]).is_err());
+    manager.set_enabled(id, true, &[Endpoints]).unwrap();
+    let input = BTreeMap::from([("text".into(), json!(" a "))]);
+    assert!(manager
+        .invoke_as(id, "transform", input.clone(), false)
+        .is_err());
+    manager.invoke(id, "transform", input).unwrap();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut session = manager.connect(id, "echo", false).unwrap();
+    let link = session.link();
+    link.deliver("ping".into()).unwrap();
+    assert_eq!(
+        runtime.block_on(session.outbound()).as_deref(),
+        Some("ping")
+    );
+    manager.set_enabled(id, false, &[]).unwrap();
+    assert_eq!(runtime.block_on(session.outbound()), None);
+    assert!(link.deliver("late".into()).is_err());
+    link.close();
+
+    drop(manager);
+    let manager = fixture.manager();
+    manager.set_enabled(id, true, &[Endpoints]).unwrap();
+    drop(manager);
+    let manager = fixture.manager();
+    assert!(manager.list().unwrap()[0].enabled, "confirmation persists");
+    manager
+        .install(&fixture.package(
+            "1.1.0",
+            &library,
+            declare(json!(["endpoints", "prompts"])),
+            None,
+        ))
+        .unwrap();
+    assert!(
+        !manager.list().unwrap()[0].enabled,
+        "a new capability needs confirmation again"
+    );
+    manager
+        .set_enabled(id, true, &[Endpoints, Prompts])
+        .unwrap();
+}
+
+/// Records kept like the runtime keeps them, so a value written by another
+/// device can be stood in for.
+#[derive(Default)]
+struct Records(std::sync::Mutex<BTreeMap<(String, String), String>>);
+
+impl Records {
+    fn set(&self, module_id: &str, key: &str, value_json: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert((module_id.into(), key.into()), value_json.into());
+    }
+    fn get(&self, module_id: &str, key: &str) -> Option<serde_json::Value> {
+        let records = self.0.lock().unwrap();
+        let json = records.get(&(module_id.to_owned(), key.to_owned()))?;
+        Some(serde_json::from_str(json).unwrap())
+    }
+}
+
+impl copypaste_modules::ModuleHostServices for Records {
+    fn record_get(
+        &self,
+        module_id: &str,
+        key: &str,
+    ) -> Result<Option<copypaste_module_sdk::ModuleRecord>, copypaste_module_sdk::HostError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap()
+            .get(&(module_id.to_owned(), key.to_owned()))
+            .map(|value_json| copypaste_module_sdk::ModuleRecord {
+                module_id: module_id.into(),
+                key: key.into(),
+                value_json: value_json.clone(),
+                deleted: false,
+            }))
+    }
+    fn record_put(
+        &self,
+        module_id: &str,
+        key: String,
+        value_json: String,
+    ) -> Result<(), copypaste_module_sdk::HostError> {
+        self.set(module_id, &key, &value_json);
+        Ok(())
+    }
+}
+
+#[test]
+fn synced_preferences_follow_their_record_and_the_locale_survives_a_restart() {
+    use copypaste_module_sdk::HOST_PREFERENCES_RECORD;
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let records = std::sync::Arc::new(Records::default());
+    manager.set_host_services(records.clone());
+    let library = fs::read(native_library()).unwrap();
+    let id = "copypaste.text-tools";
+    manager
+        .install(&fixture.package(
+            "1.0.0",
+            &library,
+            |manifest| {
+                manifest["schema_version"] = json!(6);
+                manifest["supported_platforms"] = json!([target().platform]);
+                manifest["preferences"][0]["synced"] = json!(true);
+                manifest["localizations"] = json!({"uk": {"title": "Текстові інструменти"}});
+            },
+            None,
+        ))
+        .unwrap();
+    manager
+        .set_preferences(id, BTreeMap::from([("uppercase".into(), json!(true))]))
+        .unwrap();
+    assert_eq!(
+        records.get(id, HOST_PREFERENCES_RECORD),
+        Some(json!({"uppercase": true}))
+    );
+
+    records.set(
+        id,
+        HOST_PREFERENCES_RECORD,
+        r#"{"uppercase":false,"later":1}"#,
+    );
+    assert_eq!(
+        manager.list().unwrap()[0].preferences["uppercase"],
+        json!(false)
+    );
+    let input = BTreeMap::from([("text".into(), json!(" quiet "))]);
+    assert_eq!(
+        manager.invoke(id, "transform", input).unwrap(),
+        ModuleOutput::Text {
+            text: "quiet".into()
+        }
+    );
+    manager
+        .set_preferences(id, BTreeMap::from([("uppercase".into(), json!(true))]))
+        .unwrap();
+    assert_eq!(
+        records.get(id, HOST_PREFERENCES_RECORD),
+        Some(json!({"uppercase": true, "later": 1})),
+        "values of fields this version lacks are kept"
+    );
+
+    manager.set_locale("uk").unwrap();
+    drop(manager);
+    assert_eq!(
+        fixture.manager().list().unwrap()[0].title,
+        "Текстові інструменти"
+    );
 }
 
 #[test]

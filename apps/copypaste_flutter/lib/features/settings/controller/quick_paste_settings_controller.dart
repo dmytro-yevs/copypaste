@@ -56,7 +56,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   LinuxIntegrationStatus? get linuxIntegration => _linuxIntegration;
   String? get registeredShortcutDescription => switch (_registrar) {
     LinuxPortalDesktopShortcutRegistrar registrar =>
-      registrar.registeredTriggerDescription,
+      registrar.registeredTriggerDescription(DesktopShortcutId.quickPaste),
     _ => null,
   };
 
@@ -232,9 +232,14 @@ class QuickPasteSettingsController extends ChangeNotifier
       if (_disposed) return false;
       _registeredShortcut = null;
       if (shortcut == null) {
-        await _registrar.unregister();
+        await _registrar.unregister(DesktopShortcutId.quickPaste);
       } else {
-        await _registrar.register(shortcut, _openWindow);
+        await _registrar.register(
+          DesktopShortcutId.quickPaste,
+          shortcut,
+          _openWindow,
+          description: AppStrings.current.platformGlobalShortcutDescription,
+        );
         _registeredShortcut = shortcut;
         _shortcutRefusal = null;
       }
@@ -274,7 +279,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   Future<void> _disposeRegistration() async {
     try {
       await _registrationOperation;
-      await _registrar.unregister();
+      await _registrar.unregister(DesktopShortcutId.quickPaste);
     } catch (_) {
       // Teardown cannot report late native registration errors.
     }

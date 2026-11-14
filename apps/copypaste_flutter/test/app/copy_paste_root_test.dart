@@ -20,6 +20,7 @@ import 'package:copypaste_flutter/platform/startup/launch_at_login.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../features/onboarding/onboarding_test_support.dart';
+
 import 'package:flutter/services.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -494,16 +495,18 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   @override
   Future<void> initializeTray({
     bool visible = true,
-    required Future<void> Function() onOpenRequested,
-    required Future<void> Function() onCaptureRequested,
-    required Future<void> Function() onSettingsRequested,
-    required Future<void> Function() onQuitRequested,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
   }) async {
-    settingsHandler = onSettingsRequested;
+    settingsHandler = () =>
+        events.onAction(const TrayCommandAction(TrayCommand.openSettings));
   }
 
   @override
-  Future<void> updateCaptureMenu({required CaptureControlState state}) async {}
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu) async {}
+
+  @override
+  Future<void> openQuickPaste() async {}
 
   @override
   Future<void> initializeWindow(

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../features/tray/models/tray_menu_model.dart';
 import '../capture/capture_control_state.dart';
 
 import 'desktop_window_geometry.dart';
@@ -12,6 +13,7 @@ import 'desktop_visibility_preferences.dart';
 
 export 'desktop_window_geometry.dart';
 export '../capture/capture_control_state.dart';
+export '../../features/tray/models/tray_menu_model.dart';
 
 enum DesktopWindowSetupIssue {
   windowUnavailable,
@@ -48,13 +50,15 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
 
   Future<void> initializeTray({
     bool visible = true,
-    required Future<void> Function() onOpenRequested,
-    required Future<void> Function() onCaptureRequested,
-    required Future<void> Function() onSettingsRequested,
-    required Future<void> Function() onQuitRequested,
+    required List<TrayMenuEntry> menu,
+    required TrayMenuEvents events,
   });
 
-  Future<void> updateCaptureMenu({required CaptureControlState state});
+  /// Shows [menu]; rows keep their native items when their keys persist.
+  Future<void> updateTrayMenu(List<TrayMenuEntry> menu);
+
+  /// Opens Quick Paste anchored to the status icon.
+  Future<void> openQuickPaste();
 
   Future<void> hide();
 
@@ -73,13 +77,26 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
   Future<void> dispose();
 }
 
+/// What the native tray menu reports to its owner.
+class TrayMenuEvents {
+  const TrayMenuEvents({
+    required this.onAction,
+    required this.onOpened,
+    required this.onClosed,
+  });
+
+  final Future<void> Function(TrayAction action) onAction;
+  final VoidCallback onOpened;
+  final VoidCallback onClosed;
+}
+
 /// macOS draws the app header in the native title bar once its window is ready.
 bool usesUnifiedMacosTitleBar(
   DesktopWindowController? window, {
   required bool windowReady,
 }) => Platform.isMacOS && window != null && windowReady;
 
-class DesktopWindowController {
+class DesktopWindowController implements TrayMenuSurface {
   bool _changingFullScreen = false;
 
   Future<void> toggleFullScreen() => _changeFullScreen();
@@ -106,8 +123,10 @@ class DesktopWindowController {
     required DesktopWindowHost host,
     required DesktopWindowGeometryStore geometryStore,
     DesktopVisibilityPreferencesStore? visibilityStore,
+    DateTime Function()? clock,
   }) : _host = host,
        _geometryStore = geometryStore,
+       _clock = clock ?? DateTime.now,
        visibility = DesktopVisibilityController(
          host: host,
          store: visibilityStore ?? MemoryDesktopVisibilityStore(),
@@ -118,6 +137,7 @@ class DesktopWindowController {
 
   final DesktopWindowHost _host;
   final DesktopWindowGeometryStore _geometryStore;
+  final DateTime Function() _clock;
   final ValueNotifier<DesktopWindowSetupIssue?> setupIssue =
       ValueNotifier<DesktopWindowSetupIssue?>(null);
   final ValueNotifier<bool> _isUnifiedTitleBarReady = ValueNotifier<bool>(
@@ -137,7 +157,10 @@ class DesktopWindowController {
   Future<void> Function()? _beforeQuit;
   VoidCallback? _openSettings;
   Future<void> Function()? _toggleCapture;
-  CaptureControlState _captureState = CaptureControlState.unavailable;
+  TrayMenuState _trayState = const TrayMenuState();
+  TrayMenuDelegate? _trayDelegate;
+  Timer? _resumeTimer;
+  Future<void> _trayUpdate = Future<void>.value();
   Future<void>? _initialization;
   Future<void>? _disposal;
   Future<void>? _taskbarRestoration;
@@ -229,16 +252,17 @@ class DesktopWindowController {
     try {
       await _host.initializeTray(
         visible: visibility.preferences.showInTray,
-        onOpenRequested: showFromTrayOrDock,
-        onCaptureRequested: _toggleCaptureFromTray,
-        onSettingsRequested: _openSettingsFromTray,
-        onQuitRequested: quit,
+        menu: buildTrayMenu(_trayState, AppStrings.current),
+        events: TrayMenuEvents(
+          onAction: _trayAction,
+          onOpened: _trayMenuOpened,
+          onClosed: _trayMenuClosed,
+        ),
       );
       if (_disposed) {
         return;
       }
       _trayReady = true;
-      await _host.updateCaptureMenu(state: _captureState);
       _clearIssue();
     } catch (_) {
       _setIssue(DesktopWindowSetupIssue.trayUnavailable);
@@ -269,6 +293,7 @@ class DesktopWindowController {
     }
   }
 
+  @override
   Future<void> showFromTrayOrDock() async {
     try {
       _visibilityChanged(true);
@@ -315,7 +340,109 @@ class DesktopWindowController {
   }
 
   Future<void> _toggleCaptureFromTray() async {
+    await _clearPause();
     await _toggleCapture?.call();
+  }
+
+  Future<void> _trayAction(TrayAction action) async {
+    if (_disposed) return;
+    final work = switch (action) {
+      TrayCommandAction(command: TrayCommand.openApp) => showFromTrayOrDock(),
+      TrayCommandAction(command: TrayCommand.openQuickPaste) =>
+        _host.openQuickPaste(),
+      TrayCommandAction(command: TrayCommand.toggleCapture) =>
+        _toggleCaptureFromTray(),
+      TrayCommandAction(command: TrayCommand.openSettings) =>
+        _openSettingsFromTray(),
+      TrayCommandAction(command: TrayCommand.quit) => quit(),
+      TrayPauseAction(:final duration) => pauseCapture(duration),
+      _ => _trayDelegate?.trayActionSelected(action) ?? Future<void>.value(),
+    };
+    try {
+      await work;
+    } catch (_) {
+      // Each action reports its own failure; a menu has nowhere to show one.
+    }
+  }
+
+  void _trayMenuOpened() {
+    if (_disposed) return;
+    // A monotonic timer can fall behind the wall clock across system sleep.
+    unawaited(_resumeIfDue());
+    // Labels follow the interface language, which can change while closed.
+    unawaited(updateTrayMenu((state) => state));
+    _trayDelegate?.trayMenuOpened();
+  }
+
+  void _trayMenuClosed() {
+    if (!_disposed) _trayDelegate?.trayMenuClosed();
+  }
+
+  /// Pauses capture until resumed, or for [duration] and then resumes it.
+  Future<void> pauseCapture(Duration? duration) async {
+    final toggle = _toggleCapture;
+    if (_disposed ||
+        toggle == null ||
+        _trayState.capture != CaptureControlState.running) {
+      return;
+    }
+    await _clearPause();
+    await toggle();
+    if (duration == null || _disposed) return;
+    final until = _clock().add(duration);
+    await updateTrayMenu((state) => state.copyWith(pausedUntil: until));
+    _armResume(until);
+  }
+
+  void _armResume(DateTime until) {
+    _resumeTimer?.cancel();
+    final wait = until.difference(_clock());
+    _resumeTimer = Timer(wait.isNegative ? Duration.zero : wait, () {
+      unawaited(_resumeIfDue());
+    });
+  }
+
+  Future<void> _resumeIfDue() async {
+    final until = _trayState.pausedUntil;
+    if (until == null || _disposed) return;
+    if (_clock().isBefore(until)) {
+      _armResume(until);
+      return;
+    }
+    await _clearPause();
+    if (_trayState.capture == CaptureControlState.paused) {
+      await _toggleCapture?.call();
+    }
+  }
+
+  Future<void> _clearPause() async {
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
+    if (_trayState.pausedUntil != null) {
+      await updateTrayMenu((state) => state.copyWith(pausedUntil: null));
+    }
+  }
+
+  @override
+  TrayMenuState get trayState => _trayState;
+
+  @override
+  void setTrayMenuDelegate(TrayMenuDelegate? delegate) {
+    _trayDelegate = delegate;
+  }
+
+  /// Applies [update] and shows the result once the tray is ready.
+  @override
+  Future<void> updateTrayMenu(
+    TrayMenuState Function(TrayMenuState state) update,
+  ) {
+    if (_disposed) return Future<void>.value();
+    _trayState = update(_trayState);
+    _trayUpdate = _trayUpdate.catchError((Object _) {}).then((_) async {
+      if (!_trayReady || _disposed) return;
+      await _host.updateTrayMenu(buildTrayMenu(_trayState, AppStrings.current));
+    });
+    return _trayUpdate;
   }
 
   Future<void> quit() async {
@@ -351,10 +478,19 @@ class DesktopWindowController {
   }
 
   Future<void> updateCaptureState({required CaptureControlState state}) async {
-    _captureState = state;
-    if (_trayReady && !_disposed) {
-      await _host.updateCaptureMenu(state: state);
+    if (state != CaptureControlState.paused) {
+      // Resumed or stopped elsewhere: a timed pause no longer applies.
+      _resumeTimer?.cancel();
+      _resumeTimer = null;
     }
+    await updateTrayMenu(
+      (current) => current.copyWith(
+        capture: state,
+        pausedUntil: state == CaptureControlState.paused
+            ? current.pausedUntil
+            : null,
+      ),
+    );
   }
 
   Future<void> _restoreBounds() async {
@@ -426,6 +562,9 @@ class DesktopWindowController {
     }
     _disposed = true;
     _trayReady = false;
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
+    _trayDelegate = null;
     _isUnifiedTitleBarReady.value = false;
     _persistenceReady = false;
     late final Future<void> nextDisposal;
@@ -442,6 +581,7 @@ class DesktopWindowController {
     try {
       await _initialization?.catchError((_) {});
       await _boundsWrite.catchError((_) {});
+      await _trayUpdate.catchError((_) {});
       await visibility.settle();
       await _taskbarRestoration?.catchError((_) {});
       await _host.dispose();

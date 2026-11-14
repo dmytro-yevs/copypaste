@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstring>
+#include <functional>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -42,6 +43,12 @@ constexpr char kIntegration[] = "com.copypaste.app/linux_integration";
 constexpr char kUpdates[] = "com.copypaste.app/app_update";
 constexpr char kLifecycle[] = "com.copypaste.app/lifecycle";
 constexpr char kPairingLinks[] = "com.copypaste.app/pairing_links";
+// Matches DesktopShortcutId.quickPaste in Dart.
+constexpr char kQuickPasteShortcutId[] = "copypaste.quick-paste";
+constexpr gint64 kMaxCaretMove = 2000;
+// Synthesized input waits up to 1 s for the activating keys to be released.
+constexpr guint kKeyReleaseRetryMilliseconds = 25;
+constexpr int kKeyReleaseAttempts = 40;
 
 struct ChannelState {
   GtkApplication* application = nullptr;
@@ -895,8 +902,10 @@ FlValue* integration_status() {
       gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
   const bool remote_active = portal != nullptr && portal->remote_desktop_active();
   const bool remote_available = portal != nullptr && portal->remote_desktop_available();
-  const bool shortcut_active = (portal_shortcuts && portal->shortcut_registered()) ||
-      (gnome_shortcuts_available && gnome_shortcuts->shortcut_registered());
+  const bool shortcut_active =
+      (portal_shortcuts && portal->shortcut_registered(kQuickPasteShortcutId)) ||
+      (gnome_shortcuts_available &&
+       gnome_shortcuts->shortcut_registered(kQuickPasteShortcutId));
   const char* session = wayland ? "wayland" : x11 ? "x11" : "unsupported";
   FlValue* response = fl_value_new_map();
   fl_value_set_string_take(response, "session", fl_value_new_string(session));
@@ -961,6 +970,111 @@ FlValue* integration_status() {
   return response;
 }
 
+bool own_window_active() {
+  if (state == nullptr || state->application == nullptr) return false;
+  for (GList* item = gtk_application_get_windows(state->application);
+       item != nullptr; item = item->next) {
+    if (gtk_window_is_active(GTK_WINDOW(item->data))) return true;
+  }
+  return false;
+}
+
+struct KeyReleaseWait {
+  FlMethodCall* call;
+  std::function<FlValue*(bool released)> send;
+  int attempts = 0;
+};
+
+gboolean continue_key_release_wait(gpointer data) {
+  auto* wait = static_cast<KeyReleaseWait*>(data);
+  const bool released = x11_quick_paste == nullptr || x11_quick_paste->keys_released();
+  if (!released && ++wait->attempts < kKeyReleaseAttempts) return G_SOURCE_CONTINUE;
+  success(wait->call, wait->send(released));
+  g_object_unref(wait->call);
+  delete wait;
+  return G_SOURCE_REMOVE;
+}
+
+// Answers `call` once the activating keys are up, or after one second.
+void when_keys_released(FlMethodCall* call, std::function<FlValue*(bool released)> send) {
+  if (x11_quick_paste == nullptr || x11_quick_paste->keys_released()) {
+    success(call, send(true));
+    return;
+  }
+  g_timeout_add(kKeyReleaseRetryMilliseconds, continue_key_release_wait,
+                new KeyReleaseWait{FL_METHOD_CALL(g_object_ref(call)), std::move(send)});
+}
+
+// Foreground input for actions that bypass a Quick Paste presentation. The
+// outcome names follow the Dart PasteOutcome contract.
+bool foreground_input_call(FlMethodCall* call) {
+  if (is_method(call, "secureFieldFocused")) {
+    // Neither X11 nor Wayland exposes the focused field's password state.
+    success(call, fl_value_new_null());
+    return true;
+  }
+  const bool paste = is_method(call, "pasteForeground");
+  if (!paste && !is_method(call, "moveCaretLeft")) return false;
+  FlValue* args = fl_method_call_get_args(call);
+  FlValue* plain = args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+      ? fl_value_lookup_string(args, "plainText") : nullptr;
+  const gint64 count = paste ? 0 : integer_argument(call, "count", -1);
+  if ((plain != nullptr && fl_value_get_type(plain) != FL_VALUE_TYPE_BOOL) ||
+      count < 0 || count > kMaxCaretMove) {
+    failure(call, "invalid_arguments", "Foreground input details are invalid.");
+    return true;
+  }
+  // Plain text is decided by the delivered clipboard content, so the
+  // standard paste chord serves both variants.
+  const auto blocked = [paste](const char* outcome) {
+    return paste ? fl_value_new_string(outcome) : fl_value_new_bool(false);
+  };
+  if (!paste && count == 0) {
+    success(call, fl_value_new_bool(true));
+  } else if (own_window_active()) {
+    success(call, blocked("noTarget"));
+  } else if (gdk_is_x11() && x11_quick_paste != nullptr && x11_quick_paste->input_available()) {
+    when_keys_released(call, [paste, count, blocked](bool released) -> FlValue* {
+      if (!released) return blocked("copiedOnly");
+      if (x11_quick_paste == nullptr || own_window_active() ||
+          x11_quick_paste->focused_window().empty()) {
+        return blocked("noTarget");
+      }
+      if (!paste) {
+        return fl_value_new_bool(x11_quick_paste->move_caret_left(static_cast<int>(count)));
+      }
+      return fl_value_new_string(x11_quick_paste->paste_into_focused() ? "pasted" : "unsupported");
+    });
+  } else if (gdk_is_wayland() && portal != nullptr && portal->remote_desktop_active()) {
+    // The compositor keeps the keyboard state; held keys cannot be observed here.
+    success(call, paste
+        ? fl_value_new_string(portal->send_ctrl_v() ? "pasted" : "unsupported")
+        : fl_value_new_bool(portal->send_caret_left(static_cast<int>(count))));
+  } else {
+    success(call, blocked("unsupported"));
+  }
+  return true;
+}
+
+void notify_shortcut_activated(const std::string& id) {
+  if (engine_states.empty() || engine_states.front()->channels[4] == nullptr) return;
+  FlValue* arguments = fl_value_new_map();
+  fl_value_set_string_take(arguments, "id", fl_value_new_string(id.c_str()));
+  fl_method_channel_invoke_method(engine_states.front()->channels[4], "activated",
+                                  arguments, nullptr, nullptr, nullptr);
+  fl_value_unref(arguments);
+}
+
+// Wayland Quick Paste opens through the authenticated companion; every other
+// shortcut is reported to the main engine's registrar.
+void portal_shortcut_activated(const std::string& id) {
+  if (id == kQuickPasteShortcutId) {
+    wake_bridge_waiter();
+  } else {
+    notify_shortcut_activated(id);
+  }
+}
+
 void security_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   if (is_method(call, "getBlockScreenshots") ||
       is_method(call, "setBlockScreenshots")) {
@@ -1018,7 +1132,7 @@ void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
         x11_quick_paste->focused_window(), activation_time)));
   } else if (is_method(call, "dispose")) {
     success(call, fl_value_new_bool(true));
-  } else {
+  } else if (!foreground_input_call(call)) {
     unsupported(call);
   }
 }
@@ -1113,6 +1227,13 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
     FlValue* opened = fl_value_new_map();
     fl_value_set_string_take(opened, "presentationId", fl_value_new_int(presentation_id));
     fl_value_set_string_take(opened, "inspectorVisible", fl_value_new_bool(false));
+    const gchar* x11_window = static_cast<const gchar*>(g_object_get_data(
+        G_OBJECT(state->application), "copypaste-x11-window"));
+    const std::string target_class = x11_window != nullptr && x11_quick_paste != nullptr
+        ? x11_quick_paste->window_class(x11_window) : std::string();
+    if (!target_class.empty()) {
+      fl_value_set_string_take(opened, "targetApp", fl_value_new_string(target_class.c_str()));
+    }
     fl_method_channel_invoke_method(channel, "opened", opened, nullptr, nullptr, nullptr);
     fl_value_unref(opened);
   } else if (is_method(call, "close")) {
@@ -1150,7 +1271,7 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
     if (result != nullptr) g_variant_get(result, "(b)", &opened);
     success(call);
     if (opened) quit_context_when_idle();
-  } else {
+  } else if (!foreground_input_call(call)) {
     unsupported(call);
   }
 }
@@ -1203,6 +1324,8 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
     };
     if (x11) {
       x11_quick_paste->register_shortcut(request, complete, [channel, id = request.id]() {
+        // Only Quick Paste consumes the activation time when it opens.
+        if (id != kQuickPasteShortcutId) x11_quick_paste->take_activation_time();
         FlValue* arguments = fl_value_new_map();
         fl_value_set_string_take(arguments, "id", fl_value_new_string(id.c_str()));
         fl_method_channel_invoke_method(channel, "activated", arguments, nullptr,
@@ -1210,7 +1333,7 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
         fl_value_unref(arguments);
       });
     } else if (portal_shortcuts && gnome_shortcuts != nullptr &&
-               gnome_shortcuts->shortcut_registered()) {
+               gnome_shortcuts->shortcut_registered(request.id)) {
       // The portal became available after the fallback was registered. Release
       // the fallback first so the same shortcut is never owned by both paths.
       gnome_shortcuts->unregister_shortcut(
@@ -1243,7 +1366,7 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
     };
     if (x11) {
       x11_quick_paste->unregister_shortcut(id, complete);
-    } else if (gnome_shortcuts != nullptr && gnome_shortcuts->shortcut_registered()) {
+    } else if (gnome_shortcuts != nullptr && gnome_shortcuts->shortcut_registered(id)) {
       gnome_shortcuts->unregister_shortcut(id, complete);
     } else if (portal_shortcuts) {
       portal->unregister_shortcut(id, complete);
@@ -1745,13 +1868,11 @@ void register_linux_host_channels(FlBinaryMessenger* messenger,
     GList* windows = gtk_application_get_windows(application);
     if (windows != nullptr) {
       portal = std::make_unique<LinuxPortal>(GTK_WINDOW(windows->data),
-          LinuxPortalCallbacks{[](const std::string&, const std::string&) {
-            wake_bridge_waiter();
+          LinuxPortalCallbacks{[](const std::string& id, const std::string&) {
+            portal_shortcut_activated(id);
           }, [] { cancel_bridge(); }});
-      gnome_shortcuts = std::make_unique<LinuxGnomeShortcuts>([](const std::string&) {
-        // Both native shortcut paths release the same authenticated waiter.
-        wake_bridge_waiter();
-      });
+      // Both native shortcut paths release the same authenticated waiter.
+      gnome_shortcuts = std::make_unique<LinuxGnomeShortcuts>(portal_shortcut_activated);
       if (g_object_get_data(G_OBJECT(application), "copypaste-quick-paste") == nullptr) {
         g_bus_own_name(G_BUS_TYPE_SESSION, kBridgeName, G_BUS_NAME_OWNER_FLAGS_NONE,
                        bridge_bus_acquired, nullptr, nullptr, nullptr, nullptr);

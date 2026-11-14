@@ -1,0 +1,176 @@
+[
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/p?id=7&utm_source=a&fbclid=b#frag",
+    "output": "https://x.test/p?id=7#frag",
+    "warnings": []
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/p?utm_source=a&utm_medium=b",
+    "output": "https://x.test/p"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://bucket.s3.amazonaws.com/f.pdf?X-Amz-Signature=abc&utm_source=x",
+    "output": "https://bucket.s3.amazonaws.com/f.pdf?X-Amz-Signature=abc&utm_source=x",
+    "warnings": [
+      "url.signed_unchanged"
+    ]
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://storage.googleapis.com/b/o?X-Goog-Date=1&X-Goog-Signature=ab&gclid=2",
+    "output": "https://storage.googleapis.com/b/o?X-Goog-Date=1&X-Goog-Signature=ab&gclid=2",
+    "warnings": [
+      "url.signed_unchanged"
+    ]
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "Read https://a.test/?utm_campaign=x, then (https://b.test/p?gclid=1&q=2) and https://c.test/ok.\nThanks",
+    "output": "Read https://a.test/, then (https://b.test/p?q=2) and https://c.test/ok.\nThanks"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/?UTM_Source=a&Q=1",
+    "output": "https://x.test/?Q=1"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/s?q=caf%C3%A9+au+lait&utm_term=x&tag=a%2Bb",
+    "output": "https://x.test/s?q=caf%C3%A9+au+lait&tag=a%2Bb"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/?utm%5Fsource=a&k=v",
+    "output": "https://x.test/?k=v"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/p?fbclid=1#:~:text=hello",
+    "output": "https://x.test/p#:~:text=hello"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/app#/route?utm_source=a&tab=2",
+    "output": "https://x.test/app#/route?tab=2"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/p#utm_source=a",
+    "output": "https://x.test/p"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "ftp://x.test/?utm_source=a mailto:a@b.test?utm_source=x",
+    "output": "ftp://x.test/?utm_source=a mailto:a@b.test?utm_source=x"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/?ref=a&source=b&id=c",
+    "output": "https://x.test/?ref=a&source=b&id=c"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://www.amazon.com/dp/B0?tag=aff-20&utm_medium=x",
+    "output": "https://www.amazon.com/dp/B0?tag=aff-20"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://youtu.be/abc?si=XYZ",
+    "output": "https://youtu.be/abc?si=XYZ"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/?msclkid=1&mc_eid=2&_hsenc=3&__s=4&oly_anon_id=5&oly_enc_id=6&vero_id=7&mkt_tok=8&a=b",
+    "output": "https://x.test/?a=b"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/unsubscribe?mkt_tok=abc&utm_source=n",
+    "output": "https://x.test/unsubscribe?mkt_tok=abc"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://x.test/?a=1&&utm_source=2",
+    "output": "https://x.test/?a=1"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "HTTPS://user@x.test:8080/p?gclid=1",
+    "output": "HTTPS://user@x.test:8080/p"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "https://пример.test/путь?utm_source=a&q=б",
+    "output": "https://пример.test/путь?q=б"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "<a href=\"https://x.test/?fbclid=1\">x</a>",
+    "output": "<a href=\"https://x.test/\">x</a>"
+  },
+  {
+    "transform": "url.remove_tracking",
+    "input": "plain text, no links",
+    "output": "plain text, no links",
+    "warnings": [],
+    "sensitive": false
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.com%2Fdocs%3Fa%3D1&data=05%7C01&sdata=abc&reserved=0",
+    "output": "https://example.com/docs?a=1"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://www.google.com/url?sa=t&url=https%3A%2F%2Fexample.com%2F&ved=2",
+    "output": "https://example.com/"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://www.google.co.uk/url?q=https://example.com/a&sa=U",
+    "output": "https://example.com/a"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fp&rut=abc",
+    "output": "https://example.com/p"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com%2F%3Ffbclid%3Dx&h=AT0",
+    "output": "https://example.com/?fbclid=x"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://slack-redir.net/link?url=https%3A%2F%2Fexample.com",
+    "output": "https://example.com"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fexample.com%2Fjob&urlhash=x",
+    "output": "https://example.com/job"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS8&ntb=1",
+    "output": "https://example.com/"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://bit.ly/3abc",
+    "output": "https://bit.ly/3abc"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "https://www.google.com/url?q=javascript%3Aalert(1)",
+    "output": "https://www.google.com/url?q=javascript%3Aalert(1)"
+  },
+  {
+    "transform": "url.unwrap_redirects",
+    "input": "Link: https://www.google.com/url?q=https%3A%2F%2Fa.test%2F (old)",
+    "output": "Link: https://a.test/ (old)"
+  }
+]

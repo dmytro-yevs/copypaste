@@ -31,6 +31,27 @@ const RESTORED_TABLES: &[&str] = &[
     "history_tags",
     "history_clip_tags",
     "history_pin_state",
+    "snippets",
+    "snippet_bodies",
+    "snippet_fts",
+    "snippet_collections",
+    "content_rules",
+    "content_rule_placement",
+    "transform_pipelines",
+    "library_preferences",
+    "library_set_members",
+    "clip_notes",
+    "module_records",
+    "clip_local_state",
+    "clip_rule_tags",
+    "rule_originals",
+    "content_rule_conflicts",
+    "snippet_usage",
+    "snippet_origin",
+    "paste_queue_entries",
+    "paste_queue_state",
+    "cloud_withheld",
+    "expired_ids",
     "file_references",
     "file_transfer_staging",
     "downloaded_files",
@@ -43,6 +64,40 @@ const RESTORED_TABLES: &[&str] = &[
     "source_app_icons",
     "sync_device_name",
 ];
+
+/// Organization projections, copied after the clips they may describe.
+const RESTORED_PROJECTIONS: &[&str] = &[
+    "organization_records",
+    "history_tags",
+    "history_clip_tags",
+    "history_pin_state",
+    "snippets",
+    "snippet_bodies",
+    "snippet_collections",
+    "content_rules",
+    "content_rule_placement",
+    "transform_pipelines",
+    "library_preferences",
+    "library_set_members",
+    "clip_notes",
+    "module_records",
+];
+
+/// Local state copied last, once every clip and record it refers to exists.
+const RESTORED_LOCAL_STATE: &[&str] = &[
+    "clip_local_state",
+    "clip_rule_tags",
+    "rule_originals",
+    "content_rule_conflicts",
+    "snippet_usage",
+    "snippet_origin",
+    "paste_queue_entries",
+    "paste_queue_state",
+    "cloud_withheld",
+    "expired_ids",
+];
+
+const FTS_TABLES: &[&str] = &["clipboard_fts", "snippet_fts"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum RestoreError {
@@ -225,12 +280,7 @@ impl super::Store {
                 ),
                 [],
             )?;
-            for table in [
-                "organization_records",
-                "history_tags",
-                "history_clip_tags",
-                "history_pin_state",
-            ] {
+            for table in RESTORED_PROJECTIONS {
                 tx.execute(
                     &format!("INSERT INTO {table} SELECT * FROM restore_src.{table}"),
                     [],
@@ -269,6 +319,17 @@ impl super::Store {
                    AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
                 [],
             )?;
+            tx.execute(
+                "INSERT INTO snippet_fts (rowid, id, title, abbreviation, body_text) \
+                 SELECT rowid, id, title, abbreviation, body_text FROM restore_src.snippet_fts",
+                [],
+            )?;
+            for table in RESTORED_LOCAL_STATE {
+                tx.execute(
+                    &format!("INSERT INTO {table} SELECT * FROM restore_src.{table}"),
+                    [],
+                )?;
+            }
             tx.execute(
                 "INSERT INTO sync_device_name SELECT * FROM restore_src.sync_device_name",
                 [],
@@ -326,8 +387,12 @@ fn user_tables(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     Ok(all
         .into_iter()
         .filter(|name| {
-            !name.strip_prefix("clipboard_fts_").is_some_and(|suffix| {
-                matches!(suffix, "data" | "idx" | "content" | "docsize" | "config")
+            !FTS_TABLES.iter().any(|fts| {
+                name.strip_prefix(fts)
+                    .and_then(|rest| rest.strip_prefix('_'))
+                    .is_some_and(|suffix| {
+                        matches!(suffix, "data" | "idx" | "content" | "docsize" | "config")
+                    })
             })
         })
         .collect())
@@ -701,5 +766,69 @@ mod tests {
         assert_eq!(store.count().unwrap(), 1);
         assert_eq!(store.search("rollback anchor", 10).unwrap().len(), 1);
         assert!(store.search("restored row", 10).unwrap().is_empty());
+    }
+
+    /// One row in every library and per-clip table, the clip-keyed
+    /// ones pointing at `clip`.
+    fn library_rows(store: &Store, clip: &str) {
+        store
+            .conn()
+            .unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO snippets (id, record_id, title, template, pinned, order_key, concealed, meta_stamp, created_at, created_device) VALUES ('s', 'r1', 't', 0, 0, 'a', 0, 1, 1, 'd');
+                 INSERT INTO snippet_bodies VALUES ('s', 'r2', 'rev', '[]', 'body', NULL, 1);
+                 INSERT INTO snippet_fts (id, title, abbreviation, body_text) VALUES ('s', 't', NULL, 'body');
+                 INSERT INTO snippet_collections VALUES ('c', 'r3', 'n', 'i', 'a', 'k', NULL);
+                 INSERT INTO content_rules VALUES ('rule', 'r4', 'user', NULL, '[]', 'n', '{{}}', '[]', 1, 1, NULL, 1);
+                 INSERT INTO content_rule_placement VALUES ('rule', 'r5', 1, 'a');
+                 INSERT INTO transform_pipelines VALUES ('p', 'r6', 'n', NULL, '[]', NULL, 1);
+                 INSERT INTO library_preferences VALUES ('snippets', 'k', 'r7', 'true', 1);
+                 INSERT INTO library_set_members VALUES ('snippets.s', 'm', 'r8', 1, 1);
+                 INSERT INTO clip_notes VALUES ('{clip}', 'r10', 1, 1, 0, 0, NULL, NULL, NULL, NULL);
+                 INSERT INTO module_records VALUES ('example.module', 'k', 'r11', '1', 0, 1);
+                 INSERT INTO clip_local_state (clip_id, rule_secret) VALUES ('{clip}', 1);
+                 INSERT INTO clip_rule_tags VALUES ('{clip}', 'tag');
+                 INSERT INTO rule_originals VALUES ('{clip}', X'01', X'02', 'text', 1);
+                 INSERT INTO content_rule_conflicts VALUES ('x', 'rule', '{{}}', 'd', 1);
+                 INSERT INTO snippet_usage VALUES ('s', 1, 1);
+                 INSERT INTO snippet_origin VALUES ('s', '{clip}');
+                 INSERT INTO paste_queue_entries (entry_id, position, source_kind, clip_id, content_kind, status, added_at, added_via) VALUES ('e', 1, 'clip', '{clip}', 'text', 'pending', 1, 'hotkey');
+                 INSERT INTO paste_queue_state (id, revision) VALUES (1, 1);
+                 INSERT INTO cloud_withheld VALUES ('{clip}', 1);
+                 INSERT INTO expired_ids VALUES ('gone', 1);"
+            ))
+            .unwrap();
+    }
+
+    fn count(store: &Store, table: &str) -> i64 {
+        store
+            .conn()
+            .unwrap()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn restore_keeps_every_library_and_per_clip_row_copied_after_its_clip() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        let clip = store.insert(item("described", T0)).unwrap();
+        library_rows(&store, &clip.id);
+        let before: Vec<i64> = RESTORED_TABLES.iter().map(|t| count(&store, t)).collect();
+        let backup = dir.path().join("library.backup");
+        store.backup_to(&backup, &KEY, |_, _| true).unwrap();
+
+        store.delete_all().unwrap();
+        assert_eq!(count(&store, "clip_local_state"), 0);
+        assert_eq!(count(&store, "rule_originals"), 0);
+        store.restore_from(&backup, &KEY).unwrap();
+
+        let after: Vec<i64> = RESTORED_TABLES.iter().map(|t| count(&store, t)).collect();
+        assert_eq!(after, before);
+        assert!(RESTORED_LOCAL_STATE
+            .iter()
+            .chain(RESTORED_PROJECTIONS)
+            .filter(|table| !table.starts_with("history_") && **table != "organization_records")
+            .all(|table| count(&store, table) > 0));
     }
 }

@@ -33,6 +33,7 @@ import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../presentation/history_expiry_text.dart';
 import '../presentation/secret_spoiler.dart';
 
 import 'history_inspector.dart';
@@ -259,7 +260,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             const SingleActivator(LogicalKeyboardKey.backspace):
                                 _deleteBulkSelection,
                           }
-                        : const {},
+                        : {
+                            if (usesDesktopShortcuts &&
+                                widget.controller.capabilities.edits != null)
+                              desktopShortcut(LogicalKeyboardKey.keyN): () =>
+                                  unawaited(
+                                    showHistoryNewClipDrawer(
+                                      context,
+                                      controller: widget.controller,
+                                    ),
+                                  ),
+                          },
                     child: Focus(
                       focusNode: _selectionFocus,
                       child: Listener(
@@ -486,19 +497,43 @@ class _HistoryListState extends State<_HistoryList> {
           ?.findAncestorWidgetOfExactType<EditableText>() !=
       null;
 
-  /// Copies the selected clip unless a text field owns the copy shortcut.
+  /// Shortcuts for the selected clip, unless a text field owns them:
+  /// copy, and the edit, save-as-snippet and transform actions.
+  static final _clipShortcuts = {
+    LogicalKeyboardKey.keyE: HistoryClipAction.edit,
+    LogicalKeyboardKey.keyS: HistoryClipAction.saveAsSnippet,
+    LogicalKeyboardKey.keyT: HistoryClipAction.transform,
+  };
+
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     final id = controller.selection.selectedId;
-    if (id == null ||
-        controller.bulk.isBulkSelecting ||
-        _editingText ||
-        !desktopShortcut(
-          LogicalKeyboardKey.keyC,
-        ).accepts(event, HardwareKeyboard.instance)) {
+    if (id == null || controller.bulk.isBulkSelecting || _editingText) {
       return KeyEventResult.ignored;
     }
-    unawaited(copyHistoryClip(context, controller: controller, clipId: id));
-    return KeyEventResult.handled;
+    final keyboard = HardwareKeyboard.instance;
+    if (desktopShortcut(LogicalKeyboardKey.keyC).accepts(event, keyboard)) {
+      unawaited(copyHistoryClip(context, controller: controller, clipId: id));
+      return KeyEventResult.handled;
+    }
+    final clip =
+        controller.selection.selectedClip ?? controller.window.clipById(id);
+    if (clip == null) return KeyEventResult.ignored;
+    for (final MapEntry(key: key, value: action) in _clipShortcuts.entries) {
+      if (!desktopShortcut(key).accepts(event, keyboard)) continue;
+      if (!historyClipActions(controller, clip).contains(action)) {
+        return KeyEventResult.ignored;
+      }
+      unawaited(
+        runHistoryClipAction(
+          context,
+          controller: controller,
+          clip: clip,
+          action: action,
+        ),
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -1120,7 +1155,9 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final hasReset = widget.controller.window.hasActiveFilters;
-        final actionCount = _filterCount + 2 + (hasReset ? 1 : 0);
+        final newClip = _showsNewClipButton(context);
+        final actionCount =
+            _filterCount + 2 + (hasReset ? 1 : 0) + (newClip ? 1 : 0);
         final compactFilters =
             constraints.maxWidth < _expandedToolbarMinimumWidth(context);
         final collapseSearch =
@@ -1193,6 +1230,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                     ...filters,
                     if (hasReset) _resetButton(),
                     _importButton(),
+                    if (newClip) _newClipButton(),
                   ],
                 ),
               ),
@@ -1215,11 +1253,37 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ...filters,
             if (hasReset) _resetButton(),
             _importButton(),
+            if (newClip) _newClipButton(),
           ],
         );
       },
     );
   }
+
+  /// Android has no keyboard shortcut for a new clip, so it gets a button.
+  bool _showsNewClipButton(BuildContext context) =>
+      Theme.of(context).platform == TargetPlatform.android &&
+      widget.controller.capabilities.edits != null;
+
+  Widget _newClipButton() => Semantics(
+    label: context.l10n.historyNewClip,
+    button: true,
+    child: Tooltip(
+      tooltip: (_) =>
+          TooltipContainer(child: Text(context.l10n.historyNewClip)),
+      child: Button.secondary(
+        key: const ValueKey<String>('history-new-clip'),
+        style: AppTheme.historyToolbarIconStyle,
+        onPressed: () => unawaited(
+          showHistoryNewClipDrawer(context, controller: widget.controller),
+        ),
+        child: const AppIconFrame(
+          size: AppIconSize.md,
+          child: Icon(LucideIcons.plus, size: AppIconSize.md),
+        ),
+      ),
+    ),
+  );
 
   Widget _resetButton() => Tooltip(
     tooltip: (_) =>
@@ -2158,7 +2222,7 @@ class _ClipContentState extends State<_ClipContent> {
       _highlightMemo.clear();
       _highlightClipId = clip.id;
     }
-    if (clip.secret && !revealed) {
+    if (clip.masked && !revealed) {
       _highlightMemo.clear();
       return FutureBuilder<HistoryClip>(
         future: controller.media.spoilerContent(clip.id),
@@ -2316,7 +2380,17 @@ class _ClipMeta extends StatelessWidget {
       child: Icon(data, size: AppIconSize.xs, color: style.color),
     );
     final kindIcon = icon(HistoryClipPresentation.icon(clip.contentKind));
-    final tags = controller.tags.names(clip.tagIds);
+    final annotations = clip.annotations;
+    final tags = [
+      ...controller.tags.names(clip.tagIds),
+      for (final name in controller.tags.names(annotations.ruleTagIds))
+        context.l10n.historyRuleTag(name),
+    ];
+    final provenance = HistoryClipPresentation.provenance(
+      context.l10n,
+      annotations.provenance,
+    );
+    final expiresAt = annotations.keep ? null : annotations.expiresAt;
     final cutLines = HistoryClipPresentation.cutLineCount(clip);
     return Text.rich(
       TextSpan(
@@ -2333,6 +2407,19 @@ class _ClipMeta extends StatelessWidget {
                   ),
           ),
           if (showKindLabel) TextSpan(text: ' ${clip.contentKind.label}'),
+          if (expiresAt != null) ...[
+            const TextSpan(text: ' • '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: HistoryExpiryText(
+                expiresAt: expiresAt,
+                style: style.copyWith(
+                  color: Theme.of(context).colorScheme.destructive,
+                ),
+                strutStyle: strutStyle,
+              ),
+            ),
+          ],
           if (clip.sourceApp != null) ...[
             const TextSpan(text: ' • '),
             WidgetSpan(
@@ -2346,6 +2433,12 @@ class _ClipMeta extends StatelessWidget {
               ),
             ),
           ],
+          if (provenance != null)
+            TextSpan(
+              text: clip.sourceApp == null
+                  ? ' • $provenance'
+                  : ' ($provenance)',
+            ),
           if (clip.origin != null) ...[
             const TextSpan(text: ' • '),
             WidgetSpan(

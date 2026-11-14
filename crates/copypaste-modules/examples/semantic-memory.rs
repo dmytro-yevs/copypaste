@@ -163,12 +163,12 @@ fn main() {
         .all(|(a, b)| (a - b).abs() < 0.00001));
     stage("reloaded", &worker, &receipt, &mut rows);
     manager
-        .set_enabled("copypaste.semantic-search", false)
+        .set_enabled("copypaste.semantic-search", false, &[])
         .unwrap();
     assert!(children(&worker).is_empty());
     stage("disabled", &worker, &receipt, &mut rows);
     manager
-        .set_enabled("copypaste.semantic-search", true)
+        .set_enabled("copypaste.semantic-search", true, &[])
         .unwrap();
     let final_vector = embed(&manager, "query", "оплата житла");
     assert!(original

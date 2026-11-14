@@ -98,9 +98,10 @@ internal object AndroidClipboardReader {
             captureClipboard(context, host, background = true)
         }
     }
-    fun captureForeground(context: Context, host: Host?) {
+    /** [onSaved] runs on the ingestion thread after a clip was stored. */
+    fun captureForeground(context: Context, host: Host?, onSaved: (() -> Unit)? = null) {
         if (host != null && AndroidCaptureState.foregroundCaptureEnabled(context)) {
-            captureClipboard(context, host, background = false)
+            captureClipboard(context, host, background = false, onSaved)
         }
     }
 
@@ -312,8 +313,35 @@ internal object AndroidClipboardReader {
         pending.enqueue(captured) { data -> materialize(app, pending, data) }
     }
 
-    private fun captureClipboard(context: Context, host: Host, background: Boolean) {
+    /** Saves the current clip for an explicit user action; needs window focus on Android 10+. */
+    fun captureClipboardExplicit(context: Context, completion: (Boolean) -> Unit) {
+        val host = openHost(explicit = true) ?: return completion(false)
+        val pending = begin(host, completion) ?: return host.close { completion(false) }
+        pending.explicitContext(context)
+        if (pending.token <= 0L || !pending.reading()) return
+        val captured = clipboardSnapshot(context, pending) ?: return pending.cancel()
+        val app = context.applicationContext
+        pending.enqueue(captured) { data -> materialize(app, pending, data) }
+    }
+
+    private fun captureClipboard(context: Context, host: Host, background: Boolean, onSaved: (() -> Unit)? = null) {
         val pending = begin(host) ?: return
+        val captured = clipboardSnapshot(context, pending) ?: return pending.cancel()
+        val app = context.applicationContext
+        pending.enqueue(captured) { data ->
+            val saved = materialize(app, pending, data)
+            if (saved) {
+                NativeRuntimeCapture.scoped(pending.token, true, "text/plain") {
+                    if (background) AndroidCaptureState.recordBackgroundCapture(app, data.capturedAt)
+                    AndroidCaptureFeedback.onCaptured(app, pending.feedbackPreview())
+                    onSaved?.invoke()
+                }
+            }
+            saved
+        }
+    }
+
+    private fun clipboardSnapshot(context: Context, pending: Pending): Snapshot? {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         var snapshot: Snapshot? = null
         val read = pending.snapshot { runCatching { pending.read("text/plain") { limit ->
@@ -335,19 +363,7 @@ internal object AndroidClipboardReader {
                 )
             }
         } }.getOrDefault(false) }
-        val captured = snapshot
-        if (!read || captured == null) { pending.cancel(); return }
-        val app = context.applicationContext
-        pending.enqueue(captured) { data ->
-            val saved = materialize(app, pending, data)
-            if (saved) {
-                NativeRuntimeCapture.scoped(pending.token, true, "text/plain") {
-                    if (background) AndroidCaptureState.recordBackgroundCapture(app, data.capturedAt)
-                    AndroidCaptureFeedback.onCaptured(app, pending.feedbackPreview())
-                }
-            }
-            saved
-        }
+        return snapshot.takeIf { read }
     }
 
     fun readCaptureMetadata(host: Host, action: () -> Unit): Boolean {

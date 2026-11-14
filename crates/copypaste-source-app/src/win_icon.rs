@@ -10,8 +10,11 @@ use crate::AppIcon;
 use super::{gdi, registry};
 
 pub(super) fn resolve(image_name: &str) -> Option<AppIcon> {
-    let path = registry::executable(image_name)?;
-    let icon = shell_icon(&path)?;
+    icon_at(&registry::executable(image_name)?)
+}
+
+pub(super) fn icon_at(path: &Path) -> Option<AppIcon> {
+    let icon = shell_icon(path)?;
     let pixels = icon_pixels(&icon.hIcon)?;
     AppIcon::from_png(pixels.png, pixels.width, pixels.height)
 }

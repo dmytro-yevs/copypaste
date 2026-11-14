@@ -105,11 +105,21 @@ const BYTE_CAP_HAS_VICTIM_SQL: &str = concat!(
     " WHERE deleted = 0 AND pinned = 0 LIMIT 2)"
 );
 
+/// A clip a pending paste-queue entry references is never evicted; the
+/// entry would otherwise turn unavailable before it is pasted.
+macro_rules! unqueued {
+    () => {
+        " AND NOT EXISTS (SELECT 1 FROM paste_queue_entries q \
+          WHERE q.clip_id = clipboard_items.id AND q.status = 'pending')"
+    };
+}
+
 const CAP_VICTIMS_SQL: &str = concat!(
     "SELECT id FROM ",
     "clipboard_items INDEXED BY idx_items_evictable",
-    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
-      ORDER BY created_at ASC, id ASC LIMIT ?2"
+    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1",
+    unqueued!(),
+    " ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
 /// Covering: ranking runs in index order so the window needs no sort, and the
@@ -122,21 +132,25 @@ const BYTE_VICTIMS_SQL: &str = concat!(
                ) AS cumulative_bytes \
           FROM ",
     "clipboard_items INDEXED BY idx_items_evictable",
-    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
-     ) \
-     SELECT id FROM ranked WHERE cumulative_bytes - row_bytes < ?2"
+    " WHERE deleted = 0 AND pinned = 0 AND id <> ?1",
+    unqueued!(),
+    ") SELECT id FROM ranked WHERE cumulative_bytes - row_bytes < ?2"
 );
 
 const AGE_GATE_SQL: &str = concat!(
     "SELECT EXISTS(SELECT 1 FROM ",
     "clipboard_items INDEXED BY idx_items_evictable",
-    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1)"
+    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1",
+    unqueued!(),
+    ")"
 );
 
 const AGE_VICTIMS_SQL: &str = concat!(
     "SELECT id FROM ",
     "clipboard_items INDEXED BY idx_items_evictable",
-    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1       ORDER BY created_at ASC, id ASC LIMIT ?2"
+    " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1",
+    unqueued!(),
+    " ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
 impl Store {

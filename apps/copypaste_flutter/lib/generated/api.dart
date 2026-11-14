@@ -3,10 +3,12 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'api/clips.dart';
+import 'api/rules.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_text`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These functions are ignored because they are not marked as `pub`: `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence_state`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_text`, `export_write_failed`, `from_daemon`, `history_query`, `image_preview_response`, `image_preview`, `internal`, `issue_severity`, `item_response`, `module_request`, `not_initialized`, `request_data`, `runtime_attachment_unsupported`, `runtime_capture_state`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `source_app_icon_response`, `spoiler_state`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
@@ -24,8 +26,31 @@ Future<void> moduleStageUpdate({
   appVersion: appVersion,
 );
 
-Future<void> moduleSetEnabled({required String id, required bool enabled}) =>
-    RustLib.instance.api.crateApiModuleSetEnabled(id: id, enabled: enabled);
+/// Enabling echoes every declared capability the user confirmed, by its wire
+/// name (`history_read`, …).
+Future<void> moduleSetEnabled({
+  required String id,
+  required bool enabled,
+  required List<String> capabilities,
+}) => RustLib.instance.api.crateApiModuleSetEnabled(
+  id: id,
+  enabled: enabled,
+  capabilities: capabilities,
+);
+
+/// The app UI locale for module strings, such as `uk` or `en-US`.
+Future<void> moduleSetLocale({required String locale}) =>
+    RustLib.instance.api.crateApiModuleSetLocale(locale: locale);
+
+/// JSON list of the module prompts waiting for the user.
+Future<String> modulePrompts() => RustLib.instance.api.crateApiModulePrompts();
+
+/// `None` dismisses the prompt.
+Future<void> moduleAnswerPrompt({required String promptId, String? choice}) =>
+    RustLib.instance.api.crateApiModuleAnswerPrompt(
+      promptId: promptId,
+      choice: choice,
+    );
 
 Future<void> moduleSetPreferences({
   required String id,
@@ -522,6 +547,7 @@ class Clip {
   final bool tooLargeToSync;
   final ClipFileDetails? fileDetails;
   final ClipImageDetails? imageDetails;
+  final ClipAnnotationState? annotations;
 
   const Clip({
     required this.secret,
@@ -544,6 +570,7 @@ class Clip {
     required this.tooLargeToSync,
     this.fileDetails,
     this.imageDetails,
+    this.annotations,
   });
 
   @override
@@ -567,7 +594,8 @@ class Clip {
       lineCount.hashCode ^
       tooLargeToSync.hashCode ^
       fileDetails.hashCode ^
-      imageDetails.hashCode;
+      imageDetails.hashCode ^
+      annotations.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -593,7 +621,8 @@ class Clip {
           lineCount == other.lineCount &&
           tooLargeToSync == other.tooLargeToSync &&
           fileDetails == other.fileDetails &&
-          imageDetails == other.imageDetails;
+          imageDetails == other.imageDetails &&
+          annotations == other.annotations;
 }
 
 enum ClipContentClass { text, image, file, other }
@@ -1495,6 +1524,13 @@ class RuntimeEvent {
   final CaptureState? capture;
   final bool runtimeWatch;
 
+  /// Bitset of the library record kinds a `library` event covers.
+  final int? libraryKinds;
+  final BigInt? pasteQueueRevision;
+
+  /// Counts of a long operation, on `operation_progress` events.
+  final OperationProgressView? operation;
+
   const RuntimeEvent({
     this.syncStatus,
     required this.kind,
@@ -1505,6 +1541,9 @@ class RuntimeEvent {
     this.fileOperation,
     this.capture,
     required this.runtimeWatch,
+    this.libraryKinds,
+    this.pasteQueueRevision,
+    this.operation,
   });
 
   @override
@@ -1517,7 +1556,10 @@ class RuntimeEvent {
       progress.hashCode ^
       fileOperation.hashCode ^
       capture.hashCode ^
-      runtimeWatch.hashCode;
+      runtimeWatch.hashCode ^
+      libraryKinds.hashCode ^
+      pasteQueueRevision.hashCode ^
+      operation.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1532,7 +1574,10 @@ class RuntimeEvent {
           progress == other.progress &&
           fileOperation == other.fileOperation &&
           capture == other.capture &&
-          runtimeWatch == other.runtimeWatch;
+          runtimeWatch == other.runtimeWatch &&
+          libraryKinds == other.libraryKinds &&
+          pasteQueueRevision == other.pasteQueueRevision &&
+          operation == other.operation;
 }
 
 class RuntimePeerSyncStatus {

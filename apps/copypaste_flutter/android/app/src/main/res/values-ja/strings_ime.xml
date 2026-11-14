@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">パネルのサイズを変更</string>
+    <string name="ime_search_hint">クリップを検索</string>
+    <string name="ime_backspace">削除</string>
+    <string name="ime_undo_insert">挿入を元に戻す</string>
+    <string name="ime_enter">Enter</string>
+    <string name="ime_keypad_switch_layout">レイアウトを切り替え</string>
+    <string name="ime_keypad_space">スペース</string>
+    <string name="ime_keypad_done">完了</string>
+    <string name="ime_keypad_backspace">バックスペース</string>
+    <string name="ime_kind_text">テキスト</string>
+    <string name="ime_kind_link">リンク</string>
+    <string name="ime_kind_email">メール</string>
+    <string name="ime_kind_phone">電話番号</string>
+    <string name="ime_kind_color">色</string>
+    <string name="ime_kind_code">コード</string>
+    <string name="ime_kind_image">画像</string>
+    <string name="ime_kind_file">ファイル</string>
+    <string name="ime_current_clipboard">現在のクリップボード</string>
+    <string name="ime_secret_item">シークレット項目。ダブルタップして認証すると挿入します</string>
+    <string name="ime_pinned">ピン留め</string>
+    <string name="ime_loading">クリップを読み込んでいます…</string>
+    <string name="ime_locked">クリップを表示するにはデバイスのロックを解除してください</string>
+    <string name="ime_error">クリップを開けませんでした</string>
+    <string name="ime_retry">再試行</string>
+    <string name="ime_no_results">「%1$s」に一致する項目はありません</string>
+    <string name="ime_empty_history">まだ何もありません。何かをコピーするか、［クリップボードを保存］をタップしてください。</string>
+    <string name="ime_empty_pinned">ピン留めしたクリップはまだありません</string>
+    <string name="ime_tab_history">履歴</string>
+    <string name="ime_tab_pinned">ピン留め</string>
+    <string name="ime_tab_snippets">スニペット</string>
+    <string name="ime_tab_queue">キュー</string>
+    <string name="ime_action_cancel">キャンセル</string>
+    <string name="ime_action_insert">挿入</string>
+    <string name="ime_action_insert_plain">プレーンテキストとして挿入</string>
+    <string name="ime_action_copy">クリップボードにコピー</string>
+    <string name="ime_action_pin">ピン留め</string>
+    <string name="ime_action_unpin">ピン留めを解除</string>
+    <string name="ime_action_delete">削除</string>
+    <string name="ime_action_reveal">表示</string>
+    <string name="ime_delete_confirm">このクリップを削除しますか？</string>
+    <string name="ime_delete_failed">クリップを削除できませんでした</string>
+    <string name="ime_inserted">挿入しました</string>
+    <string name="ime_copied">コピーしました</string>
+    <string name="ime_copy_failed">クリップをコピーできませんでした</string>
+    <string name="ime_insert_failed">ここには挿入できません</string>
+    <string name="ime_insert_too_large">大きすぎるため挿入できません</string>
+    <string name="ime_paste_via_clipboard">クリップボード経由で貼り付け</string>
+    <string name="ime_image_not_accepted">このフィールドは画像を受け付けません</string>
+    <string name="ime_file_not_accepted">このフィールドはファイルを受け付けません</string>
+    <string name="ime_item_unavailable">このクリップは利用できなくなりました</string>
+    <string name="ime_unlock_failed">シークレット項目のロックを解除できませんでした</string>
+    <string name="ime_masked_mode">パスワード欄: プレビューを非表示</string>
+    <string name="ime_private_field">プライベート欄: 何も保存されません</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="other">%d 文字</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="other">キューに %d 件</item>
+    </plurals>
+</resources>

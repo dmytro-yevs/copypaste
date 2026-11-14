@@ -228,7 +228,7 @@ pub(crate) async fn watch(
         let Some(copypaste_ipc::ResponseData::RuntimeEvent(event)) = response.data else {
             return Err(RuntimeError::internal());
         };
-        let event = typed_runtime_event(event);
+        let event = typed_runtime_event(*event);
         if sink.add(event).is_err() {
             return Ok(());
         }
@@ -239,9 +239,16 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
     RuntimeEvent {
         sync_status: event.sync_status.map(crate::api::runtime_sync_status),
         kind: match event.event {
-            copypaste_ipc::EventKind::Items => "items".into(),
-            copypaste_ipc::EventKind::Peers => "peers".into(),
-        },
+            copypaste_ipc::EventKind::Items => "items",
+            copypaste_ipc::EventKind::Peers => "peers",
+            copypaste_ipc::EventKind::PasteQueue => "paste_queue",
+            copypaste_ipc::EventKind::Library => "library",
+            // `progress` already names file-transfer byte progress.
+            copypaste_ipc::EventKind::Progress => "operation_progress",
+            // The pending prompts are read with `module_prompts`.
+            copypaste_ipc::EventKind::ModulePrompt => "module_prompt",
+        }
+        .into(),
         item_count: event.item_count,
         captured: event.captured,
         captured_item_id: event.captured_item_id,
@@ -249,6 +256,9 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
         progress: None,
         capture: None,
         runtime_watch: false,
+        library_kinds: event.library.map(|kinds| kinds.0),
+        paste_queue_revision: event.paste_queue_revision,
+        operation: event.operation.map(crate::api::rules::operation_progress),
     }
 }
 
@@ -263,6 +273,9 @@ pub(crate) fn runtime_ready() -> RuntimeEvent {
         progress: None,
         capture: None,
         runtime_watch: true,
+        library_kinds: None,
+        paste_queue_revision: None,
+        operation: None,
     }
 }
 
@@ -280,6 +293,9 @@ pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> Run
             progress: None,
             capture: None,
             runtime_watch: true,
+            library_kinds: None,
+            paste_queue_revision: None,
+            operation: None,
         });
     mapped.capture = event.capture.map(crate::api::runtime_capture_state);
     if mapped.capture.is_some() && mapped.kind == "progress" {
@@ -357,10 +373,14 @@ mod tests {
     }
 
     #[test]
-    fn items_and_peers_keep_distinct_runtime_event_kinds() {
+    fn every_change_kind_keeps_a_distinct_runtime_event_kind() {
         for (event, kind) in [
             (copypaste_ipc::EventKind::Items, "items"),
             (copypaste_ipc::EventKind::Peers, "peers"),
+            (copypaste_ipc::EventKind::PasteQueue, "paste_queue"),
+            (copypaste_ipc::EventKind::Library, "library"),
+            (copypaste_ipc::EventKind::Progress, "operation_progress"),
+            (copypaste_ipc::EventKind::ModulePrompt, "module_prompt"),
         ] {
             let mapped = runtime_event(copypaste_ipc::EventData {
                 sync_status: Some(copypaste_ipc::SyncStatus {
@@ -370,11 +390,12 @@ mod tests {
                     log: Vec::new(),
                     diagnostics_available: true,
                 }),
-                event,
-                item_count: 3,
                 captured: true,
                 captured_item_id: Some("captured-item".into()),
+                library: Some(copypaste_ipc::LibraryKinds::SET_MEMBERS),
+                ..copypaste_ipc::EventData::change(event, 3)
             });
+            assert_eq!(mapped.library_kinds, Some(32));
             assert_eq!(mapped.kind, kind);
             assert_eq!(mapped.item_count, 3);
             assert!(mapped.captured);

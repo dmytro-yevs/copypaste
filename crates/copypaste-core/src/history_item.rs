@@ -138,6 +138,7 @@ pub(crate) fn from_payload(
         // Counted from the whole body, never the preview; a secret's line
         // structure is as private as its text.
         line_count: payload.text_line_count().filter(|_| !privacy.secret),
+        ..Item::default()
     }
 }
 
@@ -225,6 +226,7 @@ impl StaticHistoryPreview {
             too_large_to_sync: self.too_large_to_sync,
             truncated: self.truncated,
             line_count: self.line_count.filter(|_| !privacy.secret),
+            ..Item::default()
         }
     }
 }

@@ -47,6 +47,109 @@ pub enum EventKind {
     Items,
     /// The paired-device list or protected pairing ceremony changed.
     Peers,
+    /// The paste queue moved to [`EventData::paste_queue_revision`].
+    PasteQueue,
+    /// Synced library records changed; [`EventData::library`] says which.
+    Library,
+    /// A long operation advanced; [`EventData::operation`] carries the counts.
+    Progress,
+    /// The set of module prompts waiting for the user changed;
+    /// [`EventData::module_prompts`] carries how many are pending.
+    ModulePrompt,
+}
+
+/// Bitset of the library record kinds a [`EventKind::Library`] event covers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LibraryKinds(pub u32);
+
+impl LibraryKinds {
+    pub const SNIPPETS: Self = Self(1);
+    pub const COLLECTIONS: Self = Self(1 << 1);
+    pub const RULES: Self = Self(1 << 2);
+    pub const PIPELINES: Self = Self(1 << 3);
+    pub const PREFERENCES: Self = Self(1 << 4);
+    pub const SET_MEMBERS: Self = Self(1 << 5);
+
+    #[must_use]
+    pub const fn all() -> Self {
+        Self((1 << 6) - 1)
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+}
+
+/// Counts of one cancellable operation, keyed by the caller's request id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationProgress {
+    pub request_id: String,
+    pub done: u64,
+    pub total: u64,
+}
+
+/// One kind a [`crate::Method::WatchEvents`] subscriber asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EventKindFilter {
+    Items,
+    Peers,
+    PasteQueue,
+    /// Only library events that intersect `kinds`.
+    Library {
+        #[serde(default = "LibraryKinds::all")]
+        kinds: LibraryKinds,
+    },
+    Progress,
+    ModulePrompt,
+    /// Capture-state snapshots, including the one sent on subscription.
+    Status,
+    /// File transfer operations and their byte progress.
+    Transfers,
+}
+
+/// At most this many filters per subscription.
+pub const MAX_EVENT_FILTERS: usize = 16;
+
+impl EventKindFilter {
+    fn admits_change(self, change: &EventData) -> bool {
+        match self {
+            Self::Items => change.event == EventKind::Items,
+            Self::Peers => change.event == EventKind::Peers,
+            Self::PasteQueue => change.event == EventKind::PasteQueue,
+            Self::Library { kinds } => {
+                change.event == EventKind::Library
+                    && change
+                        .library
+                        .is_none_or(|changed| changed.intersects(kinds))
+            }
+            Self::Progress => change.event == EventKind::Progress,
+            Self::ModulePrompt => change.event == EventKind::ModulePrompt,
+            Self::Status | Self::Transfers => false,
+        }
+    }
+
+    /// Whether a frame passes `filters`; a frame with several parts passes
+    /// when any part does.
+    #[must_use]
+    pub fn admits(filters: &[Self], event: &RuntimeEventData) -> bool {
+        filters.iter().any(|filter| {
+            event
+                .change
+                .as_ref()
+                .is_some_and(|change| filter.admits_change(change))
+                || (*filter == Self::Status && event.capture.is_some())
+                || (*filter == Self::Transfers
+                    && (event.file_operation.is_some() || event.progress.is_some()))
+        })
+    }
 }
 
 /// One push frame on a [`crate::Method::Watch`] connection.
@@ -70,6 +173,35 @@ pub struct EventData {
     /// Identifies the copied clip without including its content in events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<LibraryKinds>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paste_queue_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<OperationProgress>,
+    /// Pending prompts on a [`EventKind::ModulePrompt`] event. Their text is
+    /// read through the privileged `Prompts` operation, never pushed to
+    /// every watcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_prompts: Option<u32>,
+}
+
+impl EventData {
+    /// A content-free change signal with no optional details.
+    #[must_use]
+    pub fn change(event: EventKind, item_count: u64) -> Self {
+        Self {
+            sync_status: None,
+            event,
+            item_count,
+            captured: false,
+            captured_item_id: None,
+            library: None,
+            paste_queue_revision: None,
+            operation: None,
+            module_prompts: None,
+        }
+    }
 }
 
 /// Progress contains only the caller's opaque token and byte counts.
@@ -326,7 +458,7 @@ pub enum ResponseData {
     Discovered(DiscoveredData),
     Config(ConfigApplied),
     Event(EventData),
-    RuntimeEvent(RuntimeEventData),
+    RuntimeEvent(Box<RuntimeEventData>),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
     /// `None` when the query cannot be counted exactly from indexes.
@@ -347,6 +479,37 @@ pub enum ResponseData {
     CloudStatus(CloudStatusData),
     CloudSync(CloudSyncData),
     PrivateMode(PrivateModeData),
+    SnippetPage(crate::snippets::SnippetPage),
+    Snippet(crate::snippets::SnippetDetail),
+    SnippetSave(crate::snippets::SnippetSaveOutcome),
+    SnippetCollections(Vec<crate::snippets::SnippetCollection>),
+    SnippetCollection(crate::snippets::SnippetCollection),
+    TemplateLints(Vec<crate::snippets::TemplateLint>),
+    SnippetHits(Vec<crate::snippets::SnippetHit>),
+    Rendered(crate::snippets::Rendered),
+    Delivered(crate::clips::Delivered),
+    SnippetImportPlan(crate::snippets::ImportPlan),
+    SnippetImportReport(crate::snippets::ImportReport),
+    SnippetPreferences(crate::snippets::SnippetPreferences),
+    ClipAnnotations(Vec<crate::clips::ClipAnnotations>),
+    RuleTrace(crate::rules::RuleTrace),
+    MaybeItem(Option<Item>),
+    PasteQueue(crate::paste_queue::PasteQueueState),
+    QueueDelivery(crate::paste_queue::QueueDelivery),
+    TransformCatalogue(Vec<crate::transforms::TransformInfo>),
+    TransformPreview(crate::transforms::TransformPreview),
+    TransformSuggestions(Vec<String>),
+    Pipelines(Vec<crate::transforms::Pipeline>),
+    Pipeline(crate::transforms::Pipeline),
+    TransformPreferences(crate::transforms::TransformPreferences),
+    PipelineDefault(Option<String>),
+    RuleList(crate::rules::RuleList),
+    Rule(crate::rules::RuleRow),
+    RuleErrors(Vec<crate::rules::RuleError>),
+    RulePreview(crate::rules::RulePreview),
+    RuleApplyReport(crate::rules::RuleApplyReport),
+    OperationProgress(Option<OperationProgress>),
+    SkipLog(Vec<crate::rules::SkipEvent>),
     Empty {},
 }
 
@@ -359,6 +522,46 @@ mod tests {
         let event: RuntimeEventData =
             serde_json::from_str(r#"{"change":null,"progress":null}"#).unwrap();
         assert!(event.capture.is_none());
+    }
+
+    #[test]
+    fn event_filters_admit_only_the_requested_kinds() {
+        let library = |kinds| RuntimeEventData {
+            file_operation: None,
+            change: Some(EventData {
+                library: Some(kinds),
+                ..EventData::change(EventKind::Library, 0)
+            }),
+            progress: None,
+            capture: None,
+        };
+        let items = RuntimeEventData {
+            change: Some(EventData::change(EventKind::Items, 1)),
+            ..library(LibraryKinds::RULES)
+        };
+        let filters = [
+            EventKindFilter::PasteQueue,
+            EventKindFilter::Library {
+                kinds: LibraryKinds::RULES,
+            },
+        ];
+        assert!(EventKindFilter::admits(
+            &filters,
+            &library(LibraryKinds::RULES)
+        ));
+        assert!(!EventKindFilter::admits(
+            &filters,
+            &library(LibraryKinds::SNIPPETS)
+        ));
+        assert!(!EventKindFilter::admits(&filters, &items));
+        let decoded: Vec<EventKindFilter> =
+            serde_json::from_str(r#"[{"kind":"library"},{"kind":"status"}]"#).unwrap();
+        assert_eq!(
+            decoded[0],
+            EventKindFilter::Library {
+                kinds: LibraryKinds::all()
+            }
+        );
     }
 
     #[test]

@@ -5,11 +5,33 @@
 //! refresh token or a sync key in plaintext next to an encrypted database would
 //! be the weakest link in the design.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
 use super::model::StoreError;
 use super::store::Store;
+
+/// Keys one module state request may name.
+pub const MAX_MODULE_STATE_KEYS: usize = 64;
+pub const MAX_MODULE_STATE_VALUE_BYTES: usize = 128 * 1024;
+
+/// A module-chosen state key: 1 to 96 ASCII alphanumerics or `_`.
+#[must_use]
+pub fn valid_module_state_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 96
+        && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// The storage key of one module's state key, shared by every module service.
+pub fn module_state_key(module_id: &str, key: &str) -> Result<String, StoreError> {
+    if !valid_module_state_key(key) {
+        return Err(StoreError::InvalidHistoryQuery);
+    }
+    Ok(format!("module:{module_id}:{key}"))
+}
 
 impl Store {
     /// Providers with durable upload progress, including disabled packages.
@@ -41,6 +63,61 @@ impl Store {
             [prefix],
         )?;
         Ok(())
+    }
+
+    /// Values of one module's local state, `None` for keys never set.
+    pub fn module_state(
+        &self,
+        module_id: &str,
+        keys: &[String],
+    ) -> Result<BTreeMap<String, Option<String>>, StoreError> {
+        if keys.len() > MAX_MODULE_STATE_KEYS {
+            return Err(StoreError::InvalidHistoryQuery);
+        }
+        keys.iter()
+            .map(|key| Ok((key.clone(), self.state(&module_state_key(module_id, key)?)?)))
+            .collect()
+    }
+
+    /// Writes one module's local state in one transaction; an empty value
+    /// deletes its key.
+    pub fn set_module_state(
+        &self,
+        module_id: &str,
+        values: &BTreeMap<String, String>,
+    ) -> Result<(), StoreError> {
+        if values.len() > MAX_MODULE_STATE_KEYS
+            || values
+                .values()
+                .any(|value| value.len() > MAX_MODULE_STATE_VALUE_BYTES)
+        {
+            return Err(StoreError::InvalidHistoryQuery);
+        }
+        let keys = values
+            .keys()
+            .map(|key| module_state_key(module_id, key))
+            .collect::<Result<Vec<_>, _>>()?;
+        let entries = keys
+            .iter()
+            .zip(values.values())
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect::<Vec<_>>();
+        self.set_state_all(&entries)
+    }
+
+    pub fn clear_module_state_keys(
+        &self,
+        module_id: &str,
+        keys: &[String],
+    ) -> Result<(), StoreError> {
+        if keys.len() > MAX_MODULE_STATE_KEYS {
+            return Err(StoreError::InvalidHistoryQuery);
+        }
+        let keys = keys
+            .iter()
+            .map(|key| module_state_key(module_id, key))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.clear_state(&keys.iter().map(String::as_str).collect::<Vec<_>>())
     }
 
     /// Read one value, or `None` when it has never been set.
@@ -131,6 +208,22 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use crate::storage::test_support::store;
+
+    #[test]
+    fn module_state_is_namespaced_per_module_and_validates_keys() {
+        use std::collections::BTreeMap;
+        let s = store();
+        s.set_module_state("a.mod", &BTreeMap::from([("grant_1".into(), "v".into())]))
+            .unwrap();
+        let keys = ["grant_1".to_owned(), "missing".to_owned()];
+        let read = s.module_state("a.mod", &keys).unwrap();
+        assert_eq!(read["grant_1"].as_deref(), Some("v"));
+        assert_eq!(read["missing"], None);
+        assert_eq!(s.module_state("b.mod", &keys).unwrap()["grant_1"], None);
+        assert!(s.module_state("a.mod", &["bad key".into()]).is_err());
+        s.clear_module_state_keys("a.mod", &keys).unwrap();
+        assert_eq!(s.state("module:a.mod:grant_1").unwrap(), None);
+    }
 
     #[test]
     fn a_value_round_trips_and_overwrites() {

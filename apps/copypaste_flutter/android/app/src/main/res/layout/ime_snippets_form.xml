@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Template fill-in form: only the fields scroll; the preview and the
+     Cancel / Insert footer stay fixed below them. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/ime_form_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:paddingStart="@dimen/app_spacing_md"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_md"
+        android:singleLine="true"
+        android:textColor="@color/app_color_muted_foreground"
+        android:textSize="@dimen/app_text_size_small" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/ime_form_fields"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/app_spacing_md"
+            android:paddingEnd="@dimen/app_spacing_md" />
+    </ScrollView>
+
+    <TextView
+        android:id="@+id/ime_form_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:accessibilityLiveRegion="polite"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingStart="@dimen/app_spacing_md"
+        android:paddingEnd="@dimen/app_spacing_md"
+        android:textColor="@color/app_color_muted_foreground"
+        android:textSize="@dimen/app_text_size_x_small" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingTop="@dimen/app_spacing_xs"
+        android:paddingEnd="@dimen/app_spacing_sm">
+
+        <TextView
+            android:id="@+id/ime_form_cancel"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/app_control_size_large"
+            android:layout_marginEnd="@dimen/app_spacing_xs"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/ime_action_cancel"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_small" />
+
+        <TextView
+            android:id="@+id/ime_form_insert"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/app_control_size_large"
+            android:layout_marginStart="@dimen/app_spacing_xs"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/ime_action_insert"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_small" />
+    </LinearLayout>
+</LinearLayout>

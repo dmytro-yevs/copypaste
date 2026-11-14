@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:copypaste_flutter/app/theme/app_filter_indicator.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -849,6 +850,40 @@ void main() {
       isEmpty,
       reason: 'Application notifications must use AppToast.',
     );
+  });
+
+  testWidgets('shared builder installs palette, chip, code and step themes', (
+    tester,
+  ) async {
+    late BuildContext themed;
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: Builder(
+            builder: (context) {
+              themed = context;
+              return const AppFilterIndicator.count(
+                count: 120,
+                child: SizedBox.square(dimension: AppControlSize.regular),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      ComponentTheme.maybeOf<ChipInputTheme>(themed),
+      AppTheme.chipInputTheme,
+    );
+    expect(ComponentTheme.maybeOf<StepperTheme>(themed), AppTheme.stepperTheme);
+    expect(
+      ComponentTheme.maybeOf<CodeSnippetTheme>(themed)?.borderRadius,
+      const BorderRadius.all(Radius.circular(AppRadius.md)),
+    );
+    expect(find.text('99+'), findsOneWidget);
   });
 }
 

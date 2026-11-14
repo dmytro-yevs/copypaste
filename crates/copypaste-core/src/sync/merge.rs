@@ -388,8 +388,19 @@ fn apply_remote_version_with_pin_state(
     })?;
     if stored {
         debug!(id = %incoming.item_id, deleted = incoming.deleted, "applied a remote version");
+        if incoming.content_type == crate::storage::organization::CONTENT_TYPE {
+            publish_library_copies(store, keyring);
+        }
     }
     Ok(stored)
+}
+
+/// An apply holds no item key, so a snippet conflict copy it projected gets
+/// its records here. A failure is retried by the next apply.
+pub(super) fn publish_library_copies(store: &Store, keyring: &Keyring) {
+    if let Err(error) = store.publish_snippet_conflicts(&keyring.item_key()) {
+        warn!(error = ?error, "could not publish snippet conflict copies");
+    }
 }
 
 #[cfg(test)]

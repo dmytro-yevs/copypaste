@@ -10,11 +10,13 @@
 
 #include <linux/input-event-codes.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -107,17 +109,19 @@ bool parse_xid(const std::string& value, Window* window) {
 }  // namespace
 
 struct LinuxX11QuickPaste::Impl {
+  struct Binding {
+    KeyCode keycode = 0;
+    unsigned int modifiers = 0;
+    std::vector<unsigned int> masks;
+    std::function<void()> activated;
+  };
+
   Display* display = nullptr;
   Window root = 0;
   int x11_event_base = 0;
   bool xtest_available = false;
-  bool registered = false;
-  KeyCode keycode = 0;
-  unsigned int modifiers = 0;
   std::uint32_t activation_time = 0;
-  std::vector<unsigned int> registered_masks;
-  std::string id;
-  std::function<void()> activated;
+  std::map<std::string, Binding> bindings;
 
   Impl() {
     GdkDisplay* gdk_display = gdk_display_get_default();
@@ -139,36 +143,63 @@ struct LinuxX11QuickPaste::Impl {
 
   static GdkFilterReturn filter(GdkXEvent* xevent, GdkEvent*, gpointer user_data) {
     auto* self = static_cast<Impl*>(user_data);
-    if (self->display == nullptr || !self->registered) return GDK_FILTER_CONTINUE;
+    if (self->display == nullptr || self->bindings.empty()) return GDK_FILTER_CONTINUE;
     auto* event = static_cast<XEvent*>(xevent);
-    if (event->type != KeyPress || event->xkey.keycode != self->keycode) {
+    if (event->type != KeyPress) return GDK_FILTER_CONTINUE;
+    const auto matches_key = [event](const auto& entry) {
+      return entry.second.keycode == event->xkey.keycode;
+    };
+    if (std::none_of(self->bindings.begin(), self->bindings.end(), matches_key)) {
       return GDK_FILTER_CONTINUE;
     }
-    const unsigned int ignored = ignored_lock_mask(self->display);
-    if ((event->xkey.state & ~ignored) != self->modifiers) {
-      return GDK_FILTER_CONTINUE;
-    }
+    const unsigned int state = event->xkey.state & ~ignored_lock_mask(self->display);
+    const auto binding = std::find_if(
+        self->bindings.begin(), self->bindings.end(), [event, state](const auto& entry) {
+          return entry.second.keycode == event->xkey.keycode &&
+                 entry.second.modifiers == state;
+        });
+    if (binding == self->bindings.end()) return GDK_FILTER_CONTINUE;
     self->activation_time = event->xkey.time;
-    if (self->activation_time != CurrentTime && self->activated != nullptr) {
-      self->activated();
-    }
+    // The callback may replace or remove this binding.
+    const std::function<void()> activated = binding->second.activated;
+    if (self->activation_time != CurrentTime && activated != nullptr) activated();
     return GDK_FILTER_REMOVE;
   }
 
-  void clear() {
-    if (display != nullptr) {
-      for (unsigned int lock : registered_masks) {
-        XUngrabKey(display, keycode, modifiers | lock, root);
-      }
-      if (!registered_masks.empty()) XSync(display, False);
+  void ungrab(const Binding& binding) {
+    if (display == nullptr) return;
+    for (unsigned int lock : binding.masks) {
+      XUngrabKey(display, binding.keycode, binding.modifiers | lock, root);
     }
-    registered_masks.clear();
-    registered = false;
-    keycode = 0;
-    modifiers = 0;
+    if (!binding.masks.empty()) XSync(display, False);
+  }
+
+  void remove(const std::string& id) {
+    const auto binding = bindings.find(id);
+    if (binding == bindings.end()) return;
+    ungrab(binding->second);
+    bindings.erase(binding);
+    if (bindings.empty()) activation_time = 0;
+  }
+
+  void clear() {
+    for (const auto& entry : bindings) ungrab(entry.second);
+    bindings.clear();
     activation_time = 0;
-    id.clear();
-    activated = nullptr;
+  }
+
+  bool send_ctrl_v() const {
+    const KeyCode control = XKeysymToKeycode(display, XK_Control_L);
+    const KeyCode v = XKeysymToKeycode(display, XK_v);
+    if (control == 0 || v == 0) return false;
+    const bool control_down = XTestFakeKeyEvent(display, control, True, CurrentTime) != 0;
+    const bool v_down = control_down &&
+        XTestFakeKeyEvent(display, v, True, CurrentTime) != 0;
+    const bool v_up = v_down && XTestFakeKeyEvent(display, v, False, CurrentTime) != 0;
+    const bool control_up = control_down &&
+        XTestFakeKeyEvent(display, control, False, CurrentTime) != 0;
+    XSync(display, False);
+    return control_down && v_down && v_up && control_up;
   }
 };
 
@@ -191,7 +222,7 @@ std::uint32_t LinuxX11QuickPaste::take_activation_time() {
 void LinuxX11QuickPaste::register_shortcut(
     const ShortcutRequest& request, std::function<void(ShortcutResult)> done,
     std::function<void()> activated) {
-  impl_->clear();
+  impl_->remove(request.id);
   if (!available() || request.id.empty() || request.description.empty() ||
       request.usage.empty() || activated == nullptr) {
     done({false, {}, "X11 shortcut registration is unavailable."});
@@ -207,44 +238,83 @@ void LinuxX11QuickPaste::register_shortcut(
   }
   const int evdev = evdev_keycode(static_cast<guint>(usage & kHidUsageMask));
   const unsigned long x11_keycode = evdev == 0 ? 0 : static_cast<unsigned long>(evdev + 8);
-  const KeyCode keycode = static_cast<KeyCode>(x11_keycode);
-  const unsigned int modifiers = modifier_mask(request.modifiers);
-  if (modifiers == 0 || keycode == 0 || x11_keycode > 255) {
+  Impl::Binding binding;
+  binding.keycode = static_cast<KeyCode>(x11_keycode);
+  binding.modifiers = modifier_mask(request.modifiers);
+  if (binding.modifiers == 0 || binding.keycode == 0 || x11_keycode > 255) {
     done({false, {}, "The selected shortcut is invalid on X11."});
     return;
   }
-  impl_->keycode = keycode;
-  impl_->modifiers = modifiers;
+  for (const auto& entry : impl_->bindings) {
+    if (entry.second.keycode == binding.keycode &&
+        entry.second.modifiers == binding.modifiers) {
+      done({false, {}, "That X11 shortcut is already in use."});
+      return;
+    }
+  }
   const std::vector<unsigned int> masks = lock_subsets(ignored_lock_mask(impl_->display));
   grab_error = 0;
   XErrorHandler previous = XSetErrorHandler(record_grab_error);
   for (unsigned int lock : masks) {
-    XGrabKey(impl_->display, keycode, modifiers | lock, impl_->root, True,
+    XGrabKey(impl_->display, binding.keycode, binding.modifiers | lock, impl_->root, True,
              GrabModeAsync, GrabModeAsync);
     XSync(impl_->display, False);
     if (grab_error != 0) break;
-    impl_->registered_masks.push_back(lock);
+    binding.masks.push_back(lock);
   }
   XSetErrorHandler(previous);
   if (grab_error != 0) {
-    impl_->clear();
+    impl_->ungrab(binding);
     done({false, {}, "That X11 shortcut is already in use."});
     return;
   }
-  impl_->id = request.id;
-  impl_->activated = std::move(activated);
-  impl_->registered = true;
+  binding.activated = std::move(activated);
+  impl_->bindings[request.id] = std::move(binding);
   done({true, request.preferred_trigger, {}});
 }
 
 void LinuxX11QuickPaste::unregister_shortcut(
     const std::string& id, std::function<void(bool)> done) {
-  if (!impl_->registered || impl_->id == id) {
-    impl_->clear();
-    done(true);
-    return;
+  impl_->remove(id);
+  done(true);
+}
+
+bool LinuxX11QuickPaste::keys_released() const {
+  if (!available()) return true;
+  char keys[32] = {};
+  XQueryKeymap(impl_->display, keys);
+  const auto pressed = [&keys](KeyCode keycode) {
+    return keycode != 0 && (keys[keycode / 8] & (1 << (keycode % 8))) != 0;
+  };
+  for (const auto& entry : impl_->bindings) {
+    if (pressed(entry.second.keycode)) return false;
   }
-  done(false);
+  XModifierKeymap* map = XGetModifierMapping(impl_->display);
+  if (map == nullptr) return true;
+  bool released = true;
+  for (int index = 0; index < 8 * map->max_keypermod && released; ++index) {
+    released = !pressed(map->modifiermap[index]);
+  }
+  XFreeModifiermap(map);
+  return released;
+}
+
+bool LinuxX11QuickPaste::paste_into_focused() const {
+  return input_available() && !focused_window().empty() && impl_->send_ctrl_v();
+}
+
+bool LinuxX11QuickPaste::move_caret_left(int count) const {
+  if (count <= 0) return count == 0;
+  if (!input_available()) return false;
+  const KeyCode left = XKeysymToKeycode(impl_->display, XK_Left);
+  if (left == 0) return false;
+  bool sent = true;
+  for (int index = 0; index < count && sent; ++index) {
+    sent = XTestFakeKeyEvent(impl_->display, left, True, CurrentTime) != 0 &&
+        XTestFakeKeyEvent(impl_->display, left, False, CurrentTime) != 0;
+  }
+  XSync(impl_->display, False);
+  return sent;
 }
 
 std::string LinuxX11QuickPaste::focused_window() const {
@@ -289,19 +359,19 @@ bool LinuxX11QuickPaste::restore_focus(const std::string& window) const {
   return gdk_x11_display_error_trap_pop(gdk_display) == 0 && focused == target;
 }
 
+std::string LinuxX11QuickPaste::window_class(const std::string& window) const {
+  Window target = 0;
+  if (!available() || !parse_xid(window, &target)) return {};
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  gdk_x11_display_error_trap_push(gdk_display);
+  XClassHint hint {};
+  const bool found = XGetClassHint(impl_->display, target, &hint) != 0;
+  std::string value = found && hint.res_class != nullptr ? hint.res_class : "";
+  if (hint.res_name != nullptr) XFree(hint.res_name);
+  if (hint.res_class != nullptr) XFree(hint.res_class);
+  return gdk_x11_display_error_trap_pop(gdk_display) == 0 ? value : std::string();
+}
+
 bool LinuxX11QuickPaste::restore_and_paste(const std::string& window) const {
-  if (!input_available() || !restore_focus(window)) return false;
-  const KeyCode control = XKeysymToKeycode(impl_->display, XK_Control_L);
-  const KeyCode v = XKeysymToKeycode(impl_->display, XK_v);
-  if (control == 0 || v == 0) return false;
-  const bool control_down = XTestFakeKeyEvent(impl_->display, control, True,
-                                              CurrentTime) != 0;
-  const bool v_down = control_down &&
-      XTestFakeKeyEvent(impl_->display, v, True, CurrentTime) != 0;
-  const bool v_up = v_down &&
-      XTestFakeKeyEvent(impl_->display, v, False, CurrentTime) != 0;
-  const bool control_up = control_down &&
-      XTestFakeKeyEvent(impl_->display, control, False, CurrentTime) != 0;
-  XSync(impl_->display, False);
-  return control_down && v_down && v_up && control_up;
+  return input_available() && restore_focus(window) && impl_->send_ctrl_v();
 }

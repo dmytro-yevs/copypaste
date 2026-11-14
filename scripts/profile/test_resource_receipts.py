@@ -41,6 +41,13 @@ class ResourceReceiptTests(unittest.TestCase):
         self.assertEqual(result["status"], "incomplete")
         self.assertTrue(any("unresolved" in x for x in result["missing"]))
 
+    def test_feature_budgets_are_unresolved_or_positive(self):
+        budgets = self.contract["feature_budgets"]
+        for scope in ("android", "all"):
+            for key, value in budgets[scope].items():
+                with self.subTest(key=key):
+                    self.assertTrue(value is None or (type(value) in (int, float) and value > 0))
+
     def test_ai_exception_does_not_apply_to_recovery(self):
         self.contract["platforms"]["macos"]["ocr_ai_peak_limit_bytes"] = 500_000_000
         self.assertEqual(gate.check(self.contract, [self.receipt(scenario="recovery", memory=400_000_000)], COMMIT)["status"], "failed")

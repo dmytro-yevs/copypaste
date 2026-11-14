@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:pub_semver/pub_semver.dart';
 
@@ -8,7 +10,7 @@ import '../models/module_operation.dart';
 import '../repository/module_marketplace_repository.dart';
 import '../repository/modules_repository.dart';
 import '../repository/module_access_repository.dart';
-import 'module_form_draft.dart';
+import '../../../shared/forms/dynamic_form_draft.dart';
 import 'sms_access_setup_controller.dart';
 
 class ModulesController extends ChangeNotifier {
@@ -18,12 +20,22 @@ class ModulesController extends ChangeNotifier {
     ModuleInputPicker? inputPicker,
     Future<void> Function()? restart,
     ModuleAccessRepository? access,
+    ModuleDeviceCatalog? devices,
+    Stream<void>? reconnects,
   }) : _repository = repository,
        _marketplace = marketplace,
        _inputPicker = inputPicker,
        _restart = restart,
-       _access = access;
+       _access = access,
+       _devices = devices {
+    _reconnects = reconnects?.listen(
+      (_) => unawaited(_applyLocale()),
+      onError: (Object _) {},
+    );
+  }
+  late final StreamSubscription<void>? _reconnects;
   final ModuleAccessRepository? _access;
+  final ModuleDeviceCatalog? _devices;
   final ModulesRepository _repository;
   final ModuleMarketplaceRepository _marketplace;
   final ModuleInputPicker? _inputPicker;
@@ -32,16 +44,15 @@ class ModulesController extends ChangeNotifier {
   Future<void> restartApplication() => _perform(() async {
     await _restart?.call();
   }, refresh: false);
-  ModuleFormDraft form(
+  DynamicFormDraft form(
     List<ModuleField> fields,
     Map<String, Object> initial, {
     InstalledModule? module,
-  }) => ModuleFormDraft(
+  }) => DynamicFormDraft(
     fields: fields,
     initial: initial,
     picker: _inputPicker,
-    models: module?.searchModels ?? const [],
-    languageField: module?.searchLanguageField,
+    accepts: module?.acceptsPreferences,
   );
   ModulesLoadState _state = ModulesLoadState.loading;
   List<InstalledModule> _modules = const [];
@@ -160,7 +171,10 @@ class ModulesController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_disposed || _busy) return;
     _state = ModulesLoadState.loading;
+    String? listedLocale;
     await _perform(() async {
+      listedLocale = _locale;
+      await _localeSent;
       final modules = await _repository.list();
       if (!_disposed) {
         _modules = modules;
@@ -172,6 +186,8 @@ class ModulesController extends ChangeNotifier {
       _state = ModulesLoadState.error;
       notifyListeners();
     }
+    // The language resolved while the first list was in flight.
+    if (!_disposed && _locale != listedLocale) unawaited(_applyLocale());
   }
 
   Future<void> install(MarketplaceModule module) async {
@@ -227,7 +243,24 @@ class ModulesController extends ChangeNotifier {
     }
   }
 
-  Future<void> setEnabled(String id, bool enabled) => _perform(() async {
+  /// Enabling a module that declares capabilities needs them [confirmed].
+  Future<bool> setEnabled(
+    String id,
+    bool enabled, {
+    List<ModuleCapability> confirmed = const [],
+  }) async {
+    final done = await _perform(() async {
+      await _setEnabled(id, enabled, confirmed);
+      return true;
+    });
+    return done == true && _error == null;
+  }
+
+  Future<void> _setEnabled(
+    String id,
+    bool enabled,
+    List<ModuleCapability> confirmed,
+  ) async {
     final sms =
         installedModule(id)?.events.contains(ModuleEventKind.smsReceived) ??
         false;
@@ -237,7 +270,11 @@ class ModulesController extends ChangeNotifier {
         throw ModulesException(AppStrings.current.modulesSmsSetupRequired);
       }
     }
-    await _repository.setEnabled(id, enabled);
+    await _repository.setEnabled(
+      id,
+      enabled,
+      capabilities: enabled ? confirmed : const [],
+    );
     if (sms && _access != null && !await _access.synchronize()) {
       if (enabled) {
         try {
@@ -262,7 +299,50 @@ class ModulesController extends ChangeNotifier {
       }
       throw ModulesException(AppStrings.current.modulesSmsMonitoringFailed);
     }
-  });
+  }
+
+  String? _locale;
+  Future<void>? _localeSent;
+
+  /// Reports the app language, then rereads the summaries it localizes.
+  /// The runtime may keep it in memory only, so it is sent again on every
+  /// reconnect.
+  void useLocale(String locale) {
+    if (_disposed || _locale == locale) return;
+    _locale = locale;
+    unawaited(_applyLocale());
+  }
+
+  Future<void> _applyLocale() async {
+    final locale = _locale;
+    if (_disposed || locale == null) return;
+    final sent = _localeSent = _repository.setLocale(locale).catchError((
+      Object _,
+    ) {
+      // Summaries keep their English strings.
+    });
+    await sent;
+    if (_disposed || _locale != locale || _state != ModulesLoadState.ready) {
+      return;
+    }
+    try {
+      final modules = await _repository.list();
+      if (_disposed || _locale != locale || _busy) return;
+      _modules = modules;
+      notifyListeners();
+    } catch (_) {
+      // Keep the last known list.
+    }
+  }
+
+  /// Named devices for device-set fields; none when they cannot be read.
+  Future<List<ModuleChoice>> deviceChoices() async {
+    try {
+      return await _devices?.devices() ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
 
   bool get canSetUpSmsAccess => _access != null;
 
@@ -370,6 +450,7 @@ class ModulesController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_reconnects?.cancel());
     _marketplace.dispose();
     super.dispose();
   }

@@ -51,6 +51,17 @@ rclip-rtf.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.
 tempfile.workspace = true
+# Content-rule patterns and detectors.
+regex.workspace = true
+# Snippet abbreviation normalization (NFKC, then case folding).
+icu_normalizer.workspace = true
+icu_casemap.workspace = true
+# Abbreviation length is counted in grapheme clusters. Already linked through
+# `copypaste-ipc`, so no crate is added to any binary.
+unicode-segmentation.workspace = true
+# Snippet import and export: CSV rows and passphrase-encrypted bundles.
+csv.workspace = true
+argon2.workspace = true
 
 # Declared here as well as in the Android target table below, and optional only
 # here: that is what lets `--features android-keystore-typecheck` compile the
@@ -65,8 +76,9 @@ android-native-keyring-store = { version = "1", optional = true }
 secret-service = { version = "5.2", default-features = false, features = ["rt-tokio-crypto-rust"], optional = true }
 
 # Local import descriptors must not block while rejecting FIFOs and devices.
+# `time` reads the clock that counts sleep, for clip expiry.
 [target.'cfg(unix)'.dependencies]
-rustix.workspace = true
+rustix = { workspace = true, features = ["time"] }
 
 # Windows has no system OpenSSL to link SQLCipher against and no third branch
 # in libsqlite3-sys's build.rs to fall into — it panics on a missing

@@ -1,0 +1,741 @@
+{
+  "structure": {
+    "structure.json_format": {
+      "name": "格式化 JSON",
+      "description": "为 JSON 添加缩进，数字、转义和键顺序完全保持原样。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        },
+        "sort_keys": {
+          "label": "排序键"
+        }
+      }
+    },
+    "structure.json_minify": {
+      "name": "压缩 JSON",
+      "description": "删除 JSON 中所有无意义的空白。"
+    },
+    "structure.json_validate": {
+      "name": "验证 JSON",
+      "description": "检查文本是否为有效 JSON 并指出错误位置，不修改文本。",
+      "params": {
+        "lenient": {
+          "label": "允许注释和尾随逗号"
+        }
+      }
+    },
+    "structure.json_sort_keys": {
+      "name": "排序 JSON 键",
+      "description": "按码位对对象键排序；数组保持原有顺序。",
+      "params": {
+        "recursive": {
+          "label": "包括嵌套对象"
+        }
+      }
+    },
+    "structure.json_quote": {
+      "name": "转为 JSON 字符串",
+      "description": "将文本包装为 JSON 字符串字面量，并转义引号和换行。"
+    },
+    "structure.json_unquote": {
+      "name": "解析 JSON 字符串",
+      "description": "将 JSON 字符串字面量还原为纯文本，包括双重编码的 JSON。"
+    },
+    "structure.yaml_to_json": {
+      "name": "YAML 转 JSON",
+      "description": "将单个 YAML 文档转换为 JSON。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.json_to_yaml": {
+      "name": "JSON 转 YAML",
+      "description": "将 JSON 转换为块样式的 YAML。"
+    },
+    "structure.csv_to_json": {
+      "name": "CSV 转 JSON",
+      "description": "将 CSV 或 TSV 行转换为 JSON；值保持为文本。",
+      "params": {
+        "header": {
+          "label": "首行为标题行"
+        },
+        "delimiter": {
+          "label": "分隔符",
+          "options": {
+            "auto": "自动检测",
+            "comma": "逗号",
+            "semicolon": "分号",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.xml_format": {
+      "name": "格式化 XML",
+      "description": "为 XML 元素添加缩进而不改动文本；从不加载外部实体。",
+      "params": {
+        "indent": {
+          "label": "缩进",
+          "options": {
+            "2": "2 个空格",
+            "4": "4 个空格",
+            "tab": "制表符"
+          }
+        }
+      }
+    },
+    "structure.xml_minify": {
+      "name": "压缩 XML",
+      "description": "删除 XML 元素之间的空白。"
+    }
+  },
+  "encode": {
+    "encode.base64_encode": {
+      "name": "Base64 编码",
+      "description": "将文本的 UTF-8 字节编码为 Base64。",
+      "params": {
+        "variant": {
+          "label": "字母表",
+          "options": {
+            "standard": "标准",
+            "url_safe": "URL 安全"
+          }
+        },
+        "padding": {
+          "label": "添加填充 (=)"
+        },
+        "wrap": {
+          "label": "每 76 个字符换行"
+        }
+      }
+    },
+    "encode.base64_decode": {
+      "name": "Base64 解码",
+      "description": "解码标准或 URL 安全的 Base64，忽略换行、缺失的填充和 data: URI 前缀。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "text": "文本",
+            "hex": "十六进制字节"
+          }
+        }
+      }
+    },
+    "encode.url_encode": {
+      "name": "URL 组件编码",
+      "description": "对字母、数字和 - . _ ~ 以外的所有字符进行百分号编码，用于查询值或路径片段。",
+      "params": {
+        "space": {
+          "label": "空格编码为",
+          "options": {
+            "percent": "%20",
+            "plus": "+（表单格式）"
+          }
+        }
+      }
+    },
+    "encode.url_encode_full": {
+      "name": "完整 URL 编码",
+      "description": "只编码 URL 中不允许的字符，保留其结构和已有的 %XX 序列。"
+    },
+    "encode.url_decode": {
+      "name": "URL 解码",
+      "description": "解码 %XX 序列，并指出格式错误序列的位置。",
+      "params": {
+        "plus_as_space": {
+          "label": "将 + 视为空格"
+        }
+      }
+    },
+    "encode.hex_encode": {
+      "name": "十六进制编码",
+      "description": "将文本的 UTF-8 字节写成十六进制数字。",
+      "params": {
+        "separator": {
+          "label": "分隔符",
+          "options": {
+            "none": "无",
+            "space": "空格"
+          }
+        },
+        "case": {
+          "label": "大小写",
+          "options": {
+            "lower": "小写",
+            "upper": "大写"
+          }
+        }
+      }
+    },
+    "encode.hex_decode": {
+      "name": "十六进制解码",
+      "description": "将十六进制数字还原为文本，忽略空格和 0x 前缀。"
+    },
+    "encode.html_encode": {
+      "name": "HTML 实体编码",
+      "description": "将 & < > \" ' 替换为 HTML 实体，并可选择把所有非 ASCII 字符替换为数字引用。",
+      "params": {
+        "scope": {
+          "label": "要编码的字符",
+          "options": {
+            "minimal": "仅 & < > \" '",
+            "non_ascii": "也包括所有非 ASCII 字符"
+          }
+        }
+      }
+    },
+    "encode.html_decode": {
+      "name": "HTML 实体解码",
+      "description": "解码所有 HTML5 命名实体和数字引用；未知实体保持原样。"
+    },
+    "encode.backslash_escape": {
+      "name": "反斜杠转义",
+      "description": "按 C 和 JSON 风格转义反斜杠、双引号、换行、制表符和控制字符。"
+    },
+    "encode.backslash_unescape": {
+      "name": "反斜杠反转义",
+      "description": "将 \\n、\\t、\\\"、\\uXXXX、\\xXX 等转义还原为字符；未知转义保持原样并给出警告。"
+    },
+    "encode.unicode_escape": {
+      "name": "Unicode 转义",
+      "description": "将每个非 ASCII 字符写成 \\uXXXX 转义。",
+      "params": {
+        "astral": {
+          "label": "U+FFFF 以上的字符",
+          "options": {
+            "surrogate_pair": "代理对 (\\uD83D\\uDE00)",
+            "braces": "花括号 (\\u{1F600})"
+          }
+        }
+      }
+    },
+    "encode.unicode_unescape": {
+      "name": "Unicode 反转义",
+      "description": "将 \\uXXXX 和 \\u{...} 转义还原为字符，其他文本保持不变。"
+    }
+  },
+  "case": {
+    "case.upper": {
+      "name": "大写",
+      "description": "按完整的 Unicode 规则将所有字母转换为大写。",
+      "params": {
+        "locale": {
+          "label": "语言规则",
+          "options": {
+            "invariant": "与语言无关",
+            "system": "设备语言"
+          }
+        }
+      }
+    },
+    "case.lower": {
+      "name": "小写",
+      "description": "按完整的 Unicode 规则将所有字母转换为小写。",
+      "params": {
+        "locale": {
+          "label": "语言规则",
+          "options": {
+            "invariant": "与语言无关",
+            "system": "设备语言"
+          }
+        }
+      }
+    },
+    "case.title": {
+      "name": "标题格式",
+      "description": "将单词首字母大写；标题样式会让短词保持小写。",
+      "params": {
+        "style": {
+          "label": "样式",
+          "options": {
+            "headline": "标题",
+            "all_words": "每个单词"
+          }
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.sentence": {
+      "name": "句子格式",
+      "description": "将每个句子的第一个词首字母大写，其余转为小写。",
+      "params": {
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.camel": {
+      "name": "camelCase",
+      "description": "将单词连接成以小写开头的标识符。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.pascal": {
+      "name": "PascalCase",
+      "description": "将单词连接成每个词首字母大写的标识符。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        },
+        "keep_acronyms": {
+          "label": "保留缩写词"
+        }
+      }
+    },
+    "case.snake": {
+      "name": "snake_case",
+      "description": "用下划线连接小写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.kebab": {
+      "name": "kebab-case",
+      "description": "用连字符连接小写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.constant": {
+      "name": "CONSTANT_CASE",
+      "description": "用下划线连接大写单词。",
+      "params": {
+        "per_line": {
+          "label": "逐行转换"
+        }
+      }
+    },
+    "case.swap": {
+      "name": "大小写互换",
+      "description": "将大写字母变为小写，小写字母变为大写。"
+    }
+  },
+  "hash": {
+    "hash.md5": {
+      "name": "MD5 哈希",
+      "description": "MD5 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha1": {
+      "name": "SHA-1 哈希",
+      "description": "SHA-1 摘要，不适用于安全用途。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha256": {
+      "name": "SHA-256 哈希",
+      "description": "SHA-256 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.sha512": {
+      "name": "SHA-512 哈希",
+      "description": "SHA-512 摘要。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex_lower": "十六进制，小写",
+            "hex_upper": "十六进制，大写",
+            "base64": "Base64"
+          }
+        }
+      }
+    },
+    "hash.crc32": {
+      "name": "CRC-32 校验和",
+      "description": "使用 ZIP 和 PNG 所用 IEEE 多项式的 CRC-32。 按显示的原样将文本作为 UTF-8 计算哈希，不添加换行。",
+      "params": {
+        "output": {
+          "label": "输出",
+          "options": {
+            "hex": "十六进制（8 位）",
+            "decimal": "十进制"
+          }
+        }
+      }
+    }
+  },
+  "lines": {
+    "lines.trim": {
+      "name": "去除首尾空白",
+      "description": "删除文本开头和结尾的空格和换行。"
+    },
+    "lines.trim_each": {
+      "name": "去除每行空白",
+      "description": "删除每行开头、结尾或两侧的空格。",
+      "params": {
+        "sides": {
+          "label": "位置",
+          "options": {
+            "both": "两侧",
+            "start": "开头",
+            "end": "结尾"
+          }
+        }
+      }
+    },
+    "lines.collapse_whitespace": {
+      "name": "合并空白",
+      "description": "将连续的空格和制表符变为一个空格。",
+      "params": {
+        "keep_line_breaks": {
+          "label": "保留换行"
+        }
+      }
+    },
+    "lines.remove_empty": {
+      "name": "删除空行",
+      "description": "删除空行或只含空格的行。",
+      "params": {
+        "whitespace_only": {
+          "label": "只含空白的行视为空行"
+        }
+      }
+    },
+    "lines.sort": {
+      "name": "排序行",
+      "description": "按字母、自然、数值或长度对行排序。",
+      "params": {
+        "order": {
+          "label": "顺序",
+          "options": {
+            "asc": "升序",
+            "desc": "降序"
+          }
+        },
+        "mode": {
+          "label": "比较方式",
+          "options": {
+            "natural": "自然顺序",
+            "code_point": "码位",
+            "case_insensitive": "忽略大小写",
+            "numeric": "数值",
+            "length": "长度"
+          }
+        }
+      }
+    },
+    "lines.dedupe": {
+      "name": "删除重复行",
+      "description": "按原顺序保留每行的首次出现。",
+      "params": {
+        "case_sensitive": {
+          "label": "区分大小写"
+        },
+        "compare_trimmed": {
+          "label": "忽略首尾空格"
+        }
+      }
+    },
+    "lines.reverse": {
+      "name": "反转行顺序",
+      "description": "将行按相反顺序排列。"
+    },
+    "lines.join": {
+      "name": "合并行",
+      "description": "用分隔符将所有行合并为一行。",
+      "params": {
+        "separator": {
+          "label": "分隔符",
+          "options": {
+            "space": "空格",
+            "comma": "逗号",
+            "none": "无",
+            "custom": "自定义"
+          }
+        },
+        "custom_separator": {
+          "label": "自定义分隔符"
+        },
+        "drop_empty": {
+          "label": "跳过空行"
+        }
+      }
+    },
+    "lines.unwrap": {
+      "name": "解除段落换行",
+      "description": "连接段落内被强制换行的行，例如从 PDF 复制的文本。",
+      "params": {
+        "dehyphenate": {
+          "label": "合并被连字符拆开的单词"
+        }
+      }
+    },
+    "lines.prefix": {
+      "name": "添加行前缀",
+      "description": "在每行前添加项目符号、编号、引用符号或自定义文本。",
+      "params": {
+        "style": {
+          "label": "样式",
+          "options": {
+            "dash": "短横线",
+            "asterisk": "星号",
+            "number": "编号",
+            "quote": "引用",
+            "custom": "自定义"
+          }
+        },
+        "custom_prefix": {
+          "label": "自定义前缀"
+        },
+        "skip_empty": {
+          "label": "跳过空行"
+        }
+      }
+    }
+  },
+  "clean": {
+    "clean.invisible": {
+      "name": "删除不可见字符",
+      "description": "删除零宽字符、双向控制字符和软连字符，并将不换行空格替换为普通空格。"
+    },
+    "clean.quotes": {
+      "name": "拉直引号",
+      "description": "将弯引号替换为直引号，并可选择将破折号替换为连字符。",
+      "params": {
+        "dashes": {
+          "label": "同时拉直破折号"
+        }
+      }
+    }
+  },
+  "url": {
+    "url.remove_tracking": {
+      "name": "移除跟踪参数",
+      "description": "从所有链接中移除 utm_ 和点击 ID 参数，已签名的链接保持不变。",
+      "keywords": [
+        "跟踪",
+        "清理链接",
+        "隐私"
+      ]
+    },
+    "url.unwrap_redirects": {
+      "name": "展开重定向链接",
+      "description": "离线将搜索引擎、社交网络和 Safe Links 的重定向替换为真实目标地址。",
+      "keywords": [
+        "重定向"
+      ]
+    }
+  },
+  "markup": {
+    "markup.rich_to_plain": {
+      "name": "富文本转纯文本",
+      "description": "保留带格式内容的文字，以及段落和换行。",
+      "keywords": [
+        "纯文本",
+        "清除格式"
+      ]
+    },
+    "markup.html_to_markdown": {
+      "name": "HTML 转 Markdown",
+      "description": "将标题、链接、列表、表格和代码块转换为 Markdown，并保留代码中的空白。",
+      "keywords": [
+        "转换"
+      ]
+    },
+    "markup.markdown_to_plain": {
+      "name": "Markdown 转纯文本",
+      "description": "移除 Markdown 语法并保留文字；表格改为制表符分隔。",
+      "keywords": [
+        "纯文本"
+      ],
+      "params": {
+        "link_style": {
+          "label": "链接",
+          "options": {
+            "text": "仅文字",
+            "text_url": "文字和 URL"
+          }
+        },
+        "keep_list_markers": {
+          "label": "保留列表符号"
+        }
+      }
+    }
+  },
+  "dev": {
+    "dev.jwt_decode": {
+      "name": "JWT：解码",
+      "description": "以 JSON 显示令牌的头部和载荷。不验证签名。",
+      "keywords": [
+        "令牌"
+      ]
+    },
+    "dev.timestamp_to_date": {
+      "name": "时间戳转日期",
+      "description": "将 Unix 时间戳转换为日期，自动识别秒、毫秒、微秒或纳秒。",
+      "keywords": [
+        "时间戳",
+        "时间"
+      ],
+      "params": {
+        "unit": {
+          "label": "单位",
+          "options": {
+            "auto": "自动识别",
+            "seconds": "秒",
+            "milliseconds": "毫秒",
+            "microseconds": "微秒",
+            "nanoseconds": "纳秒"
+          }
+        },
+        "format": {
+          "label": "格式",
+          "options": {
+            "iso_utc": "ISO 8601（UTC）",
+            "iso_local": "ISO 8601（本地时间）",
+            "rfc2822": "RFC 2822 格式"
+          }
+        }
+      }
+    },
+    "dev.date_to_timestamp": {
+      "name": "日期转时间戳",
+      "description": "将 ISO 8601、RFC 2822 或普通日期转换为 Unix 时间戳；没有时区偏移时按本地时间处理。",
+      "keywords": [
+        "时间戳",
+        "时间"
+      ],
+      "params": {
+        "unit": {
+          "label": "单位",
+          "options": {
+            "seconds": "秒",
+            "milliseconds": "毫秒"
+          }
+        }
+      }
+    },
+    "dev.find_replace": {
+      "name": "查找和替换",
+      "description": "替换文本或正则表达式的匹配项；替换内容中的 $1 会插入分组。",
+      "keywords": [
+        "替换",
+        "查找"
+      ],
+      "params": {
+        "find": {
+          "label": "查找"
+        },
+        "replace": {
+          "label": "替换为"
+        },
+        "regex": {
+          "label": "正则表达式"
+        },
+        "case_sensitive": {
+          "label": "区分大小写"
+        },
+        "whole_word": {
+          "label": "仅完整单词"
+        },
+        "multiline": {
+          "label": "^ 和 $ 按行匹配"
+        }
+      }
+    },
+    "dev.extract": {
+      "name": "提取匹配项",
+      "description": "列出每个 URL、邮箱、数字、地址、颜色、UUID 或模式匹配项，每行一个。",
+      "keywords": [
+        "提取"
+      ],
+      "params": {
+        "preset": {
+          "label": "查找内容",
+          "options": {
+            "urls": "链接",
+            "emails": "邮箱地址",
+            "numbers": "数字",
+            "ipv4": "IPv4 地址",
+            "ipv6": "IPv6 地址",
+            "hex_colors": "十六进制颜色",
+            "uuids": "UUID 标识",
+            "custom": "自定义模式"
+          }
+        },
+        "pattern": {
+          "label": "模式"
+        },
+        "dedupe": {
+          "label": "去除重复"
+        }
+      }
+    },
+    "dev.remove_chars": {
+      "name": "删除字符",
+      "description": "删除数字、标点、非 ASCII 字符、表情符号或你指定的字符。",
+      "keywords": [
+        "删除",
+        "数字"
+      ],
+      "params": {
+        "class": {
+          "label": "删除内容",
+          "options": {
+            "digits": "数字",
+            "punctuation": "标点",
+            "non_ascii": "非 ASCII 字符",
+            "emoji": "表情符号",
+            "custom": "指定的字符"
+          }
+        },
+        "chars": {
+          "label": "字符"
+        }
+      }
+    }
+  }
+}

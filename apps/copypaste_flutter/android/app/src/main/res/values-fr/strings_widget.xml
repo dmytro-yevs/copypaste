@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Historique</string>
+    <string name="widget_filter_pinned">Épinglés</string>
+    <string name="widget_filter_snippets">Extraits</string>
+    <string name="widget_filter_description">Affiche : %1$s. Touchez pour changer.</string>
+    <string name="widget_privacy_full">Aperçu complet</string>
+    <string name="widget_privacy_titles">Titres seulement</string>
+    <string name="widget_privacy_hidden">Masqué</string>
+    <string name="widget_privacy_description">Aperçus : %1$s. Touchez pour changer.</string>
+    <string name="widget_search">Rechercher dans CopyPaste</string>
+    <string name="widget_paused">Capture en pause · Reprendre</string>
+    <string name="widget_empty">Aucun clip pour l\'instant · Enregistrer le presse-papiers</string>
+    <string name="widget_empty_pinned">Aucun clip épinglé</string>
+    <string name="widget_empty_snippets">Aucun extrait pour l\'instant</string>
+    <string name="widget_setup">Configurer la capture</string>
+    <string name="widget_unavailable">Déverrouillez pour afficher les clips</string>
+    <string name="widget_error">Impossible de charger les clips · Touchez pour réessayer</string>
+    <string name="widget_hidden">Aperçus masqués</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d clip</item>
+        <item quantity="many">%d clips</item>
+        <item quantity="other">%d clips</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d extrait</item>
+        <item quantity="many">%d extraits</item>
+        <item quantity="other">%d extraits</item>
+    </plurals>
+    <string name="widget_kind_text">Texte</string>
+    <string name="widget_kind_link">Lien</string>
+    <string name="widget_kind_image">Image</string>
+    <string name="widget_kind_file">Fichier</string>
+    <string name="widget_kind_color">Couleur</string>
+    <string name="widget_kind_code">Code</string>
+    <string name="widget_kind_snippet">Extrait</string>
+    <string name="widget_secret_item">Élément secret</string>
+    <string name="widget_secret_description">%1$s, secret. Touchez deux fois et authentifiez-vous pour copier.</string>
+    <string name="widget_concealed_snippet">Extrait masqué</string>
+    <string name="widget_copied">Copié</string>
+    <string name="widget_copy_failed">Impossible de copier</string>
+    <string name="widget_auth_reason">Copier un élément secret</string>
+</resources>

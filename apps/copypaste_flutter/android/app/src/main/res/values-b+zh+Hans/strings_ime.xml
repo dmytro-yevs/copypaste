@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">调整面板大小</string>
+    <string name="ime_search_hint">搜索剪贴</string>
+    <string name="ime_backspace">删除</string>
+    <string name="ime_undo_insert">撤销插入</string>
+    <string name="ime_enter">Enter</string>
+    <string name="ime_keypad_switch_layout">切换布局</string>
+    <string name="ime_keypad_space">空格</string>
+    <string name="ime_keypad_done">完成</string>
+    <string name="ime_keypad_backspace">退格</string>
+    <string name="ime_kind_text">文本</string>
+    <string name="ime_kind_link">链接</string>
+    <string name="ime_kind_email">电子邮件</string>
+    <string name="ime_kind_phone">电话号码</string>
+    <string name="ime_kind_color">颜色</string>
+    <string name="ime_kind_code">代码</string>
+    <string name="ime_kind_image">图片</string>
+    <string name="ime_kind_file">文件</string>
+    <string name="ime_current_clipboard">当前剪贴板</string>
+    <string name="ime_secret_item">机密项目，点按两次并验证身份后插入</string>
+    <string name="ime_pinned">已置顶</string>
+    <string name="ime_loading">正在加载剪贴…</string>
+    <string name="ime_locked">解锁设备以查看你的剪贴</string>
+    <string name="ime_error">无法打开你的剪贴</string>
+    <string name="ime_retry">重试</string>
+    <string name="ime_no_results">没有与“%1$s”匹配的结果</string>
+    <string name="ime_empty_history">这里还没有内容。复制一些内容，或点按“保存剪贴板”。</string>
+    <string name="ime_empty_pinned">还没有置顶的剪贴</string>
+    <string name="ime_tab_history">历史记录</string>
+    <string name="ime_tab_pinned">已置顶</string>
+    <string name="ime_tab_snippets">片段</string>
+    <string name="ime_tab_queue">队列</string>
+    <string name="ime_action_cancel">取消</string>
+    <string name="ime_action_insert">插入</string>
+    <string name="ime_action_insert_plain">以纯文本插入</string>
+    <string name="ime_action_copy">复制到剪贴板</string>
+    <string name="ime_action_pin">置顶</string>
+    <string name="ime_action_unpin">取消置顶</string>
+    <string name="ime_action_delete">删除</string>
+    <string name="ime_action_reveal">显示</string>
+    <string name="ime_delete_confirm">删除此剪贴？</string>
+    <string name="ime_delete_failed">无法删除该剪贴</string>
+    <string name="ime_inserted">已插入</string>
+    <string name="ime_copied">已复制</string>
+    <string name="ime_copy_failed">无法复制该剪贴</string>
+    <string name="ime_insert_failed">无法在此处插入</string>
+    <string name="ime_insert_too_large">内容太大，无法在此处插入</string>
+    <string name="ime_paste_via_clipboard">通过剪贴板粘贴</string>
+    <string name="ime_image_not_accepted">此字段不接受图片</string>
+    <string name="ime_file_not_accepted">此字段不接受文件</string>
+    <string name="ime_item_unavailable">此剪贴已不可用</string>
+    <string name="ime_unlock_failed">无法解锁机密项目</string>
+    <string name="ime_masked_mode">密码字段：预览已隐藏</string>
+    <string name="ime_private_field">隐私字段：不会保存任何内容</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="other">%d 个字符</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="other">队列中有 %d 项</item>
+    </plurals>
+</resources>

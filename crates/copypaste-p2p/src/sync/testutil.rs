@@ -15,6 +15,7 @@ use super::{
     SyncCursor, SyncError, SyncOutcome, SyncSource,
 };
 use crate::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
+use crate::DeviceProfile;
 
 pub(crate) fn source_icon_metadata() -> String {
     let mut png = std::io::Cursor::new(Vec::new());
@@ -63,6 +64,16 @@ pub(crate) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> Sy
     }
 }
 
+/// Stands in for an organization record of a class legacy peers decline.
+pub(crate) const LIBRARY_CONTENT_TYPE: &str = "test/library";
+
+pub(crate) fn library_item(id: &str, created_at: i64, origin: &str) -> SyncItem {
+    SyncItem {
+        content_type: LIBRARY_CONTENT_TYPE.into(),
+        ..item(id, created_at, id, origin)
+    }
+}
+
 pub(super) fn tombstone(id: &str, created_at: i64, hash: &str, origin: &str) -> SyncItem {
     SyncItem {
         item_id: id.into(),
@@ -92,6 +103,7 @@ pub(crate) struct TestSource {
     /// Items the source hands back even though they were not requested —
     /// used to prove the session refuses them.
     smuggle: Mutex<Vec<SyncItem>>,
+    profile: DeviceProfile,
 }
 
 impl TestSource {
@@ -101,6 +113,18 @@ impl TestSource {
             device_name: format!("{device_id} name"),
             items: Mutex::new(items.into_iter().map(|i| (i.item_id.clone(), i)).collect()),
             smuggle: Mutex::new(Vec::new()),
+            profile: DeviceProfile::current(),
+        }
+    }
+
+    /// A source that says hello the way a build without library records does.
+    pub(crate) fn legacy(device_id: &str, items: Vec<SyncItem>) -> Self {
+        Self {
+            profile: DeviceProfile {
+                organization_kinds: None,
+                ..DeviceProfile::current()
+            },
+            ..Self::new(device_id, items)
         }
     }
 
@@ -125,11 +149,24 @@ impl TestSource {
         after_id: Option<&str>,
         limit: usize,
     ) -> Vec<ItemSummary> {
+        self.page_for(since_ms, after_id, limit, crate::ORGANIZATION_KINDS)
+    }
+
+    /// [`Self::page`] as offered to a peer accepting `organization_kinds`.
+    pub(crate) fn page_for(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+        organization_kinds: u32,
+    ) -> Vec<ItemSummary> {
+        let legacy = organization_kinds < crate::ORGANIZATION_KINDS;
         let mut v: Vec<_> = self
             .items
             .lock()
             .unwrap()
             .values()
+            .filter(|i| !legacy || i.content_type != LIBRARY_CONTENT_TYPE)
             .map(|i| i.summary())
             .filter(|s| super::summary::summary_key(s) >= since_ms)
             .collect();
@@ -172,8 +209,13 @@ impl SyncSource for TestSource {
         since_ms: i64,
         after_id: Option<&str>,
         limit: usize,
+        organization_kinds: u32,
     ) -> Result<Vec<ItemSummary>, SyncError> {
-        Ok(self.page(since_ms, after_id, limit))
+        Ok(self.page_for(since_ms, after_id, limit, organization_kinds))
+    }
+
+    fn device_profile(&self) -> DeviceProfile {
+        self.profile.clone()
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {

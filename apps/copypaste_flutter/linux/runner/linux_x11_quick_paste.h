@@ -26,6 +26,7 @@ class LinuxX11QuickPaste {
   // Zero means no usable user-activation time is pending.
   std::uint32_t take_activation_time();
 
+  // Grabs one shortcut per id; registering an id again replaces its grab.
   void register_shortcut(const ShortcutRequest& request,
                          std::function<void(ShortcutResult)> done,
                          std::function<void()> activated);
@@ -36,7 +37,16 @@ class LinuxX11QuickPaste {
   // opened. It is consumed by the child context, never persisted.
   std::string focused_window() const;
   bool restore_focus(const std::string& window) const;
+  // The WM_CLASS class of a decimal XID, or empty when it has none.
+  std::string window_class(const std::string& window) const;
   bool restore_and_paste(const std::string& window) const;
+
+  // XTEST input merges with held keys, and a grabbed shortcut keeps the
+  // keyboard grabbed until its key is released. Callers send input only once
+  // no modifier and no registered shortcut key is down.
+  bool keys_released() const;
+  bool paste_into_focused() const;
+  bool move_caret_left(int count) const;
 
  private:
   struct Impl;

@@ -57,12 +57,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get commonEnable => '켜기';
 
   @override
-  String get commonOn => '켜짐';
-
-  @override
-  String get commonOff => '꺼짐';
-
-  @override
   String get settingsLanguageTitle => '언어';
 
   @override
@@ -120,15 +114,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsRuntimeExcludedAppsLimit => '최대 256개의 앱을 제외할 수 있습니다.';
-
-  @override
-  String get settingsQuickPasteStartFailed =>
-      'Quick Paste를 시작할 수 없어 단축키가 작동하지 않습니다.';
-
-  @override
-  String settingsQuickPasteShortcutInUse(String shortcut) {
-    return '$shortcut은(는) 다른 앱에서 사용 중입니다. 다른 단축키를 선택하세요.';
-  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -745,6 +730,452 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSectionModulesSummary => '선택적 모듈 설치 및 관리.';
 
   @override
+  String get settingsSectionRules => '콘텐츠 규칙';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      '클립에 자동으로 태그를 지정하거나 건너뛰거나 보호하거나 만료합니다.';
+
+  @override
+  String get settingsSectionQuickAccess => '빠른 액세스';
+
+  @override
+  String get settingsSectionQuickAccessSummary => '키보드, 타일, 홈 화면 위젯.';
+
+  @override
+  String get settingsSectionSnippets => '스니펫';
+
+  @override
+  String get settingsSectionSnippetsSummary => '재사용 가능한 텍스트와 템플릿.';
+
+  @override
+  String get settingsSectionTransforms => '텍스트 변환';
+
+  @override
+  String get settingsSectionTransformsSummary => '즐겨찾기, 파이프라인, 붙여넣기 기본 변환.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary => '여러 복사 항목을 모아 순서대로 붙여넣습니다.';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return '$total개 중 $position번째를 붙여 넣었습니다';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '$total개 중 $position번째 항목이 클립보드에 있습니다';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목을 붙여 넣었습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목이 클립보드에 있습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => '대기열 완료';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '추가됨, 대기열에 $total개',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste => '대기열이 비어 있어 붙여 넣지 않았습니다';
+
+  @override
+  String get pasteQueueMixed => '모두 붙여 넣기는 텍스트만 또는 파일만 있는 대기열에서 작동합니다';
+
+  @override
+  String get pasteQueueSeveralFiles => '파일은 하나씩 붙여 넣으세요.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 항목을 더 이상 사용할 수 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle => '다음 붙여 넣기가 복사만 합니다';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      '항목을 복사했습니다. 자동으로 붙여 넣으려면 손쉬운 사용을 허용하세요.';
+
+  @override
+  String get pasteQueuePasteUnsupported => '자동으로 붙여 넣지 못했습니다. 대신 항목을 복사했습니다.';
+
+  @override
+  String get pasteQueueTargetElevated => '관리자 앱에는 붙여 넣을 수 없습니다. 대신 항목을 복사했습니다.';
+
+  @override
+  String get pasteQueueNoTarget => '붙여 넣을 앱이 없습니다. 대신 항목을 복사했습니다.';
+
+  @override
+  String get pasteQueueCollectingStarted => '복사 항목 수집 중';
+
+  @override
+  String get pasteQueueCollectingStopped => '수집을 중지했습니다';
+
+  @override
+  String get pasteQueueFailed => 'Paste Queue 작업을 완료하지 못했습니다';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 대기 중',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 대기 중 · 수집 중',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => '수집 중';
+
+  @override
+  String get pasteQueueFinishedSummary => '완료';
+
+  @override
+  String pasteQueueFull(int max) {
+    return '대기열이 가득 찼습니다($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage => '새 복사 항목이 더 이상 추가되지 않습니다.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue가 비어 있습니다';
+
+  @override
+  String get pasteQueueEmptyMessage => '복사 항목을 모으거나 기록에서 항목을 추가하세요.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle => '복사하면 추가됩니다';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      '수집을 중지할 때까지 복사한 항목이 대기열에 추가됩니다.';
+
+  @override
+  String get pasteQueueStartCollecting => '수집 시작';
+
+  @override
+  String get pasteQueueStopCollecting => '수집 중지';
+
+  @override
+  String get pasteQueueLoading => '대기열을 불러오는 중…';
+
+  @override
+  String get pasteQueueLoadFailed => '대기열을 불러오지 못했습니다';
+
+  @override
+  String get pasteQueuePasteNext => '다음 붙여 넣기';
+
+  @override
+  String get pasteQueueCopyNext => '다음 복사';
+
+  @override
+  String get pasteQueuePasteAll => '모두 붙여 넣기';
+
+  @override
+  String get pasteQueueCopyAll => '모두 복사';
+
+  @override
+  String get pasteQueueReverse => '순서 뒤집기';
+
+  @override
+  String get pasteQueueStepBack => '한 단계 뒤로';
+
+  @override
+  String get pasteQueueSkip => '건너뛰기';
+
+  @override
+  String get pasteQueueRemovePasted => '붙여 넣은 항목 제거';
+
+  @override
+  String get pasteQueueCleared => '대기열을 비웠습니다';
+
+  @override
+  String get pasteQueueUndo => '실행 취소';
+
+  @override
+  String get pasteQueueStartFresh => '새로 시작';
+
+  @override
+  String get pasteQueueAppend => '이어서 추가';
+
+  @override
+  String get pasteQueueRestartTitle => '새로 수집을 시작할까요?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      '새로 시작은 붙여 넣은 항목을 제거하고, 이어서 추가는 유지합니다.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time의 대기열';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => '붙여 넣음';
+
+  @override
+  String get pasteQueueStatusSkipped => '건너뜀';
+
+  @override
+  String get pasteQueueStatusUnavailable => '더 이상 사용할 수 없음';
+
+  @override
+  String get pasteQueueEdited => '편집됨';
+
+  @override
+  String get pasteQueueSecret => '비밀';
+
+  @override
+  String get pasteQueueKindImage => '이미지';
+
+  @override
+  String get pasteQueueKindFiles => '파일';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '$time에 생성됨';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return '항목 $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '$position번째 위치로 이동했습니다';
+  }
+
+  @override
+  String get pasteQueueMoveUp => '위로 이동';
+
+  @override
+  String get pasteQueueMoveDown => '아래로 이동';
+
+  @override
+  String get pasteQueueMoveToTop => '맨 위로 이동';
+
+  @override
+  String get pasteQueueMoveToBottom => '맨 아래로 이동';
+
+  @override
+  String get pasteQueueReorder => '끌어서 순서 변경';
+
+  @override
+  String get pasteQueueMoreActions => '추가 작업';
+
+  @override
+  String get pasteQueuePasteNow => '지금 붙여 넣기';
+
+  @override
+  String get pasteQueueEdit => '텍스트 편집';
+
+  @override
+  String get pasteQueueUseOriginal => '원래 텍스트 사용';
+
+  @override
+  String get pasteQueueRemove => '대기열에서 제거';
+
+  @override
+  String get pasteQueueEditTitle => '대기열 텍스트 편집';
+
+  @override
+  String get pasteQueueEditMessage => '변경 사항은 이 대기열에만 적용됩니다.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => '단축키 설정';
+
+  @override
+  String get pasteQueueShortcutPromptMessage => 'CopyPaste를 열지 않고 모으고 붙여넣습니다.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting => '수집 시작 또는 중지';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain => '다음을 일반 텍스트로 붙여 넣기';
+
+  @override
+  String get pasteQueueShortcutDescription => '모든 앱에서 작동하는 전역 단축키입니다.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      '다른 CopyPaste 단축키가 이 조합을 사용합니다. 이전 단축키가 유지됩니다.';
+
+  @override
+  String get pasteQueueShortcutInUse => '다른 앱이 이 조합을 사용 중입니다.';
+
+  @override
+  String get pasteQueueShortcutRejected => '시스템에서 이 조합을 거부했습니다. 이전 단축키가 유지됩니다.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt는 많은 자판에서 문자를 입력합니다. 다른 조합을 선택하세요.';
+
+  @override
+  String get pasteQueueShortcutUnavailable => '이 세션에서는 전역 단축키를 사용할 수 없습니다.';
+
+  @override
+  String get pasteQueueShortcutFailed => '이 단축키를 설정하지 못했습니다.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue 사용';
+
+  @override
+  String get pasteQueueEnableDescription => '끄면 단축키와 수집이 중지됩니다.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => '다음 붙여 넣기 동작';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription => '자동으로 붙여넣거나 클립보드에 복사만 합니다.';
+
+  @override
+  String get pasteQueuePasteIntoApp => '앞에 있는 앱에 붙여 넣기';
+
+  @override
+  String get pasteQueueClipboardOnly => '클립보드에만 넣기';
+
+  @override
+  String get pasteQueueInsertTitle => '새 항목 추가 위치';
+
+  @override
+  String get pasteQueueInsertDescription => '수집하거나 추가한 항목이 대기열의 어디에 들어갈지 정합니다.';
+
+  @override
+  String get pasteQueueInsertEnd => '끝(선입선출)';
+
+  @override
+  String get pasteQueueInsertStart => '처음(후입선출)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => '마지막 항목 다음';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      '모든 항목을 붙여 넣은 뒤 다음 붙여 넣기의 동작입니다.';
+
+  @override
+  String get pasteQueueEndStop => '중지';
+
+  @override
+  String get pasteQueueEndLoop => '처음부터 다시';
+
+  @override
+  String get pasteQueueEndKeepLast => '마지막 항목 계속 붙여 넣기';
+
+  @override
+  String get pasteQueueSeparatorTitle => '모두 붙여 넣기 구분자';
+
+  @override
+  String get pasteQueueSeparatorDescription => '한 번에 모두 붙여 넣을 때 항목 사이에 들어갑니다.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => '줄 바꿈';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => '빈 줄';
+
+  @override
+  String get pasteQueueSeparatorTab => '탭';
+
+  @override
+  String get pasteQueueSeparatorSpace => '공백';
+
+  @override
+  String get pasteQueueSeparatorComma => '쉼표';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => '쉼표와 공백';
+
+  @override
+  String get pasteQueueSeparatorNone => '없음';
+
+  @override
+  String get pasteQueueSeparatorCustom => '사용자 지정';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder => '최대 32자, \\n 및 \\t 사용 가능';
+
+  @override
+  String get pasteQueuePlainTextTitle => '항상 일반 텍스트로 붙여 넣기';
+
+  @override
+  String get pasteQueuePlainTextDescription => '대기열 항목의 서식을 제거합니다.';
+
+  @override
+  String get pasteQueueIdleStopTitle => '수집 자동 중지 시간';
+
+  @override
+  String get pasteQueueIdleStopDescription => '이 시간 동안 복사가 없으면 수집을 중지합니다.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes분';
+  }
+
+  @override
+  String get pasteQueueIdleNever => '안 함';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => '대기열 크기 제한';
+
+  @override
+  String get pasteQueueMaxEntriesDescription => '가득 차면 새 복사 항목이 추가되지 않습니다.';
+
+  @override
+  String get pasteQueueRestoreTitle => '완료되면 이전 클립보드 복원';
+
+  @override
+  String get pasteQueueRestoreDescription => '붙여넣기 전에 복사했던 내용을 되돌립니다.';
+
+  @override
+  String get pasteQueueSettingsKeywords => 'paste queue 대기열 수집 순서 단축키 구분자';
+
+  @override
   String get settingsSectionAbout => '정보';
 
   @override
@@ -823,8 +1254,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsStartupUnavailable => '이 설치본에서는 자동 시작을 사용할 수 없습니다.';
 
   @override
-  String get settingsStartupAndroidDescription =>
-      '기기를 다시 시작한 후 켜져 있던 백그라운드 서비스를 재개합니다.';
+  String get settingsStartupAndroidDescription => '재시작 후 백그라운드 서비스를 다시 실행합니다.';
 
   @override
   String get settingsStartupDesktopDescription => '로그인할 때 CopyPaste를 자동으로 엽니다.';
@@ -878,7 +1308,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      '전체 또는 제한 모드를 선택하고 일회성 Shizuku 또는 ADB 설정을 관리합니다.';
+      '전체 또는 제한 모드와 Shizuku·ADB 1회 설정.';
 
   @override
   String get settingsOpenSetup => '설정 열기';
@@ -902,7 +1332,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      '백그라운드에서 새 스크린샷을 저장하려면 모든 사진 및 알림에 대한 접근을 허용하십시오.';
+      '백그라운드에서 스크린샷을 저장하는 데 필요합니다.';
 
   @override
   String get settingsAllowAccess => '접근 허용';
@@ -963,8 +1393,7 @@ class AppLocalizationsKo extends AppLocalizations {
       '가져오기 다운로드 전송 크기 한도 import download transfer size limit';
 
   @override
-  String get settingsMaxFileSizeDescription =>
-      '파일 추가 및 다운로드 한도입니다. 파일 내용은 ‘다운로드’를 선택할 때만 전송됩니다.';
+  String get settingsMaxFileSizeDescription => '추가하거나 다운로드할 수 있는 최대 파일 크기입니다.';
 
   @override
   String get settingsHistoryFilesTitle => '기록 파일';
@@ -1008,8 +1437,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsRestoreDialogTitle => '로컬 기록을 대체하시겠습니까?';
 
   @override
-  String get settingsRestoreDialogMessage =>
-      '선택한 암호화된 백업이 이 기기의 클립보드 기록을 대체합니다. 현재 설정과 기기 ID는 유지됩니다.';
+  String get settingsRestoreDialogMessage => '백업이 이 기기의 기록을 대체합니다. 설정은 유지됩니다.';
 
   @override
   String get settingsRestoreFailed => '백업을 복원할 수 없습니다.';
@@ -1018,7 +1446,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSyncSwitchTitle => '동기화';
 
   @override
-  String get settingsSyncSwitchDescription => '페어링된 기기 동기화를 한 번에 켜거나 끕니다.';
+  String get settingsSyncSwitchDescription => '페어링된 기기와 기록을 동기화합니다.';
 
   @override
   String get settingsSyncSearchDescription => '페어링된 기기 동기화.';
@@ -1036,7 +1464,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      '다른 기기의 최신 클립을 이 기기의 클립보드에 자동으로 복사합니다.';
+      '다른 기기의 새 클립을 이 클립보드에 복사합니다.';
 
   @override
   String get settingsLanVisibilityTitle => 'LAN 표시';
@@ -1060,16 +1488,11 @@ class AppLocalizationsKo extends AppLocalizations {
       '개인정보 앱 식별자 privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      '이 앱이 활성 상태인 동안 자동 수집을 건너뜁니다. 백그라운드 복사는 제외 설정을 우회할 수 있습니다.';
-
-  @override
-  String get settingsExcludedAppsDesktopDescription =>
-      '식별된 클립보드 소유자로부터의 자동 수집을 건너뜁니다. 제외 항목이 설정되어 있고 출처를 식별할 수 없으면 수집이 일시 정지됩니다.';
+  String get settingsExcludedAppsDesktopDescription => '이 앱에서는 자동으로 수집하지 않습니다.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Android는 출처 앱을 식별할 수 없으므로 제외 항목이 설정되어 있는 동안 자동 수집을 건너뜁니다.';
+      '제외된 앱이 있으면 자동 수집이 일시 중지됩니다.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1087,22 +1510,16 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => '앱 제외';
+  String get applicationPickerSearch => '앱 검색';
 
   @override
-  String get settingsExcludeDialogAction => '제외';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => '앱 식별자';
-
-  @override
-  String get settingsExcludeFailed => '앱을 제외할 수 없습니다.';
+  String get applicationPickerEmpty => '앱을 찾을 수 없습니다';
 
   @override
   String get settingsSkipSecretTitle => '기밀 클립보드 건너뛰기';
 
   @override
-  String get settingsSkipSecretDescription => '출처 앱이 기밀로 표시한 내용을 기록에서 제외합니다.';
+  String get settingsSkipSecretDescription => '앱이 비밀로 표시한 복사본은 저장하지 않습니다.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1112,8 +1529,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsSkipTransientTitle => '임시 클립보드 건너뛰기';
 
   @override
-  String get settingsSkipTransientDescription =>
-      '출처 앱이 임시로 표시한 복사 항목을 기록에서 제외합니다.';
+  String get settingsSkipTransientDescription => '앱이 임시로 표시한 복사본은 저장하지 않습니다.';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1302,7 +1718,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      '단축키는 CopyPaste가 백그라운드에서 실행 중일 때 작동합니다.';
+      'CopyPaste가 백그라운드에서 실행 중일 때 작동합니다.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -1335,6 +1751,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsShortcutRecording => '단축키 입력…';
 
   @override
+  String get settingsShortcutNotSet => '설정 안 됨';
+
+  @override
   String get settingsShortcutReset => '단축키 재설정';
 
   @override
@@ -1364,13 +1783,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => '근처에 기기 없음';
-
-  @override
-  String get devicesEmptyTitle => '아직 페어링된 다른 기기가 없습니다';
-
-  @override
-  String get devicesEmptyMessage =>
-      '다른 기기를 페어링하면 기기 간에 클립보드 기록이 동기화됩니다. 두 기기가 같은 네트워크에 있어야 하며, 모든 페어링은 두 기기에서 확인합니다.';
 
   @override
   String get devicesThisDevice => '이 기기';
@@ -1705,9 +2117,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pairingStateFailed => '페어링 실패';
 
   @override
-  String get pairingStateNotCompleted => '페어링이 완료되지 않음';
-
-  @override
   String get pairingHandshakingDescription => '기기 간에 보안 채널을 설정하는 중입니다.';
 
   @override
@@ -1726,48 +2135,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get pairingIdleDescription => '기기를 연결하려면 페어링을 시작하십시오.';
-
-  @override
-  String get pairingStepInvite => '초대';
-
-  @override
-  String get pairingStepScan => '스캔';
-
-  @override
-  String get pairingStepCode => '코드';
-
-  @override
-  String get pairingStepRequest => '요청';
-
-  @override
-  String get pairingStepConnect => '연결';
-
-  @override
-  String get pairingStepConfirm => '확인';
-
-  @override
-  String get pairingStepPaired => '페어링됨';
-
-  @override
-  String get pairingOtherDevice => '다른 기기';
-
-  @override
-  String get pairingDecisionNotConfirmed => '아직 확인되지 않음';
-
-  @override
-  String get pairingDecisionSending => '결정을 보내는 중…';
-
-  @override
-  String get pairingDecisionConfirmed => '확인됨';
-
-  @override
-  String get pairingDecisionRejected => '거부됨';
-
-  @override
-  String get pairingDecisionWaiting => '확인을 기다리는 중';
-
-  @override
-  String get pairingDecisionUnknown => '응답을 알 수 없음';
 
   @override
   String get pairingProtectedUnavailableTitle => '보호된 페어링을 사용할 수 없음';
@@ -1933,16 +2300,6 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return '동기화: $status';
-  }
-
-  @override
-  String syncHeaderDeviceCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '기기 $count대',
-    );
-    return '$_temp0';
   }
 
   @override
@@ -2317,16 +2674,6 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String historyClipLineCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count줄',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get historyInspectorEmptyTitle => '클립 선택';
 
   @override
@@ -2561,9 +2908,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get appWindowSetupTitle => '창 설정 확인 필요';
 
   @override
-  String get appNavigationLabel => '기본 탐색';
-
-  @override
   String get appOpenHistory => '기록 열기';
 
   @override
@@ -2644,16 +2988,6 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedStepPosition(int step, int count, String name) {
-    return '$step / $count · $name';
-  }
-
-  @override
-  String sharedStepSemantics(int step, int count, String name) {
-    return '$count단계 중 $step단계: $name';
   }
 
   @override
@@ -3088,22 +3422,6 @@ class AppLocalizationsKo extends AppLocalizations {
   String get modulesDownloadingModel => '언어 모델 다운로드 중…';
 
   @override
-  String get modulesPhaseDownload => '다운로드';
-
-  @override
-  String get modulesPhaseInstall => '설치';
-
-  @override
-  String modulesInstallingModule(String module) {
-    return '$module 설치 중';
-  }
-
-  @override
-  String modulesUpdatingModule(String module) {
-    return '$module 업데이트 중';
-  }
-
-  @override
   String get modulesRun => '실행';
 
   @override
@@ -3353,6 +3671,154 @@ class AppLocalizationsKo extends AppLocalizations {
   String get historyTagsAction => '태그…';
 
   @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '기밀 항목 잠금 해제',
+      'other': '기밀 항목 잠금 해제',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '숨김 스니펫 사용',
+      'other': '숨김 스니펫 사용',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': '기밀 항목 복사',
+      'other': '기밀 항목 복사',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => '이 시스템에서는 사용할 수 없음';
+
+  @override
+  String get deviceAuthNotConfigured => '먼저 기기 암호, PIN 또는 생체 인증을 설정하세요';
+
+  @override
+  String get commonOn => '켜짐';
+
+  @override
+  String get commonOff => '꺼짐';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste를 시작할 수 없어 단축키가 작동하지 않습니다.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut은(는) 다른 앱에서 사용 중입니다. 다른 단축키를 선택하세요.';
+  }
+
+  @override
+  String get devicesEmptyTitle => '아직 페어링된 다른 기기가 없습니다';
+
+  @override
+  String get devicesEmptyMessage => '같은 네트워크의 기기와 페어링해 기록을 동기화하세요.';
+
+  @override
+  String get pairingStateNotCompleted => '페어링이 완료되지 않음';
+
+  @override
+  String get pairingStepInvite => '초대';
+
+  @override
+  String get pairingStepScan => '스캔';
+
+  @override
+  String get pairingStepCode => '코드';
+
+  @override
+  String get pairingStepRequest => '요청';
+
+  @override
+  String get pairingStepConnect => '연결';
+
+  @override
+  String get pairingStepConfirm => '확인';
+
+  @override
+  String get pairingStepPaired => '페어링됨';
+
+  @override
+  String get pairingOtherDevice => '다른 기기';
+
+  @override
+  String get pairingDecisionNotConfirmed => '아직 확인되지 않음';
+
+  @override
+  String get pairingDecisionSending => '결정을 보내는 중…';
+
+  @override
+  String get pairingDecisionConfirmed => '확인됨';
+
+  @override
+  String get pairingDecisionRejected => '거부됨';
+
+  @override
+  String get pairingDecisionWaiting => '확인을 기다리는 중';
+
+  @override
+  String get pairingDecisionUnknown => '응답을 알 수 없음';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '기기 $count대',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count줄',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => '기본 탐색';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return '$count단계 중 $step단계: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => '다운로드';
+
+  @override
+  String get modulesPhaseInstall => '설치';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '$module 설치 중';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '$module 업데이트 중';
+  }
+
+  @override
   String get commonDismiss => '닫기';
 
   @override
@@ -3360,7 +3826,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return '새 한도: $limit. 이보다 오래된 고정되지 않은 항목은 지금 이 기기에서 제거되며 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+    return '새 한도: $limit. 고정되지 않은 이전 항목은 영구적으로 삭제됩니다.';
   }
 
   @override
@@ -3368,7 +3834,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return '새 할당량: $size. 고정되지 않은 기록이 이보다 많은 공간을 사용하면 가장 오래된 항목부터 지금 제거되며 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+    return '새 할당량: $size. 초과하면 고정되지 않은 오래된 항목부터 영구 삭제됩니다.';
   }
 
   @override
@@ -3379,11 +3845,11 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      '둘 다 끄면 CopyPaste 아이콘이 어디에도 표시되지 않습니다. 다시 열려면 CopyPaste를 다시 실행하십시오.';
+      '둘 다 끄면 아이콘이 없습니다. 열려면 CopyPaste를 다시 실행하세요.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return '둘 다 끄면 CopyPaste 아이콘이 어디에도 표시되지 않습니다. 다시 열려면 $shortcut 키를 누르거나 CopyPaste를 다시 실행하십시오.';
+    return '둘 다 끄면 아이콘이 없습니다. 열려면 $shortcut을(를) 누르거나 CopyPaste를 다시 실행하세요.';
   }
 
   @override
@@ -3481,7 +3947,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return '새 할당량: $size. 고정되지 않은 기록이 $used를 사용하므로 할당량에 맞을 때까지 가장 오래된 클립부터 지금 제거됩니다. 제거된 클립은 복구할 수 없습니다. 고정된 항목은 유지됩니다.';
+    return '새 할당량: $size. 현재 $used를 사용 중이므로 고정되지 않은 오래된 항목부터 영구 삭제됩니다.';
   }
 
   @override
@@ -3493,4 +3959,2378 @@ class AppLocalizationsKo extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'CopyPaste 열기';
+
+  @override
+  String get trayOpenQuickPaste => 'Quick Paste 열기';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Quick Paste 열기 ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => '새 스니펫';
+
+  @override
+  String get trayRecent => '최근';
+
+  @override
+  String get trayRecentLoading => '불러오는 중…';
+
+  @override
+  String get trayRecentFailed => '클립을 불러올 수 없음';
+
+  @override
+  String get trayRecentEmpty => '아직 클립 없음';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '최근 클립 $count개 숨김',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => '비밀';
+
+  @override
+  String get trayCopyLatestFromOtherDevice => '다른 기기의 최신 클립 복사';
+
+  @override
+  String get trayCaptureNow => '지금 수집';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '$time까지 일시 정지됨';
+  }
+
+  @override
+  String get trayPauseFor => '일시 정지 시간…';
+
+  @override
+  String get trayPauseFor15Minutes => '15분';
+
+  @override
+  String get trayPauseForOneHour => '1시간';
+
+  @override
+  String get trayPauseUntilResumed => '재개할 때까지';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count개 항목',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '수집 중: $count개 항목',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return '최근 건너뜀 ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => '콘텐츠 규칙 열기';
+
+  @override
+  String get trayRecentSettingsTitle => '메뉴 막대 및 트레이';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      '메뉴 막대 또는 트레이 메뉴의 최근 항목에 표시할 내용입니다.';
+
+  @override
+  String get trayRecentCountTitle => '최근 클립';
+
+  @override
+  String get trayRecentCountDescription => '메뉴에 표시할 최신 클립 수입니다.';
+
+  @override
+  String get trayRecentPreviewTitle => '최근 클립 미리보기';
+
+  @override
+  String get trayRecentPreviewDescription => '메뉴에 표시할 클립 텍스트의 양입니다.';
+
+  @override
+  String get trayRecentPreviewFull => '전체 미리보기';
+
+  @override
+  String get trayRecentPreviewTitles => '유형 및 출처만';
+
+  @override
+  String get trayRecentPreviewHidden => '숨김';
+
+  @override
+  String get trayRecentSettingsKeywords => '트레이 메뉴 막대 최근 미리보기 개인정보 개수';
+
+  @override
+  String get transformsPaletteTitle => '텍스트 변환';
+
+  @override
+  String get transformsFilterPlaceholder => '변환 필터';
+
+  @override
+  String get transformsNoMatches => '일치하는 변환 없음';
+
+  @override
+  String get transformsGroupResults => '결과';
+
+  @override
+  String get transformsGroupSuggested => '추천';
+
+  @override
+  String get transformsGroupRecent => '최근';
+
+  @override
+  String get transformsGroupFavorites => '즐겨찾기';
+
+  @override
+  String get transformsGroupPipelines => '파이프라인';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV 및 XML';
+
+  @override
+  String get transformsCategoryEncode => '인코딩 및 디코딩';
+
+  @override
+  String get transformsCategoryCase => '대소문자';
+
+  @override
+  String get transformsCategoryHash => '해시';
+
+  @override
+  String get transformsCategoryLines => '줄 및 공백';
+
+  @override
+  String get transformsCategoryClean => '정리';
+
+  @override
+  String get transformsCategoryUrl => '링크';
+
+  @override
+  String get transformsCategoryMarkup => '서식 있는 텍스트 및 Markdown';
+
+  @override
+  String get transformsCategoryDev => '개발자';
+
+  @override
+  String get transformsCategoryOther => '기타';
+
+  @override
+  String get transformsChainEmpty => '아직 단계 없음';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return '다음: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => '이 단계 실행';
+
+  @override
+  String get transformsMoveEarlier => '위로 이동';
+
+  @override
+  String get transformsMoveLater => '아래로 이동';
+
+  @override
+  String get transformsRemoveStep => '단계 제거';
+
+  @override
+  String get transformsSavePipeline => '파이프라인으로 저장';
+
+  @override
+  String get transformsSavePipelineTitle => '파이프라인 저장';
+
+  @override
+  String get transformsSavePipelineFailed => '파이프라인을 저장할 수 없습니다.';
+
+  @override
+  String get transformsPipelineNameLabel => '이름';
+
+  @override
+  String get transformsPipelineDescriptionLabel => '설명(선택 사항)';
+
+  @override
+  String get transformsPipelineStepsLabel => '단계';
+
+  @override
+  String get transformsPipelineNoSteps => '단계를 하나 이상 추가하세요.';
+
+  @override
+  String get transformsPipelineNameRequired => '이름을 입력하세요.';
+
+  @override
+  String get transformsPipelineNameTooLong => '80자 이하로 입력하세요.';
+
+  @override
+  String get transformsPipelineNameTaken => '같은 이름의 파이프라인이 이미 있습니다.';
+
+  @override
+  String get transformsPipelineSavedTitle => '파이프라인 저장됨';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name을(를) 모든 변환 팔레트에서 사용할 수 있습니다.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return '단계: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => '삭제된 파이프라인';
+
+  @override
+  String get transformsNeedsNewerVersion => '최신 버전의 CopyPaste가 필요합니다';
+
+  @override
+  String get transformsLoadFailed => '변환을 불러올 수 없습니다.';
+
+  @override
+  String get transformsNotTextTitle => '변환은 텍스트에서 작동합니다';
+
+  @override
+  String get transformsNotTextMessage =>
+      '이 항목은 이미지, 파일 또는 색상입니다. 텍스트 항목을 선택하거나 텍스트를 복사하세요.';
+
+  @override
+  String get transformsNothingTitle => '변환할 내용 없음';
+
+  @override
+  String get transformsNothingMessage => '텍스트를 복사하거나 기록 항목을 선택하세요.';
+
+  @override
+  String get transformsPickTransform => '변환을 선택하세요';
+
+  @override
+  String get transformsPickTransformHint => 'Tab으로 단계를 추가하고 Enter로 결과를 적용합니다.';
+
+  @override
+  String get transformsPreviewing => '미리보기 업데이트 중…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return '줄: $lines · 단어: $words · 문자: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => '변경 사항 없음';
+
+  @override
+  String transformsTruncated(String size) {
+    return '$size 중 처음 64KiB 표시 중';
+  }
+
+  @override
+  String get transformsRandom => '무작위';
+
+  @override
+  String get transformsNotRun => '실행 안 됨';
+
+  @override
+  String get transformsSensitiveHidden => '결과가 민감하여 숨겨져 있습니다.';
+
+  @override
+  String get transformsReveal => '표시';
+
+  @override
+  String get transformsPaneOutput => '출력';
+
+  @override
+  String get transformsPaneInput => '입력';
+
+  @override
+  String get transformsPaneChanges => '변경 사항';
+
+  @override
+  String get transformsCannotTransform => '이 텍스트를 변환할 수 없습니다';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return '$step단계 · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => '16진수로 표시';
+
+  @override
+  String get transformsActionPaste => '붙여넣기';
+
+  @override
+  String get transformsActionSave => '새 항목으로 저장';
+
+  @override
+  String get transformsCopiedMessage => '결과가 클립보드와 기록에 있습니다.';
+
+  @override
+  String get transformsSavedTitle => '저장됨';
+
+  @override
+  String get transformsSavedMessage => '새 기록 항목으로 저장했습니다.';
+
+  @override
+  String get transformsPasteFailedTitle => '붙여넣을 수 없음';
+
+  @override
+  String get transformsPasteFailedMessage => '결과가 클립보드에 있습니다. 직접 붙여넣으세요.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message($line행 $column열)';
+  }
+
+  @override
+  String get transformsErrorBinary => '디코딩된 데이터가 텍스트가 아닌 바이너리입니다';
+
+  @override
+  String get transformsErrorTooLarge => '너무 커서 변환할 수 없습니다';
+
+  @override
+  String get transformsErrorInvalidParam => '이 단계의 설정이 올바르지 않습니다';
+
+  @override
+  String get transformsErrorCancelled => '취소됨';
+
+  @override
+  String get transformsErrorTooExpensive => '패턴 처리 비용이 너무 큽니다';
+
+  @override
+  String get transformsErrorPattern => '패턴이 올바르지 않습니다';
+
+  @override
+  String get transformsErrorTimestampUnit => '숫자가 초인지 밀리초인지 선택하세요';
+
+  @override
+  String get transformsErrorExternalEntity => '외부 엔터티는 허용되지 않습니다';
+
+  @override
+  String get transformsErrorJwtEncrypted => '암호화된 토큰은 디코딩할 수 없습니다';
+
+  @override
+  String get transformsErrorJson => '잘못된 JSON';
+
+  @override
+  String get transformsErrorYaml => '잘못된 YAML';
+
+  @override
+  String get transformsErrorXml => '잘못된 XML';
+
+  @override
+  String get transformsErrorCsv => '잘못된 CSV';
+
+  @override
+  String get transformsErrorBase64 => '잘못된 Base64';
+
+  @override
+  String get transformsErrorHex => '잘못된 16진수';
+
+  @override
+  String get transformsErrorEscape => '잘못된 이스케이프 시퀀스';
+
+  @override
+  String get transformsErrorUrl => '잘못된 퍼센트 인코딩';
+
+  @override
+  String get transformsErrorJwt => '유효한 JWT가 아닙니다';
+
+  @override
+  String get transformsErrorDate => '인식할 수 있는 날짜나 타임스탬프가 아닙니다';
+
+  @override
+  String get transformsErrorGeneric => '이 단계는 입력을 변환할 수 없습니다';
+
+  @override
+  String get transformsWarningSignedLink => '서명된 링크는 변경하지 않았습니다';
+
+  @override
+  String get transformsWarningExpired => '만료됨';
+
+  @override
+  String get transformsWarningNotYetValid => '아직 유효하지 않음';
+
+  @override
+  String get transformsWarningSignatureNotVerified => '서명이 확인되지 않음';
+
+  @override
+  String get transformsWarningDuplicateKeys => '중복된 키';
+
+  @override
+  String get transformsWarningLenientJson => '비표준 JSON을 허용했습니다';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON이 두 번 인코딩되어 있었습니다';
+
+  @override
+  String get transformsWarningEscapes => '알 수 없는 이스케이프 시퀀스를 그대로 유지했습니다';
+
+  @override
+  String get transformsWarningLocalZone => '현지 시간대로 가정했습니다';
+
+  @override
+  String get transformsWarningNoMatches => '일치 항목 없음';
+
+  @override
+  String get transformsWarningGeneric => '결과를 확인하세요';
+
+  @override
+  String get transformsRestoreTitle => '붙여넣은 후 클립보드 복원';
+
+  @override
+  String get transformsRestoreDescription => '붙여 넣은 후 이전 클립보드를 되돌립니다.';
+
+  @override
+  String get transformsDefaultTitle => '붙여넣기 기본 변환';
+
+  @override
+  String get transformsDefaultDescription => 'Quick Paste에서 붙여 넣는 텍스트에 적용됩니다.';
+
+  @override
+  String get transformsNoDefault => '없음';
+
+  @override
+  String get transformsAppDefaultsTitle => '앱별 기본값';
+
+  @override
+  String get transformsAppDefaultsDescription => '특정 앱에서 다른 기본값을 사용합니다.';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return '$platform에서만';
+  }
+
+  @override
+  String get transformsAddApp => '앱 추가';
+
+  @override
+  String get transformsRemove => '제거';
+
+  @override
+  String get transformsFavoritesTitle => '즐겨찾기';
+
+  @override
+  String get transformsFavoritesDescription => '모든 팔레트에서 먼저 표시됩니다.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return '팔레트에서 Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => '즐겨찾기 추가';
+
+  @override
+  String get transformsPipelinesTitle => '파이프라인';
+
+  @override
+  String get transformsPipelinesDescription => '저장된 변환 묶음입니다.';
+
+  @override
+  String get transformsNewPipeline => '새 파이프라인';
+
+  @override
+  String get transformsEditPipeline => '파이프라인 편집';
+
+  @override
+  String get transformsDuplicatePipeline => '복제';
+
+  @override
+  String get transformsDeletePipeline => '삭제';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name을(를) 삭제할까요?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      '이를 사용하는 즐겨찾기와 붙여넣기 기본값이 지워집니다.';
+
+  @override
+  String get transformsDeletePipelineFailed => '파이프라인을 삭제할 수 없습니다.';
+
+  @override
+  String get transformsAddStep => '단계 추가';
+
+  @override
+  String get transformsHiddenTitle => '숨긴 변환';
+
+  @override
+  String get transformsHiddenDescription => '팔레트와 제안에 표시되지 않습니다.';
+
+  @override
+  String get transformsHideTransform => '변환 숨기기';
+
+  @override
+  String get transformsShow => '표시';
+
+  @override
+  String get transformsSuggestionsTitle => '추천';
+
+  @override
+  String get transformsSuggestionsDescription => '텍스트에 맞는 변환을 제안합니다.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON 웹 토큰';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => '추적 매개변수가 있는 링크';
+
+  @override
+  String get transformsDetectorTimestamp => '타임스탬프';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => '추적 매개변수';
+
+  @override
+  String get transformsTrackingDescription => '추가로 제거하거나 항상 유지할 링크 매개변수입니다.';
+
+  @override
+  String get transformsTrackingRemoveLabel => '추가로 제거';
+
+  @override
+  String get transformsTrackingAllowLabel => '항상 유지';
+
+  @override
+  String get transformsTrackingPlaceholder => 'name 또는 name@domain 입력 후 Enter';
+
+  @override
+  String get quickAccessUnavailableTitle => '빠른 액세스 상태를 사용할 수 없음';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste가 키보드, 타일, 위젯 상태를 읽지 못했습니다. 다시 시도하세요.';
+
+  @override
+  String get quickAccessActionFailedTitle => '작업을 완료할 수 없음';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android가 요청한 화면을 열지 못했거나 변경 사항을 저장하지 못했습니다. 다시 시도하세요.';
+
+  @override
+  String get quickAccessKeyboardTitle => '클립 키보드';
+
+  @override
+  String get quickAccessKeyboardDescription => '키보드 설정에서 CopyPaste 클립을 켜세요.';
+
+  @override
+  String get quickAccessKeyboardOn => '켜짐';
+
+  @override
+  String get quickAccessKeyboardOff => '꺼짐';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => '키보드 설정 열기';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'CopyPaste 클립 키보드 패널을 켭니다.';
+
+  @override
+  String get quickAccessKeyboardKeywords => '키보드 입력 방법 ime 패널 사용';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => '클립 키보드로 전환';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'CopyPaste 클립을 현재 키보드로 설정하세요.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => '키보드 선택';
+
+  @override
+  String get quickAccessKeyboardCurrent => '현재 키보드';
+
+  @override
+  String get quickAccessCaptureTierTitle => '수집 모드';
+
+  @override
+  String get quickAccessCaptureTierDescription => '다른 앱의 복사 항목이 저장되는 방식입니다.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      '다른 앱의 복사 내용이 저장되는 방식을 확인합니다.';
+
+  @override
+  String get quickAccessCaptureTierKeywords => '수집 단계 전체 패널 수동 shizuku 모으기';
+
+  @override
+  String get quickAccessTierFull => '전체: 모든 복사 내용을 백그라운드에서 저장';
+
+  @override
+  String get quickAccessTierPanelCollecting => '패널 선택됨: 수집 중';
+
+  @override
+  String get quickAccessTierPanelCatchUp => '패널 모드: 열 때 가져오기';
+
+  @override
+  String get quickAccessTierManual => '수동: 앱, 타일, 위젯 또는 공유에서 저장';
+
+  @override
+  String get quickAccessTierPaused => '수집 일시중지됨';
+
+  @override
+  String get quickAccessAutoReturnTitle => '삽입 후 이전 키보드로 돌아가기';
+
+  @override
+  String get quickAccessAutoReturnDescription => '클립 하나를 삽입하면 이전 키보드로 돌아갑니다.';
+
+  @override
+  String get quickAccessAutoReturnKeywords => '돌아가기 이전 키보드 자동 삽입';
+
+  @override
+  String get quickAccessFocusSearchTitle => '패널을 열 때 검색에 포커스';
+
+  @override
+  String get quickAccessFocusSearchDescription => '검색이 준비된 상태로 패널을 엽니다.';
+
+  @override
+  String get quickAccessTilesTitle => '빠른 설정 타일';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      '클립보드 저장 및 클립보드 수집 타일을 추가합니다.';
+
+  @override
+  String get quickAccessTilesKeywords => '빠른 설정 타일 알림창 저장 일시중지';
+
+  @override
+  String get quickAccessTileInstructions =>
+      '아래로 두 번 스와이프하고 수정을 탭한 뒤 CopyPaste 타일을 추가하세요.';
+
+  @override
+  String get quickAccessSaveTileTitle => '클립보드 저장 타일';
+
+  @override
+  String get quickAccessSaveTileDescription => '빠른 설정에서 클립보드 내용을 저장합니다.';
+
+  @override
+  String get quickAccessCaptureTileTitle => '클립보드 수집 타일';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      '빠른 설정에서 수집을 일시중지하고 다시 시작합니다.';
+
+  @override
+  String get quickAccessAddTile => '타일 추가';
+
+  @override
+  String get quickAccessTileAdded => '빠른 설정에 추가됨';
+
+  @override
+  String get quickAccessWidgetTitle => '최근 클립 위젯';
+
+  @override
+  String get quickAccessWidgetDescription => '홈 화면의 최근 클립을 탭 한 번으로 복사합니다.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      '홈 화면을 길게 누르고 위젯을 탭한 뒤 최근 클립을 추가하세요.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '위젯 $count개 추가됨',
+      zero: '추가되지 않음',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => '위젯 추가';
+
+  @override
+  String get quickAccessWidgetKeywords => '홈 화면 위젯 런처 최근';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return '약어 $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => '약어';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => '선택 사항, 예: sig';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return '“$title”에서 이미 사용 중입니다';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return '최대 $max자까지 사용하세요.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace => '약어에는 공백이나 제어 문자를 사용할 수 없습니다.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '동기화 후 검토가 필요한 스니펫 $count개',
+      zero: '검토할 스니펫이 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => '텍스트';
+
+  @override
+  String get snippetsBodyPlaceholder => '스니펫 텍스트 입력';
+
+  @override
+  String get snippetsClearSelection => '선택 해제';
+
+  @override
+  String get snippetsClipTooLarge => '너무 커서 편집할 수 없습니다. 이 클립은 읽기 전용으로 열립니다.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': '중립',
+      'blue': '파랑',
+      'green': '초록',
+      'amber': '호박색',
+      'red': '빨강',
+      'other': '중립',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => '강조 색상';
+
+  @override
+  String get snippetsCollectionIcon => '아이콘';
+
+  @override
+  String get snippetsCollectionLabel => '컬렉션';
+
+  @override
+  String get snippetsCollectionName => '이름';
+
+  @override
+  String get snippetsCollectionNameTaken => '이 이름의 컬렉션이 이미 있습니다.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return '최대 $max자까지 사용하세요.';
+  }
+
+  @override
+  String get snippetsConcealedBody => '이 스니펫은 숨겨져 있습니다.';
+
+  @override
+  String get snippetsConcealedConfirmAction => '계속';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      '이 기기에서는 본인 확인을 할 수 없습니다. 본인 기기에서만 계속하세요.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => '본인 확인';
+
+  @override
+  String get snippetsConcealedPreview => '숨김 스니펫';
+
+  @override
+  String get snippetsConcealedSwitch => '숨김';
+
+  @override
+  String get snippetsConcealedTitle => '숨김 스니펫';
+
+  @override
+  String get snippetsConflictBadge => '충돌 사본';
+
+  @override
+  String get snippetsCopied => '복사됨';
+
+  @override
+  String get snippetsCreate => '스니펫 만들기';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '“$query” 스니펫 만들기';
+  }
+
+  @override
+  String get snippetsDeleteCollection => '컬렉션 삭제';
+
+  @override
+  String get snippetsDeleteCollectionMove => '스니펫을 미분류로 이동';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '“$name”을(를) 삭제할까요?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => '스니펫도 삭제';
+
+  @override
+  String get snippetsDeletedMessage => '최근 삭제된 항목으로 이동했습니다.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 삭제했습니다',
+      one: '스니펫을 삭제했습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => '저장 위치';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': '기록 클립',
+      'snippet': '스니펫',
+      'other': '기록 클립',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => '버리기';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation => '다른 스니펫에 같은 약어가 있습니다. 하나를 변경하세요.';
+
+  @override
+  String get snippetsDuplicateBadge => '중복 약어';
+
+  @override
+  String get snippetsEditClip => '클립 편집';
+
+  @override
+  String get snippetsEditCollection => '컬렉션 편집';
+
+  @override
+  String get snippetsEditSnippet => '스니펫 편집';
+
+  @override
+  String get snippetsEditTab => '편집';
+
+  @override
+  String get snippetsEmptyMessage => '스니펫에 약어를 지정한 다음 Quick Paste에서 입력하세요.';
+
+  @override
+  String get snippetsEmptyTitle => '아직 스니펫이 없습니다';
+
+  @override
+  String get snippetsEnableTemplate => '켜기';
+
+  @override
+  String get snippetsEnableTemplateMessage => '자리 표시자처럼 보이는 텍스트도 채워집니다.';
+
+  @override
+  String get snippetsEnableTemplateTitle => '템플릿을 켤까요?';
+
+  @override
+  String get snippetsExport => '내보내기';
+
+  @override
+  String get snippetsExportCollection => '컬렉션 내보내기';
+
+  @override
+  String get snippetsExportConcealedConfirm => '읽을 수 있는 파일에 숨김 스니펫 포함';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 기록했습니다',
+      zero: '기록된 스니펫이 없습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => '스니펫을 내보냈습니다';
+
+  @override
+  String get snippetsExportEncrypt => '암호 문구로 암호화';
+
+  @override
+  String get snippetsExportFailed => '내보내기 실패';
+
+  @override
+  String get snippetsExportPlainConfirm => '파일이 있는 누구나 읽을 수 있음을 이해합니다';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': '모든 스니펫',
+      'collections': '이 컬렉션',
+      'snippets': '선택한 스니펫($count)',
+      'other': '모든 스니펫',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => '스니펫 내보내기';
+
+  @override
+  String get snippetsFieldBuilderTitle => '필드 삽입';
+
+  @override
+  String get snippetsFieldDefault => '기본값';
+
+  @override
+  String get snippetsFieldName => '이름';
+
+  @override
+  String get snippetsFieldOptions => '옵션(쉼표로 구분)';
+
+  @override
+  String get snippetsFieldRequired => '이 필드를 입력하세요.';
+
+  @override
+  String get snippetsFieldType => '유형';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': '한 줄',
+      'multiline': '여러 줄',
+      'choice': '선택',
+      'other': '한 줄',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice => '저장하면 서식이 제거됩니다.';
+
+  @override
+  String get snippetsGoToSnippet => '스니펫으로 이동';
+
+  @override
+  String get snippetsImport => '가져오기';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => '이미 사용 중인 약어';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': '약어 없이 가져오기',
+      'renameWithSuffix': '약어에 번호 추가',
+      'skip': '건너뛰기',
+      'other': '약어 없이 가져오기',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => '이름이 같은 컬렉션';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': '기존 컬렉션에 추가',
+      'createNew': '새로 만들기',
+      'other': '기존 컬렉션에 추가',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => '알려진 자리 표시자 변환';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return '새 항목: $added. 동일, 건너뜀: $identical. 변경됨: $updated. 약어 충돌: $conflicts. 잘못됨: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => '스니펫을 가져왔습니다';
+
+  @override
+  String get snippetsImportFailed => '가져오기 실패';
+
+  @override
+  String get snippetsImportFileType => '스니펫 파일';
+
+  @override
+  String get snippetsImportFormat => '형식';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste 번들',
+      'json': 'JSON 목록',
+      'csv': 'CSV',
+      'other': 'CopyPaste 번들',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return '$row행: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => '가져오지 않을 행';
+
+  @override
+  String get snippetsImportPassphraseHint => '암호 문구(파일이 암호화된 경우)';
+
+  @override
+  String get snippetsImportPreview => '미리 보기';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return '추가: $inserted. 업데이트: $updated. 건너뜀: $skipped. 검토할 약어: $flagged. 인식되지 않은 자리 표시자: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => '같은 스니펫, 다른 내용';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': '둘 다 유지',
+      'replace': '기존 항목 바꾸기',
+      'skip': '건너뛰기',
+      'other': '둘 다 유지',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => '스니펫 가져오기';
+
+  @override
+  String get snippetsInsert => '삽입';
+
+  @override
+  String get snippetsInsertPlaceholder => '자리 표시자 삽입';
+
+  @override
+  String get snippetsKeepReferences => '그대로 두기';
+
+  @override
+  String get snippetsLibraryDescription => '스니펫과 컬렉션을 둘러보고, 정리하고, 편집합니다.';
+
+  @override
+  String get snippetsLibraryKeywords => '스니펫 템플릿 약어 컬렉션 텍스트 상용구';
+
+  @override
+  String get snippetsLibraryTitle => '스니펫 라이브러리';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': '이 자리 표시자가 닫히지 않았습니다.',
+      'malformed': '이 자리 표시자를 읽을 수 없습니다.',
+      'unknownPlaceholder': '알 수 없는 자리 표시자 “$detail”. 입력한 그대로 붙여 넣습니다.',
+      'unknownParameter': '알 수 없는 옵션 “$detail”.',
+      'duplicateParameter': '옵션 “$detail”이(가) 두 번 지정되었습니다.',
+      'missingParameter': '옵션 “$detail”이(가) 없습니다.',
+      'invalidValue': '옵션 “$detail”의 값이 잘못되었습니다.',
+      'conflictingParameters': '이 옵션들은 함께 사용할 수 없습니다.',
+      'unknownLocale': '알 수 없는 언어입니다.',
+      'unknownTimeZone': '알 수 없는 시간대입니다.',
+      'invalidPattern': '날짜 패턴이 잘못되었습니다.',
+      'dateOutOfRange': '날짜가 범위를 벗어났습니다.',
+      'unknownModifier': '알 수 없는 수정자 “$detail”.',
+      'modifierFailed': '수정자 “$detail”을(를) 적용할 수 없습니다.',
+      'emptyClipboard': '클립보드 항목 $detail이(가) 비어 있습니다.',
+      'extraCursor': '첫 번째 커서 자리 표시자만 사용됩니다.',
+      'nestedCursor': '삽입된 스니펫 안의 커서는 무시됩니다.',
+      'tooManyFields': '필드 “$detail”이(가) 10개 필드 한도를 넘습니다.',
+      'conflictingField': '필드 “$detail”이(가) 다른 설정으로 두 번 정의되었습니다.',
+      'choiceDefaultNotOption': '“$detail”의 기본값이 옵션에 없습니다.',
+      'cycle': '스니펫이 서로를 순환하여 삽입합니다: $detail.',
+      'depthExceeded': '스니펫이 3단계보다 깊게 삽입되었습니다.',
+      'nestingLimit': '삽입된 스니펫이 너무 많습니다.',
+      'unknownSnippet': '이 약어를 가진 스니펫이 없습니다.',
+      'containsPlaceholders': '텍스트에 자리 표시자가 있습니다. 채우려면 템플릿을 켜세요.',
+      'other': '이 자리 표시자에 문제가 있습니다.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => '스니펫을 불러올 수 없습니다';
+
+  @override
+  String get snippetsLoadMore => '더 불러오기';
+
+  @override
+  String get snippetsMerge => '병합';
+
+  @override
+  String get snippetsMergeCollection => '다른 컬렉션에 병합';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '“$name” 병합 대상';
+  }
+
+  @override
+  String get snippetsMoveTo => '이동할 위치';
+
+  @override
+  String get snippetsNewCollection => '새 컬렉션';
+
+  @override
+  String get snippetsNewSnippet => '새 스니펫';
+
+  @override
+  String get snippetsNewText => '새 텍스트';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '“$query”와(과) 일치하는 스니펫이 없습니다';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => '암호 문구 다시 입력';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return '암호 문구, $min자 이상';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => '암호 문구';
+
+  @override
+  String get snippetsPassphraseNoRecovery => '잊어버린 암호 문구는 복구할 수 없습니다.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': '너무 짧음',
+      'weak': '약함',
+      'fair': '보통',
+      'good': '좋음',
+      'other': '강함',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => '고정됨';
+
+  @override
+  String get snippetsPlaceholderGroup => '자리 표시자';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': '날짜',
+      'dateShort': '날짜, 짧게',
+      'dateLong': '날짜, 길게',
+      'dateIso': '날짜, ISO 8601',
+      'dateNextWeek': '일주일 후 날짜',
+      'now': '시간',
+      'dateTime': '날짜 및 시간',
+      'clipboard': '클립보드',
+      'clipboardPrevious': '이전 클립보드 항목',
+      'field': '입력 필드…',
+      'cursor': '커서 위치',
+      'uuid': 'UUID',
+      'random': '임의의 숫자',
+      'upper': '수정자: 대문자',
+      'lower': '수정자: 소문자',
+      'trim': '수정자: 공백 제거',
+      'other': '자리 표시자',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => '다른 스니펫 삽입';
+
+  @override
+  String get snippetsPlaceholderNoMatch => '일치하는 자리 표시자가 없습니다';
+
+  @override
+  String get snippetsPreviewEmpty => '미리 볼 내용이 없습니다';
+
+  @override
+  String get snippetsPreviewTab => '미리 보기';
+
+  @override
+  String get snippetsPurge => '영구 삭제';
+
+  @override
+  String get snippetsPurgeMessage => '모든 기기에서 지워집니다. 이 작업은 되돌릴 수 없습니다.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스니펫 $count개를 영구 삭제할까요?',
+      one: '스니펫을 영구 삭제할까요?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => '최근 삭제된 항목이 없습니다';
+
+  @override
+  String get snippetsRecordPastedDescription => '붙여 넣은 스니펫을 기록에 추가합니다.';
+
+  @override
+  String get snippetsRecordPastedKeywords => '기록 저장 붙여넣기 스니펫';
+
+  @override
+  String get snippetsRecordPastedTitle => '붙여 넣은 스니펫을 기록에 저장';
+
+  @override
+  String get snippetsReplaceOriginal => '원본 바꾸기';
+
+  @override
+  String get snippetsReplaceOriginalHint => '저장 후 원본 클립을 삭제합니다.';
+
+  @override
+  String get snippetsRequireAuthDescription => '먼저 비밀번호나 생체 인증을 요청합니다.';
+
+  @override
+  String get snippetsRequireAuthKeywords => '숨김 암호 생체 인식 지문 얼굴 잠금 확인';
+
+  @override
+  String get snippetsRequireAuthTitle => '숨김 스니펫 사용 전 본인 확인';
+
+  @override
+  String get snippetsRestore => '복원';
+
+  @override
+  String get snippetsSaveBlockTooLarge => '텍스트가 64KB를 넘습니다.';
+
+  @override
+  String get snippetsSaveFailed => '저장할 수 없습니다';
+
+  @override
+  String get snippetsScopeAll => '전체';
+
+  @override
+  String get snippetsScopeEmpty => '스니펫이 없습니다';
+
+  @override
+  String get snippetsScopePinned => '고정됨';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => '최근 삭제된 항목';
+
+  @override
+  String get snippetsSearchPlaceholder => '스니펫 검색';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개 선택됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => '보기';
+
+  @override
+  String get snippetsShowAll => '모두 보기';
+
+  @override
+  String get snippetsShowAttention => '검토';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '스니펫이 $count개 있습니다. 최대 20,000개까지 허용됩니다.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => '템플릿';
+
+  @override
+  String get snippetsTemplateSwitch => '템플릿';
+
+  @override
+  String get snippetsTitleLabel => '제목';
+
+  @override
+  String get snippetsTitlePlaceholder => '선택 사항';
+
+  @override
+  String get snippetsTransferDescription => '스니펫을 백업하거나 앱 간에 옮깁니다.';
+
+  @override
+  String get snippetsTransferKeywords => '가져오기 내보내기 백업 번들 json csv 암호 문구';
+
+  @override
+  String get snippetsTransferTitle => '가져오기 및 내보내기';
+
+  @override
+  String get snippetsUndo => '실행 취소';
+
+  @override
+  String get snippetsUnfiled => '미분류';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '자리 표시자 $count개가 입력한 그대로 붙여 넣어집니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => '고정 해제';
+
+  @override
+  String get snippetsUnsavedMessage => '닫기 전에 변경 사항을 저장할까요?';
+
+  @override
+  String get snippetsUnsavedTitle => '저장되지 않은 변경 사항';
+
+  @override
+  String get snippetsUntitled => '제목 없는 스니펫';
+
+  @override
+  String get snippetsUpdateReferences => '업데이트';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return '다른 템플릿이 “$from”을(를) 삽입할 수 있습니다. “$to”을(를) 사용하도록 업데이트할까요?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => '참조를 업데이트할까요?';
+
+  @override
+  String get snippetsUseFailed => '스니펫을 사용할 수 없습니다';
+
+  @override
+  String get quickPasteTabQueue => '대기열';
+
+  @override
+  String get quickPasteMaskedMode => '암호 필드: 미리 보기가 숨겨집니다';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return '숨김: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => '비밀 항목 잠금 해제';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return '붙여넣기 변환: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut: 원본 붙여넣기';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => '기본 변환을 건너뜀';
+
+  @override
+  String get quickPasteDefaultSkippedMessage => '대신 원본을 사용했습니다.';
+
+  @override
+  String get quickPastePasteManually => '내용이 클립보드에 있습니다. 직접 붙여넣으세요.';
+
+  @override
+  String get quickPastePaste => '붙여넣기';
+
+  @override
+  String get quickPasteSnippetsUnavailable => '스니펫을 사용할 수 없습니다';
+
+  @override
+  String get rulesLoadFailed => '콘텐츠 규칙을 불러올 수 없습니다.';
+
+  @override
+  String get rulesNewRule => '새 규칙';
+
+  @override
+  String get rulesEditRule => '규칙 편집';
+
+  @override
+  String get rulesUntitled => '이름 없는 규칙';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => '개인정보 보호 기본값';
+
+  @override
+  String get rulesPrivacyDefaultsDescription => '개인정보 보호 설정은 모든 규칙보다 먼저 적용됩니다.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      '개인정보 숨김 임시 제외 앱 기본 제공 자격 증명 비밀번호 카드';
+
+  @override
+  String get rulesOpenPrivacy => '개인정보 보호 열기';
+
+  @override
+  String get rulesMyRulesTitle => '내 규칙';
+
+  @override
+  String get rulesMyRulesDescription => '새 복사 항목에 순서대로 실행됩니다.';
+
+  @override
+  String get rulesMyRulesKeywords => '규칙 자동화 태그 건너뛰기 비밀 만료 삭제 패턴 정규식';
+
+  @override
+  String get rulesEmptyTitle => '아직 규칙이 없습니다';
+
+  @override
+  String get rulesEmptyMessage => '규칙은 새 복사 항목에 태그를 달거나 보호, 만료, 건너뛰기를 합니다.';
+
+  @override
+  String get rulesDeletedTitle => '최근 삭제됨';
+
+  @override
+  String get rulesDeletedDescription => '30일 이내에 복원할 수 있습니다.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return '삭제됨: $time';
+  }
+
+  @override
+  String get rulesRestore => '복원';
+
+  @override
+  String get rulesDeletedToast => '규칙이 삭제됨';
+
+  @override
+  String get rulesDeletedToastMessage => '30일 동안 복원할 수 있습니다.';
+
+  @override
+  String get rulesUndo => '실행 취소';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return '$device에서 동시에 수정한 “$rule”이(가) 최신 수정으로 대체되었습니다.';
+  }
+
+  @override
+  String get rulesAnotherDevice => '다른 기기';
+
+  @override
+  String get rulesRestoreConflict => '해당 버전 사용';
+
+  @override
+  String get rulesSkipLogTitle => '최근 건너뜀';
+
+  @override
+  String get rulesSkipLogDescription => '이 기기에서 규칙 때문에 저장되지 않은 복사 항목입니다.';
+
+  @override
+  String get rulesSkipLogKeywords => '건너뜀 무시 저장 안 됨 기록';
+
+  @override
+  String get rulesSkipLogShow => '보기';
+
+  @override
+  String get rulesSkipLogEmpty => '건너뛴 복사본이 없습니다.';
+
+  @override
+  String get rulesUnknownApp => '알 수 없는 앱';
+
+  @override
+  String get rulesMatchesEverything => '모든 복사본';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, 그 후 중지';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' 또는 ',
+      'other': ' 그리고 ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return '실행 기기: $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return '$device에서 새로 추가';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => '업데이트 필요';
+
+  @override
+  String get rulesUpdateRequired => '이 규칙을 실행하려면 CopyPaste를 업데이트하세요.';
+
+  @override
+  String get rulesErrorBadge => '오류';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem 수정될 때까지 일치 항목은 보호됩니다.';
+  }
+
+  @override
+  String get rulesReorder => '끌어서 순서 변경';
+
+  @override
+  String get rulesMoreActions => '추가 작업';
+
+  @override
+  String get rulesEdit => '편집';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': '위로 이동',
+      'down': '아래로 이동',
+      'top': '맨 위로 이동',
+      'other': '맨 아래로 이동',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => '기존 항목에 적용…';
+
+  @override
+  String get rulesResetBuiltin => '기본값으로 재설정';
+
+  @override
+  String get rulesNameLabel => '이름';
+
+  @override
+  String get rulesNamePlaceholder => '예: 업무 링크';
+
+  @override
+  String get rulesWhenTitle => '조건';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': '하나 이상의 조건 일치',
+      'other': '모든 조건 일치',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions => '조건 없음: 이 규칙은 모든 복사본에 적용됩니다.';
+
+  @override
+  String get rulesAddCondition => '조건 추가';
+
+  @override
+  String get rulesRemoveCondition => '조건 삭제';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': '텍스트',
+      'content_type': '콘텐츠 유형',
+      'detected_kind': '감지된 종류',
+      'source_app': '원본 앱',
+      'size': '크기',
+      'privacy_marker': '개인정보 표시',
+      'capture_origin': '출처',
+      'other': '알 수 없는 조건',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '포함',
+      'equals': '일치',
+      'starts_with': '시작',
+      'ends_with': '끝남',
+      'matches_regex': '패턴 일치',
+      'other': '일치',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': '포함 안 함',
+      'equals': '일치 안 함',
+      'starts_with': '시작 안 함',
+      'ends_with': '끝나지 않음',
+      'matches_regex': '패턴 불일치',
+      'other': '불일치',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': '제외',
+      'other': '포함',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '미만',
+      'other': '초과',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': '이상',
+      'other': '이하',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '줄',
+      'bytes': '바이트',
+      'other': '자',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': '줄',
+      'bytes': '바이트',
+      'other': '자',
+    });
+    return '$count$_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': '일반 텍스트',
+      'rich_text': '서식 있는 텍스트',
+      'image': '이미지',
+      'files': '파일',
+      'color': '색상',
+      'link': '링크',
+      'other': '기타',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': '비밀번호 또는 비밀 정보',
+      'url': '웹 주소',
+      'email': '이메일 주소',
+      'phone': '전화번호',
+      'code': '코드',
+      'color': '색상 값',
+      'json': 'JSON',
+      'file_path': '파일 경로',
+      'number': '숫자',
+      'one_time_code': '일회용 코드',
+      'payment_card': '카드 번호',
+      'other': '기타',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': '숨김',
+      'transient': '임시',
+      'auto_generated': '자동 생성',
+      'excluded_from_history': '기록에서 제외',
+      'other': '기타',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': '이 기기에서 복사',
+      'received': '다른 기기에서 받음',
+      'created_in_app': 'CopyPaste에서 생성',
+      'other': '기타',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => '찾을 텍스트';
+
+  @override
+  String get rulesPatternPlaceholder => '패턴(예: ^ticket-[0-9]+)';
+
+  @override
+  String get rulesPatternHint => '전후방 탐색과 역참조는 지원되지 않습니다.';
+
+  @override
+  String get rulesCaseSensitive => '대/소문자 구분';
+
+  @override
+  String get rulesChooseValues => '선택';
+
+  @override
+  String get rulesUnknownConditionNotice => '이 조건은 최신 버전의 CopyPaste에서 만들어졌습니다.';
+
+  @override
+  String get rulesSourceAppNotice => 'Android에서는 클립 키보드로 복사한 항목만 일치합니다.';
+
+  @override
+  String get rulesPrivacyMarkerNotice => '모든 시스템이 모든 표시를 제공하지는 않습니다.';
+
+  @override
+  String get rulesThenTitle => '동작';
+
+  @override
+  String get rulesNoActions => '동작을 하나 이상 추가하세요.';
+
+  @override
+  String get rulesAddAction => '동작 추가';
+
+  @override
+  String get rulesRemoveAction => '동작 삭제';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': '저장 안 함',
+      'mark_secret': '비밀로 표시',
+      'delete_after': '다음 시간 후 삭제',
+      'add_tags': '태그 추가',
+      'transform': '변환',
+      'other': '알 수 없는 동작',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“저장 안 함”은 다른 동작과 함께 사용할 수 없습니다.',
+      'present': '이 규칙에 이미 이 동작이 있습니다.',
+      'other': '규칙에는 동작을 최대 8개까지 추가할 수 있습니다.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice => '이 동작은 최신 버전의 CopyPaste에서 만들어졌습니다.';
+
+  @override
+  String get rulesDontSaveWarning => '일치하는 복사본은 저장, 색인, 동기화되지 않습니다.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count분',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count시간',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count일',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry => '클립보드에 이 복사본이 남아 있으면 함께 지웁니다.';
+
+  @override
+  String get rulesNoTags => '기록에서 태그를 만들면 여기에서 사용할 수 있습니다.';
+
+  @override
+  String get rulesNoTransforms => '사용할 수 있는 변환이 없습니다.';
+
+  @override
+  String get rulesReplaceClipboard => '클립보드도 결과로 바꾸기';
+
+  @override
+  String get rulesOptionsTitle => '옵션';
+
+  @override
+  String get rulesEnabledSwitch => '사용';
+
+  @override
+  String get rulesStopProcessing => '이 규칙이 일치하면 이후 규칙 처리 중지';
+
+  @override
+  String get rulesRunsOnLabel => '실행 기기';
+
+  @override
+  String get rulesAllDevices => '모든 기기';
+
+  @override
+  String get rulesChosenDevices => '선택한 기기';
+
+  @override
+  String get rulesTestTitle => '테스트';
+
+  @override
+  String get rulesTestDescription => '샘플 텍스트로 규칙을 시험합니다.';
+
+  @override
+  String get rulesSamplePlaceholder => '샘플 텍스트를 붙여넣거나 입력';
+
+  @override
+  String get rulesTestFullSet => '모든 규칙과 함께 테스트';
+
+  @override
+  String get rulesRunTest => '테스트 실행';
+
+  @override
+  String get rulesTestFailed => '테스트를 실행할 수 없습니다.';
+
+  @override
+  String get rulesPreviewHistory => '기록으로 미리 보기';
+
+  @override
+  String get rulesSaveFailed => '규칙을 저장할 수 없습니다.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      '최신 버전의 CopyPaste로 만든 규칙입니다. 편집하거나 실행하려면 업데이트하세요.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': '규칙을 읽을 수 없습니다.',
+      'unsupported_schema': '이 규칙에는 최신 버전의 CopyPaste가 필요합니다.',
+      'unknown_condition_type': '이 조건에는 최신 버전의 CopyPaste가 필요합니다.',
+      'unknown_action_type': '이 동작에는 최신 버전의 CopyPaste가 필요합니다.',
+      'too_many_conditions': '규칙에는 조건을 최대 20개까지 추가할 수 있습니다.',
+      'too_many_actions': '규칙에는 동작을 최대 8개까지 추가할 수 있습니다.',
+      'too_many_rules': '처음 200개의 규칙만 실행됩니다.',
+      'no_actions': '동작을 하나 이상 추가하세요.',
+      'conflicting_actions': '“저장 안 함”은 다른 동작과 함께 사용할 수 없습니다.',
+      'duplicate_action': '각 동작은 한 번만 사용할 수 있습니다.',
+      'empty_value': '값을 입력하세요.',
+      'empty_list': '값을 하나 이상 선택하세요.',
+      'too_many_values': '값은 최대 64개까지 선택할 수 있습니다.',
+      'invalid_value': '유효하지 않은 값입니다.',
+      'pattern_too_long': '패턴은 최대 2,000자까지 입력할 수 있습니다.',
+      'unsupported_look_around':
+          '전방 탐색과 후방 탐색은 지원되지 않습니다. 대신 “모든 조건 일치”로 두 조건을 사용하세요.',
+      'unsupported_backreference': '역참조는 지원되지 않습니다.',
+      'pattern_too_large': '패턴이 너무 복잡합니다. 반복을 단순하게 바꾸세요.',
+      'invalid_pattern': '유효하지 않은 패턴입니다.',
+      'invalid_duration': '1분에서 90일 사이의 기간을 선택하세요.',
+      'invalid_tags': '태그를 하나 이상 선택하세요.',
+      'invalid_transform': '변환을 선택하세요.',
+      'other': '이 규칙에 문제가 있습니다.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': '일치',
+      'not_matched': '불일치',
+      'unknown': '알 수 없음',
+      'skipped': '실행 안 됨',
+      'other': '오류',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return '조건 $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => '평가된 규칙이 없습니다.';
+
+  @override
+  String get rulesTraceStopped => '이후 규칙은 실행되지 않았습니다.';
+
+  @override
+  String get rulesTraceUnknownReason => '이 복사 항목에서는 알 수 없으므로 일치하지 않습니다.';
+
+  @override
+  String get rulesTraceRuleError => '이 규칙을 실행하지 못해 일치 항목이 보호됩니다.';
+
+  @override
+  String get rulesTraceOutcomeTitle => '결과';
+
+  @override
+  String get rulesTraceNoEffect => '이 복사본을 변경하는 규칙이 없습니다.';
+
+  @override
+  String get rulesTraceSkipped => '저장 안 됨';
+
+  @override
+  String get rulesTraceSecret => '비밀로 저장';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return '$duration 후 삭제';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return '태그: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return '변환: $names';
+  }
+
+  @override
+  String get rulesTraceOutput => '변환된 텍스트';
+
+  @override
+  String get rulesPreviewTitle => '기존 항목에 적용';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return '최근 클립 $count개를 확인하는 중…';
+  }
+
+  @override
+  String get rulesPreviewNone => '이 규칙과 일치하는 최근 클립이 없습니다.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개 일치',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개가 삭제됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개가 비밀로 표시됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개에 삭제 시간이 설정됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개에 태그가 지정됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return '최근 클립 $count개만 확인했습니다.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return '외 $count개';
+  }
+
+  @override
+  String get rulesPreviewNote => '적용하기 전에는 아무것도 바뀌지 않습니다.';
+
+  @override
+  String get rulesSecretItem => '비밀 항목';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return '$app의 비밀 항목';
+  }
+
+  @override
+  String get rulesPreviewCancelled => '미리 보기를 중지했습니다. 변경된 내용은 없습니다.';
+
+  @override
+  String get rulesPreviewFailed => '미리 보기를 실행할 수 없습니다.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개를 삭제할까요?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      '일치하는 클립이 모든 기기에서 삭제됩니다. 실행 취소할 수 없습니다.';
+
+  @override
+  String get rulesApplyDeleteConfirm => '삭제 후 적용';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return '적용 중: $done/$total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개 변경됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개 삭제됨',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개를 변경하지 못했습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled => '중지했습니다. 지금까지의 변경 사항은 유지됩니다.';
+
+  @override
+  String get historyActionEdit => '편집';
+
+  @override
+  String get historyActionSaveAsSnippet => '스니펫으로 저장';
+
+  @override
+  String get historyActionAddToQueue => 'Paste Queue에 추가';
+
+  @override
+  String get historyActionTransform => '변환…';
+
+  @override
+  String get historyActionExplain => '이 항목이 여기 있는 이유';
+
+  @override
+  String get historyActionKeep => '유지';
+
+  @override
+  String get historyNewClip => '새 클립';
+
+  @override
+  String get historySavedTitle => '저장됨';
+
+  @override
+  String get historyEditSaved => '편집한 텍스트가 기록 맨 위에 새 클립으로 추가되었습니다.';
+
+  @override
+  String get historyNewClipSaved => '텍스트를 저장했습니다.';
+
+  @override
+  String get historySnippetSaved => '클립의 텍스트가 이제 스니펫입니다.';
+
+  @override
+  String get historySnippetSaveFailed => '이 클립을 스니펫으로 저장할 수 없습니다.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '클립 $count개를 대기열에 추가했습니다.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed => 'Paste Queue에 추가할 수 없습니다. 켜져 있는지 확인하세요.';
+
+  @override
+  String get historyKeepFailed => '이 클립을 유지할 수 없습니다.';
+
+  @override
+  String get historyExplainFailed => '설명을 불러올 수 없습니다.';
+
+  @override
+  String get historyDeletesSoon => '1분 이내에 삭제';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count분 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count시간 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count일 후 삭제',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => '직접 입력';
+
+  @override
+  String get historyProvenanceEdited => '편집됨';
+
+  @override
+  String get historyProvenanceTransformed => '변환됨';
+
+  @override
+  String get historyProvenanceModule => '모듈';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name(자동)';
+  }
+
+  @override
+  String get historyMetadataExpiry => '삭제';
+
+  @override
+  String get historyMetadataRuleTags => '자동 태그';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module을(를) 켜시겠습니까?';
+  }
+
+  @override
+  String get modulesEnableAccess => '이 모듈이 할 수 있는 작업:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': '클립보드 기록 읽기',
+      'clipboard_write': '클립보드에 복사',
+      'library_write': '스니펫 저장 및 항목 고정',
+      'snippets': '스니펫 읽기',
+      'synced_records': '기기 간 데이터 동기화',
+      'local_state': '이 기기에 데이터 보관',
+      'prompts': '작업 확인 요청',
+      'endpoints': '로컬 앱의 연결 수락',
+      'other': 'CopyPaste 서비스 사용',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return '$module에서';
+  }
+
+  @override
+  String get modulesUnknownModule => '알 수 없는 모듈';
+
+  @override
+  String get modulesPromptAnswerFailed => '응답을 보내지 못했습니다.';
+
+  @override
+  String get modulesPromptNotificationBody => 'CopyPaste를 열어 응답하세요.';
+
+  @override
+  String get modulesUnknownDevice => '알 수 없는 기기';
+
+  @override
+  String get modulesChooseDevices => '기기 선택';
+
+  @override
+  String get modulesAddApp => '앱 추가';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app 제거';
+  }
+
+  @override
+  String get modulesNoApps => '선택한 앱 없음';
 }

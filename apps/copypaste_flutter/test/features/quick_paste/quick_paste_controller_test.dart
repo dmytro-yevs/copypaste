@@ -31,7 +31,14 @@ import 'package:copypaste_flutter/features/modules/repository/modules_repository
 import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import 'package:copypaste_flutter/features/transfers/file_operations_controller.dart';
 
+import 'package:copypaste_flutter/features/quick_paste/repository/quick_paste_delivery_repository.dart';
+import 'package:copypaste_flutter/features/snippets/models/snippet_models.dart';
+import 'package:copypaste_flutter/features/transforms/models/transform_models.dart';
+import 'package:copypaste_flutter/platform/security/device_authenticator.dart';
+
 import '../modules/modules_test_support.dart';
+import '../snippets/snippet_test_support.dart';
+import '../transforms/transform_test_support.dart';
 import '../../support/focus_traversal.dart';
 
 void main() {
@@ -3372,6 +3379,286 @@ void main() {
     );
     expect(host.pasteIds, [2]);
   });
+
+  group('library integration', () {
+    test('an exact abbreviation is preselected and Enter pastes it', () async {
+      final snippets = FakeSnippetRepository(
+        snippets: [summary('addr-id', title: 'Address', abbreviation: 'addr')],
+      );
+      final repository = _Repository();
+      final host = _ContextHost()..permissionGranted = true;
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        snippets: snippets,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      await controller.search('addr');
+      await pumpEventQueue();
+      expect(controller.focusedSnippet?.id, 'addr-id');
+      expect(controller.isExactSnippet('addr-id'), isTrue);
+      await controller.activateFocused();
+      expect(snippets.used.single.$1, 'addr-id');
+      expect(snippets.used.single.$3, SnippetDelivery.paste);
+      expect(repository.copied, isEmpty);
+      expect(host.pasteIds, [1]);
+      expect(snippets.releases, 1);
+    });
+
+    test('snippet rows keep the runtime ranking', () async {
+      final rows = [
+        for (var index = 0; index < 7; index++)
+          summary('s$index', abbreviation: 'a$index'),
+      ];
+      final snippets = _RankedSnippets([
+        SnippetHit(snippet: rows[3], tier: SnippetMatchTier.exactAbbreviation),
+        SnippetHit(snippet: rows[0], tier: SnippetMatchTier.abbreviationPrefix),
+        SnippetHit(snippet: rows[5], tier: SnippetMatchTier.abbreviationPrefix),
+        SnippetHit(snippet: rows[1], tier: SnippetMatchTier.title),
+        SnippetHit(snippet: rows[6], tier: SnippetMatchTier.fullText),
+        SnippetHit(snippet: rows[2], tier: SnippetMatchTier.fullText),
+        SnippetHit(snippet: rows[4], tier: SnippetMatchTier.fullText),
+      ]);
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+        snippets: snippets,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      await controller.search('a');
+      await pumpEventQueue();
+      expect(controller.snippetResults.map((row) => row.id), [
+        's3',
+        's0',
+        's5',
+        's1',
+        's6',
+      ]);
+      await controller.selectTab(QuickPasteTab.snippets);
+      expect(controller.snippetResults.map((row) => row.id), [
+        's3',
+        's0',
+        's5',
+        's1',
+        's6',
+        's2',
+        's4',
+      ]);
+    });
+
+    testWidgets('a template form opens inside the popup and pastes', (
+      tester,
+    ) async {
+      final greeting = SnippetSummary(
+        id: 'greeting',
+        title: 'Greeting',
+        template: true,
+        createdAt: DateTime(2026),
+      );
+      final snippets = FakeSnippetRepository(
+        snippets: [greeting],
+        details: {
+          'greeting': SnippetDetail(
+            summary: greeting,
+            bodyText: 'Hello {{field name}}',
+            fields: const [TemplateField(name: 'name', label: 'Name')],
+          ),
+        },
+      );
+      final host = _ContextHost()..permissionGranted = true;
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        snippets: snippets,
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.activateSnippet(greeting);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('template-fill-form')), findsOneWidget);
+      expect(host.closeIds, isEmpty);
+      expect(host.pasteIds, isEmpty);
+      await tester.enterText(find.byKey(const ValueKey('name')), 'Ada');
+      await tester.tap(
+        find.byKey(const ValueKey('quick-paste-template-paste')),
+      );
+      await tester.pumpAndSettle();
+      expect(snippets.used.single.$2, {'name': 'Ada'});
+      expect(host.pasteIds, [1]);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('a password target masks previews and turns transforms off', (
+      tester,
+    ) async {
+      final repository = _Repository();
+      final host = _SecureHost()..permissionGranted = true;
+      final transforms = FakeTransformRepository();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        transforms: transforms,
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      expect(controller.maskedMode, isTrue);
+      expect(controller.canTransform, isFalse);
+      expect(await controller.transformSource(), isNull);
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('quick-paste-masked-mode')), findsOne);
+      expect(find.byKey(const ValueKey('quick-paste-masked-recent')), findsOne);
+      expect(find.text('Recent clip'), findsNothing);
+      // The paste leaves history order untouched.
+      await controller.activate(controller.items.first);
+      expect(repository.copied, isEmpty);
+      expect(transforms.runs.single.$3, isTrue);
+      expect(host.pasteIds, [1]);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    test(
+      'a secret paste asks for the owner and restores the clipboard',
+      () async {
+        final repository = _Repository();
+        repository.clips.insert(
+          0,
+          HistoryClip(
+            id: 'secret',
+            secret: true,
+            contentType: 'text/plain',
+            preview: '',
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          ),
+        );
+        final host = _ContextHost()..permissionGranted = true;
+        final transforms = FakeTransformRepository();
+        final delivery = _Delivery();
+        final authenticator = _Authenticator();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: host,
+          transforms: transforms,
+          delivery: delivery,
+          authenticator: authenticator,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await controller.opened(1);
+        expect(controller.secretsLocked, isTrue);
+        await controller.activate(
+          controller.items.firstWhere((clip) => clip.id == 'secret'),
+        );
+        expect(authenticator.requests, 1);
+        expect(transforms.runs.single.$1, TransformRunAction.paste);
+        expect(repository.copied, isEmpty);
+        expect(host.pasteIds, [1]);
+        expect(delivery.restored, [
+          ('restore-1', QuickPasteController.restoreDelay),
+        ]);
+        expect(controller.secretsLocked, isTrue);
+      },
+    );
+
+    test('the target application picks the default paste transform', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final host = _ContextHost()..permissionGranted = true;
+      final transforms = FakeTransformRepository()
+        ..savedPipelines = const [
+          TransformPipeline(id: 'global', name: 'Global', steps: []),
+          TransformPipeline(id: 'mail', name: 'Mail', steps: []),
+        ]
+        ..defaults = const {null: 'global', 'outlook.exe': 'mail'};
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        transforms: transforms,
+        delivery: _Delivery(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await host.openedHandler!(
+        1,
+        inspectorVisible: false,
+        targetApp: 'outlook.exe',
+      );
+      expect(transforms.defaultQueries.single, ('windows', 'outlook.exe'));
+      expect(controller.defaultPipeline?.name, 'Mail');
+      await controller.activate(controller.items.first);
+      expect(transforms.runPipelineIds.single, 'mail');
+      expect(host.pasteIds, [1]);
+
+      await host.openedHandler!(2, inspectorVisible: false);
+      expect(controller.defaultPipeline?.name, 'Global');
+    });
+  });
+}
+
+class _RankedSnippets extends FakeSnippetRepository {
+  _RankedSnippets(this.hits)
+    : super(snippets: [for (final hit in hits) hit.snippet]);
+
+  final List<SnippetHit> hits;
+
+  @override
+  Future<List<SnippetHit>> search(String query, {int limit = 50}) async =>
+      hits.take(limit).toList();
+}
+
+class _SecureHost extends _ContextHost implements ForegroundPasteHost {
+  @override
+  Future<bool?> secureFieldFocused() async => true;
+
+  @override
+  Future<PasteOutcome> pasteForeground({bool plainText = false}) async =>
+      PasteOutcome.pasted;
+
+  @override
+  Future<bool> moveCaretLeft(int count) async => true;
+}
+
+class _Delivery implements QuickPasteDeliveryRepository {
+  final restored = <(String, Duration)>[];
+
+  @override
+  Future<String?> deliverText(String text, {required bool secret}) async =>
+      'delivered';
+
+  @override
+  Future<void> restoreClipboard(String token, Duration after) async =>
+      restored.add((token, after));
+}
+
+class _Authenticator implements DeviceAuthenticator {
+  int requests = 0;
+
+  @override
+  Future<DeviceAuthAvailability> availability() async =>
+      DeviceAuthAvailability.available;
+
+  @override
+  Future<DeviceAuthResult> authenticate({required String reason}) async {
+    requests += 1;
+    return DeviceAuthResult.success;
+  }
 }
 
 class _Repository implements HistoryRepository {

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_resize">Paneli yeniden boyutlandır</string>
+    <string name="ime_search_hint">Kliplerde ara</string>
+    <string name="ime_backspace">Sil</string>
+    <string name="ime_undo_insert">Eklemeyi geri al</string>
+    <string name="ime_enter">Enter</string>
+    <string name="ime_keypad_switch_layout">Düzeni değiştir</string>
+    <string name="ime_keypad_space">Boşluk</string>
+    <string name="ime_keypad_done">Bitti</string>
+    <string name="ime_keypad_backspace">Geri sil</string>
+    <string name="ime_kind_text">Metin</string>
+    <string name="ime_kind_link">Bağlantı</string>
+    <string name="ime_kind_email">E-posta</string>
+    <string name="ime_kind_phone">Telefon numarası</string>
+    <string name="ime_kind_color">Renk</string>
+    <string name="ime_kind_code">Kod</string>
+    <string name="ime_kind_image">Görsel</string>
+    <string name="ime_kind_file">Dosya</string>
+    <string name="ime_current_clipboard">Geçerli pano</string>
+    <string name="ime_secret_item">Gizli öğe, eklemek için iki kez dokunup kimliğinizi doğrulayın</string>
+    <string name="ime_pinned">Sabitlendi</string>
+    <string name="ime_loading">Klipler yükleniyor…</string>
+    <string name="ime_locked">Kliplerinizi görmek için cihazınızın kilidini açın</string>
+    <string name="ime_error">Klipleriniz açılamadı</string>
+    <string name="ime_retry">Yeniden dene</string>
+    <string name="ime_no_results">“%1$s” için eşleşme yok</string>
+    <string name="ime_empty_history">Henüz bir şey yok. Bir şey kopyalayın veya Panoyu kaydet\'e dokunun.</string>
+    <string name="ime_empty_pinned">Henüz sabitlenmiş klip yok</string>
+    <string name="ime_tab_history">Geçmiş</string>
+    <string name="ime_tab_pinned">Sabitlenenler</string>
+    <string name="ime_tab_snippets">Parçacıklar</string>
+    <string name="ime_tab_queue">Kuyruk</string>
+    <string name="ime_action_cancel">İptal</string>
+    <string name="ime_action_insert">Ekle</string>
+    <string name="ime_action_insert_plain">Düz metin olarak ekle</string>
+    <string name="ime_action_copy">Panoya kopyala</string>
+    <string name="ime_action_pin">Sabitle</string>
+    <string name="ime_action_unpin">Sabitlemeyi kaldır</string>
+    <string name="ime_action_delete">Sil</string>
+    <string name="ime_action_reveal">Göster</string>
+    <string name="ime_delete_confirm">Bu klip silinsin mi?</string>
+    <string name="ime_delete_failed">Klip silinemedi</string>
+    <string name="ime_inserted">Eklendi</string>
+    <string name="ime_copied">Kopyalandı</string>
+    <string name="ime_copy_failed">Klip kopyalanamadı</string>
+    <string name="ime_insert_failed">Buraya eklenemiyor</string>
+    <string name="ime_insert_too_large">Buraya eklemek için çok büyük</string>
+    <string name="ime_paste_via_clipboard">Pano üzerinden yapıştır</string>
+    <string name="ime_image_not_accepted">Bu alan görsel kabul etmiyor</string>
+    <string name="ime_file_not_accepted">Bu alan dosya kabul etmiyor</string>
+    <string name="ime_item_unavailable">Bu klip artık kullanılamıyor</string>
+    <string name="ime_unlock_failed">Gizli öğelerin kilidi açılamadı</string>
+    <string name="ime_masked_mode">Parola alanı: önizlemeler gizli</string>
+    <string name="ime_private_field">Gizli alan: hiçbir şey kaydedilmez</string>
+    <string name="ime_masked_summary">•••••• · %1$s</string>
+    <string name="ime_masked_summary_length">•••••• · %1$s · %2$s</string>
+    <plurals name="ime_characters">
+        <item quantity="one">%d karakter</item>
+        <item quantity="other">%d karakter</item>
+    </plurals>
+    <plurals name="ime_queue_count">
+        <item quantity="one">Kuyrukta %d</item>
+        <item quantity="other">Kuyrukta %d</item>
+    </plurals>
+</resources>

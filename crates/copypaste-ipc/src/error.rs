@@ -30,6 +30,11 @@ pub enum ErrorCode {
     /// No such paired device; items use `NotFound`.
     PeerNotFound,
 
+    /// A privileged operation from a peer that is not the CopyPaste app.
+    Forbidden,
+    /// The operation is not available in this build or on this platform.
+    Unsupported,
+
     Internal,
 }
 
@@ -55,6 +60,8 @@ impl ErrorCode {
             Self::PeerFailed => "peer_failed",
             Self::PeerVersion => "peer_version",
             Self::PeerNotFound => "peer_not_found",
+            Self::Forbidden => "forbidden",
+            Self::Unsupported => "unsupported",
             Self::Internal => "internal",
         }
     }
@@ -79,6 +86,8 @@ impl ErrorCode {
             "peer_failed" => Some(Self::PeerFailed),
             "peer_version" => Some(Self::PeerVersion),
             "peer_not_found" => Some(Self::PeerNotFound),
+            "forbidden" => Some(Self::Forbidden),
+            "unsupported" => Some(Self::Unsupported),
             "internal" => Some(Self::Internal),
             _ => None,
         }
@@ -106,7 +115,9 @@ impl ErrorCode {
             | Self::RateLimited
             | Self::PairingLimit
             | Self::PeerVersion
-            | Self::PeerNotFound => false,
+            | Self::PeerNotFound
+            | Self::Forbidden
+            | Self::Unsupported => false,
         }
     }
 }
@@ -139,6 +150,8 @@ mod tests {
             (ErrorCode::PeerFailed, "\"peer_failed\""),
             (ErrorCode::PeerVersion, "\"peer_version\""),
             (ErrorCode::PeerNotFound, "\"peer_not_found\""),
+            (ErrorCode::Forbidden, "\"forbidden\""),
+            (ErrorCode::Unsupported, "\"unsupported\""),
             (ErrorCode::Internal, "\"internal\""),
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);

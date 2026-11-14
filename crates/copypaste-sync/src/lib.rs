@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 pub mod account_state;
 pub mod cadence;
+pub mod cloud_id;
 pub mod host;
 pub mod outcome;
 #[cfg(feature = "storage")]

@@ -6,15 +6,18 @@
 //! protocol; those remain in `copypaste-core` and `copypaste-p2p`.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
+use copypaste_core::rules::compile::CompiledRuleSet;
+use copypaste_core::storage::local_state::LibraryRevision;
 use copypaste_core::{now_ms, p2p_contract, ClipboardPayload, Keyring, Store, StoreSource};
 use copypaste_ipc::{
-    CapabilityGuarantee, CapabilityState, CapabilityStatus, EventData, EventKind,
-    PlatformCapability,
+    CapabilityGuarantee, CapabilityState, CapabilityStatus, EventData, EventKind, LibraryKinds,
+    OperationProgress, PlatformCapability,
 };
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
@@ -22,7 +25,10 @@ use copypaste_p2p::Node;
 use tokio::sync::{broadcast, watch};
 
 pub mod capture_admission;
+mod capture_rules;
+mod deadlines;
 mod dispatch;
+mod features;
 pub mod host;
 pub mod messages;
 pub mod meta;
@@ -31,8 +37,11 @@ mod peer_sync;
 pub mod settings;
 
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
+pub use capture_rules::{CaptureDecision, CapturePlan, CaptureSubject, MAX_SKIPPED_CAPTURES};
+pub use deadlines::ResumeWaker;
 pub use dispatch::{BlockingAdmission, Route, MAX_REORDER_IDS};
-pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost};
+pub use features::ModuleHistoryFilters;
+pub use host::{ClipboardWriter, PlatformStatus, RuntimeHost, WriteOptions};
 pub use meta::{Meta, Origin};
 pub use p2p::P2p;
 pub use settings::{Settings, SettingsError, SettingsReadGuard, SettingsTransition};
@@ -40,6 +49,13 @@ pub use settings::{Settings, SettingsError, SettingsReadGuard, SettingsTransitio
 /// Change events buffered per subscriber before it is told it lagged. Small on
 /// purpose: the recovery for a lag is one extra re-read.
 pub const EVENT_BUFFER: usize = 256;
+
+/// `Library` events are coalesced to at most one per this window.
+const LIBRARY_COALESCE_MS: i64 = 500;
+/// `Progress` events are coalesced to at most one per this window.
+const PROGRESS_COALESCE_MS: i64 = 250;
+/// Concurrent operations whose progress is coalesced.
+const MAX_PROGRESS_OPERATIONS: usize = 32;
 
 /// What a host opens before the runtime is composed over it. The host owns
 /// the keyring and the store so it can report their failures its own way.
@@ -70,6 +86,10 @@ pub struct Runtime {
     pub source: Arc<StoreSource>,
     host: Arc<dyn RuntimeHost>,
     changes: Arc<Changes>,
+    deadlines: Arc<deadlines::Deadlines>,
+    /// Captures content rules skipped, for "Recently skipped".
+    skipped_captures: capture_rules::SkippedCaptures,
+    paste_queue: features::PasteQueue,
     runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     shutdown: watch::Sender<bool>,
     listener_started: AtomicBool,
@@ -85,14 +105,73 @@ struct Changes {
     store: Store,
     modules: Weak<copypaste_modules::ModuleHost>,
     host: Arc<dyn RuntimeHost>,
+    deadlines: Arc<deadlines::Deadlines>,
+    clipboard: features::ClipboardOwner,
+    library: Mutex<LibraryChanges>,
+    progress: Mutex<HashMap<String, ProgressSlot>>,
+}
+
+/// Library changes waiting for the coalesced `Library` event.
+#[derive(Default)]
+struct LibraryChanges {
+    kinds: LibraryKinds,
+    /// A peer or the cloud applied versions; diff the revision to learn what.
+    received: bool,
+    scheduled: bool,
+    baseline: Option<LibraryRevision>,
+}
+
+/// The last emission of one operation's progress and the update held back.
+struct ProgressSlot {
+    emitted_at: i64,
+    held: Option<OperationProgress>,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Changes {
+    /// Send one event when anyone listens; the count is read only then.
+    fn send(&self, event: EventKind, fill: impl FnOnce(&mut EventData)) {
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let mut data = EventData::change(event, self.store.count().unwrap_or(0));
+        fill(&mut data);
+        let _ = self.events.send(data);
+    }
+
+    /// Versions arrived from a peer or the cloud. The coalesced flush
+    /// re-checks library kinds and sweeps deadlines, since a synced expiry
+    /// may have arrived; a long pull costs one sweep per window, not per row.
+    fn received(&self) {
+        self.library_changed(LibraryKinds::default(), true);
+    }
+
+    fn library_changed(&self, kinds: LibraryKinds, received: bool) {
+        let mut library = locked(&self.library);
+        library.kinds = library.kinds.union(kinds);
+        library.received |= received;
+        if std::mem::replace(&mut library.scheduled, true) {
+            return;
+        }
+        drop(library);
+        self.deadlines.schedule(
+            deadlines::DeadlineKey::new("library_event", ""),
+            self.deadlines.now().saturating_add(LIBRARY_COALESCE_MS),
+            Box::new(|runtime: &Runtime| runtime.flush_library()),
+        );
+    }
+
     fn publish(&self, event: EventKind, captured_item_id: Option<&str>) {
         if event == EventKind::Items {
             if let Some(modules) = self.modules.upgrade() {
                 modules.history_changed();
             }
+            self.host.surfaces_changed();
         }
         // No subscriber is the ordinary case, and `item_count` costs a
         // `SELECT COUNT(*)`, so nothing is built for nobody.
@@ -100,17 +179,16 @@ impl Changes {
             return;
         }
         let _ = self.events.send(EventData {
-            sync_status: None,
-            event,
-            item_count: self.store.count().unwrap_or(0),
             captured: captured_item_id.is_some(),
             captured_item_id: captured_item_id.map(str::to_owned),
+            ..EventData::change(event, self.store.count().unwrap_or(0))
         });
     }
 
     /// A received item reached the system clipboard: copy feedback without
     /// treating the receive as local activity.
     fn received_copy(&self, item_id: &str) {
+        self.clipboard.changed(Some(item_id));
         self.publish(EventKind::Items, Some(item_id));
         self.host.copy_feedback();
     }
@@ -230,11 +308,16 @@ impl Runtime {
         ));
         let modules = Arc::new(copypaste_modules::ModuleHost::new(&data_dir));
         let events = broadcast::channel(EVENT_BUFFER).0;
+        let deadlines = Arc::new(deadlines::Deadlines::default());
         let changes = Arc::new(Changes {
             events: events.clone(),
             store: store.clone(),
             modules: Arc::downgrade(&modules),
             host: Arc::clone(&host),
+            deadlines: Arc::clone(&deadlines),
+            clipboard: features::ClipboardOwner::default(),
+            library: Mutex::default(),
+            progress: Mutex::default(),
         });
         let instant_clipboard = Arc::new(copypaste_core::sync::InstantClipboard::default());
         let source = Arc::new(Self::source(
@@ -255,15 +338,20 @@ impl Runtime {
         modules.bind_search(
             store.clone(),
             Arc::new(move || {
-                let _ = search_events.send(EventData {
-                    sync_status: None,
-                    event: EventKind::Items,
-                    item_count: search_store.count().unwrap_or(0),
-                    captured: false,
-                    captured_item_id: None,
-                });
+                let _ = search_events.send(EventData::change(
+                    EventKind::Items,
+                    search_store.count().unwrap_or(0),
+                ));
             }),
         );
+        let prompt_changes = Arc::clone(&changes);
+        modules
+            .set_prompt_listener(Arc::new(move |pending| {
+                prompt_changes.send(EventKind::ModulePrompt, |data| {
+                    data.module_prompts = Some(pending);
+                });
+            }))
+            .map_err(|_| RuntimeError::Storage)?;
         let shutdown = watch::channel(false).0;
         Self::install_module_services(
             &store, &meta, &settings, &p2p, &modules, &source, &changes, &shutdown,
@@ -281,6 +369,9 @@ impl Runtime {
             source,
             host,
             changes,
+            deadlines,
+            skipped_captures: Mutex::default(),
+            paste_queue: features::PasteQueue::default(),
             runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown,
             listener_started: AtomicBool::new(false),
@@ -395,6 +486,7 @@ impl Runtime {
                         local_node.cursors().note_local(stamp);
                         local_driver.wake();
                         local_changes.publish(EventKind::Items, None);
+                        local_changes.received();
                     },
                 )
                 .with_group(
@@ -506,6 +598,7 @@ impl Runtime {
     /// sync until [`Runtime::shutdown`]. Idempotent while the listener runs.
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
         self.start_module_sync();
+        self.start_deadlines();
         if self.listener_started.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -551,7 +644,7 @@ impl Runtime {
             move |_, outcome| {
                 session.remember_device(outcome);
                 if outcome.stats.received > 0 {
-                    session.note_remote_change();
+                    session.note_received_change();
                 }
             },
             move |sync_status_changed: bool| {
@@ -660,12 +753,161 @@ impl Runtime {
         self.changes.publish(EventKind::Items, Some(item_id));
         self.p2p.wake();
         self.modules.note_version(floor_ms);
+        self.on_captured(item_id);
     }
 
     /// History changed because a peer or the cloud delivered something, or
     /// only its presentation changed.
     pub fn note_remote_change(&self) {
         self.changes.publish(EventKind::Items, None);
+    }
+
+    /// A peer or the cloud applied versions here: history changed, library
+    /// records may have, and a synced deadline may have arrived.
+    pub fn note_received_change(&self) {
+        self.note_remote_change();
+        self.changes.received();
+    }
+
+    /// A host saw the clipboard change without capturing it (paused or
+    /// excluded), so a pending restore must not overwrite it.
+    pub fn note_clipboard_changed(&self) {
+        self.changes.clipboard.changed(None);
+    }
+
+    /// A store deadline (a clip expiry, a purge time) was written; the
+    /// deadline task re-arms when it is the earliest.
+    pub fn note_store_deadline(&self, at_ms: i64) {
+        self.deadlines.note_store_deadline(at_ms);
+    }
+
+    /// A committed local capture, for the features that follow captures.
+    fn on_captured(&self, item_id: &str) {
+        self.changes.clipboard.changed(Some(item_id));
+        self.paste_queue_captured(item_id);
+    }
+
+    /// History was cleared: the paste queue and the host surfaces that show
+    /// history (Android widgets) are emptied with it.
+    pub(crate) fn on_history_cleared(&self) {
+        self.paste_queue_history_cleared();
+        self.host.history_cleared();
+    }
+
+    /// A paired device was removed: host surfaces drop what they show from it.
+    pub(crate) fn on_device_removed(&self, device_id: &str) {
+        self.host.device_removed(device_id);
+    }
+
+    /// Library records of `kinds` changed locally. Emits one coalesced
+    /// `Library` event and drops compiled rules when rules changed.
+    pub fn on_org_changed(&self, kinds: LibraryKinds) {
+        self.changes.library_changed(kinds, false);
+    }
+
+    fn flush_library(&self) {
+        let (mut kinds, received, baseline) = {
+            let mut library = locked(&self.changes.library);
+            library.scheduled = false;
+            (
+                std::mem::take(&mut library.kinds),
+                std::mem::take(&mut library.received),
+                library.baseline,
+            )
+        };
+        if received {
+            self.deadlines.request_sweep();
+        }
+        match self.store.library_revision() {
+            Ok(current) => {
+                if received {
+                    kinds = kinds.union(
+                        baseline.map_or(LibraryKinds::all(), |base| library_diff(&base, &current)),
+                    );
+                }
+                locked(&self.changes.library).baseline = Some(current);
+            }
+            Err(_) if received => kinds = LibraryKinds::all(),
+            Err(_) => {}
+        }
+        if kinds == LibraryKinds::default() {
+            return;
+        }
+        if kinds.intersects(LibraryKinds::SNIPPETS) {
+            self.host.surfaces_changed();
+        }
+        self.changes
+            .send(EventKind::Library, |data| data.library = Some(kinds));
+    }
+
+    /// The paste queue moved to `revision`.
+    pub fn note_paste_queue_changed(&self, revision: u64) {
+        self.changes.send(EventKind::PasteQueue, |data| {
+            data.paste_queue_revision = Some(revision);
+        });
+    }
+
+    /// A long operation advanced. Coalesced per request to one event per
+    /// 250 ms; the final update is never held back.
+    pub fn note_progress(&self, progress: OperationProgress) {
+        let now = self.deadlines.now();
+        let mut slots = locked(&self.changes.progress);
+        if slots.len() >= MAX_PROGRESS_OPERATIONS && !slots.contains_key(&progress.request_id) {
+            slots.clear();
+        }
+        let request_id = progress.request_id.clone();
+        let finished = progress.done >= progress.total;
+        let slot = slots.entry(request_id.clone()).or_insert(ProgressSlot {
+            emitted_at: i64::MIN,
+            held: None,
+        });
+        let due = slot.emitted_at.saturating_add(PROGRESS_COALESCE_MS);
+        if !finished && now < due {
+            let first_held = slot.held.replace(progress).is_none();
+            drop(slots);
+            if first_held {
+                let request = request_id.clone();
+                self.deadlines.schedule(
+                    deadlines::DeadlineKey::new("progress_event", request_id),
+                    due,
+                    Box::new(move |runtime: &Runtime| runtime.flush_progress(&request)),
+                );
+            }
+            return;
+        }
+        if finished {
+            slots.remove(&request_id);
+        } else {
+            slot.emitted_at = now;
+            slot.held = None;
+        }
+        drop(slots);
+        if finished {
+            self.deadlines
+                .cancel(&deadlines::DeadlineKey::new("progress_event", request_id));
+        }
+        self.changes
+            .send(EventKind::Progress, |data| data.operation = Some(progress));
+    }
+
+    fn flush_progress(&self, request_id: &str) {
+        let now = self.deadlines.now();
+        let held = locked(&self.changes.progress)
+            .get_mut(request_id)
+            .and_then(|slot| {
+                slot.emitted_at = now;
+                slot.held.take()
+            });
+        if let Some(held) = held {
+            self.changes
+                .send(EventKind::Progress, |data| data.operation = Some(held));
+        }
+    }
+
+    /// The content rules this device runs, compiled once per rules revision
+    /// in the store and shared with capture and receipt.
+    pub fn compiled_rules(&self) -> Result<Arc<CompiledRuleSet>, copypaste_core::StoreError> {
+        Ok(self.store.content_rules()?.set)
     }
 
     pub fn note_peers_changed(&self) {
@@ -690,10 +932,7 @@ impl Runtime {
         }
         let _ = self.changes.events.send(EventData {
             sync_status: Some(sync_status),
-            event: EventKind::Peers,
-            item_count: self.store.count().unwrap_or(0),
-            captured: false,
-            captured_item_id: None,
+            ..EventData::change(EventKind::Peers, self.store.count().unwrap_or(0))
         });
     }
 
@@ -705,10 +944,11 @@ impl Runtime {
         self.capture_running.load(Ordering::Acquire)
     }
 
-    /// Advance the capture revision and publish status, only when subscribed.
-    /// Status includes no clipboard payload.
+    /// Advance the capture revision, tell host surfaces, and publish status
+    /// only when subscribed. Status includes no clipboard payload.
     pub fn note_capture_state_changed(&self) {
         self.capture_revision.fetch_add(1, Ordering::AcqRel);
+        self.host.surfaces_changed();
         if self.runtime_events.receiver_count() == 0 {
             return;
         }
@@ -726,15 +966,20 @@ impl Runtime {
     /// runtime remains the only owner of encryption, deduplication, retention,
     /// exclusions and History change events.
     pub fn capture_text(&self, content: &str) -> Result<(), RuntimeError> {
-        self.capture_text_with_policy(content, false)
+        self.capture_text_with_policy(content, false).map(|_| ())
     }
 
     /// Records text from an explicit Android Share or Process Text action.
     pub fn capture_explicit_text(&self, content: &str) -> Result<(), RuntimeError> {
-        self.capture_text_with_policy(content, true)
+        self.capture_text_with_policy(content, true).map(|_| ())
     }
 
-    fn capture_text_with_policy(&self, content: &str, explicit: bool) -> Result<(), RuntimeError> {
+    /// Captures text and returns the id of the history item that holds it.
+    fn capture_text_with_policy(
+        &self,
+        content: &str,
+        explicit: bool,
+    ) -> Result<String, RuntimeError> {
         let host = self
             .capture_admission()
             .open_host(if explicit {
@@ -748,7 +993,9 @@ impl Runtime {
             .begin(host, Arc::new(|| {}))
             .ok_or(RuntimeError::CaptureRefused)
             .and_then(|token| {
-                let result = self.capture_text_operation(token, content).map(|_| ());
+                let result = self
+                    .capture_text_item(token, content, true)
+                    .map(|(id, _)| id);
                 self.capture_admission().abandon(token);
                 result
             });
@@ -763,51 +1010,74 @@ impl Runtime {
         token: u64,
         content: &str,
     ) -> Result<copypaste_ipc::ClipboardPrivacy, RuntimeError> {
-        self.capture_text_item(token, content)
+        self.capture_text_item(token, content, true)
             .map(|(_, privacy)| privacy)
     }
 
+    /// Content rules run on clipboard captures; a module's capture skips them.
     fn capture_text_item(
         &self,
         token: u64,
         content: &str,
+        rules: bool,
     ) -> Result<(String, copypaste_ipc::ClipboardPrivacy), RuntimeError> {
-        if let Some(privacy) =
-            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
-        {
-            if !self.capture_admission().classify(token, privacy) {
-                return Err(RuntimeError::CaptureRefused);
-            }
-        }
         let mut permit = self
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
+        let created_at = now_ms();
+        let plan = if rules {
+            match self.evaluate_capture(&CaptureSubject {
+                text: Some(content),
+                content_type: copypaste_ipc::content_type::TEXT,
+                byte_len: content.len() as u64,
+                source_app: None,
+                source_app_name: None,
+                privacy: permit.privacy,
+                created_at,
+            }) {
+                CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+                CaptureDecision::Store(plan) => plan,
+            }
+        } else {
+            CapturePlan::default()
+        };
+        let content = plan.text(content);
+        // Detection only marks the item; producer markers alone gate capture.
+        let detected =
+            copypaste_core::classify_credentials(copypaste_ipc::content_type::TEXT, content)
+                .unwrap_or_default();
         let settings = &permit.config;
-        let privacy_metadata =
-            (!permit.privacy.is_empty()).then_some(copypaste_core::PayloadMetadata {
+        let privacy_metadata = plan.metadata((!permit.privacy.is_empty()).then_some(
+            copypaste_core::PayloadMetadata {
                 secret_override: None,
                 privacy: permit.privacy,
                 ..Default::default()
-            });
-        let ingested =
-            copypaste_core::ingest_into_with_capture_source_metadata_with_current_retention(
-                &self.store,
-                &self.keyring,
-                content,
-                copypaste_ipc::content_type::TEXT,
-                now_ms(),
-                None,
-                None,
-                privacy_metadata.as_ref(),
-                settings,
-                || self.settings.config(),
-            )
-            .map_err(|_| RuntimeError::Capture)?;
-        let privacy = permit.privacy;
+            },
+        ));
+        let ingested = copypaste_core::ingest::ingest_text_with_rules(
+            &self.store,
+            &self.keyring,
+            content,
+            copypaste_ipc::content_type::TEXT,
+            created_at,
+            None,
+            None,
+            privacy_metadata.as_ref(),
+            settings,
+            || self.settings.config(),
+            plan.effects(),
+        )
+        .map_err(|_| RuntimeError::Capture)?;
+        let privacy = permit.privacy.union(detected);
+        let privacy = copypaste_ipc::ClipboardPrivacy {
+            secret: privacy.secret || plan.secret(),
+            ..privacy
+        };
         let item = ingested.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok((item.id, privacy))
     }
 
@@ -850,7 +1120,7 @@ impl Runtime {
     }
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
-        let (item_id, _) = self.capture_text_item(token, code)?;
+        let (item_id, _) = self.capture_text_item(token, code, false)?;
         let completion = self
             .capture_admission()
             .acquire(token, CaptureScope::Completion)
@@ -860,9 +1130,11 @@ impl Runtime {
                 &item_id,
                 &ClipboardPayload::Text(code.to_owned().into()),
                 copypaste_ipc::content_type::TEXT,
-                completion.privacy.secret,
+                WriteOptions::copy(completion.privacy.secret),
             )
-            .map_err(|_| RuntimeError::Capture)
+            .map_err(|_| RuntimeError::Capture)?;
+        self.changes.clipboard.changed(Some(&item_id));
+        Ok(())
     }
 
     /// Records an image or file captured by an in-process platform host.
@@ -946,6 +1218,19 @@ impl Runtime {
             .capture_admission()
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
+        let created_at = now_ms();
+        let plan = match self.evaluate_capture(&CaptureSubject {
+            text: None,
+            content_type,
+            byte_len: bytes.len() as u64,
+            source_app: source_app.map(|source| source.bundle_id.as_str()),
+            source_app_name: source_app.and_then(|source| source.name.as_deref()),
+            privacy: permit.privacy,
+            created_at,
+        }) {
+            CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+            CaptureDecision::Store(plan) => plan,
+        };
         let settings = &permit.config;
         let metadata = copypaste_core::PayloadMetadata {
             credentials: false,
@@ -954,25 +1239,29 @@ impl Runtime {
             file: None,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
         };
-        let metadata = (!metadata.privacy.is_empty()
-            || metadata.file.is_some()
-            || metadata.source_app_icon.is_some())
-        .then_some(metadata);
-        let ingested = copypaste_core::ingest_binary_into_with_capture_source_metadata(
+        let metadata = plan.metadata(
+            (!metadata.privacy.is_empty()
+                || metadata.file.is_some()
+                || metadata.source_app_icon.is_some())
+            .then_some(metadata),
+        );
+        let ingested = copypaste_core::ingest::ingest_binary_with_rules(
             &self.store,
             &self.keyring,
             bytes,
             content_type,
-            now_ms(),
+            created_at,
             source_app.map(|source| source.bundle_id.as_str()),
             source_app.and_then(|source| source.name.as_deref()),
             metadata.as_ref(),
             settings,
+            Some(plan.effects()),
         )
         .map_err(|_| RuntimeError::Capture)?;
         let item = ingested.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok(())
     }
 
@@ -1003,22 +1292,39 @@ impl Runtime {
             Some(size_bytes),
         )
         .map_err(|_| RuntimeError::Capture)?;
+        let created_at = now_ms();
+        let subject = copypaste_core::rules::apply::file_subject(&metadata);
+        let plan = match self.evaluate_capture(&CaptureSubject {
+            text: Some(&subject),
+            content_type: copypaste_ipc::content_type::FILE,
+            byte_len: reference.size(),
+            source_app: source_app.map(|source| source.bundle_id.as_str()),
+            source_app_name: source_app.and_then(|source| source.name.as_deref()),
+            privacy: permit.privacy,
+            created_at,
+        }) {
+            CaptureDecision::Skip => return Err(RuntimeError::CaptureRefused),
+            CaptureDecision::Store(plan) => plan,
+        };
+        let context = plan.metadata(Some(context));
         let row = reference
-            .publish(
+            .publish_with_rules(
                 &self.store,
                 &self.keyring.item_key(),
                 metadata,
-                now_ms(),
+                created_at,
                 source_app.map(|source| source.bundle_id.as_str()),
                 source_app.and_then(|source| source.name.as_deref()),
-                Some(&context),
+                context.as_ref(),
                 &permit.config,
                 false,
+                Some(plan.effects()),
             )
             .map_err(|_| RuntimeError::Capture)?;
         let item = row.into_item();
         self.note_capture(item.created_at, &item.id);
         permit.committed();
+        self.finish_capture(&item.id, &plan);
         Ok(())
     }
 
@@ -1061,6 +1367,31 @@ impl Runtime {
         let _ = self.capture_admission().shutdown();
         let _ = self.shutdown.send(true);
     }
+}
+
+/// The library kinds whose change markers differ between two revisions.
+fn library_diff(before: &LibraryRevision, after: &LibraryRevision) -> LibraryKinds {
+    [
+        (
+            before.snippets != after.snippets,
+            LibraryKinds::SNIPPETS.union(LibraryKinds::COLLECTIONS),
+        ),
+        (before.rules != after.rules, LibraryKinds::RULES),
+        (before.pipelines != after.pipelines, LibraryKinds::PIPELINES),
+        (
+            before.preferences != after.preferences,
+            LibraryKinds::PREFERENCES,
+        ),
+        (
+            before.set_members != after.set_members,
+            LibraryKinds::SET_MEMBERS,
+        ),
+    ]
+    .into_iter()
+    .filter(|(changed, _)| *changed)
+    .fold(LibraryKinds::default(), |kinds, (_, kind)| {
+        kinds.union(kind)
+    })
 }
 
 /// Source exclusions need authenticated attribution: without an active source
@@ -1231,15 +1562,15 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<bool>>);
+    struct RecordingClipboard(Mutex<Vec<String>>, Mutex<Vec<WriteOptions>>);
     impl ClipboardWriter for RecordingClipboard {
         fn write(
             &self,
             payload: &ClipboardPayload,
             _content_type: &str,
-            secret: bool,
+            options: WriteOptions,
         ) -> Result<(), ClipboardWriteError> {
-            self.1.lock().unwrap().push(secret);
+            self.1.lock().unwrap().push(options);
             self.0.lock().unwrap().push(match payload {
                 ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
                 ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
@@ -1286,7 +1617,11 @@ mod tests {
             .set_secret(&runtime.keyring, "secret-source", false)
             .unwrap();
         assert!(runtime.copy(4, "secret-source", false).ok);
-        assert_eq!(*clipboard.1.lock().unwrap(), [true, true, true, false]);
+        assert_eq!(
+            *clipboard.1.lock().unwrap(),
+            [true, true, true, false].map(WriteOptions::copy),
+            "history copies keep their sensitivity and are never transient"
+        );
     }
 
     #[derive(Default)]
@@ -1301,9 +1636,9 @@ mod tests {
             &self,
             payload: &ClipboardPayload,
             kind: &str,
-            secret: bool,
+            options: WriteOptions,
         ) -> Result<(), ClipboardWriteError> {
-            self.writes.write(payload, kind, secret)
+            self.writes.write(payload, kind, options)
         }
 
         fn write_received(
@@ -1312,7 +1647,7 @@ mod tests {
             kind: &str,
             secret: bool,
         ) -> Result<(), ClipboardWriteError> {
-            self.write(payload, kind, secret)?;
+            self.write(payload, kind, WriteOptions::copy(secret))?;
             *self.acknowledgements.lock().unwrap() += 1;
             self.concealed.lock().unwrap().push(secret);
             Ok(())
@@ -1523,22 +1858,12 @@ mod tests {
     }
 
     #[test]
-    fn detected_credentials_share_the_android_capture_gate_and_hidden_preview() {
+    fn detected_credentials_are_captured_with_a_hidden_preview() {
         let (runtime, _dir) = fixture();
-        let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic";
-        assert!(matches!(
-            runtime.capture_text(content),
-            Err(RuntimeError::CaptureRefused)
-        ));
-        assert_eq!(runtime.store.count().unwrap(), 0);
-        runtime
-            .settings
-            .apply(&copypaste_ipc::ConfigPatch {
-                skip_secret: Some(false),
-                ..Default::default()
-            })
-            .unwrap();
-        runtime.capture_text(content).unwrap();
+        assert!(runtime.settings.config().skip_secret);
+        // Assembled from fragments so the source holds no key-shaped literal.
+        let content = format!("-----BEGIN OPENSSH {}-----\nsynthetic", "PRIVATE KEY");
+        runtime.capture_text(&content).unwrap();
         let row = runtime.store.list(10, 0).unwrap().pop().unwrap();
         let preview = runtime.item_value(row, true).unwrap();
         assert!(preview.privacy.secret);
@@ -2210,7 +2535,7 @@ mod tests {
                 &self,
                 _: &ClipboardPayload,
                 _: &str,
-                _: bool,
+                _: WriteOptions,
             ) -> Result<(), ClipboardWriteError> {
                 Err(ClipboardWriteError::Failed)
             }
@@ -3358,5 +3683,88 @@ mod tests {
             capture.backend.as_deref(),
             Some("linux-wayland-data-control")
         );
+    }
+
+    #[tokio::test]
+    async fn library_changes_coalesce_into_one_event_and_clearing_history_reaches_the_host() {
+        #[derive(Default)]
+        struct ClearingClipboard(Mutex<usize>);
+        impl ClipboardWriter for ClearingClipboard {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: WriteOptions,
+            ) -> Result<(), ClipboardWriteError> {
+                Ok(())
+            }
+            fn history_cleared(&self) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let clipboard = Arc::new(ClearingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let task = runtime.start_deadlines().unwrap();
+        let mut events = runtime.subscribe_events();
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        runtime.on_org_changed(LibraryKinds::RULES);
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        let event = events.try_recv().unwrap();
+        assert_eq!(event.event, EventKind::Library);
+        assert_eq!(
+            event.library,
+            Some(LibraryKinds::SNIPPETS.union(LibraryKinds::RULES))
+        );
+        assert!(events.try_recv().is_err(), "one event for the burst");
+
+        assert!(
+            runtime
+                .request_blocking(1, Method::DeleteAll { through: None })
+                .ok
+        );
+        assert_eq!(*clipboard.0.lock().unwrap(), 1);
+        runtime.shutdown();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_surfaces_hear_history_snippet_and_capture_changes_but_not_rules() {
+        #[derive(Default)]
+        struct SurfaceClipboard(Mutex<usize>);
+        impl ClipboardWriter for SurfaceClipboard {
+            fn write(
+                &self,
+                _: &ClipboardPayload,
+                _: &str,
+                _: WriteOptions,
+            ) -> Result<(), ClipboardWriteError> {
+                Ok(())
+            }
+            fn surfaces_changed(&self) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let clipboard = Arc::new(SurfaceClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let task = runtime.start_deadlines().unwrap();
+        let count = || *clipboard.0.lock().unwrap();
+
+        runtime.capture_text("shown on a widget").unwrap();
+        assert_eq!(count(), 1, "a capture changes history");
+        runtime.on_org_changed(LibraryKinds::RULES);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(count(), 1, "rules are not shown on surfaces");
+        runtime.on_org_changed(LibraryKinds::SNIPPETS);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(count(), 2, "snippets are");
+        assert!(
+            runtime
+                .request_blocking(1, Method::SetPrivateMode { enabled: true })
+                .ok
+        );
+        assert_eq!(count(), 3, "pausing capture changes the surface state");
+        runtime.shutdown();
+        task.await.unwrap();
     }
 }

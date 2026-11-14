@@ -145,7 +145,7 @@ class HistorySelectionController {
   ) async {
     try {
       final fullClip = await _scope.repository.get(id);
-      if (fullClip.secret && _scope.repository is HistorySpoilerRepository) {
+      if (fullClip.masked && _scope.repository is HistorySpoilerRepository) {
         await _spoilers.refresh();
       }
       if (!_history.window.isCurrent(queryEpoch) ||

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keyboard panel: header (search, switch back), tabs, notice, scrollable body,
+     keypad slot and a fixed footer of host-field controls. Sizes and colors
+     come from design_tokens.xml. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ime_panel"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/app_color_background"
+    android:orientation="vertical">
+
+    <ImageView
+        android:id="@+id/ime_resize_handle"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/app_spacing_lg"
+        android:contentDescription="@string/ime_resize"
+        android:rotation="90"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_lucide_grip_vertical" />
+
+    <LinearLayout
+        android:id="@+id/ime_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingEnd="@dimen/app_spacing_sm">
+
+        <TextView
+            android:id="@+id/ime_search"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:drawableStart="@drawable/ic_lucide_search"
+            android:drawablePadding="@dimen/app_spacing_sm"
+            android:ellipsize="start"
+            android:gravity="center_vertical"
+            android:hint="@string/ime_search_hint"
+            android:minHeight="@dimen/app_control_size_touch"
+            android:paddingStart="@dimen/app_spacing_md"
+            android:paddingEnd="@dimen/app_spacing_md"
+            android:singleLine="true"
+            android:textColor="@color/app_color_foreground"
+            android:textColorHint="@color/app_color_muted_foreground"
+            android:textSize="@dimen/app_text_size_base" />
+
+        <ImageButton
+            android:id="@+id/ime_switch_back"
+            android:layout_width="@dimen/app_control_size_touch"
+            android:layout_height="@dimen/app_control_size_touch"
+            android:layout_marginStart="@dimen/app_spacing_sm"
+            android:contentDescription="@string/quick_access_ime_switch_back"
+            android:src="@drawable/ic_lucide_keyboard" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/ime_tabs"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/app_spacing_xs"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingEnd="@dimen/app_spacing_sm" />
+
+    <LinearLayout
+        android:id="@+id/ime_notice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:accessibilityLiveRegion="polite"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_md"
+        android:paddingEnd="@dimen/app_spacing_sm"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/ime_notice_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingTop="@dimen/app_spacing_xs"
+            android:paddingBottom="@dimen/app_spacing_xs"
+            android:textColor="@color/app_color_muted_foreground"
+            android:textSize="@dimen/app_text_size_x_small" />
+
+        <TextView
+            android:id="@+id/ime_notice_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:minHeight="@dimen/app_control_size_compact"
+            android:paddingStart="@dimen/app_spacing_md"
+            android:paddingEnd="@dimen/app_spacing_md"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_small"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/ime_body"
+        android:layout_width="match_parent"
+        android:layout_height="0dp">
+
+        <ListView
+            android:id="@+id/ime_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:scrollbarStyle="outsideOverlay" />
+
+        <include layout="@layout/ime_state" />
+
+        <LinearLayout
+            android:id="@+id/ime_actions"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/app_color_popover"
+            android:orientation="vertical"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/ime_keypad_slot"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/ime_footer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_spacing_sm"
+        android:paddingEnd="@dimen/app_spacing_sm"
+        android:paddingBottom="@dimen/app_spacing_xs">
+
+        <ImageButton
+            android:id="@+id/ime_backspace"
+            android:layout_width="@dimen/app_control_size_touch"
+            android:layout_height="@dimen/app_control_size_touch"
+            android:contentDescription="@string/ime_backspace"
+            android:src="@drawable/ic_lucide_delete" />
+
+        <ImageButton
+            android:id="@+id/ime_undo"
+            android:layout_width="@dimen/app_control_size_touch"
+            android:layout_height="@dimen/app_control_size_touch"
+            android:layout_marginStart="@dimen/app_spacing_xs"
+            android:contentDescription="@string/ime_undo_insert"
+            android:src="@drawable/ic_lucide_undo_2" />
+
+        <TextView
+            android:id="@+id/ime_queue_indicator"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/app_control_size_touch"
+            android:layout_marginStart="@dimen/app_spacing_xs"
+            android:layout_marginEnd="@dimen/app_spacing_xs"
+            android:layout_weight="1"
+            android:drawableStart="@drawable/ic_lucide_list_ordered"
+            android:drawablePadding="@dimen/app_spacing_sm"
+            android:gravity="center_vertical"
+            android:paddingStart="@dimen/app_spacing_md"
+            android:paddingEnd="@dimen/app_spacing_md"
+            android:singleLine="true"
+            android:textColor="@color/app_color_foreground"
+            android:textSize="@dimen/app_text_size_small"
+            android:visibility="invisible" />
+
+        <ImageButton
+            android:id="@+id/ime_enter"
+            android:layout_width="@dimen/app_control_size_touch"
+            android:layout_height="@dimen/app_control_size_touch"
+            android:contentDescription="@string/ime_enter"
+            android:src="@drawable/ic_lucide_corner_down_left" />
+    </LinearLayout>
+</LinearLayout>

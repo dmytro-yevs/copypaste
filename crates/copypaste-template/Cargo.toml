@@ -1,0 +1,21 @@
+[package]
+name = "copypaste-template"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Parser, lint and single-pass renderer for snippet templates. No storage or
+# IO: the caller supplies the zone id, clipboard text, nested snippets and
+# modifiers.
+[dependencies]
+icu_calendar.workspace = true
+icu_datetime.workspace = true
+icu_locale.workspace = true
+jiff.workspace = true
+rand.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+unicode-segmentation.workspace = true
+uuid.workspace = true
+writeable.workspace = true

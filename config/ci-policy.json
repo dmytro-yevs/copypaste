@@ -9,6 +9,7 @@
       "windows-core": "Windows Rust capabilities",
       "optional-modules": "Optional modules (${{ matrix.name }})",
       "flutter-foundation": "Flutter foundation (${{ matrix.name }})",
+      "android-unit-tests": "Android Kotlin unit tests",
       "linux-native-fixtures": "Linux native fixtures (${{ matrix.architecture }})",
       "linux-mutter-bridges": "Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})",
       "linux-pr-release-candidate": "Linux release candidate (${{ matrix.architecture }})",
@@ -71,6 +72,13 @@
       "android": "android",
       "android-native": "android-native",
       "publish": "publish"
+    },
+    "ai-tools-module.yml": {
+      "preflight": "preflight",
+      "desktop": "desktop",
+      "android": "android",
+      "android-native": "android-native",
+      "publish": "publish"
     }
   },
   "required_dependencies": {
@@ -85,6 +93,7 @@
         "windows-core",
         "optional-modules",
         "flutter-foundation",
+        "android-unit-tests",
         "linux-native-fixtures",
         "linux-mutter-bridges",
         "linux-pr-release-candidate",
@@ -173,6 +182,11 @@
       "group": "module-marketplace",
       "cancel-in-progress": false,
       "queue": "max"
+    },
+    "ai-tools-module.yml": {
+      "group": "ai-tools-module-release",
+      "cancel-in-progress": false,
+      "queue": "max"
     }
   },
   "required_job_concurrency": {
@@ -185,6 +199,11 @@
     }
   },
   "artifact_retention_days": {
+    "ai-tools-module.yml": {
+      "desktop": 7,
+      "android": 7,
+      "android-native": 90
+    },
     "ci-metrics.yml": {
       "report": 3
     },

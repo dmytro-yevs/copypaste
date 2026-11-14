@@ -9,10 +9,12 @@ import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Locale;
 import 'package:pub_semver/pub_semver.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/github_module_marketplace_repository.dart';
+import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:copypaste_flutter/platform/modules/module_marketplace_platform.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
 import 'package:copypaste_flutter/shared/security/minisign_verifier.dart';
@@ -142,6 +144,32 @@ void main() {
       }
     },
   );
+
+  test('shows catalog translations with an English fallback', () {
+    final body = catalog();
+    ((body['modules'] as List).single as Map)['localizations'] = {
+      'uk': {'title': 'Розпізнавання', 'description': 'Офлайн.'},
+      'pt': {'title': 'Reconhecimento'},
+    };
+    final module = const ModuleCatalogParser()
+        .parse(jsonEncode(body), target)
+        .single;
+    addTearDown(() => AppStrings.useLocale(const Locale('en')));
+    expect(module.title, 'OCR');
+    AppStrings.useLocale(const Locale('uk'));
+    expect((module.title, module.description), ('Розпізнавання', 'Офлайн.'));
+    AppStrings.useLocale(const Locale('pt'));
+    expect(module.title, 'Reconhecimento');
+    expect(module.description, 'Recognize images offline.');
+
+    ((body['modules'] as List).single as Map)['localizations'] = {
+      'uk': {'title': ' '},
+    };
+    expect(
+      () => const ModuleCatalogParser().parse(jsonEncode(body), target),
+      throwsA(isA<ModulesException>()),
+    );
+  });
 
   test(
     'rejects platform declarations that disagree with published artifacts',

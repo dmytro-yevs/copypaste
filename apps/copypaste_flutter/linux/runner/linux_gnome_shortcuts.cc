@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -113,6 +114,7 @@ struct LinuxGnomeShortcuts::Impl
   struct UnregisterCall {
     std::shared_ptr<Impl> owner;
     guint generation = 0;
+    std::string id;
     std::function<void(bool)> done;
   };
 
@@ -177,8 +179,7 @@ struct LinuxGnomeShortcuts::Impl
       g_dbus_connection_signal_unsubscribe(connection, activation_subscription);
       activation_subscription = 0;
     }
-    registered = false;
-    registered_id.clear();
+    registered_ids.clear();
   }
 
   void verify_version() {
@@ -217,10 +218,10 @@ struct LinuxGnomeShortcuts::Impl
           const auto self = subscription->owner;
           const gchar* id = nullptr;
           g_variant_get(parameters, "(&s)", &id);
-          if (self->active && self->registered &&
+          if (self->active &&
               subscription->registration_epoch == self->registration_epoch &&
-              id != nullptr &&
-              self->registered_id == id && self->activated != nullptr) {
+              id != nullptr && self->registered_ids.count(id) != 0 &&
+              self->activated != nullptr) {
             self->activated(id);
           }
         },
@@ -244,23 +245,9 @@ struct LinuxGnomeShortcuts::Impl
       done({false, {}, "A GNOME shortcut operation is already in progress."});
       return;
     }
+    // The companion keys bindings by id and replaces an existing one itself,
+    // so other ids stay bound.
     operation_in_flight = true;
-    const guint operation_generation = generation;
-    const std::string previous_id = registered_id;
-    if (!previous_id.empty()) {
-      dispatch_unregister(previous_id,
-                          [self = shared_from_this(), request, accelerator,
-                           operation_generation, done = std::move(done)](
-                              bool removed) mutable {
-                            if (!removed) {
-                              self->finish_operation(operation_generation);
-                              done({false, {}, "GNOME did not release the existing shortcut."});
-                              return;
-                            }
-                            self->dispatch_register(request.id, accelerator, std::move(done));
-                          });
-      return;
-    }
     dispatch_register(request.id, accelerator, std::move(done));
   }
 
@@ -285,8 +272,7 @@ struct LinuxGnomeShortcuts::Impl
             g_variant_get(reply, "(b&s)", &registered, &description);
           }
           if (registered && description != nullptr && *description != '\0') {
-            self->registered = true;
-            self->registered_id = call->id;
+            self->registered_ids.insert(call->id);
             self->subscribe_activations();
             self->finish_operation(call->generation);
             call->done({true, description, {}});
@@ -299,11 +285,11 @@ struct LinuxGnomeShortcuts::Impl
   }
 
   void unregister_shortcut(const std::string& id, std::function<void(bool)> done) {
-    if (id.empty() || (registered && registered_id != id)) {
+    if (id.empty()) {
       done(false);
       return;
     }
-    if (!registered) {
+    if (registered_ids.count(id) == 0) {
       done(true);
       return;
     }
@@ -325,7 +311,7 @@ struct LinuxGnomeShortcuts::Impl
   }
 
   void dispatch_unregister(const std::string& id, std::function<void(bool)> done) {
-    auto* call = new UnregisterCall{shared_from_this(), generation, std::move(done)};
+    auto* call = new UnregisterCall{shared_from_this(), generation, id, std::move(done)};
     g_dbus_connection_call(
         connection, kCompanionName, kCompanionPath, kCompanionInterface,
         "UnregisterShortcut", g_variant_new("(s)", id.c_str()),
@@ -342,7 +328,10 @@ struct LinuxGnomeShortcuts::Impl
               reply != nullptr && g_variant_is_of_type(reply, G_VARIANT_TYPE("(b)"))) {
             g_variant_get(reply, "(b)", &removed);
           }
-          if (removed) self->clear_registration();
+          if (removed) {
+            self->registered_ids.erase(call->id);
+            if (self->registered_ids.empty()) self->clear_registration();
+          }
           call->done(removed);
         },
         call);
@@ -363,9 +352,8 @@ struct LinuxGnomeShortcuts::Impl
   guint registration_epoch = 0;
   bool active = true;
   bool available = false;
-  bool registered = false;
   bool operation_in_flight = false;
-  std::string registered_id;
+  std::set<std::string> registered_ids;
 };
 
 LinuxGnomeShortcuts::LinuxGnomeShortcuts(
@@ -379,7 +367,11 @@ LinuxGnomeShortcuts::~LinuxGnomeShortcuts() { impl_->shutdown(); }
 bool LinuxGnomeShortcuts::is_available() const { return impl_->available; }
 
 bool LinuxGnomeShortcuts::shortcut_registered() const {
-  return impl_->registered;
+  return !impl_->registered_ids.empty();
+}
+
+bool LinuxGnomeShortcuts::shortcut_registered(const std::string& id) const {
+  return impl_->registered_ids.count(id) != 0;
 }
 
 void LinuxGnomeShortcuts::register_shortcut(

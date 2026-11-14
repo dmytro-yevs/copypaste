@@ -1,3 +1,8 @@
+import '../../content_rules/models/content_rule_models.dart';
+import '../../snippets/repository/clip_edit_preferences.dart';
+import '../../snippets/repository/snippet_repository.dart';
+import '../../transforms/repository/transform_recents_store.dart';
+import '../../transforms/repository/transform_repository.dart';
 import '../models/history_models.dart';
 import 'history_file_importer.dart';
 
@@ -72,4 +77,37 @@ abstract interface class HistoryTagsRepository {
     required List<String> tagIds,
     required bool assigned,
   });
+}
+
+/// Editing clips, writing new ones and saving them as snippets, through the
+/// snippets feature's ports.
+abstract interface class HistoryEditRepository {
+  ClipEditRepository get clipEdits;
+  SnippetRepository get snippets;
+  ClipEditPreferences get clipEditPreferences;
+}
+
+/// Adding History clips to this device's paste queue.
+abstract interface class HistoryQueueRepository {
+  /// Appends [clipIds] in the given order and returns how many entries are
+  /// now pending. Throws when the queue is turned off or refuses the add.
+  Future<int> addToQueue(List<String> clipIds);
+}
+
+/// The transform palette's ports for History clips.
+abstract interface class HistoryTransformRepository {
+  TransformRepository get transforms;
+  TransformRecentsStore get transformRecents;
+}
+
+/// Per-clip annotations: keeping an expiring clip and the content-rule trace
+/// that explains a clip's state.
+abstract interface class HistoryAnnotationsRepository {
+  /// Clears any expiry and returns the clip's updated annotations.
+  Future<HistoryClipAnnotations> keep(String clipId);
+
+  Future<RuleTrace> ruleTrace(String clipId);
+
+  /// Names of the tags and transforms a trace refers to.
+  Future<RuleOptions> ruleOptions();
 }

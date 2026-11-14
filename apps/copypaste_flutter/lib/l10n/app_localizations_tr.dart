@@ -57,12 +57,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get commonEnable => 'Etkinleştir';
 
   @override
-  String get commonOn => 'Açık';
-
-  @override
-  String get commonOff => 'Kapalı';
-
-  @override
   String get settingsLanguageTitle => 'Dil';
 
   @override
@@ -125,15 +119,6 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get settingsRuntimeExcludedAppsLimit =>
       'En fazla 256 uygulamayı hariç tutabilirsiniz.';
-
-  @override
-  String get settingsQuickPasteStartFailed =>
-      'Quick Paste başlatılamadı, bu yüzden kısayolu çalışmıyor.';
-
-  @override
-  String settingsQuickPasteShortcutInUse(String shortcut) {
-    return '$shortcut başka bir uygulama tarafından kullanılıyor. Başka bir kısayol seçin.';
-  }
 
   @override
   String get settingsRuntimeAutoPasteUpdateFailed =>
@@ -803,6 +788,488 @@ class AppLocalizationsTr extends AppLocalizations {
       'İsteğe bağlı modülleri yükleyin ve yönetin.';
 
   @override
+  String get settingsSectionRules => 'İçerik kuralları';
+
+  @override
+  String get settingsSectionRulesSummary =>
+      'Öğeleri otomatik olarak etiketleyin, atlayın, koruyun veya süresini doldurun.';
+
+  @override
+  String get settingsSectionQuickAccess => 'Hızlı erişim';
+
+  @override
+  String get settingsSectionQuickAccessSummary =>
+      'Klavye, kutucuklar ve ana ekran widget\'ı.';
+
+  @override
+  String get settingsSectionSnippets => 'Parçacıklar';
+
+  @override
+  String get settingsSectionSnippetsSummary =>
+      'Yeniden kullanılabilir metinler ve şablonlar.';
+
+  @override
+  String get settingsSectionTransforms => 'Metin dönüşümleri';
+
+  @override
+  String get settingsSectionTransformsSummary =>
+      'Favoriler, işlem hatları ve yapıştırmada varsayılan dönüşümler.';
+
+  @override
+  String get pasteQueueSettingsTitle => 'Paste Queue';
+
+  @override
+  String get pasteQueueSettingsSummary =>
+      'Birden çok kopyayı toplayın ve sırayla yapıştırın.';
+
+  @override
+  String pasteQueuePasted(int position, int total) {
+    return '$total öğeden $position. yapıştırıldı';
+  }
+
+  @override
+  String pasteQueueCopied(int position, int total) {
+    return '$total öğeden $position. öğe panoda';
+  }
+
+  @override
+  String pasteQueuePastedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe yapıştırıldı',
+      one: '1 öğe yapıştırıldı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueCopiedAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe panoda',
+      one: '1 öğe panoda',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueFinished => 'Kuyruk tamamlandı';
+
+  @override
+  String pasteQueueAdded(int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Eklendi, kuyrukta $total',
+      one: 'Eklendi, kuyrukta 1',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueNothingToPaste =>
+      'Kuyruk boş, hiçbir şey yapıştırılmadı';
+
+  @override
+  String get pasteQueueMixed =>
+      'Tümünü yapıştır yalnızca metin ya da yalnızca dosya içeren kuyruklarda çalışır';
+
+  @override
+  String get pasteQueueSeveralFiles => 'Dosyaları tek tek yapıştırın.';
+
+  @override
+  String pasteQueueUnavailable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe artık kullanılamıyor',
+      one: '1 öğe artık kullanılamıyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCopyOnlyTitle =>
+      'Sonrakini yapıştır yalnızca kopyalıyor';
+
+  @override
+  String get pasteQueueAccessibilityMessage =>
+      'Öğe kopyalandı. Otomatik yapıştırmak için Erişilebilirlik izni verin.';
+
+  @override
+  String get pasteQueuePasteUnsupported =>
+      'Otomatik yapıştırılamadı. Bunun yerine öğe kopyalandı.';
+
+  @override
+  String get pasteQueueTargetElevated =>
+      'Yönetici uygulamasına yapıştırılamaz. Bunun yerine öğe kopyalandı.';
+
+  @override
+  String get pasteQueueNoTarget =>
+      'Yapıştırılacak uygulama yok. Bunun yerine öğe kopyalandı.';
+
+  @override
+  String get pasteQueueCollectingStarted => 'Kopyalar toplanıyor';
+
+  @override
+  String get pasteQueueCollectingStopped => 'Toplama durduruldu';
+
+  @override
+  String get pasteQueueFailed => 'Paste Queue işlemi tamamlanamadı';
+
+  @override
+  String pasteQueueSummary(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bekliyor',
+      one: '1 bekliyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pasteQueueSummaryCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bekliyor · Toplanıyor',
+      one: '1 bekliyor · Toplanıyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pasteQueueCollectingLabel => 'Toplanıyor';
+
+  @override
+  String get pasteQueueFinishedSummary => 'Tamamlandı';
+
+  @override
+  String pasteQueueFull(int max) {
+    return 'Kuyruk dolu ($max)';
+  }
+
+  @override
+  String get pasteQueueFullMessage => 'Yeni kopyalar artık eklenmiyor.';
+
+  @override
+  String get pasteQueueEmptyTitle => 'Paste Queue boş';
+
+  @override
+  String get pasteQueueEmptyMessage =>
+      'Kopyaları toplayın veya geçmişten öğe ekleyin.';
+
+  @override
+  String get pasteQueueCollectingEmptyTitle =>
+      'Eklemek için öğeleri kopyalayın';
+
+  @override
+  String get pasteQueueCollectingEmptyMessage =>
+      'Toplamayı durdurana kadar her kopya kuyruğa eklenir.';
+
+  @override
+  String get pasteQueueStartCollecting => 'Toplamaya başla';
+
+  @override
+  String get pasteQueueStopCollecting => 'Toplamayı durdur';
+
+  @override
+  String get pasteQueueLoading => 'Kuyruk yükleniyor…';
+
+  @override
+  String get pasteQueueLoadFailed => 'Kuyruk yüklenemedi';
+
+  @override
+  String get pasteQueuePasteNext => 'Sonrakini yapıştır';
+
+  @override
+  String get pasteQueueCopyNext => 'Sonrakini kopyala';
+
+  @override
+  String get pasteQueuePasteAll => 'Tümünü yapıştır';
+
+  @override
+  String get pasteQueueCopyAll => 'Tümünü kopyala';
+
+  @override
+  String get pasteQueueReverse => 'Sırayı ters çevir';
+
+  @override
+  String get pasteQueueStepBack => 'Bir adım geri';
+
+  @override
+  String get pasteQueueSkip => 'Atla';
+
+  @override
+  String get pasteQueueRemovePasted => 'Yapıştırılanları kaldır';
+
+  @override
+  String get pasteQueueCleared => 'Kuyruk temizlendi';
+
+  @override
+  String get pasteQueueUndo => 'Geri al';
+
+  @override
+  String get pasteQueueStartFresh => 'Baştan başla';
+
+  @override
+  String get pasteQueueAppend => 'Sona ekle';
+
+  @override
+  String get pasteQueueRestartTitle => 'Yeni bir toplama başlatılsın mı?';
+
+  @override
+  String get pasteQueueRestartMessage =>
+      'Baştan başla yapıştırılan öğeleri kaldırır. Sona ekle onları korur.';
+
+  @override
+  String pasteQueueStale(String time) {
+    return '$time tarihli kuyruk';
+  }
+
+  @override
+  String get pasteQueueStatusPasted => 'Yapıştırıldı';
+
+  @override
+  String get pasteQueueStatusSkipped => 'Atlandı';
+
+  @override
+  String get pasteQueueStatusUnavailable => 'Artık kullanılamıyor';
+
+  @override
+  String get pasteQueueEdited => 'Düzenlendi';
+
+  @override
+  String get pasteQueueSecret => 'Gizli';
+
+  @override
+  String get pasteQueueKindImage => 'Görsel';
+
+  @override
+  String get pasteQueueKindFiles => 'Dosyalar';
+
+  @override
+  String pasteQueueRenderedAt(String time) {
+    return '$time itibarıyla oluşturuldu';
+  }
+
+  @override
+  String pasteQueueRowLabel(String position, String content) {
+    return 'Öğe $position: $content';
+  }
+
+  @override
+  String pasteQueueMoved(int position) {
+    return '$position. sıraya taşındı';
+  }
+
+  @override
+  String get pasteQueueMoveUp => 'Yukarı taşı';
+
+  @override
+  String get pasteQueueMoveDown => 'Aşağı taşı';
+
+  @override
+  String get pasteQueueMoveToTop => 'En başa taşı';
+
+  @override
+  String get pasteQueueMoveToBottom => 'En sona taşı';
+
+  @override
+  String get pasteQueueReorder => 'Sıralamak için sürükleyin';
+
+  @override
+  String get pasteQueueMoreActions => 'Diğer işlemler';
+
+  @override
+  String get pasteQueuePasteNow => 'Şimdi yapıştır';
+
+  @override
+  String get pasteQueueEdit => 'Metni düzenle';
+
+  @override
+  String get pasteQueueUseOriginal => 'Özgün metni kullan';
+
+  @override
+  String get pasteQueueRemove => 'Kuyruktan kaldır';
+
+  @override
+  String get pasteQueueEditTitle => 'Kuyruktaki metni düzenle';
+
+  @override
+  String get pasteQueueEditMessage =>
+      'Değişiklikler yalnızca bu kuyruğa uygulanır.';
+
+  @override
+  String get pasteQueueShortcutPromptTitle => 'Kısayolları ayarla';
+
+  @override
+  String get pasteQueueShortcutPromptMessage =>
+      'CopyPaste’i açmadan toplayın ve yapıştırın.';
+
+  @override
+  String get pasteQueueShortcutToggleCollecting =>
+      'Toplamayı başlat veya durdur';
+
+  @override
+  String get pasteQueueShortcutPasteNextPlain =>
+      'Sonrakini düz metin olarak yapıştır';
+
+  @override
+  String get pasteQueueShortcutDescription =>
+      'Her uygulamada çalışan genel bir kısayol.';
+
+  @override
+  String get pasteQueueShortcutHeldByApp =>
+      'Başka bir CopyPaste kısayolu bu bileşimi kullanıyor. Önceki korunur.';
+
+  @override
+  String get pasteQueueShortcutInUse =>
+      'Bu kombinasyonu başka bir uygulama kullanıyor.';
+
+  @override
+  String get pasteQueueShortcutRejected =>
+      'Sistem bu bileşimi reddetti. Önceki korunur.';
+
+  @override
+  String get pasteQueueShortcutAltGr =>
+      'Ctrl+Alt birçok düzende karakter yazar. Başka birini seçin.';
+
+  @override
+  String get pasteQueueShortcutUnavailable =>
+      'Bu oturumda genel kısayollar kullanılamaz.';
+
+  @override
+  String get pasteQueueShortcutFailed => 'Bu kısayol ayarlanamadı.';
+
+  @override
+  String get pasteQueueEnableTitle => 'Paste Queue\'yu etkinleştir';
+
+  @override
+  String get pasteQueueEnableDescription =>
+      'Kapalıyken kısayollar ve toplama durur.';
+
+  @override
+  String get pasteQueuePasteNextStyleTitle => 'Sonrakini yapıştır şunu yapar';
+
+  @override
+  String get pasteQueuePasteNextStyleDescription =>
+      'Otomatik yapıştır veya yalnızca panoya kopyala.';
+
+  @override
+  String get pasteQueuePasteIntoApp => 'Öndeki uygulamaya yapıştır';
+
+  @override
+  String get pasteQueueClipboardOnly => 'Yalnızca panoya koy';
+
+  @override
+  String get pasteQueueInsertTitle => 'Yeni öğeler şuraya eklenir';
+
+  @override
+  String get pasteQueueInsertDescription =>
+      'Toplanan ve eklenen öğelerin kuyruğa nereden katılacağı.';
+
+  @override
+  String get pasteQueueInsertEnd => 'Sona (ilk giren ilk çıkar)';
+
+  @override
+  String get pasteQueueInsertStart => 'Başa (son giren ilk çıkar)';
+
+  @override
+  String get pasteQueueEndBehaviorTitle => 'Son öğeden sonra';
+
+  @override
+  String get pasteQueueEndBehaviorDescription =>
+      'Tüm öğeler yapıştırıldıktan sonra Sonrakini yapıştır\'ın yaptığı.';
+
+  @override
+  String get pasteQueueEndStop => 'Dur';
+
+  @override
+  String get pasteQueueEndLoop => 'Baştan başla';
+
+  @override
+  String get pasteQueueEndKeepLast => 'Son öğeyi yapıştırmaya devam et';
+
+  @override
+  String get pasteQueueSeparatorTitle => 'Tümünü yapıştır ayırıcısı';
+
+  @override
+  String get pasteQueueSeparatorDescription =>
+      'Tümü bir kerede yapıştırılırken öğelerin arasına konur.';
+
+  @override
+  String get pasteQueueSeparatorNewLine => 'Yeni satır';
+
+  @override
+  String get pasteQueueSeparatorBlankLine => 'Boş satır';
+
+  @override
+  String get pasteQueueSeparatorTab => 'Sekme';
+
+  @override
+  String get pasteQueueSeparatorSpace => 'Boşluk';
+
+  @override
+  String get pasteQueueSeparatorComma => 'Virgül';
+
+  @override
+  String get pasteQueueSeparatorCommaSpace => 'Virgül ve boşluk';
+
+  @override
+  String get pasteQueueSeparatorNone => 'Yok';
+
+  @override
+  String get pasteQueueSeparatorCustom => 'Özel';
+
+  @override
+  String get pasteQueueCustomSeparatorPlaceholder =>
+      'En fazla 32 karakter; \\n ve \\t kullanılabilir';
+
+  @override
+  String get pasteQueuePlainTextTitle => 'Her zaman düz metin olarak yapıştır';
+
+  @override
+  String get pasteQueuePlainTextDescription =>
+      'Kuyruktaki öğelerin biçimlendirmesini kaldırır.';
+
+  @override
+  String get pasteQueueIdleStopTitle => 'Toplamayı şu süreden sonra durdur';
+
+  @override
+  String get pasteQueueIdleStopDescription =>
+      'Bu süre boyunca kopya olmazsa toplamayı durdur.';
+
+  @override
+  String pasteQueueIdleMinutes(int minutes) {
+    return '$minutes dk';
+  }
+
+  @override
+  String get pasteQueueIdleNever => 'Asla';
+
+  @override
+  String get pasteQueueMaxEntriesTitle => 'Kuyruk boyutu sınırı';
+
+  @override
+  String get pasteQueueMaxEntriesDescription =>
+      'Dolduğunda yeni kopyalar eklenmez.';
+
+  @override
+  String get pasteQueueRestoreTitle => 'Bitince önceki panoyu geri yükle';
+
+  @override
+  String get pasteQueueRestoreDescription =>
+      'Yapıştırmadan önce kopyaladığınızı geri getirir.';
+
+  @override
+  String get pasteQueueSettingsKeywords =>
+      'paste queue kuyruk toplama sıra kısayol ayırıcı';
+
+  @override
   String get settingsSectionAbout => 'Hakkında';
 
   @override
@@ -893,7 +1360,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsStartupAndroidDescription =>
-      'Cihaz yeniden başlatıldıktan sonra etkin arka plan hizmetleri sürdürülür.';
+      'Yeniden başlatmadan sonra arka plan hizmetlerini sürdür.';
 
   @override
   String get settingsStartupDesktopDescription =>
@@ -951,7 +1418,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsAndroidCaptureDescription =>
-      'Tam veya Sınırlı modu seçin ve tek seferlik Shizuku ya da ADB kurulumunu yönetin.';
+      'Tam veya Sınırlı mod ve tek seferlik Shizuku ya da ADB kurulumu.';
 
   @override
   String get settingsOpenSetup => 'Kurulumu aç';
@@ -976,7 +1443,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsScreenshotAccessDescription =>
-      'Yeni ekran görüntülerini arka planda kaydetmek için tüm fotoğraflara ve bildirimlere erişime izin verin.';
+      'Ekran görüntülerini arka planda kaydetmek için gerekir.';
 
   @override
   String get settingsAllowAccess => 'Erişime izin ver';
@@ -1042,7 +1509,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsMaxFileSizeDescription =>
-      'Dosya ekleme ve indirme sınırı. Dosya içerikleri yalnızca İndir\'i seçtiğinizde aktarılır.';
+      'Ekleyebileceğiniz veya indirebileceğiniz en büyük dosya.';
 
   @override
   String get settingsHistoryFilesTitle => 'Geçmiş dosyaları';
@@ -1090,7 +1557,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsRestoreDialogMessage =>
-      'Seçilen şifreli yedek, bu cihazdaki pano geçmişinin yerini alacak. Geçerli ayarlar ve cihaz kimliği korunur.';
+      'Yedek, bu cihazın geçmişinin yerini alır. Ayarlar korunur.';
 
   @override
   String get settingsRestoreFailed => 'Yedek geri yüklenemedi.';
@@ -1100,7 +1567,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsSyncSwitchDescription =>
-      'Eşlenmiş cihaz senkronizasyonunun ana anahtarı.';
+      'Geçmişi eşlenen cihazlarla eşitle.';
 
   @override
   String get settingsSyncSearchDescription => 'Eşlenmiş cihaz senkronizasyonu.';
@@ -1118,7 +1585,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsInstantClipboardDescription =>
-      'Diğer cihazlardan gelen daha yeni öğeleri otomatik olarak bu cihazın panosuna kopyalar.';
+      'Diğer cihazlardaki yeni öğeleri bu panoya kopyala.';
 
   @override
   String get settingsLanVisibilityTitle => 'LAN görünürlüğü';
@@ -1143,16 +1610,12 @@ class AppLocalizationsTr extends AppLocalizations {
       'gizlilik uygulama tanımlayıcılar privacy app identifiers';
 
   @override
-  String get settingsExcludedAppsMacDescription =>
-      'Bu uygulamalar etkinken otomatik yakalama atlanır. Arka plandaki kopyalamalar hariç tutmaları aşabilir.';
-
-  @override
   String get settingsExcludedAppsDesktopDescription =>
-      'Tanımlanan pano sahiplerinden otomatik yakalama atlanır. Hariç tutmalar ayarlıyken kaynak tanımlanamazsa yakalama duraklatılır.';
+      'Bu uygulamalardan otomatik yakalama yapılmaz.';
 
   @override
   String get settingsExcludedAppsAndroidDescription =>
-      'Android kaynak uygulamaları tanımlayamadığından, hariç tutmalar ayarlıyken otomatik yakalamayı atlar.';
+      'Hariç tutulan uygulama varken otomatik yakalama duraklatılır.';
 
   @override
   String get settingsExcludedAppsUnsupportedDescription =>
@@ -1170,23 +1633,17 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String get settingsExcludeDialogTitle => 'Uygulamayı hariç tut';
+  String get applicationPickerSearch => 'Uygulama ara';
 
   @override
-  String get settingsExcludeDialogAction => 'Hariç tut';
-
-  @override
-  String get settingsExcludeDialogPlaceholder => 'Uygulama tanımlayıcısı';
-
-  @override
-  String get settingsExcludeFailed => 'Uygulama hariç tutulamadı.';
+  String get applicationPickerEmpty => 'Uygulama bulunamadı';
 
   @override
   String get settingsSkipSecretTitle => 'Gizli pano içeriğini atla';
 
   @override
   String get settingsSkipSecretDescription =>
-      'Kaynak uygulamanın gizli olarak işaretlediği içerikleri Geçmiş\'in dışında tutar.';
+      'Uygulamaların gizli olarak işaretlediği kopyaları kaydetme.';
 
   @override
   String get settingsSkipSecretKeywords =>
@@ -1197,7 +1654,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsSkipTransientDescription =>
-      'Kaynak uygulamanın geçici olarak işaretlediği kopyaları Geçmiş\'in dışında tutar.';
+      'Uygulamaların geçici olarak işaretlediği kopyaları kaydetme.';
 
   @override
   String get settingsSkipTransientKeywords =>
@@ -1399,7 +1856,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsQuickPasteShortcutDescription =>
-      'Kısayol, CopyPaste arka planda çalışırken kullanılabilir.';
+      'CopyPaste arka planda çalışırken kullanılabilir.';
 
   @override
   String settingsQuickPasteRegisteredShortcut(String shortcut) {
@@ -1437,6 +1894,9 @@ class AppLocalizationsTr extends AppLocalizations {
   String get settingsShortcutRecording => 'Kısayola basın…';
 
   @override
+  String get settingsShortcutNotSet => 'Ayarlanmadı';
+
+  @override
   String get settingsShortcutReset => 'Kısayolu sıfırla';
 
   @override
@@ -1467,13 +1927,6 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get devicesNoneNearby => 'Yakında cihaz yok';
-
-  @override
-  String get devicesEmptyTitle => 'Henüz eşlenmiş başka cihaz yok';
-
-  @override
-  String get devicesEmptyMessage =>
-      'Pano geçmişini cihazlar arasında senkronize tutmak için başka bir cihaz eşleyin. Her iki cihaz da aynı ağda olmalıdır ve her eşleme iki cihazda da onaylanır.';
 
   @override
   String get devicesThisDevice => 'Bu cihaz';
@@ -1814,9 +2267,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get pairingStateFailed => 'Eşleme başarısız oldu';
 
   @override
-  String get pairingStateNotCompleted => 'Eşleme tamamlanmadı';
-
-  @override
   String get pairingHandshakingDescription =>
       'Cihazlar güvenli bir kanal kuruyor.';
 
@@ -1838,48 +2288,6 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String get pairingIdleDescription =>
       'Bir cihaz bağlamak için eşleme denemesi başlatın.';
-
-  @override
-  String get pairingStepInvite => 'Davet';
-
-  @override
-  String get pairingStepScan => 'Tarama';
-
-  @override
-  String get pairingStepCode => 'Kod';
-
-  @override
-  String get pairingStepRequest => 'İstek';
-
-  @override
-  String get pairingStepConnect => 'Bağlantı';
-
-  @override
-  String get pairingStepConfirm => 'Onay';
-
-  @override
-  String get pairingStepPaired => 'Eşlendi';
-
-  @override
-  String get pairingOtherDevice => 'Diğer cihaz';
-
-  @override
-  String get pairingDecisionNotConfirmed => 'Henüz onaylanmadı';
-
-  @override
-  String get pairingDecisionSending => 'Kararınız gönderiliyor…';
-
-  @override
-  String get pairingDecisionConfirmed => 'Onaylandı';
-
-  @override
-  String get pairingDecisionRejected => 'Reddedildi';
-
-  @override
-  String get pairingDecisionWaiting => 'Onay bekleniyor';
-
-  @override
-  String get pairingDecisionUnknown => 'Yanıt bilinmiyor';
 
   @override
   String get pairingProtectedUnavailableTitle =>
@@ -2055,17 +2463,6 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String syncHeaderSemanticsLabel(String status) {
     return 'Senkronizasyon: $status';
-  }
-
-  @override
-  String syncHeaderDeviceCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count cihaz',
-      one: '$count cihaz',
-    );
-    return '$_temp0';
   }
 
   @override
@@ -2458,17 +2855,6 @@ class AppLocalizationsTr extends AppLocalizations {
   }
 
   @override
-  String historyClipLineCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count satır',
-      one: '$count satır',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get historyInspectorEmptyTitle => 'Bir öğe seçin';
 
   @override
@@ -2714,9 +3100,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get appWindowSetupTitle => 'Pencere kurulumu dikkat gerektiriyor';
 
   @override
-  String get appNavigationLabel => 'Ana gezinme';
-
-  @override
   String get appOpenHistory => 'Geçmiş\'i aç';
 
   @override
@@ -2802,16 +3185,6 @@ class AppLocalizationsTr extends AppLocalizations {
   @override
   String sharedSizeBytes(String size) {
     return '$size B';
-  }
-
-  @override
-  String sharedStepPosition(int step, int count, String name) {
-    return '$step / $count · $name';
-  }
-
-  @override
-  String sharedStepSemantics(int step, int count, String name) {
-    return 'Adım $step/$count: $name';
   }
 
   @override
@@ -3277,22 +3650,6 @@ class AppLocalizationsTr extends AppLocalizations {
   String get modulesDownloadingModel => 'Dil modeli indiriliyor…';
 
   @override
-  String get modulesPhaseDownload => 'İndirme';
-
-  @override
-  String get modulesPhaseInstall => 'Yükleme';
-
-  @override
-  String modulesInstallingModule(String module) {
-    return '$module yükleniyor';
-  }
-
-  @override
-  String modulesUpdatingModule(String module) {
-    return '$module güncelleniyor';
-  }
-
-  @override
   String get modulesRun => 'Çalıştır';
 
   @override
@@ -3561,6 +3918,158 @@ class AppLocalizationsTr extends AppLocalizations {
   String get historyTagsAction => 'Etiketler…';
 
   @override
+  String deviceAuthReasonUnlockSecrets(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli öğelerin kilidini açmaya',
+      'other': 'Gizli öğelerin kilidini aç',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonUseConcealedSnippet(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli bir kod parçacığını kullanmaya',
+      'other': 'Gizli kod parçacığını kullan',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String deviceAuthReasonCopySecret(String platform) {
+    String _temp0 = intl.Intl.selectLogic(platform, {
+      'macos': 'gizli bir öğeyi kopyalamaya',
+      'other': 'Gizli öğeyi kopyala',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get deviceAuthUnavailable => 'Bu sistemde kullanılamaz';
+
+  @override
+  String get deviceAuthNotConfigured =>
+      'Önce bir cihaz parolası, PIN veya biyometri ayarlayın';
+
+  @override
+  String get commonOn => 'Açık';
+
+  @override
+  String get commonOff => 'Kapalı';
+
+  @override
+  String get settingsQuickPasteStartFailed =>
+      'Quick Paste başlatılamadı, bu yüzden kısayolu çalışmıyor.';
+
+  @override
+  String settingsQuickPasteShortcutInUse(String shortcut) {
+    return '$shortcut başka bir uygulama tarafından kullanılıyor. Başka bir kısayol seçin.';
+  }
+
+  @override
+  String get devicesEmptyTitle => 'Henüz eşlenmiş başka cihaz yok';
+
+  @override
+  String get devicesEmptyMessage =>
+      'Geçmişi eşitlemek için aynı ağdaki bir cihazı eşleyin.';
+
+  @override
+  String get pairingStateNotCompleted => 'Eşleme tamamlanmadı';
+
+  @override
+  String get pairingStepInvite => 'Davet';
+
+  @override
+  String get pairingStepScan => 'Tarama';
+
+  @override
+  String get pairingStepCode => 'Kod';
+
+  @override
+  String get pairingStepRequest => 'İstek';
+
+  @override
+  String get pairingStepConnect => 'Bağlantı';
+
+  @override
+  String get pairingStepConfirm => 'Onay';
+
+  @override
+  String get pairingStepPaired => 'Eşlendi';
+
+  @override
+  String get pairingOtherDevice => 'Diğer cihaz';
+
+  @override
+  String get pairingDecisionNotConfirmed => 'Henüz onaylanmadı';
+
+  @override
+  String get pairingDecisionSending => 'Kararınız gönderiliyor…';
+
+  @override
+  String get pairingDecisionConfirmed => 'Onaylandı';
+
+  @override
+  String get pairingDecisionRejected => 'Reddedildi';
+
+  @override
+  String get pairingDecisionWaiting => 'Onay bekleniyor';
+
+  @override
+  String get pairingDecisionUnknown => 'Yanıt bilinmiyor';
+
+  @override
+  String syncHeaderDeviceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count cihaz',
+      one: '$count cihaz',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyClipLineCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count satır',
+      one: '$count satır',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appNavigationLabel => 'Ana gezinme';
+
+  @override
+  String sharedStepPosition(int step, int count, String name) {
+    return '$step / $count · $name';
+  }
+
+  @override
+  String sharedStepSemantics(int step, int count, String name) {
+    return 'Adım $step/$count: $name';
+  }
+
+  @override
+  String get modulesPhaseDownload => 'İndirme';
+
+  @override
+  String get modulesPhaseInstall => 'Yükleme';
+
+  @override
+  String modulesInstallingModule(String module) {
+    return '$module yükleniyor';
+  }
+
+  @override
+  String modulesUpdatingModule(String module) {
+    return '$module güncelleniyor';
+  }
+
+  @override
   String get commonDismiss => 'Kapat';
 
   @override
@@ -3568,7 +4077,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsRetentionConfirmMessage(String limit) {
-    return 'Yeni sınır: $limit. Daha eski sabitlenmemiş öğeler bu cihazdan şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni sınır: $limit. Sabitlenmemiş eski öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -3577,7 +4086,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmMessage(String size) {
-    return 'Yeni kota: $size. Sabitlenmemiş geçmiş daha fazla yer kaplıyorsa en eski öğeler şimdi kaldırılır ve geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni kota: $size. Kotayı aşan en eski sabitlenmemiş öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -3588,11 +4097,11 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get settingsHideEverywhereMessage =>
-      'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için CopyPaste\'i tekrar başlatın.';
+      'İkisi de kapalıyken simge olmaz. Açmak için CopyPaste’i yeniden başlatın.';
 
   @override
   String settingsHideEverywhereShortcutMessage(String shortcut) {
-    return 'İkisi de kapalıyken CopyPaste\'in görünür bir simgesi olmaz. Yeniden açmak için $shortcut tuşlarına basın veya CopyPaste\'i tekrar başlatın.';
+    return 'İkisi de kapalıyken simge olmaz. Açmak için $shortcut tuşlarına basın veya CopyPaste’i yeniden başlatın.';
   }
 
   @override
@@ -3692,7 +4201,7 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String settingsStorageQuotaConfirmRemovesMessage(String size, String used) {
-    return 'Yeni kota: $size. Sabitlenmemiş geçmiş $used yer kaplıyor; bu yüzden sığana kadar en eski öğeleri şimdi kaldırılır. Bunlar geri getirilemez. Sabitlenmiş öğeler korunur.';
+    return 'Yeni kota: $size. $used kullanılıyor, bu yüzden en eski sabitlenmemiş öğeler kalıcı olarak silinir.';
   }
 
   @override
@@ -3705,4 +4214,2466 @@ class AppLocalizationsTr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get trayOpenApp => 'CopyPaste\'i aç';
+
+  @override
+  String get trayOpenQuickPaste => 'Quick Paste\'i aç';
+
+  @override
+  String trayOpenQuickPasteWithShortcut(String shortcut) {
+    return 'Quick Paste\'i aç ($shortcut)';
+  }
+
+  @override
+  String get trayNewSnippet => 'Yeni parçacık';
+
+  @override
+  String get trayRecent => 'Son kullanılanlar';
+
+  @override
+  String get trayRecentLoading => 'Yükleniyor…';
+
+  @override
+  String get trayRecentFailed => 'Kliplar yüklenemedi';
+
+  @override
+  String get trayRecentEmpty => 'Henüz klip yok';
+
+  @override
+  String trayRecentHidden(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count son klip gizlendi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get trayRecentSecret => 'Gizli';
+
+  @override
+  String get trayCopyLatestFromOtherDevice =>
+      'Diğer cihazdaki en son klibi kopyala';
+
+  @override
+  String get trayCaptureNow => 'Şimdi yakala';
+
+  @override
+  String trayPausedUntil(String time) {
+    return '$time saatine kadar duraklatıldı';
+  }
+
+  @override
+  String get trayPauseFor => 'Şu süreyle duraklat…';
+
+  @override
+  String get trayPauseFor15Minutes => '15 dakika';
+
+  @override
+  String get trayPauseForOneHour => '1 saat';
+
+  @override
+  String get trayPauseUntilResumed => 'Ben sürdürene kadar';
+
+  @override
+  String trayPasteQueue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Paste Queue: $count öğe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayPasteQueueCollecting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Toplanıyor: $count öğe',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String trayRecentlySkipped(int count) {
+    return 'Son atlananlar ($count)';
+  }
+
+  @override
+  String get trayOpenContentRules => 'İçerik kurallarını aç';
+
+  @override
+  String get trayRecentSettingsTitle => 'Menü çubuğu ve tepsi';
+
+  @override
+  String get trayRecentSettingsDescription =>
+      'Menü çubuğu veya tepsi menüsünün Son kullanılanlar altında gösterdikleri.';
+
+  @override
+  String get trayRecentCountTitle => 'Son kliplar';
+
+  @override
+  String get trayRecentCountDescription =>
+      'Menünün gösterdiği en yeni klip sayısı.';
+
+  @override
+  String get trayRecentPreviewTitle => 'Son klip önizlemeleri';
+
+  @override
+  String get trayRecentPreviewDescription =>
+      'Menünün gösterdiği klip metni miktarı.';
+
+  @override
+  String get trayRecentPreviewFull => 'Tam önizleme';
+
+  @override
+  String get trayRecentPreviewTitles => 'Yalnızca tür ve kaynak';
+
+  @override
+  String get trayRecentPreviewHidden => 'Gizli';
+
+  @override
+  String get trayRecentSettingsKeywords =>
+      'tepsi menü çubuğu son önizleme gizlilik sayı';
+
+  @override
+  String get transformsPaletteTitle => 'Metni dönüştür';
+
+  @override
+  String get transformsFilterPlaceholder => 'Dönüşümleri filtrele';
+
+  @override
+  String get transformsNoMatches => 'Eşleşen dönüşüm yok';
+
+  @override
+  String get transformsGroupResults => 'Sonuçlar';
+
+  @override
+  String get transformsGroupSuggested => 'Önerilen';
+
+  @override
+  String get transformsGroupRecent => 'Son kullanılan';
+
+  @override
+  String get transformsGroupFavorites => 'Favoriler';
+
+  @override
+  String get transformsGroupPipelines => 'İşlem hatları';
+
+  @override
+  String get transformsCategoryStructure => 'JSON, YAML, CSV ve XML';
+
+  @override
+  String get transformsCategoryEncode => 'Kodla ve çöz';
+
+  @override
+  String get transformsCategoryCase => 'Büyük/küçük harf';
+
+  @override
+  String get transformsCategoryHash => 'Özetler';
+
+  @override
+  String get transformsCategoryLines => 'Satırlar ve boşluklar';
+
+  @override
+  String get transformsCategoryClean => 'Temizle';
+
+  @override
+  String get transformsCategoryUrl => 'Bağlantılar';
+
+  @override
+  String get transformsCategoryMarkup => 'Zengin metin ve Markdown';
+
+  @override
+  String get transformsCategoryDev => 'Geliştirici';
+
+  @override
+  String get transformsCategoryOther => 'Diğer';
+
+  @override
+  String get transformsChainEmpty => 'Henüz adım yok';
+
+  @override
+  String transformsStepLabel(int step, String name) {
+    return '$step · $name';
+  }
+
+  @override
+  String transformsThenLabel(String name) {
+    return 'Sonra: $name';
+  }
+
+  @override
+  String get transformsStepEnabled => 'Bu adımı çalıştır';
+
+  @override
+  String get transformsMoveEarlier => 'Yukarı taşı';
+
+  @override
+  String get transformsMoveLater => 'Aşağı taşı';
+
+  @override
+  String get transformsRemoveStep => 'Adımı kaldır';
+
+  @override
+  String get transformsSavePipeline => 'İşlem hattı olarak kaydet';
+
+  @override
+  String get transformsSavePipelineTitle => 'İşlem hattını kaydet';
+
+  @override
+  String get transformsSavePipelineFailed => 'İşlem hattı kaydedilemedi.';
+
+  @override
+  String get transformsPipelineNameLabel => 'Ad';
+
+  @override
+  String get transformsPipelineDescriptionLabel => 'Açıklama (isteğe bağlı)';
+
+  @override
+  String get transformsPipelineStepsLabel => 'Adımlar';
+
+  @override
+  String get transformsPipelineNoSteps => 'En az bir adım ekleyin.';
+
+  @override
+  String get transformsPipelineNameRequired => 'Bir ad girin.';
+
+  @override
+  String get transformsPipelineNameTooLong => 'En fazla 80 karakter kullanın.';
+
+  @override
+  String get transformsPipelineNameTaken =>
+      'Bu ada sahip başka bir işlem hattı var.';
+
+  @override
+  String get transformsPipelineSavedTitle => 'İşlem hattı kaydedildi';
+
+  @override
+  String transformsPipelineSavedMessage(String name) {
+    return '$name her dönüşüm paletinde kullanılabilir.';
+  }
+
+  @override
+  String transformsPipelineSteps(int count) {
+    return 'Adımlar: $count';
+  }
+
+  @override
+  String transformsPipelineCopyName(String name, int index) {
+    return '$name ($index)';
+  }
+
+  @override
+  String get transformsRemovedPipeline => 'Silinmiş işlem hattı';
+
+  @override
+  String get transformsNeedsNewerVersion =>
+      'Daha yeni bir CopyPaste sürümü gerekir';
+
+  @override
+  String get transformsLoadFailed => 'Dönüşümler yüklenemedi.';
+
+  @override
+  String get transformsNotTextTitle => 'Dönüşümler metin üzerinde çalışır';
+
+  @override
+  String get transformsNotTextMessage =>
+      'Bu öğe bir görsel, dosya veya renk. Bir metin öğesi seçin ya da metin kopyalayın.';
+
+  @override
+  String get transformsNothingTitle => 'Dönüştürülecek bir şey yok';
+
+  @override
+  String get transformsNothingMessage =>
+      'Metin kopyalayın veya geçmişten bir öğe seçin.';
+
+  @override
+  String get transformsPickTransform => 'Bir dönüşüm seçin';
+
+  @override
+  String get transformsPickTransformHint =>
+      'Tab adım olarak ekler. Enter sonucu uygular.';
+
+  @override
+  String get transformsPreviewing => 'Önizleme güncelleniyor…';
+
+  @override
+  String transformsCounts(int lines, int words, int chars) {
+    return 'Satır: $lines · Sözcük: $words · Karakter: $chars';
+  }
+
+  @override
+  String get transformsNoChanges => 'Değişiklik yok';
+
+  @override
+  String transformsTruncated(String size) {
+    return '$size içinden ilk 64 KiB gösteriliyor';
+  }
+
+  @override
+  String get transformsRandom => 'Rastgele';
+
+  @override
+  String get transformsNotRun => 'Çalıştırılmadı';
+
+  @override
+  String get transformsSensitiveHidden => 'Sonuç hassas olduğundan gizlendi.';
+
+  @override
+  String get transformsReveal => 'Göster';
+
+  @override
+  String get transformsPaneOutput => 'Çıktı';
+
+  @override
+  String get transformsPaneInput => 'Girdi';
+
+  @override
+  String get transformsPaneChanges => 'Değişiklikler';
+
+  @override
+  String get transformsCannotTransform => 'Bu metin dönüştürülemiyor';
+
+  @override
+  String transformsStepFailed(int step, String name, String message) {
+    return 'Adım $step · $name: $message';
+  }
+
+  @override
+  String get transformsUseHexOutput => 'Onaltılık göster';
+
+  @override
+  String get transformsActionPaste => 'Yapıştır';
+
+  @override
+  String get transformsActionSave => 'Yeni öğe olarak kaydet';
+
+  @override
+  String get transformsCopiedMessage => 'Sonuç panoda ve geçmişte.';
+
+  @override
+  String get transformsSavedTitle => 'Kaydedildi';
+
+  @override
+  String get transformsSavedMessage => 'Yeni geçmiş öğesi olarak kaydedildi.';
+
+  @override
+  String get transformsPasteFailedTitle => 'Yapıştırılamadı';
+
+  @override
+  String get transformsPasteFailedMessage => 'Sonuç panoda. Elle yapıştırın.';
+
+  @override
+  String transformsErrorAt(String message, int line, int column) {
+    return '$message ($line. satır, $column. sütun)';
+  }
+
+  @override
+  String get transformsErrorBinary => 'Çözülen veri metin değil, ikili';
+
+  @override
+  String get transformsErrorTooLarge => 'Dönüştürmek için çok büyük';
+
+  @override
+  String get transformsErrorInvalidParam => 'Bu adımın bir ayarı geçersiz';
+
+  @override
+  String get transformsErrorCancelled => 'İptal edildi';
+
+  @override
+  String get transformsErrorTooExpensive => 'Desen çok maliyetli';
+
+  @override
+  String get transformsErrorPattern => 'Desen geçersiz';
+
+  @override
+  String get transformsErrorTimestampUnit =>
+      'Sayının saniye mi milisaniye mi olduğunu seçin';
+
+  @override
+  String get transformsErrorExternalEntity => 'Harici varlıklara izin verilmez';
+
+  @override
+  String get transformsErrorJwtEncrypted => 'Şifreli belirteçler çözülemez';
+
+  @override
+  String get transformsErrorJson => 'Geçersiz JSON';
+
+  @override
+  String get transformsErrorYaml => 'Geçersiz YAML';
+
+  @override
+  String get transformsErrorXml => 'Geçersiz XML';
+
+  @override
+  String get transformsErrorCsv => 'Geçersiz CSV';
+
+  @override
+  String get transformsErrorBase64 => 'Geçersiz Base64';
+
+  @override
+  String get transformsErrorHex => 'Geçersiz onaltılık';
+
+  @override
+  String get transformsErrorEscape => 'Geçersiz kaçış dizisi';
+
+  @override
+  String get transformsErrorUrl => 'Hatalı yüzde kodlaması';
+
+  @override
+  String get transformsErrorJwt => 'Geçerli bir JWT değil';
+
+  @override
+  String get transformsErrorDate =>
+      'Tanınan bir tarih veya zaman damgası değil';
+
+  @override
+  String get transformsErrorGeneric => 'Bu adım girdisini dönüştüremiyor';
+
+  @override
+  String get transformsWarningSignedLink => 'İmzalı bağlantı değiştirilmedi';
+
+  @override
+  String get transformsWarningExpired => 'Süresi dolmuş';
+
+  @override
+  String get transformsWarningNotYetValid => 'Henüz geçerli değil';
+
+  @override
+  String get transformsWarningSignatureNotVerified => 'İmza doğrulanmadı';
+
+  @override
+  String get transformsWarningDuplicateKeys => 'Yinelenen anahtarlar';
+
+  @override
+  String get transformsWarningLenientJson => 'Standart dışı JSON kabul edildi';
+
+  @override
+  String get transformsWarningDoubleEncoded => 'JSON iki kez kodlanmıştı';
+
+  @override
+  String get transformsWarningEscapes =>
+      'Bilinmeyen kaçış dizileri olduğu gibi bırakıldı';
+
+  @override
+  String get transformsWarningLocalZone => 'Yerel saat dilimi varsayıldı';
+
+  @override
+  String get transformsWarningNoMatches => 'Eşleşme yok';
+
+  @override
+  String get transformsWarningGeneric => 'Sonucu kontrol edin';
+
+  @override
+  String get transformsRestoreTitle => 'Yapıştırdıktan sonra panoyu geri yükle';
+
+  @override
+  String get transformsRestoreDescription =>
+      'Yapıştırdıktan sonra önceki pano içeriğini geri getir.';
+
+  @override
+  String get transformsDefaultTitle => 'Varsayılan yapıştırma dönüşümü';
+
+  @override
+  String get transformsDefaultDescription =>
+      'Quick Paste’ten yapıştırılan metne uygulanır.';
+
+  @override
+  String get transformsNoDefault => 'Yok';
+
+  @override
+  String get transformsAppDefaultsTitle => 'Uygulamaya göre varsayılanlar';
+
+  @override
+  String get transformsAppDefaultsDescription =>
+      'Belirli uygulamalarda farklı bir varsayılan kullan.';
+
+  @override
+  String transformsOtherPlatform(String platform) {
+    return 'yalnızca $platform';
+  }
+
+  @override
+  String get transformsAddApp => 'Uygulama ekle';
+
+  @override
+  String get transformsRemove => 'Kaldır';
+
+  @override
+  String get transformsFavoritesTitle => 'Favoriler';
+
+  @override
+  String get transformsFavoritesDescription =>
+      'Her palette ilk sırada gösterilir.';
+
+  @override
+  String transformsFavoriteShortcut(int number) {
+    return 'Palette Mod+$number';
+  }
+
+  @override
+  String get transformsAddFavorite => 'Favori ekle';
+
+  @override
+  String get transformsPipelinesTitle => 'İşlem hatları';
+
+  @override
+  String get transformsPipelinesDescription =>
+      'Kaydedilmiş dönüşüm zincirleri.';
+
+  @override
+  String get transformsNewPipeline => 'Yeni işlem hattı';
+
+  @override
+  String get transformsEditPipeline => 'İşlem hattını düzenle';
+
+  @override
+  String get transformsDuplicatePipeline => 'Çoğalt';
+
+  @override
+  String get transformsDeletePipeline => 'Sil';
+
+  @override
+  String transformsDeletePipelineTitle(String name) {
+    return '$name silinsin mi?';
+  }
+
+  @override
+  String get transformsDeletePipelineMessage =>
+      'Bunu kullanan favoriler ve yapıştırma varsayılanları temizlenir.';
+
+  @override
+  String get transformsDeletePipelineFailed => 'İşlem hattı silinemedi.';
+
+  @override
+  String get transformsAddStep => 'Adım ekle';
+
+  @override
+  String get transformsHiddenTitle => 'Gizli dönüşümler';
+
+  @override
+  String get transformsHiddenDescription =>
+      'Paletlerde ve önerilerde gösterilmez.';
+
+  @override
+  String get transformsHideTransform => 'Bir dönüşümü gizle';
+
+  @override
+  String get transformsShow => 'Göster';
+
+  @override
+  String get transformsSuggestionsTitle => 'Öneriler';
+
+  @override
+  String get transformsSuggestionsDescription => 'Metne uygun dönüşümler öner.';
+
+  @override
+  String get transformsDetectorJson => 'JSON';
+
+  @override
+  String get transformsDetectorJwt => 'JSON Web Token\'ları';
+
+  @override
+  String get transformsDetectorBase64 => 'Base64';
+
+  @override
+  String get transformsDetectorTrackingUrl => 'İzleme parametreli bağlantılar';
+
+  @override
+  String get transformsDetectorTimestamp => 'Zaman damgaları';
+
+  @override
+  String get transformsDetectorHtml => 'HTML';
+
+  @override
+  String get transformsDetectorMarkdown => 'Markdown';
+
+  @override
+  String get transformsTrackingTitle => 'İzleme parametreleri';
+
+  @override
+  String get transformsTrackingDescription =>
+      'Ayrıca kaldırılacak veya her zaman korunacak bağlantı parametreleri.';
+
+  @override
+  String get transformsTrackingRemoveLabel => 'Ayrıca kaldır';
+
+  @override
+  String get transformsTrackingAllowLabel => 'Her zaman tut';
+
+  @override
+  String get transformsTrackingPlaceholder =>
+      'ad veya ad@alanadı, ardından Enter';
+
+  @override
+  String get quickAccessUnavailableTitle =>
+      'Hızlı erişim durumu kullanılamıyor';
+
+  @override
+  String get quickAccessUnavailableMessage =>
+      'CopyPaste klavye, kutucuk ve widget durumunu okuyamadı. Tekrar deneyin.';
+
+  @override
+  String get quickAccessActionFailedTitle => 'İşlem tamamlanamadı';
+
+  @override
+  String get quickAccessActionFailedMessage =>
+      'Android istenen ekranı açmadı veya değişikliği kaydetmedi. Tekrar deneyin.';
+
+  @override
+  String get quickAccessKeyboardTitle => 'Öğe klavyesi';
+
+  @override
+  String get quickAccessKeyboardDescription =>
+      'Klavye ayarlarında CopyPaste öğeleri\'ni açın.';
+
+  @override
+  String get quickAccessKeyboardOn => 'Açık';
+
+  @override
+  String get quickAccessKeyboardOff => 'Kapalı';
+
+  @override
+  String get quickAccessOpenKeyboardSettings => 'Klavye ayarlarını aç';
+
+  @override
+  String get quickAccessKeyboardSearchDescription =>
+      'CopyPaste öğeleri klavye panelini açın.';
+
+  @override
+  String get quickAccessKeyboardKeywords =>
+      'klavye giriş yöntemi ime panel etkinleştir';
+
+  @override
+  String get quickAccessSwitchKeyboardTitle => 'Öğe klavyesine geç';
+
+  @override
+  String get quickAccessSwitchKeyboardDescription =>
+      'CopyPaste öğeleri\'ni geçerli klavye yapın.';
+
+  @override
+  String get quickAccessSwitchKeyboardAction => 'Klavye seç';
+
+  @override
+  String get quickAccessKeyboardCurrent => 'Geçerli klavye';
+
+  @override
+  String get quickAccessCaptureTierTitle => 'Yakalama modu';
+
+  @override
+  String get quickAccessCaptureTierDescription =>
+      'Diğer uygulamalardaki kopyaların nasıl kaydedildiği.';
+
+  @override
+  String get quickAccessCaptureTierSearchDescription =>
+      'Diğer uygulamalardaki kopyaların nasıl kaydedildiğini görün.';
+
+  @override
+  String get quickAccessCaptureTierKeywords =>
+      'yakalama düzey tam panel manuel shizuku toplama';
+
+  @override
+  String get quickAccessTierFull => 'Tam: her kopya arka planda kaydedilir';
+
+  @override
+  String get quickAccessTierPanelCollecting => 'Panel seçili: toplanıyor';
+
+  @override
+  String get quickAccessTierPanelCatchUp => 'Panel modu: açılışta yakalama';
+
+  @override
+  String get quickAccessTierManual =>
+      'Manuel: uygulama, kutucuk, widget veya Paylaş üzerinden kaydedin';
+
+  @override
+  String get quickAccessTierPaused => 'Yakalama duraklatıldı';
+
+  @override
+  String get quickAccessAutoReturnTitle =>
+      'Ekledikten sonra önceki klavyeye dön';
+
+  @override
+  String get quickAccessAutoReturnDescription =>
+      'Bir öğe ekledikten sonra geri dön.';
+
+  @override
+  String get quickAccessAutoReturnKeywords =>
+      'geri dön önceki klavye otomatik ekle';
+
+  @override
+  String get quickAccessFocusSearchTitle => 'Panel açılınca aramaya odaklan';
+
+  @override
+  String get quickAccessFocusSearchDescription =>
+      'Paneli arama hazır olarak aç.';
+
+  @override
+  String get quickAccessTilesTitle => 'Hızlı Ayarlar kutucukları';
+
+  @override
+  String get quickAccessTilesSearchDescription =>
+      'Panoyu kaydet ve Pano yakalama kutucuklarını ekleyin.';
+
+  @override
+  String get quickAccessTilesKeywords =>
+      'hızlı ayarlar kutucuk bildirim paneli kaydet duraklat';
+
+  @override
+  String get quickAccessTileInstructions =>
+      'İki kez aşağı kaydırın, Düzenle’ye dokunun ve bir CopyPaste kutucuğu ekleyin.';
+
+  @override
+  String get quickAccessSaveTileTitle => 'Panoyu kaydet kutucuğu';
+
+  @override
+  String get quickAccessSaveTileDescription =>
+      'Hızlı Ayarlar\'dan panodakini kaydeder.';
+
+  @override
+  String get quickAccessCaptureTileTitle => 'Pano yakalama kutucuğu';
+
+  @override
+  String get quickAccessCaptureTileDescription =>
+      'Hızlı Ayarlar\'dan yakalamayı duraklatır ve sürdürür.';
+
+  @override
+  String get quickAccessAddTile => 'Kutucuk ekle';
+
+  @override
+  String get quickAccessTileAdded => 'Hızlı Ayarlar\'a eklendi';
+
+  @override
+  String get quickAccessWidgetTitle => 'Son öğeler widget\'ı';
+
+  @override
+  String get quickAccessWidgetDescription =>
+      'Ana ekranda son öğeler, tek dokunuşla kopyalanır.';
+
+  @override
+  String get quickAccessWidgetInstructions =>
+      'Ana ekranı basılı tutun, Widget’lar’a dokunun ve Son öğeler’i ekleyin.';
+
+  @override
+  String quickAccessWidgetCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count widget eklendi',
+      zero: 'Eklenmedi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quickAccessAddWidget => 'Widget ekle';
+
+  @override
+  String get quickAccessWidgetKeywords => 'ana ekran widget başlatıcı son';
+
+  @override
+  String snippetsAbbreviationBadge(String abbreviation) {
+    return 'Kısaltma $abbreviation';
+  }
+
+  @override
+  String get snippetsAbbreviationLabel => 'Kısaltma';
+
+  @override
+  String get snippetsAbbreviationPlaceholder => 'İsteğe bağlı, örneğin imza';
+
+  @override
+  String snippetsAbbreviationTaken(String title) {
+    return 'Zaten “$title” tarafından kullanılıyor';
+  }
+
+  @override
+  String snippetsAbbreviationTooLong(int max) {
+    return 'En fazla $max karakter kullanın.';
+  }
+
+  @override
+  String get snippetsAbbreviationWhitespace =>
+      'Kısaltma boşluk veya denetim karakteri içeremez.';
+
+  @override
+  String snippetsAttention(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Eşitlemeden sonra $count parçacığın incelenmesi gerekiyor',
+      zero: 'İncelenecek parçacık yok',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsBodyLabel => 'Metin';
+
+  @override
+  String get snippetsBodyPlaceholder => 'Parçacık metnini yazın';
+
+  @override
+  String get snippetsClearSelection => 'Seçimi temizle';
+
+  @override
+  String get snippetsClipTooLarge =>
+      'Düzenlemek için çok büyük. Bu öğe salt okunur açılır.';
+
+  @override
+  String snippetsCollectionAccent(String accent) {
+    String _temp0 = intl.Intl.selectLogic(accent, {
+      'neutral': 'Nötr',
+      'blue': 'Mavi',
+      'green': 'Yeşil',
+      'amber': 'Kehribar',
+      'red': 'Kırmızı',
+      'other': 'Nötr',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsCollectionAccentLabel => 'Vurgu rengi';
+
+  @override
+  String get snippetsCollectionIcon => 'Simge';
+
+  @override
+  String get snippetsCollectionLabel => 'Koleksiyon';
+
+  @override
+  String get snippetsCollectionName => 'Ad';
+
+  @override
+  String get snippetsCollectionNameTaken => 'Bu adda bir koleksiyon zaten var.';
+
+  @override
+  String snippetsCollectionNameTooLong(int max) {
+    return 'En fazla $max karakter kullanın.';
+  }
+
+  @override
+  String get snippetsConcealedBody => 'Bu parçacık gizli.';
+
+  @override
+  String get snippetsConcealedConfirmAction => 'Devam et';
+
+  @override
+  String get snippetsConcealedConfirmMessage =>
+      'Bu cihaz kimliğinizi doğrulayamaz. Yalnızca kendi cihazınızsa devam edin.';
+
+  @override
+  String get snippetsConcealedConfirmTitle => 'Siz olduğunuzu onaylayın';
+
+  @override
+  String get snippetsConcealedPreview => 'Gizli parçacık';
+
+  @override
+  String get snippetsConcealedSwitch => 'Gizli';
+
+  @override
+  String get snippetsConcealedTitle => 'Gizli parçacık';
+
+  @override
+  String get snippetsConflictBadge => 'Çakışma kopyası';
+
+  @override
+  String get snippetsCopied => 'Kopyalandı';
+
+  @override
+  String get snippetsCreate => 'Parçacık oluştur';
+
+  @override
+  String snippetsCreateNamed(String query) {
+    return '“$query” parçacığını oluştur';
+  }
+
+  @override
+  String get snippetsDeleteCollection => 'Koleksiyonu sil';
+
+  @override
+  String get snippetsDeleteCollectionMove =>
+      'Parçacıklarını Koleksiyonsuz bölümüne taşı';
+
+  @override
+  String snippetsDeleteCollectionTitle(String name) {
+    return '“$name” silinsin mi?';
+  }
+
+  @override
+  String get snippetsDeleteCollectionWithSnippets => 'Parçacıklarını da sil';
+
+  @override
+  String get snippetsDeletedMessage => 'Son silinenler bölümüne taşındı.';
+
+  @override
+  String snippetsDeletedTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık silindi',
+      one: 'Parçacık silindi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDestination => 'Kaydedilecek yer';
+
+  @override
+  String snippetsDestinationName(String destination) {
+    String _temp0 = intl.Intl.selectLogic(destination, {
+      'historyClip': 'Geçmiş öğesi',
+      'snippet': 'Parçacık',
+      'other': 'Geçmiş öğesi',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDiscard => 'Vazgeç';
+
+  @override
+  String snippetsDragging(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsDuplicateAbbreviation =>
+      'Başka bir parçacık bu kısaltmayı kullanıyor. Birini değiştirin.';
+
+  @override
+  String get snippetsDuplicateBadge => 'Yinelenen kısaltma';
+
+  @override
+  String get snippetsEditClip => 'Öğeyi düzenle';
+
+  @override
+  String get snippetsEditCollection => 'Koleksiyonu düzenle';
+
+  @override
+  String get snippetsEditSnippet => 'Parçacığı düzenle';
+
+  @override
+  String get snippetsEditTab => 'Düzenle';
+
+  @override
+  String get snippetsEmptyMessage =>
+      'Bir parçacığa kısaltma verin, sonra bunu Quick Paste\'te yazın.';
+
+  @override
+  String get snippetsEmptyTitle => 'Henüz parçacık yok';
+
+  @override
+  String get snippetsEnableTemplate => 'Aç';
+
+  @override
+  String get snippetsEnableTemplateMessage =>
+      'Yer tutucuya benzeyen metin doldurulur.';
+
+  @override
+  String get snippetsEnableTemplateTitle => 'Şablon açılsın mı?';
+
+  @override
+  String get snippetsExport => 'Dışa aktar';
+
+  @override
+  String get snippetsExportCollection => 'Koleksiyonu dışa aktar';
+
+  @override
+  String get snippetsExportConcealedConfirm =>
+      'Gizli parçacıkları okunabilir dosyaya ekle';
+
+  @override
+  String snippetsExportCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık yazıldı',
+      zero: 'Hiç parçacık yazılmadı',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportDone => 'Parçacıklar dışa aktarıldı';
+
+  @override
+  String get snippetsExportEncrypt => 'Parola ifadesiyle şifrele';
+
+  @override
+  String get snippetsExportFailed => 'Dışa aktarma başarısız';
+
+  @override
+  String get snippetsExportPlainConfirm =>
+      'Dosyaya sahip olan herkesin onu okuyabileceğini anlıyorum';
+
+  @override
+  String snippetsExportScope(String scope, int count) {
+    String _temp0 = intl.Intl.selectLogic(scope, {
+      'all': 'Tüm parçacıklar',
+      'collections': 'Bu koleksiyon',
+      'snippets': 'Seçili parçacıklar ($count)',
+      'other': 'Tüm parçacıklar',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsExportTitle => 'Parçacıkları dışa aktar';
+
+  @override
+  String get snippetsFieldBuilderTitle => 'Alan ekle';
+
+  @override
+  String get snippetsFieldDefault => 'Varsayılan değer';
+
+  @override
+  String get snippetsFieldName => 'Ad';
+
+  @override
+  String get snippetsFieldOptions => 'Virgülle ayrılmış seçenekler';
+
+  @override
+  String get snippetsFieldRequired => 'Bu alanı doldurun.';
+
+  @override
+  String get snippetsFieldType => 'Tür';
+
+  @override
+  String snippetsFieldTypeName(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'text': 'Tek satır',
+      'multiline': 'Birden çok satır',
+      'choice': 'Seçim',
+      'other': 'Tek satır',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsFormattingNotice =>
+      'Kaydettiğinizde biçimlendirme kaldırılır.';
+
+  @override
+  String get snippetsGoToSnippet => 'Parçacığa git';
+
+  @override
+  String get snippetsImport => 'İçe aktar';
+
+  @override
+  String get snippetsImportAbbreviationPolicy => 'Kısaltma zaten kullanılıyor';
+
+  @override
+  String snippetsImportAbbreviationPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'importWithout': 'Kısaltmasız içe aktar',
+      'renameWithSuffix': 'Kısaltmaya sayı ekle',
+      'skip': 'Atla',
+      'other': 'Kısaltmasız içe aktar',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportCollectionPolicy => 'Aynı adlı koleksiyon';
+
+  @override
+  String snippetsImportCollectionPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'merge': 'Mevcut olana ekle',
+      'createNew': 'Yeni bir tane oluştur',
+      'other': 'Mevcut olana ekle',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportConvert => 'Bilinen yer tutucuları dönüştür';
+
+  @override
+  String snippetsImportCounts(
+    int added,
+    int identical,
+    int updated,
+    int conflicts,
+    int invalid,
+  ) {
+    return 'Yeni: $added. Aynı, atlandı: $identical. Değişmiş: $updated. Kısaltma çakışmaları: $conflicts. Geçersiz: $invalid.';
+  }
+
+  @override
+  String get snippetsImportDone => 'Parçacıklar içe aktarıldı';
+
+  @override
+  String get snippetsImportFailed => 'İçe aktarma başarısız';
+
+  @override
+  String get snippetsImportFileType => 'Parçacık dosyaları';
+
+  @override
+  String get snippetsImportFormat => 'Biçim';
+
+  @override
+  String snippetsImportFormatName(String format) {
+    String _temp0 = intl.Intl.selectLogic(format, {
+      'bundle': 'CopyPaste paketi',
+      'json': 'JSON listesi',
+      'csv': 'CSV',
+      'other': 'CopyPaste paketi',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String snippetsImportInvalidRow(int row, String reason) {
+    return 'Satır $row: $reason';
+  }
+
+  @override
+  String get snippetsImportInvalidRows => 'İçe aktarılmayacak satırlar';
+
+  @override
+  String get snippetsImportPassphraseHint => 'Dosya şifreliyse parola ifadesi';
+
+  @override
+  String get snippetsImportPreview => 'Önizle';
+
+  @override
+  String snippetsImportReport(
+    int inserted,
+    int updated,
+    int skipped,
+    int flagged,
+    int unrecognized,
+  ) {
+    return 'Eklenen: $inserted. Güncellenen: $updated. Atlanan: $skipped. İncelenecek kısaltmalar: $flagged. Tanınmayan yer tutucular: $unrecognized.';
+  }
+
+  @override
+  String get snippetsImportSameIdPolicy => 'Aynı parçacık, farklı içerik';
+
+  @override
+  String snippetsImportSameIdPolicyName(String policy) {
+    String _temp0 = intl.Intl.selectLogic(policy, {
+      'keepBoth': 'İkisini de tut',
+      'replace': 'Mevcut olanı değiştir',
+      'skip': 'Atla',
+      'other': 'İkisini de tut',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsImportTitle => 'Parçacıkları içe aktar';
+
+  @override
+  String get snippetsInsert => 'Ekle';
+
+  @override
+  String get snippetsInsertPlaceholder => 'Yer tutucu ekle';
+
+  @override
+  String get snippetsKeepReferences => 'Olduğu gibi bırak';
+
+  @override
+  String get snippetsLibraryDescription =>
+      'Parçacıklara ve koleksiyonlara göz atın, bunları düzenleyin.';
+
+  @override
+  String get snippetsLibraryKeywords =>
+      'parçacıklar şablonlar kısaltmalar koleksiyonlar metin snippet';
+
+  @override
+  String get snippetsLibraryTitle => 'Parçacık kitaplığı';
+
+  @override
+  String snippetsLint(String code, String detail) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'unclosed': 'Bu yer tutucu hiç kapatılmıyor.',
+      'malformed': 'Bu yer tutucu okunamıyor.',
+      'unknownPlaceholder':
+          'Bilinmeyen yer tutucu “$detail”. Yazıldığı gibi yapıştırılır.',
+      'unknownParameter': 'Bilinmeyen seçenek “$detail”.',
+      'duplicateParameter': '“$detail” seçeneği iki kez ayarlanmış.',
+      'missingParameter': '“$detail” seçeneği eksik.',
+      'invalidValue': '“$detail” seçeneğinin değeri geçersiz.',
+      'conflictingParameters': 'Bu seçenekler birlikte kullanılamaz.',
+      'unknownLocale': 'Bilinmeyen dil.',
+      'unknownTimeZone': 'Bilinmeyen saat dilimi.',
+      'invalidPattern': 'Geçersiz tarih kalıbı.',
+      'dateOutOfRange': 'Tarih aralık dışında.',
+      'unknownModifier': 'Bilinmeyen değiştirici “$detail”.',
+      'modifierFailed': '“$detail” değiştiricisi uygulanamadı.',
+      'emptyClipboard': '$detail. pano öğesi boş.',
+      'extraCursor': 'Yalnızca ilk imleç yer tutucusu kullanılır.',
+      'nestedCursor': 'Eklenen bir parçacıktaki imleç yok sayılır.',
+      'tooManyFields': '“$detail” alanı 10 alan sınırını aşıyor.',
+      'conflictingField':
+          '“$detail” alanı farklı ayarlarla iki kez tanımlanmış.',
+      'choiceDefaultNotOption':
+          '“$detail” alanının varsayılan değeri seçeneklerinden biri değil.',
+      'cycle': 'Parçacıklar birbirini döngü içinde ekliyor: $detail.',
+      'depthExceeded': 'Parçacıklar 3 düzeyden daha derine ekleniyor.',
+      'nestingLimit': 'Çok fazla eklenmiş parçacık var.',
+      'unknownSnippet': 'Hiçbir parçacıkta bu kısaltma yok.',
+      'containsPlaceholders':
+          'Metin yer tutucular içeriyor. Doldurmak için Şablon\'u açın.',
+      'other': 'Bu yer tutucuda bir sorun var.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsLoadFailed => 'Parçacıklar yüklenemedi';
+
+  @override
+  String get snippetsLoadMore => 'Daha fazla yükle';
+
+  @override
+  String get snippetsMerge => 'Birleştir';
+
+  @override
+  String get snippetsMergeCollection => 'Başka bir koleksiyonla birleştir';
+
+  @override
+  String snippetsMergeCollectionTitle(String name) {
+    return '“$name” koleksiyonunu şununla birleştir';
+  }
+
+  @override
+  String get snippetsMoveTo => 'Şuraya taşı';
+
+  @override
+  String get snippetsNewCollection => 'Yeni koleksiyon';
+
+  @override
+  String get snippetsNewSnippet => 'Yeni parçacık';
+
+  @override
+  String get snippetsNewText => 'Yeni metin';
+
+  @override
+  String snippetsNoMatch(String query) {
+    return '“$query” ile eşleşen parçacık yok';
+  }
+
+  @override
+  String get snippetsPassphraseConfirm => 'Parola ifadesini tekrarlayın';
+
+  @override
+  String snippetsPassphraseHint(int min) {
+    return 'Parola ifadesi, en az $min karakter';
+  }
+
+  @override
+  String get snippetsPassphraseLabel => 'Parola ifadesi';
+
+  @override
+  String get snippetsPassphraseNoRecovery =>
+      'Unutulan parola ifadesi kurtarılamaz.';
+
+  @override
+  String snippetsPassphraseStrength(String score) {
+    String _temp0 = intl.Intl.selectLogic(score, {
+      'tooShort': 'Çok kısa',
+      'weak': 'Zayıf',
+      'fair': 'Orta',
+      'good': 'İyi',
+      'other': 'Güçlü',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPinnedSwitch => 'Sabitlendi';
+
+  @override
+  String get snippetsPlaceholderGroup => 'Yer tutucular';
+
+  @override
+  String snippetsPlaceholderKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'today': 'Tarih',
+      'dateShort': 'Tarih, kısa',
+      'dateLong': 'Tarih, uzun',
+      'dateIso': 'Tarih, ISO 8601',
+      'dateNextWeek': 'Bir hafta sonraki tarih',
+      'now': 'Saat',
+      'dateTime': 'Tarih ve saat',
+      'clipboard': 'Pano',
+      'clipboardPrevious': 'Önceki pano öğesi',
+      'field': 'Doldurulacak alan…',
+      'cursor': 'İmleç konumu',
+      'uuid': 'UUID',
+      'random': 'Rastgele sayı',
+      'upper': 'Değiştirici: büyük harf',
+      'lower': 'Değiştirici: küçük harf',
+      'trim': 'Değiştirici: boşlukları kırp',
+      'other': 'Yer tutucu',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsPlaceholderNestedGroup => 'Başka bir parçacık ekle';
+
+  @override
+  String get snippetsPlaceholderNoMatch => 'Eşleşen yer tutucu yok';
+
+  @override
+  String get snippetsPreviewEmpty => 'Önizlenecek bir şey yok';
+
+  @override
+  String get snippetsPreviewTab => 'Önizleme';
+
+  @override
+  String get snippetsPurge => 'Kalıcı olarak sil';
+
+  @override
+  String get snippetsPurgeMessage =>
+      'Tüm cihazlarınızdan silinecekler. Bu işlem geri alınamaz.';
+
+  @override
+  String snippetsPurgeTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count parçacık kalıcı olarak silinsin mi?',
+      one: 'Parçacık kalıcı olarak silinsin mi?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsRecentlyDeletedEmpty => 'Son silinenler boş';
+
+  @override
+  String get snippetsRecordPastedDescription =>
+      'Yapıştırılan parçacıkları geçmişe ekle.';
+
+  @override
+  String get snippetsRecordPastedKeywords =>
+      'geçmiş kaydet yapıştırılan parçacıklar';
+
+  @override
+  String get snippetsRecordPastedTitle =>
+      'Yapıştırılan parçacıkları Geçmiş\'e kaydet';
+
+  @override
+  String get snippetsReplaceOriginal => 'Orijinali değiştir';
+
+  @override
+  String get snippetsReplaceOriginalHint =>
+      'Kaydettikten sonra orijinal öğeyi siler.';
+
+  @override
+  String get snippetsRequireAuthDescription =>
+      'Önce parola veya biyometri iste.';
+
+  @override
+  String get snippetsRequireAuthKeywords =>
+      'gizli parola biyometri parmak izi yüz kilit doğrula';
+
+  @override
+  String get snippetsRequireAuthTitle =>
+      'Gizli parçacıkları kullanmadan önce doğrula';
+
+  @override
+  String get snippetsRestore => 'Geri yükle';
+
+  @override
+  String get snippetsSaveBlockTooLarge => 'Metin 64 KB\'tan büyük.';
+
+  @override
+  String get snippetsSaveFailed => 'Kaydedilemedi';
+
+  @override
+  String get snippetsScopeAll => 'Tümü';
+
+  @override
+  String get snippetsScopeEmpty => 'Burada parçacık yok';
+
+  @override
+  String get snippetsScopePinned => 'Sabitlenenler';
+
+  @override
+  String get snippetsScopeRecentlyDeleted => 'Son silinenler';
+
+  @override
+  String get snippetsSearchPlaceholder => 'Parçacıklarda ara';
+
+  @override
+  String snippetsSelected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count seçildi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsShow => 'Göster';
+
+  @override
+  String get snippetsShowAll => 'Tümünü göster';
+
+  @override
+  String get snippetsShowAttention => 'İncele';
+
+  @override
+  String snippetsSoftLimit(int count) {
+    return '$count parçacığınız var. En fazla 20.000 parçacığa izin verilir.';
+  }
+
+  @override
+  String get snippetsTemplateBadge => 'Şablon';
+
+  @override
+  String get snippetsTemplateSwitch => 'Şablon';
+
+  @override
+  String get snippetsTitleLabel => 'Başlık';
+
+  @override
+  String get snippetsTitlePlaceholder => 'İsteğe bağlı';
+
+  @override
+  String get snippetsTransferDescription =>
+      'Parçacıkları yedekleyin veya uygulamalar arasında taşıyın.';
+
+  @override
+  String get snippetsTransferKeywords =>
+      'içe aktar dışa aktar yedek paket json csv parola';
+
+  @override
+  String get snippetsTransferTitle => 'İçe ve dışa aktar';
+
+  @override
+  String get snippetsUndo => 'Geri al';
+
+  @override
+  String get snippetsUnfiled => 'Koleksiyonsuz';
+
+  @override
+  String snippetsUnfilledWarning(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count yer tutucu yazıldığı gibi yapıştırılır',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get snippetsUnpin => 'Sabitlemeyi kaldır';
+
+  @override
+  String get snippetsUnsavedMessage =>
+      'Kapatmadan önce değişiklikler kaydedilsin mi?';
+
+  @override
+  String get snippetsUnsavedTitle => 'Kaydedilmemiş değişiklikler';
+
+  @override
+  String get snippetsUntitled => 'Başlıksız parçacık';
+
+  @override
+  String get snippetsUpdateReferences => 'Güncelle';
+
+  @override
+  String snippetsUpdateReferencesMessage(String from, String to) {
+    return 'Diğer şablonlar “$from” ekliyor olabilir. “$to” kullanacak şekilde güncellensinler mi?';
+  }
+
+  @override
+  String get snippetsUpdateReferencesTitle => 'Başvurular güncellensin mi?';
+
+  @override
+  String get snippetsUseFailed => 'Parçacık kullanılamadı';
+
+  @override
+  String get quickPasteTabQueue => 'Kuyruk';
+
+  @override
+  String get quickPasteMaskedMode => 'Parola alanı: önizlemeler gizlendi';
+
+  @override
+  String quickPasteMaskedItem(String kind) {
+    return 'Gizli: $kind';
+  }
+
+  @override
+  String get quickPasteUnlockSecrets => 'Gizli öğelerin kilidini aç';
+
+  @override
+  String quickPastePastingWith(String name) {
+    return 'Şununla yapıştırılıyor: $name';
+  }
+
+  @override
+  String quickPastePasteOriginalHint(String shortcut) {
+    return '$shortcut orijinali yapıştırır';
+  }
+
+  @override
+  String get quickPasteDefaultSkipped => 'Varsayılan dönüşüm atlandı';
+
+  @override
+  String get quickPasteDefaultSkippedMessage =>
+      'Bunun yerine orijinal kullanıldı.';
+
+  @override
+  String get quickPastePasteManually => 'İçerik panoda. Elle yapıştırın.';
+
+  @override
+  String get quickPastePaste => 'Yapıştır';
+
+  @override
+  String get quickPasteSnippetsUnavailable => 'Parçacıklar kullanılamıyor';
+
+  @override
+  String get rulesLoadFailed => 'İçerik kuralları yüklenemedi.';
+
+  @override
+  String get rulesNewRule => 'Yeni kural';
+
+  @override
+  String get rulesEditRule => 'Kuralı düzenle';
+
+  @override
+  String get rulesUntitled => 'Adsız kural';
+
+  @override
+  String get rulesPrivacyDefaultsTitle => 'Gizlilik varsayılanları';
+
+  @override
+  String get rulesPrivacyDefaultsDescription =>
+      'Gizlilik ayarları her kuraldan önce uygulanır.';
+
+  @override
+  String get rulesPrivacyDefaultsKeywords =>
+      'gizlilik gizlenmiş geçici hariç uygulamalar yerleşik kimlik bilgileri parolalar kartlar';
+
+  @override
+  String get rulesOpenPrivacy => 'Gizliliği aç';
+
+  @override
+  String get rulesMyRulesTitle => 'Kurallarım';
+
+  @override
+  String get rulesMyRulesDescription => 'Yeni kopyalarda sırayla çalışır.';
+
+  @override
+  String get rulesMyRulesKeywords =>
+      'kurallar otomasyon etiket atla gizli süre sil desen regex';
+
+  @override
+  String get rulesEmptyTitle => 'Henüz kural yok';
+
+  @override
+  String get rulesEmptyMessage =>
+      'Kurallar yeni kopyaları etiketler, korur, süresini doldurur veya atlar.';
+
+  @override
+  String get rulesDeletedTitle => 'Son silinenler';
+
+  @override
+  String get rulesDeletedDescription => '30 gün içinde geri yüklenebilir.';
+
+  @override
+  String rulesDeletedAt(String time) {
+    return 'Silinme: $time';
+  }
+
+  @override
+  String get rulesRestore => 'Geri yükle';
+
+  @override
+  String get rulesDeletedToast => 'Kural silindi';
+
+  @override
+  String get rulesDeletedToastMessage =>
+      '30 gün boyunca geri yükleyebilirsiniz.';
+
+  @override
+  String get rulesUndo => 'Geri al';
+
+  @override
+  String rulesConflictMessage(String rule, String device) {
+    return '$device cihazında “$rule” için yapılan eşzamanlı düzenleme daha yeni bir düzenlemeyle değiştirildi.';
+  }
+
+  @override
+  String get rulesAnotherDevice => 'başka bir cihaz';
+
+  @override
+  String get rulesRestoreConflict => 'O sürümü kullan';
+
+  @override
+  String get rulesSkipLogTitle => 'Son atlananlar';
+
+  @override
+  String get rulesSkipLogDescription =>
+      'Kurallarınızın bu cihazda kaydetmediği kopyalar.';
+
+  @override
+  String get rulesSkipLogKeywords => 'atlanan yok sayılan kaydedilmeyen günlük';
+
+  @override
+  String get rulesSkipLogShow => 'Göster';
+
+  @override
+  String get rulesSkipLogEmpty => 'Atlanan kopya yok.';
+
+  @override
+  String get rulesUnknownApp => 'Bilinmeyen uygulama';
+
+  @override
+  String get rulesMatchesEverything => 'Herhangi bir kopya';
+
+  @override
+  String rulesSummary(String conditions, String actions) {
+    return '$conditions → $actions';
+  }
+
+  @override
+  String rulesSummaryStop(String summary) {
+    return '$summary, sonra dur';
+  }
+
+  @override
+  String rulesConditionJoin(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': ' veya ',
+      'other': ' ve ',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesConditionSummary(
+    String attribute,
+    String operator,
+    String value,
+  ) {
+    return '$attribute $operator $value';
+  }
+
+  @override
+  String rulesActionSummary(String action, String value) {
+    return '$action: $value';
+  }
+
+  @override
+  String rulesRunsOn(String devices) {
+    return 'Çalıştığı cihazlar: $devices';
+  }
+
+  @override
+  String rulesNewFromDevice(String device) {
+    return '$device cihazından yeni';
+  }
+
+  @override
+  String get rulesNeedsUpdateBadge => 'Güncelleme gerekli';
+
+  @override
+  String get rulesUpdateRequired =>
+      'Bu kuralı çalıştırmak için CopyPaste’i güncelleyin.';
+
+  @override
+  String get rulesErrorBadge => 'Hata';
+
+  @override
+  String rulesErrorHint(String problem) {
+    return '$problem Düzeltilene kadar eşleşmeler korunur.';
+  }
+
+  @override
+  String get rulesReorder => 'Yeniden sıralamak için sürükleyin';
+
+  @override
+  String get rulesMoreActions => 'Diğer işlemler';
+
+  @override
+  String get rulesEdit => 'Düzenle';
+
+  @override
+  String rulesMove(String direction) {
+    String _temp0 = intl.Intl.selectLogic(direction, {
+      'up': 'Yukarı taşı',
+      'down': 'Aşağı taşı',
+      'top': 'En üste taşı',
+      'other': 'En alta taşı',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyToItems => 'Mevcut öğelere uygula…';
+
+  @override
+  String get rulesResetBuiltin => 'Varsayılana sıfırla';
+
+  @override
+  String get rulesNameLabel => 'Ad';
+
+  @override
+  String get rulesNamePlaceholder => 'Örneğin, İş bağlantıları';
+
+  @override
+  String get rulesWhenTitle => 'Ne zaman';
+
+  @override
+  String rulesMatchMode(String mode) {
+    String _temp0 = intl.Intl.selectLogic(mode, {
+      'any': 'Herhangi bir koşul eşleşir',
+      'other': 'Tüm koşullar eşleşir',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesNoConditions => 'Koşul yok: Bu kural her kopyaya uygulanır.';
+
+  @override
+  String get rulesAddCondition => 'Koşul ekle';
+
+  @override
+  String get rulesRemoveCondition => 'Koşulu kaldır';
+
+  @override
+  String rulesConditionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'content_text': 'Metin',
+      'content_type': 'İçerik türü',
+      'detected_kind': 'Algılanan tür',
+      'source_app': 'Kaynak uygulama',
+      'size': 'Boyut',
+      'privacy_marker': 'Gizlilik işareti',
+      'capture_origin': 'Kaynak',
+      'other': 'Bilinmeyen koşul',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'içerir',
+      'equals': 'eşittir',
+      'starts_with': 'ile başlar',
+      'ends_with': 'ile biter',
+      'matches_regex': 'desenle eşleşir',
+      'other': 'eşleşir',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTextOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'contains': 'içermez',
+      'equals': 'eşit değildir',
+      'starts_with': 'ile başlamaz',
+      'ends_with': 'ile bitmez',
+      'matches_regex': 'desenle eşleşmez',
+      'other': 'eşleşmez',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesListOperator(String negate) {
+    String _temp0 = intl.Intl.selectLogic(negate, {
+      'true': 'şu değil',
+      'other': 'şu',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperator(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'şundan küçük',
+      'other': 'şundan büyük',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeOperatorNegated(String op) {
+    String _temp0 = intl.Intl.selectLogic(op, {
+      'less_than': 'şundan küçük değil',
+      'other': 'şundan büyük değil',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeUnit(String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'satır',
+      'bytes': 'bayt',
+      'other': 'karakter',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesSizeValue(int count, String unit) {
+    String _temp0 = intl.Intl.selectLogic(unit, {
+      'lines': 'satır',
+      'bytes': 'bayt',
+      'other': 'karakter',
+    });
+    return '$count $_temp0';
+  }
+
+  @override
+  String rulesContentKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'plain_text': 'Düz metin',
+      'rich_text': 'Zengin metin',
+      'image': 'Görsel',
+      'files': 'Dosyalar',
+      'color': 'Renk',
+      'link': 'Bağlantı',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDetectedKind(String kind) {
+    String _temp0 = intl.Intl.selectLogic(kind, {
+      'credential': 'Parola veya gizli bilgi',
+      'url': 'Web adresi',
+      'email': 'E-posta adresi',
+      'phone': 'Telefon numarası',
+      'code': 'Kod',
+      'color': 'Renk değeri',
+      'json': 'JSON',
+      'file_path': 'Dosya yolu',
+      'number': 'Sayı',
+      'one_time_code': 'Tek kullanımlık kod',
+      'payment_card': 'Kart numarası',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPrivacyMarker(String marker) {
+    String _temp0 = intl.Intl.selectLogic(marker, {
+      'concealed': 'Gizlenmiş',
+      'transient': 'Geçici',
+      'auto_generated': 'Otomatik oluşturulmuş',
+      'excluded_from_history': 'Geçmişten hariç',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesCaptureOrigin(String origin) {
+    String _temp0 = intl.Intl.selectLogic(origin, {
+      'local_copy': 'Bu cihazda kopyalandı',
+      'received': 'Başka bir cihazdan alındı',
+      'created_in_app': 'CopyPaste’te oluşturuldu',
+      'other': 'Diğer',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesValuePlaceholder => 'Aranacak metin';
+
+  @override
+  String get rulesPatternPlaceholder => 'Desen, örneğin ^ticket-[0-9]+';
+
+  @override
+  String get rulesPatternHint =>
+      'Çevre denetimi ve geri başvurular desteklenmez.';
+
+  @override
+  String get rulesCaseSensitive => 'Büyük/küçük harf duyarlı';
+
+  @override
+  String get rulesChooseValues => 'Seç';
+
+  @override
+  String get rulesUnknownConditionNotice =>
+      'Bu koşul CopyPaste’in daha yeni bir sürümünden geliyor.';
+
+  @override
+  String get rulesSourceAppNotice =>
+      'Android’de yalnızca öğe klavyesiyle yapılan kopyalar eşleşir.';
+
+  @override
+  String get rulesPrivacyMarkerNotice => 'Her sistem her işaretçiyi bildirmez.';
+
+  @override
+  String get rulesThenTitle => 'O zaman';
+
+  @override
+  String get rulesNoActions => 'En az bir işlem ekleyin.';
+
+  @override
+  String get rulesAddAction => 'İşlem ekle';
+
+  @override
+  String get rulesRemoveAction => 'İşlemi kaldır';
+
+  @override
+  String rulesActionType(String type) {
+    String _temp0 = intl.Intl.selectLogic(type, {
+      'dont_save': 'Kaydetme',
+      'mark_secret': 'Gizli olarak işaretle',
+      'delete_after': 'Şu süre sonra sil',
+      'add_tags': 'Etiket ekle',
+      'transform': 'Dönüştür',
+      'other': 'Bilinmeyen işlem',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesActionBlock(String reason) {
+    String _temp0 = intl.Intl.selectLogic(reason, {
+      'dont_save_alone': '“Kaydetme” diğer işlemlerle birleştirilemez.',
+      'present': 'Bu kuralda bu işlem zaten var.',
+      'other': 'Bir kuralda en fazla 8 işlem olabilir.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesUnknownActionNotice =>
+      'Bu işlem CopyPaste’in daha yeni bir sürümünden geliyor.';
+
+  @override
+  String get rulesDontSaveWarning =>
+      'Eşleşen kopyalar hiçbir zaman kaydedilmez, dizine eklenmez veya eşitlenmez.';
+
+  @override
+  String rulesMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dakika',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count saat',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gün',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesClearClipboardAtExpiry =>
+      'Pano hâlâ bu kopyayı içeriyorsa onu da temizle.';
+
+  @override
+  String get rulesNoTags => 'Burada kullanmak için Geçmiş’te etiket oluşturun.';
+
+  @override
+  String get rulesNoTransforms => 'Kullanılabilir dönüşüm yok.';
+
+  @override
+  String get rulesReplaceClipboard => 'Panoyu da sonuçla değiştir';
+
+  @override
+  String get rulesOptionsTitle => 'Seçenekler';
+
+  @override
+  String get rulesEnabledSwitch => 'Etkin';
+
+  @override
+  String get rulesStopProcessing =>
+      'Bu kural eşleşirse sonraki kuralları işleme';
+
+  @override
+  String get rulesRunsOnLabel => 'Çalıştığı yer';
+
+  @override
+  String get rulesAllDevices => 'Tüm cihazlar';
+
+  @override
+  String get rulesChosenDevices => 'Seçilen cihazlar';
+
+  @override
+  String get rulesTestTitle => 'Test';
+
+  @override
+  String get rulesTestDescription => 'Kuralı örnek metinle deneyin.';
+
+  @override
+  String get rulesSamplePlaceholder => 'Örnek metni yapıştırın veya yazın';
+
+  @override
+  String get rulesTestFullSet => 'Tüm kurallarla birlikte test et';
+
+  @override
+  String get rulesRunTest => 'Testi çalıştır';
+
+  @override
+  String get rulesTestFailed => 'Test çalıştırılamadı.';
+
+  @override
+  String get rulesPreviewHistory => 'Geçmişte önizle';
+
+  @override
+  String get rulesSaveFailed => 'Kural kaydedilemedi.';
+
+  @override
+  String get rulesReadOnlyNotice =>
+      'Daha yeni bir CopyPaste ile oluşturuldu. Düzenlemek veya çalıştırmak için güncelleyin.';
+
+  @override
+  String rulesProblem(String code) {
+    String _temp0 = intl.Intl.selectLogic(code, {
+      'invalid_definition': 'Kural okunamadı.',
+      'unsupported_schema':
+          'Bu kural CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'unknown_condition_type':
+          'Bu koşul CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'unknown_action_type':
+          'Bu işlem CopyPaste’in daha yeni bir sürümünü gerektiriyor.',
+      'too_many_conditions': 'Bir kuralda en fazla 20 koşul olabilir.',
+      'too_many_actions': 'Bir kuralda en fazla 8 işlem olabilir.',
+      'too_many_rules': 'Yalnızca ilk 200 kural çalışır.',
+      'no_actions': 'En az bir işlem ekleyin.',
+      'conflicting_actions': '“Kaydetme” diğer işlemlerle birleştirilemez.',
+      'duplicate_action': 'Her işlem yalnızca bir kez kullanılabilir.',
+      'empty_value': 'Bir değer girin.',
+      'empty_list': 'En az bir değer seçin.',
+      'too_many_values': 'En fazla 64 değer seçin.',
+      'invalid_value': 'Bu değer geçerli değil.',
+      'pattern_too_long': 'Desenler en fazla 2.000 karakter olabilir.',
+      'unsupported_look_around':
+          'İleriye ve geriye bakma desteklenmez. Bunun yerine “Tüm koşullar eşleşir” ile iki koşul kullanın.',
+      'unsupported_backreference': 'Geri başvurular desteklenmez.',
+      'pattern_too_large': 'Bu desen çok karmaşık. Tekrarlarını basitleştirin.',
+      'invalid_pattern': 'Bu desen geçerli değil.',
+      'invalid_duration': '1 dakika ile 90 gün arasında bir süre seçin.',
+      'invalid_tags': 'En az bir etiket seçin.',
+      'invalid_transform': 'Bir dönüşüm seçin.',
+      'other': 'Bu kuralda bir sorun var.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceLine(String label, String result) {
+    return '$label: $result';
+  }
+
+  @override
+  String rulesTraceResult(String result) {
+    String _temp0 = intl.Intl.selectLogic(result, {
+      'matched': 'eşleşti',
+      'not_matched': 'eşleşmedi',
+      'unknown': 'bilinmiyor',
+      'skipped': 'çalıştırılmadı',
+      'other': 'hata',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String rulesTraceCondition(int number) {
+    return 'Koşul $number';
+  }
+
+  @override
+  String get rulesTraceNoRules => 'Hiçbir kural değerlendirilmedi.';
+
+  @override
+  String get rulesTraceStopped => 'Sonraki kurallar çalışmadı.';
+
+  @override
+  String get rulesTraceUnknownReason =>
+      'Bu kopya için bilinmiyor, bu yüzden eşleşmez.';
+
+  @override
+  String get rulesTraceRuleError =>
+      'Bu kural çalışamadı, bu yüzden eşleşmeler korunur.';
+
+  @override
+  String get rulesTraceOutcomeTitle => 'Sonuç';
+
+  @override
+  String get rulesTraceNoEffect => 'Hiçbir kural bu kopyayı değiştirmez.';
+
+  @override
+  String get rulesTraceSkipped => 'Kaydedilmez';
+
+  @override
+  String get rulesTraceSecret => 'Gizli olarak kaydedilir';
+
+  @override
+  String rulesTraceExpires(String duration) {
+    return '$duration sonra silinir';
+  }
+
+  @override
+  String rulesTraceTags(String tags) {
+    return 'Etiketler: $tags';
+  }
+
+  @override
+  String rulesTraceTransforms(String names) {
+    return 'Dönüştürme: $names';
+  }
+
+  @override
+  String get rulesTraceOutput => 'Dönüştürülmüş metin';
+
+  @override
+  String get rulesPreviewTitle => 'Mevcut öğelere uygula';
+
+  @override
+  String rulesPreviewRunning(int count) {
+    return 'Son $count öğe denetleniyor…';
+  }
+
+  @override
+  String get rulesPreviewNone => 'Bu kuralla eşleşen yeni öğe yok.';
+
+  @override
+  String rulesPreviewMatched(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe eşleşiyor',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silinir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewSecret(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe gizli olarak işaretlenir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewExpiring(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğeye silinme zamanı atanır',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTagged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe etiketlenir',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesPreviewTruncated(int count) {
+    return 'Yalnızca son $count öğe denetlendi.';
+  }
+
+  @override
+  String rulesPreviewMore(int count) {
+    return 've $count tane daha';
+  }
+
+  @override
+  String get rulesPreviewNote => 'Uygulayana kadar hiçbir şey değişmez.';
+
+  @override
+  String get rulesSecretItem => 'Gizli öğe';
+
+  @override
+  String rulesSecretItemFrom(String app) {
+    return '$app uygulamasından gizli öğe';
+  }
+
+  @override
+  String get rulesPreviewCancelled =>
+      'Önizleme durduruldu. Hiçbir şey değişmedi.';
+
+  @override
+  String get rulesPreviewFailed => 'Önizleme çalıştırılamadı.';
+
+  @override
+  String rulesApplyDeleteTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silinsin mi?',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyDeleteMessage =>
+      'Eşleşen klipler tüm cihazlarınızda silinir. Bu işlem geri alınamaz.';
+
+  @override
+  String get rulesApplyDeleteConfirm => 'Sil ve uygula';
+
+  @override
+  String rulesApplyProgress(int done, int total) {
+    return 'Uygulanıyor: $done/$total';
+  }
+
+  @override
+  String rulesApplyChanged(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe değiştirildi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe silindi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String rulesApplyFailed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe değiştirilemedi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get rulesApplyCancelled =>
+      'Durduruldu. Şimdiye kadarki değişiklikler kalır.';
+
+  @override
+  String get historyActionEdit => 'Düzenle';
+
+  @override
+  String get historyActionSaveAsSnippet => 'Parçacık olarak kaydet';
+
+  @override
+  String get historyActionAddToQueue => 'Paste Queue\'ya ekle';
+
+  @override
+  String get historyActionTransform => 'Dönüştür…';
+
+  @override
+  String get historyActionExplain => 'Bu neden burada?';
+
+  @override
+  String get historyActionKeep => 'Sakla';
+
+  @override
+  String get historyNewClip => 'Yeni öğe';
+
+  @override
+  String get historySavedTitle => 'Kaydedildi';
+
+  @override
+  String get historyEditSaved =>
+      'Düzenlenen metin, geçmişin en üstünde yeni bir öğe oldu.';
+
+  @override
+  String get historyNewClipSaved => 'Metniniz kaydedildi.';
+
+  @override
+  String get historySnippetSaved => 'Öğenin metni artık bir parçacık.';
+
+  @override
+  String get historySnippetSaveFailed =>
+      'Bu öğe parçacık olarak kaydedilemedi.';
+
+  @override
+  String historyQueueAddedInOrder(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count öğe kuyruğa eklendi.',
+      one: '1 öğe kuyruğa eklendi.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyQueueAddFailed =>
+      'Paste Queue\'ya eklenemedi. Açık olduğunu kontrol edin.';
+
+  @override
+  String get historyKeepFailed => 'Bu öğe saklanamadı.';
+
+  @override
+  String get historyExplainFailed => 'Açıklama yüklenemedi.';
+
+  @override
+  String get historyDeletesSoon => 'Bir dakikadan kısa sürede silinecek';
+
+  @override
+  String historyDeletesInMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count dk sonra silinecek',
+      one: '1 dk sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count sa sonra silinecek',
+      one: '1 sa sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String historyDeletesInDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gün sonra silinecek',
+      one: '1 gün sonra silinecek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get historyProvenanceManual => 'Elle';
+
+  @override
+  String get historyProvenanceEdited => 'Düzenlendi';
+
+  @override
+  String get historyProvenanceTransformed => 'Dönüştürüldü';
+
+  @override
+  String get historyProvenanceModule => 'Modül';
+
+  @override
+  String historyRuleTag(String name) {
+    return '$name (otomatik)';
+  }
+
+  @override
+  String get historyMetadataExpiry => 'Silinme';
+
+  @override
+  String get historyMetadataRuleTags => 'Otomatik etiketler';
+
+  @override
+  String modulesEnableTitle(String module) {
+    return '$module etkinleştirilsin mi?';
+  }
+
+  @override
+  String get modulesEnableAccess => 'Modül şunları yapabilecek:';
+
+  @override
+  String modulesCapability(String capability) {
+    String _temp0 = intl.Intl.selectLogic(capability, {
+      'history_read': 'Pano geçmişinizi okuma',
+      'clipboard_write': 'Panonuza kopyalama',
+      'library_write': 'Parçacık kaydetme ve öğe sabitleme',
+      'snippets': 'Parçacıklarınızı okuma',
+      'synced_records': 'Verilerini cihazlarınız arasında eşitleme',
+      'local_state': 'Verilerini bu cihazda saklama',
+      'prompts': 'İşlemleri onaylamanızı isteme',
+      'endpoints': 'Yerel uygulamalardan bağlantı kabul etme',
+      'other': 'Bir CopyPaste hizmetini kullanma',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String modulesPromptFrom(String module) {
+    return 'Gönderen: $module';
+  }
+
+  @override
+  String get modulesUnknownModule => 'Bilinmeyen modül';
+
+  @override
+  String get modulesPromptAnswerFailed => 'Yanıtınız gönderilmedi.';
+
+  @override
+  String get modulesPromptNotificationBody =>
+      'Yanıtlamak için CopyPaste\'i açın.';
+
+  @override
+  String get modulesUnknownDevice => 'Bilinmeyen cihaz';
+
+  @override
+  String get modulesChooseDevices => 'Cihazları seçin';
+
+  @override
+  String get modulesAddApp => 'Uygulama ekle';
+
+  @override
+  String modulesRemoveApp(String app) {
+    return '$app uygulamasını kaldır';
+  }
+
+  @override
+  String get modulesNoApps => 'Uygulama seçilmedi';
 }

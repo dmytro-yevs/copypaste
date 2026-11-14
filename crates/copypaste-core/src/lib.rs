@@ -31,9 +31,11 @@ pub mod p2p_contract;
 pub mod peer_store;
 pub mod retention;
 mod rich_text;
+pub mod rules;
 pub mod semantic;
 pub mod settings_record;
 pub mod settings_transition;
+pub mod snippets;
 pub mod spoiler;
 pub mod storage;
 pub mod sync;
@@ -63,8 +65,8 @@ pub use storage::{
     compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity,
     HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryPreviewPage,
     HistoryPreviewRow, HistoryQuery, HistorySort, HistorySourceAppFacet, IncomingItem, Ingest,
-    ItemCursor, NewItem, Page, PreviewPage, RestoreError, SemanticMatches, SemanticWork, Store,
-    StoreError, StoredItem, Version,
+    IntegrationKinds, IntegrationView, ItemCursor, NewItem, Page, PreviewPage, RestoreError,
+    SemanticMatches, SemanticWork, Store, StoreError, StoredItem, Version,
 };
 pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

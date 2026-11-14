@@ -1,5 +1,10 @@
 use super::protocol::{read_frame, write_frame, InferenceReply, InferenceRequest};
-use crate::{native::ModuleInstance, package::PackageVerifier, ModuleError};
+use crate::{
+    bridge::HostAccess,
+    native::{LoadSpec, ModuleInstance},
+    package::PackageVerifier,
+    ModuleError,
+};
 use copypaste_module_sdk::resolve_fields;
 use std::io::{Read, Write};
 
@@ -9,7 +14,7 @@ pub fn run_inference_worker(
     mut reader: impl Read,
     mut writer: impl Write,
 ) -> Result<(), ModuleError> {
-    let instance = ModuleInstance::new();
+    let instance = ModuleInstance::new("inference", Default::default());
     let mut context_key = None;
     while let Some(request) = read_frame::<InferenceRequest>(&mut reader)? {
         let key = serde_json::to_vec(&(
@@ -60,11 +65,18 @@ fn invoke(
     resolve_fields(&command.arguments, &request.invocation.arguments)?;
     resolve_fields(&manifest.preferences, &request.invocation.preferences)?;
     instance.invoke(
-        &verifier,
-        &request.package_dir,
-        &request.data_dir,
+        LoadSpec {
+            verifier: &verifier,
+            package_dir: &request.package_dir,
+            data_dir: &request.data_dir,
+            preferences: &request.invocation.preferences,
+            access: HostAccess {
+                sync: None,
+                sync_provider: false,
+                capabilities: Vec::new(),
+                preference_fields: Vec::new(),
+            },
+        },
         &request.invocation,
-        None,
-        &request.id,
     )
 }

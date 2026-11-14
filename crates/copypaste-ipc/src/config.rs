@@ -52,6 +52,94 @@ const fn default_storage_quota_bytes() -> u64 {
     DEFAULT_STORAGE_QUOTA_BYTES
 }
 
+/// What "Paste next" does after the last paste-queue entry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueEndBehavior {
+    /// Finish after the last entry and stop collecting.
+    #[default]
+    Stop,
+    /// Return every entry to pending and start again.
+    Loop,
+    /// Deliver the last entry again.
+    KeepLast,
+}
+
+/// How "Paste all" joins entries. Line breaks follow the platform convention.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueSeparator {
+    #[default]
+    NewLine,
+    BlankLine,
+    Tab,
+    Space,
+    Comma,
+    CommaSpace,
+    None,
+    Custom,
+}
+
+/// Idle auto-stop choices in minutes; `0` means never.
+pub const PASTE_QUEUE_IDLE_STOP_MINUTES: [u32; 5] = [0, 5, 15, 30, 60];
+pub const PASTE_QUEUE_MAX_ENTRIES: (u32, u32) = (10, 1_000);
+pub const PASTE_QUEUE_CUSTOM_SEPARATOR_CHARS: usize = 32;
+
+/// Device-local paste-queue settings. **Live.**
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PasteQueueSettings {
+    pub enabled: bool,
+    pub insert_at_start: bool,
+    pub end_behavior: QueueEndBehavior,
+    pub separator: QueueSeparator,
+    /// Used with [`QueueSeparator::Custom`]; `\n` and `\t` escapes allowed.
+    pub custom_separator: String,
+    pub plain_text: bool,
+    pub idle_stop_minutes: u32,
+    pub max_entries: u32,
+    pub move_to_next_field: bool,
+    pub restore_when_finished: bool,
+}
+
+impl Default for PasteQueueSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            insert_at_start: false,
+            end_behavior: QueueEndBehavior::Stop,
+            separator: QueueSeparator::NewLine,
+            custom_separator: String::new(),
+            plain_text: false,
+            idle_stop_minutes: 15,
+            max_entries: 200,
+            move_to_next_field: false,
+            restore_when_finished: false,
+        }
+    }
+}
+
+impl PasteQueueSettings {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !PASTE_QUEUE_IDLE_STOP_MINUTES.contains(&self.idle_stop_minutes) {
+            return Err(ConfigError::BadEntry {
+                field: "paste_queue.idle_stop_minutes",
+            });
+        }
+        range(
+            "paste_queue.max_entries",
+            self.max_entries,
+            PASTE_QUEUE_MAX_ENTRIES,
+        )?;
+        if self.custom_separator.chars().count() > PASTE_QUEUE_CUSTOM_SEPARATOR_CHARS {
+            return Err(ConfigError::BadEntry {
+                field: "paste_queue.custom_separator",
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Whether a change takes effect on the running daemon.
 ///
 /// Recorded per field in [`ConfigData::field_liveness`] and surfaced by
@@ -158,6 +246,9 @@ pub struct ConfigData {
     /// be suppressed in test environments, and the player must not leave a
     /// process behind).
     pub sound_on_copy: bool,
+
+    /// Paste-queue behavior on this device. **Live.**
+    pub paste_queue: PasteQueueSettings,
 }
 
 impl Default for ConfigData {
@@ -182,6 +273,7 @@ impl Default for ConfigData {
             notify_on_copy: false,
             notification_preview: true,
             sound_on_copy: true,
+            paste_queue: PasteQueueSettings::default(),
         }
     }
 }
@@ -275,6 +367,8 @@ pub struct ConfigPatch {
     pub notification_preview: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound_on_copy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paste_queue: Option<PasteQueueSettings>,
 }
 
 impl ConfigPatch {
@@ -356,6 +450,10 @@ impl ConfigPatch {
         if let Some(v) = self.sound_on_copy {
             next.sound_on_copy = v;
         }
+        if let Some(settings) = &self.paste_queue {
+            settings.validate()?;
+            next.paste_queue = settings.clone();
+        }
         Ok(next)
     }
 }
@@ -382,6 +480,7 @@ impl From<&ConfigData> for ConfigPatch {
             notify_on_copy: Some(c.notify_on_copy),
             notification_preview: Some(c.notification_preview),
             sound_on_copy: Some(c.sound_on_copy),
+            paste_queue: Some(c.paste_queue.clone()),
         }
     }
 }
@@ -425,6 +524,7 @@ impl ConfigData {
             ("notify_on_copy", Liveness::Live),
             ("notification_preview", Liveness::Live),
             ("sound_on_copy", Liveness::Live),
+            ("paste_queue", Liveness::Live),
         ]
     }
 
@@ -471,6 +571,35 @@ impl ConfigData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feature_settings_default_closed_and_validate_their_bounds() {
+        let defaults = ConfigData::default();
+        assert_eq!(defaults.paste_queue.max_entries, 200);
+        assert_eq!(defaults.paste_queue.idle_stop_minutes, 15);
+        let decoded: ConfigData = serde_json::from_str("{}").unwrap();
+        assert_eq!(decoded, defaults);
+        for bad in [
+            PasteQueueSettings {
+                max_entries: 5,
+                ..Default::default()
+            },
+            PasteQueueSettings {
+                idle_stop_minutes: 7,
+                ..Default::default()
+            },
+            PasteQueueSettings {
+                custom_separator: "x".repeat(33),
+                ..Default::default()
+            },
+        ] {
+            let patch = ConfigPatch {
+                paste_queue: Some(bad),
+                ..Default::default()
+            };
+            assert!(patch.apply(&defaults).is_err());
+        }
+    }
 
     #[test]
     fn an_empty_patch_changes_nothing() {

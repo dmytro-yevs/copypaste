@@ -91,7 +91,7 @@ impl Fixture {
             Arc::new(ModuleManager::open(&root, "1.0.23", target, &keys.pk.to_base64()).unwrap());
         manager.install(&package).unwrap();
         manager
-            .set_enabled("copypaste.fixture-search", true)
+            .set_enabled("copypaste.fixture-search", true, &[])
             .unwrap();
         let (launcher, launched, stopped, entered) = crate::inference::launcher_fixture();
         manager.set_inference_launcher(launcher);
@@ -355,7 +355,7 @@ fn lexical_results_remain_immediate_while_inference_is_blocked_and_disable_cance
     );
     fixture
         .manager
-        .set_enabled("copypaste.fixture-search", false)
+        .set_enabled("copypaste.fixture-search", false, &[])
         .unwrap();
     assert_eq!(fixture.stopped.load(Ordering::SeqCst), 1);
     service.notify();

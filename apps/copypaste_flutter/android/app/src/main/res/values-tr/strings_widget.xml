@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_filter_history">Geçmiş</string>
+    <string name="widget_filter_pinned">Sabitlenenler</string>
+    <string name="widget_filter_snippets">Parçacıklar</string>
+    <string name="widget_filter_description">%1$s gösteriliyor. Değiştirmek için dokunun.</string>
+    <string name="widget_privacy_full">Tam önizleme</string>
+    <string name="widget_privacy_titles">Yalnızca başlıklar</string>
+    <string name="widget_privacy_hidden">Gizli</string>
+    <string name="widget_privacy_description">Önizlemeler: %1$s. Değiştirmek için dokunun.</string>
+    <string name="widget_search">CopyPaste’te ara</string>
+    <string name="widget_paused">Yakalama duraklatıldı · Sürdür</string>
+    <string name="widget_empty">Henüz klip yok · Panoyu kaydet</string>
+    <string name="widget_empty_pinned">Sabitlenmiş klip yok</string>
+    <string name="widget_empty_snippets">Henüz parçacık yok</string>
+    <string name="widget_setup">Yakalamayı ayarla</string>
+    <string name="widget_unavailable">Klipleri görmek için kilidi açın</string>
+    <string name="widget_error">Klipler yüklenemedi · Yeniden denemek için dokunun</string>
+    <string name="widget_hidden">Önizlemeler gizli</string>
+    <plurals name="widget_hidden_clips">
+        <item quantity="one">%d klip</item>
+        <item quantity="other">%d klip</item>
+    </plurals>
+    <plurals name="widget_hidden_snippets">
+        <item quantity="one">%d parçacık</item>
+        <item quantity="other">%d parçacık</item>
+    </plurals>
+    <string name="widget_kind_text">Metin</string>
+    <string name="widget_kind_link">Bağlantı</string>
+    <string name="widget_kind_image">Görüntü</string>
+    <string name="widget_kind_file">Dosya</string>
+    <string name="widget_kind_color">Renk</string>
+    <string name="widget_kind_code">Kod</string>
+    <string name="widget_kind_snippet">Parçacık</string>
+    <string name="widget_secret_item">Gizli öğe</string>
+    <string name="widget_secret_description">%1$s, gizli. Kopyalamak için iki kez dokunun ve kimliğinizi doğrulayın.</string>
+    <string name="widget_concealed_snippet">Gizlenmiş parçacık</string>
+    <string name="widget_copied">Kopyalandı</string>
+    <string name="widget_copy_failed">Kopyalanamadı</string>
+    <string name="widget_auth_reason">Gizli bir öğeyi kopyala</string>
+</resources>

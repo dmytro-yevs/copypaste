@@ -32,7 +32,7 @@ pub mod transport;
 pub use copypaste_ipc::{DeviceClass, DevicePlatform};
 #[cfg(target_os = "android")]
 pub use device_profile::AndroidHardwareProfile;
-pub use device_profile::{AuthenticatedDeviceProfile, DeviceProfile};
+pub use device_profile::{AuthenticatedDeviceProfile, DeviceProfile, ORGANIZATION_KINDS};
 pub use node::{
     AuthenticatedReachability, Node, NodeError, PairingInvite, PairingPeer, PairingPhase,
     PairingRole, PairingStatus, ProbeState, PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,

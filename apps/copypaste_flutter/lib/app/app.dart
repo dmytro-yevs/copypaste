@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import '../features/modules/controller/module_prompt_controller.dart';
 import '../features/modules/controller/modules_controller.dart';
+import '../features/modules/view/module_prompt_presenter.dart';
 
 import '../features/transfers/file_operations_view.dart';
 import '../features/notifications/notifications_controller.dart';
@@ -10,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../features/devices/devices.dart';
+import '../features/paste_queue/view/paste_queue_header_action.dart';
 import '../l10n/l10n.dart';
 import 'localization/app_language.dart';
 import '../features/history/controller/history_controller.dart';
@@ -26,6 +29,7 @@ import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
 import '../platform/desktop/desktop_shortcuts.dart';
 import '../shared/state_view.dart';
+import 'app_features.dart';
 import 'navigation/navigation.dart';
 import 'shell/shell.dart';
 import 'theme/app_theme.dart';
@@ -37,11 +41,13 @@ class CopyPasteApp extends StatelessWidget {
     required this.navigation,
     this.historyController,
     this.devicesController,
+    this.features,
     this.notifications,
     this.quickPasteSettings,
     this.settingsController,
     this.launchAtLogin,
     this.modulesController,
+    this.modulePrompts,
     this.appUpdateController,
     this.desktopWindow,
     this.runtimeUnavailableMessage,
@@ -54,11 +60,13 @@ class CopyPasteApp extends StatelessWidget {
   final AppNavigationController navigation;
   final HistoryController? historyController;
   final DevicesController? devicesController;
+  final AppFeatures? features;
   final NotificationsController? notifications;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
   final LaunchAtLoginController? launchAtLogin;
   final ModulesController? modulesController;
+  final ModulePromptController? modulePrompts;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
   final String? runtimeUnavailableMessage;
@@ -97,7 +105,9 @@ class CopyPasteApp extends StatelessWidget {
       localeListResolutionCallback: AppLocalization.resolve,
       home: Builder(
         builder: (context) {
-          AppStrings.useLocale(Localizations.localeOf(context));
+          final locale = Localizations.localeOf(context);
+          AppStrings.useLocale(locale);
+          modulesController?.useLocale(locale.toLanguageTag());
           final theme = Theme.of(context);
           final overlay = theme.brightness == Brightness.dark
               ? SystemUiOverlayStyle.light
@@ -150,6 +160,17 @@ class CopyPasteApp extends StatelessWidget {
                 ],
               ],
               headerEnd: [
+                if (features case final features?)
+                  PasteQueueHeaderAction(
+                    key: features.pasteQueueAction,
+                    controller: features.pasteQueue,
+                    shortcuts: features.pasteQueueShortcuts,
+                    onOpenSettings: () => features.openSettings(
+                      features.pasteQueueSettingsSection,
+                    ),
+                    onDrawerVisibilityChanged:
+                        navigation.handleDrawerVisibilityChanged,
+                  ),
                 if (historyController?.transfers.fileOperations
                     case final transfers?)
                   FileOperationsHeaderAction(
@@ -222,6 +243,7 @@ class CopyPasteApp extends StatelessWidget {
                         appUpdate: appUpdateController,
                         modules: modulesController,
                         onOpenAndroidCaptureSetup: onOpenAndroidCaptureSetup,
+                        featureSections: features?.settingsSections ?? const [],
                       ),
               },
             );
@@ -264,20 +286,23 @@ class CopyPasteApp extends StatelessWidget {
             );
           }
 
-          return AnnotatedRegion<SystemUiOverlayStyle>(
-            value: overlay.copyWith(
-              statusBarColor: Colors.transparent,
-              systemNavigationBarColor: theme.colorScheme.background,
-            ),
-            child: ColoredBox(
-              color: theme.colorScheme.background,
-              child: desktopWindow == null
-                  ? buildContent(false)
-                  : ValueListenableBuilder<bool>(
-                      valueListenable: desktopWindow!.isUnifiedTitleBarReady,
-                      builder: (context, windowReady, child) =>
-                          buildContent(windowReady),
-                    ),
+          return ModulePromptPresenter(
+            controller: modulePrompts,
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: overlay.copyWith(
+                statusBarColor: Colors.transparent,
+                systemNavigationBarColor: theme.colorScheme.background,
+              ),
+              child: ColoredBox(
+                color: theme.colorScheme.background,
+                child: desktopWindow == null
+                    ? buildContent(false)
+                    : ValueListenableBuilder<bool>(
+                        valueListenable: desktopWindow!.isUnifiedTitleBarReady,
+                        builder: (context, windowReady, child) =>
+                            buildContent(windowReady),
+                      ),
+              ),
             ),
           );
         },
