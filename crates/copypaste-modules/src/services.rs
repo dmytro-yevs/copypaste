@@ -3,10 +3,10 @@
 //! host serves exactly what it implements. Capability checks, request limits,
 //! state, prompts and endpoints are handled before these methods are called.
 use copypaste_module_sdk::{
-    native::to_exact_vec, ClipboardSource, DeviceName, HistoryContentKind, HistoryFacets,
-    HistoryItem, HistoryPage, HistoryScope, HostError, HostErrorCode, ModuleHostRequest,
-    ModuleProvenance, ModuleRecord, RecordPage, RenderedSnippet, SavedRecord, Snippet,
-    SnippetSummary,
+    native::to_exact_vec, ClipboardSource, ClipboardWritten, DeviceName, HistoryContentKind,
+    HistoryFacets, HistoryItem, HistoryPage, HistoryScope, HostError, HostErrorCode,
+    ModuleHostRequest, ModuleProvenance, ModuleRecord, RecordPage, RenderedSnippet, SavedRecord,
+    Snippet, SnippetSummary,
 };
 use std::collections::BTreeMap;
 
@@ -101,7 +101,7 @@ pub trait ModuleHostServices: Send + Sync {
         &self,
         _source: ClipboardSource,
         _provenance: ModuleProvenance,
-    ) -> Result<(), HostError> {
+    ) -> Result<ClipboardWritten, HostError> {
         unsupported()
     }
     fn record_list(
@@ -126,11 +126,6 @@ pub trait ModuleHostServices: Send + Sync {
     }
     fn record_delete(&self, _module_id: &str, _key: &str) -> Result<(), HostError> {
         unsupported()
-    }
-    /// The module was removed; drop what the host keeps for it on this device
-    /// (its synced records). An error leaves the removal as cleanup debt.
-    fn module_removed(&self, _module_id: &str) -> Result<(), HostError> {
-        Ok(())
     }
 }
 

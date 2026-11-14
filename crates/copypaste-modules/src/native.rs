@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, Mutex, OnceLock, RwLock,
     },
 };
 
@@ -32,6 +32,8 @@ pub(crate) struct ModuleInstance {
     accepting: Arc<AtomicBool>,
     lifetime: Arc<crate::host_lifetime::HostLifetime>,
     endpoints: Arc<Endpoints>,
+    /// The preference values of the latest call, for the `context` request.
+    preferences: Arc<RwLock<BTreeMap<String, serde_json::Value>>>,
     module: Mutex<Option<NativeModule>>,
 }
 
@@ -54,8 +56,16 @@ impl ModuleInstance {
             accepting: Arc::new(AtomicBool::new(true)),
             lifetime: Arc::new(crate::host_lifetime::HostLifetime::default()),
             endpoints: Arc::default(),
+            preferences: Arc::default(),
             module: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn set_preferences(&self, values: BTreeMap<String, serde_json::Value>) {
+        *self
+            .preferences
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = values;
     }
 
     pub(crate) fn endpoints(&self) -> &Endpoints {
@@ -70,6 +80,7 @@ impl ModuleInstance {
         if !self.accepting.load(Ordering::Acquire) {
             return Err(ModuleError::Disabled);
         }
+        self.set_preferences(spec.preferences.clone());
         if module.is_none() {
             let manifest = spec.verifier.installed(spec.package_dir, true)?;
             std::fs::create_dir_all(spec.data_dir)?;
@@ -98,6 +109,7 @@ impl ModuleInstance {
                     accepting: Arc::clone(&self.accepting),
                     lifetime: Arc::clone(&self.lifetime),
                     endpoints: Arc::clone(&self.endpoints),
+                    preferences: Arc::clone(&self.preferences),
                 })
             });
             *module = Some(NativeModule::load(
@@ -177,6 +189,14 @@ impl ModuleInstance {
             }
         }
         module.take();
+    }
+}
+
+/// Whatever drops the last lease, teardown dismisses the module's prompts
+/// first: destroying the module joins workers that may wait on one.
+impl Drop for ModuleInstance {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

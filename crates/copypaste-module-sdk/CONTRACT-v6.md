@@ -95,16 +95,16 @@ until the user confirms again. Every host request is checked against
 
 | operation | capabilities | reply |
 |---|---|---|
-| `context` | — | `ModuleHostContext { locale }` |
+| `context` | — | `ModuleHostContext { locale, preferences }` |
 | `history_query` | history_read | `HistoryPage` |
 | `history_get` | history_read | `HistoryItem` (`not_found` for hidden and unknown ids alike) |
 | `history_facets` | history_read | `HistoryFacets` within the scope |
 | `device_names` | history_read | `Vec<DeviceName>` |
-| `snippet_search` / `snippet_get` / `snippet_render` | snippets | `Vec<SnippetSummary>` / `Snippet` / `RenderedSnippet` |
+| `snippet_search` / `snippet_get` / `snippet_render` | snippets | `Vec<SnippetSummary>` / `Snippet` / `RenderedSnippet` (concealed snippets are `not_found`) |
 | `snippet_save` | snippets + library_write | `SavedRecord` |
 | `set_pinned` | history_read + library_write | `null` |
-| `clipboard_write` (text) | clipboard_write | `null` |
-| `clipboard_write` (item) | clipboard_write + history_read | `null` |
+| `clipboard_write` (text) | clipboard_write | `ClipboardWritten { item_id }` |
+| `clipboard_write` (item) | clipboard_write + history_read | `ClipboardWritten { item_id }` |
 | `record_list` / `record_get` | synced_records | `RecordPage` / `Option<ModuleRecord>` |
 | `record_put` / `record_delete` | synced_records | `null` |
 | `read_state` / `write_state` / `clear_state` | local_state | `{key: value \| null}` / `null` / `null` |
@@ -126,7 +126,20 @@ never receive secret substrings. The scope filters
 `source_app` and `device` take ids from `history_facets`.
 
 `clipboard_write` records the provenance `ModuleProvenance { module_id, label }`.
-The host supplies `module_id`; `label` is at most `MAX_LABEL_CHARS`.
+The host supplies `module_id`; `label` is at most `MAX_LABEL_CHARS`. Clients
+see it as the clip provenance kind `module` with `module_id` and `label`. The
+reply names the history item now on the clipboard; the restore token of the
+write stays with the app's undo.
+
+`snippet_render` never reads the clipboard: no capability grants a module
+clipboard content. A snippet with clipboard placeholders, a required value
+left empty, or a `snippet_save` abbreviation already in use is `invalid`,
+with a message the module can show.
+
+`context` carries `preferences`, the module's current values with synced
+values read from their record, so endpoint calls see changes made in the app
+or on another device without a command in between. It is omitted for
+modules without preferences.
 
 Common error codes: `unsupported`, `denied`, `invalid` (also produced
 client-side by `ModuleHostRequest::validate`), `not_found`, `busy`, and
@@ -149,7 +162,10 @@ client-side by `ModuleHostRequest::validate`), `not_found`, `busy`, and
   deletes its records on this device only.
 - Synced preference values (`synced: true`) are stored by the host as the
   reserved record `host.preferences`, a JSON object of field values. Local
-  preference values stay in the registry.
+  preference values stay in the registry, which also keeps the synced ones
+  as this device's fallback. `SetPreferences` writes the record, `List`,
+  invocations and `context` read it, and values of fields an older version
+  does not declare are kept. Reserved records are never listed to modules.
 
 ## Local encrypted state
 
@@ -195,7 +211,9 @@ module's own frame protocol. Android has no IPC endpoint and returns
 optional destructive), timeout_secs (1–300) }` and blocks the calling thread
 until the user answers or the prompt expires. It returns
 `PromptAnswer { choice: Option<id> }`, where `None` means dismissed, expired,
-or module disabled. Prompts block the instance when called from
+or module disabled. Disabling, removing, updating or unloading a module
+dismisses its pending prompts before the instance is destroyed. Prompts
+block the instance when called from
 `invoke`/`deliver`, so modules serving several connections call `prompt` from
 a worker thread. A module may have at most `MAX_PENDING_PROMPTS` pending
 prompts; more return `busy`. The UI lists pending prompts with
@@ -231,7 +249,8 @@ and the existing drawer contract, with actions in a fixed footer.
 `…/<field>/options/<choice>/title`. Unknown keys and over-long or blank titles
 are rejected. `ModuleManifest::localized(locale)` resolves the exact tag, then
 shorter prefixes, then the English fields. The app reports its locale with
-`ModuleOperation::SetLocale { locale }` (privileged). The host localizes
+`ModuleOperation::SetLocale { locale }` (privileged); the host keeps it across
+restarts. The host localizes
 `InstalledModule` summaries and returns the locale through `context`, so
 modules can localize their own runtime strings (views, prompts, frames).
 
@@ -244,5 +263,7 @@ everything except `List`, `Invoke` and `Connect`; `Method::privileged()` in
 commands to callers that are not the app; `ModuleHost::request` takes the
 caller (`ModuleCaller`). The application services behind history, snippets,
 pins, clipboard writes and records are the `ModuleHostServices` trait in
-`copypaste-modules`; until a host implements a method it answers
-`unsupported`. `local_state` uses the same store as the sync provider state.
+`copypaste-modules`, served by the runtime in the desktop daemon and the
+Android in-process runtime (`Runtime::attach_module_services`); a method a
+host does not implement answers `unsupported`. `local_state` uses the same
+store as the sync provider state, and removing a module clears both.

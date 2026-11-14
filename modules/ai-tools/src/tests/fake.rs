@@ -2,10 +2,10 @@
 //! CopyPaste behind the `HostClient` boundary.
 use crate::host::Host;
 use copypaste_module_sdk::{
-    ClipboardSource, DeviceName, HistoryContent, HistoryContentKind, HistoryEntry, HistoryFacet,
-    HistoryFacets, HistoryItem, HistoryPage, HistoryScope, HostError, HostErrorCode,
-    ModuleHostRequest, ModuleRecord, PromptAnswer, PromptRequest, RecordPage, RenderedSnippet,
-    SavedRecord, Snippet, SnippetSummary, HISTORY_TEXT_CHUNK_CHARS,
+    ClipboardSource, ClipboardWritten, DeviceName, HistoryContent, HistoryContentKind,
+    HistoryEntry, HistoryFacet, HistoryFacets, HistoryItem, HistoryPage, HistoryScope, HostError,
+    HostErrorCode, ModuleHostRequest, ModuleRecord, PromptAnswer, PromptRequest, RecordPage,
+    RenderedSnippet, SavedRecord, Snippet, SnippetSummary, HISTORY_TEXT_CHUNK_CHARS,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
@@ -279,11 +279,17 @@ impl Host for Fake {
                 reply(())
             }
             ModuleHostRequest::ClipboardWrite { source, label } => {
-                if let ClipboardSource::Item { scope, id } = source {
-                    state.find(scope, id)?;
-                }
+                let item_id = match source {
+                    ClipboardSource::Item { scope, id } => {
+                        state.find(scope, id)?;
+                        id.clone()
+                    }
+                    ClipboardSource::Text { .. } => "written".to_owned(),
+                };
                 state.writes.push((source.clone(), label.clone()));
-                reply(())
+                reply(ClipboardWritten {
+                    item_id: Some(item_id),
+                })
             }
             ModuleHostRequest::SnippetSearch { query, limit } => reply(
                 state

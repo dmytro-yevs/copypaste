@@ -117,6 +117,17 @@ pub(super) struct Expansion<'a> {
     pub(super) locale: Option<&'a str>,
 }
 
+/// A snippet expanded without the clipboard, for a module.
+pub(crate) struct IsolatedRendering {
+    pub(crate) text: String,
+    /// Required fields `values` left empty.
+    pub(crate) missing_fields: Vec<String>,
+    /// A clipboard placeholder was left empty.
+    pub(crate) reads_clipboard: bool,
+    /// A concealed snippet or a secret clip went into the text.
+    pub(crate) secret: bool,
+}
+
 pub(super) struct Rendering {
     pub(super) text: String,
     pub(super) cursor_graphemes_from_end: Option<u32>,
@@ -224,13 +235,25 @@ impl Runtime {
         &self,
         detail: &SnippetDetail,
         values: &BTreeMap<String, String>,
-        clipboard: Option<String>,
-    ) -> Result<(String, Vec<String>, bool), RenderError> {
-        let clipboard = ClipboardText::Only(clipboard);
+    ) -> Result<IsolatedRendering, RenderError> {
+        let clipboard = ClipboardText::Only(None);
         let rendering = Expansion::of(detail, values, &clipboard, None).render(self)?;
-        let secret = rendering.secret;
-        let rendered = wire_rendered(rendering);
-        Ok((rendered.text, rendered.missing_required, secret))
+        Ok(IsolatedRendering {
+            reads_clipboard: rendering
+                .warnings
+                .iter()
+                .any(|issue| matches!(issue, Issue::EmptyClipboard { .. })),
+            missing_fields: rendering
+                .missing_required
+                .iter()
+                .filter_map(|required| match required {
+                    Required::Field { name } => Some(name.clone()),
+                    Required::Clipboard { .. } => None,
+                })
+                .collect(),
+            secret: rendering.secret,
+            text: rendering.text,
+        })
     }
 }
 

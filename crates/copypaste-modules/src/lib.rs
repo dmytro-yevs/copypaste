@@ -13,6 +13,7 @@ mod manager;
 #[allow(unsafe_code)]
 mod native;
 mod package;
+mod preferences;
 mod prompts;
 mod resources;
 mod semantic_search;

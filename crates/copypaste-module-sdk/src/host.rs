@@ -49,6 +49,8 @@ pub const MAX_RECORDS: usize = 1024;
 pub const MAX_RECORD_PAGE: u32 = 256;
 /// Record keys with this prefix belong to the host (synced preferences).
 pub const RESERVED_RECORD_PREFIX: &str = "host.";
+/// The reserved record holding a module's `synced: true` preference values.
+pub const HOST_PREFERENCES_RECORD: &str = "host.preferences";
 pub const MAX_PROMPT_CHOICES: usize = 4;
 pub const MAX_PROMPT_TIMEOUT_SECS: u32 = 300;
 /// Pending prompts per module; more are refused as busy.
@@ -157,7 +159,7 @@ pub enum ModuleHostRequest {
         id: String,
         pinned: bool,
     },
-    /// → `null`. Recorded with `ModuleProvenance { module_id, label }`.
+    /// → `ClipboardWritten`. Recorded with `ModuleProvenance { module_id, label }`.
     ClipboardWrite {
         source: ClipboardSource,
         label: String,
@@ -371,10 +373,21 @@ impl std::fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModuleHostContext {
     /// The application UI locale, e.g. `uk` or `en-US`.
     pub locale: String,
+    /// The module's current preference values, synced ones included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+/// The `clipboard_write` reply.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClipboardWritten {
+    /// The history item now on the clipboard; `None` when written text was
+    /// not recorded in history.
+    pub item_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
