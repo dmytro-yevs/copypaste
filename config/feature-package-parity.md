@@ -55,7 +55,7 @@ Every row below still needs native verification on macOS, Windows and Android (p
 |---|---|---|---|
 | Transform a history item | History and Quick Paste: Mod+T palette; row and inspector "Transform…" | Same, with Ctrl+T | Inspector drawer "Transform…"; IME "Transform…" item action and Transforms tab |
 | Transform the clipboard or a selection | Desktop selection hotkey and Services: X (decision T2) | X | IME Transforms tab (Selection / Clipboard / History / Snippet sources); `PROCESS_TEXT` selection menu; Quick Settings tile through the transform sheet |
-| Default paste pipeline | Quick Paste "Pasting with" chip; bypass with Mod+Shift+Enter | Same | IME history inserts, with an "Insert original" action |
+| Default paste pipeline | Quick Paste "Pasting with" chip; bypass with Mod+Shift+Enter. A per-app default follows the frontmost app's bundle ID | Same; the target's lowercase image name | IME history inserts, with an "Insert original" action; the editor's package name |
 | Settings → Transforms | Yes | Yes | Yes |
 
 ### 1.4 Content Rules
@@ -241,6 +241,7 @@ Known limit:
 - Linux has no device-authentication adapter. `availability()` reports `unsupported`.
 - Concealed snippets, the Quick Paste secret unlock and the tray copy of a secret fall back to an in-app confirmation.
 - Quick Paste on Linux does not explain that password fields cannot be detected there (quick-access D3). Masked mode is never entered on Linux.
+- Quick Paste applies a per-app default paste pipeline only on X11, where the target window's class names its desktop entry. Wayland companions do not report the target app, so the global default applies there.
 - Peer identity on Linux is path-based (section 4.2).
 - Linux is not in the parity triad.
 - On Windows builds without the window interop (before 22000), Windows Hello falls back to the unparented `UserConsentVerifier` prompt.
@@ -290,7 +291,7 @@ Integration-level behavior to measure with those entries:
 
 - **Quick Paste (I1):**
   - No polling.
-  - Each open adds one `secureFieldFocused` query and one transform-preferences read, plus a pipelines read when a default pipeline is set.
+  - Each open adds one `secureFieldFocused` query and one default-pipeline read for the target app, plus a pipelines read when a default pipeline applies.
   - One 60 s one-shot timer runs only while secrets are unlocked.
   - The queue controller is created on first use.
   - Snippet rows are bounded (5 in History, 50 in the Snippets tab) and are dropped, with `SnippetOp::Release`, when the presentation ends.
@@ -358,7 +359,7 @@ Still to measure:
    - Android app and widget "Copy latest from other device" (decision A3).
 2. A native hook that hides the main window and reactivates the previous app, so the main-window queue drawer can paste instead of only copying (I3).
 3. Quick Paste masks only authenticated secrets (`clip.secret`). History also masks clips that a rule marked secret (`HistoryClip.masked`). Aligning the two is a possible follow-up.
-4. The per-app default paste pipeline is not applied in Quick Paste, because the host does not report the target app.
+4. Report the target app from the Wayland companions so Quick Paste applies per-app default paste pipelines there (section 4.3).
 5. Decide whether `SnippetOp::SetPreference` (`snippets.require_auth`) should be a privileged operation (section 4.2).
 6. Add the AGENTS.md line in section 4.5.
 7. Record native evidence for every N row, then the resource measurements in section 5, before claiming any qualification.

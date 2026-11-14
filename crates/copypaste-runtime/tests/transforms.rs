@@ -484,6 +484,8 @@ fn defaults_resolve_per_app_and_a_failing_default_leaves_the_clipboard_for_the_o
         Some(global.clone())
     );
     assert_eq!(device.default_for("macos", "com.example.raw"), None);
+    // An unknown target gets the global default.
+    assert_eq!(device.default_for("macos", ""), Some(global.clone()));
 
     let decode = device
         .save(None, "Decode", vec![step("encode.base64_decode")])

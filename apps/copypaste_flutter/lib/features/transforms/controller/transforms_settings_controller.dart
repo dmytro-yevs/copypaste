@@ -22,15 +22,6 @@ class TransformsSettingsController extends ChangeNotifier {
   /// The runtime platform name per-app defaults are keyed by on this device.
   final String platform;
 
-  /// The platform name of [target] in per-app default keys.
-  static String platformName(TargetPlatform target) => switch (target) {
-    TargetPlatform.macOS => 'macos',
-    TargetPlatform.windows => 'windows',
-    TargetPlatform.android => 'android',
-    TargetPlatform.iOS => 'ios',
-    TargetPlatform.fuchsia => 'fuchsia',
-    TargetPlatform.linux => 'linux',
-  };
   final TransformRepository _repository;
   final String? _locale;
 

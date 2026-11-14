@@ -592,6 +592,7 @@ class RunnerTests: XCTestCase {
 
 private final class FakeQuickPasteTarget: QuickPasteApplicationTarget {
   let processIdentifier: pid_t
+  var bundleIdentifier: String?
   var isTerminated = false
   var activationSucceeds = true
   var activations = 0

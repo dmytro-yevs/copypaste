@@ -8,7 +8,7 @@ import '../frb_generated.dart';
 import 'clips.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `counts`, `info`, `pipeline`, `preferences_response`, `preferences`, `preview`, `source`, `step_view`, `step`, `transform_op`
+// These functions are ignored because they are not marked as `pub`: `counts`, `desktop_entry_id`, `info`, `pipeline`, `preferences_response`, `preferences`, `preview`, `source`, `step_view`, `step`, `transform_op`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// The catalogue with names and descriptions in `locale`.
@@ -86,7 +86,9 @@ Future<TransformPreferencesView> setTransformSetMember({
   present: present,
 );
 
-/// The default paste pipeline for one application, if any.
+/// The default paste pipeline for one application, if any; an empty
+/// identifier answers the global default. On Linux an X11 window class is
+/// resolved to the desktop entry ID that per-app defaults are keyed by.
 Future<String?> defaultTransformPipelineFor({
   required String platform,
   required String identifier,
