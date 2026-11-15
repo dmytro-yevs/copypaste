@@ -4,6 +4,8 @@
 #include <X11/Xlib.h>
 #include <gdk/gdkx.h>
 
+#include <initializer_list>
+
 namespace {
 
 constexpr char kChannel[] = "com.copypaste.app/window_material";
