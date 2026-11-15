@@ -1,6 +1,4 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:shadcn_flutter/shadcn_flutter.dart' show Color;
 
 /// The accent color the operating system shows.
 ///

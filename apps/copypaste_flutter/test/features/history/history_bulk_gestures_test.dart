@@ -276,10 +276,18 @@ void main() {
           expect(image.top, greaterThanOrEqualTo(row.top));
           expect(image.bottom, lessThanOrEqualTo(row.bottom));
           final actions = [
-            for (final id in ['close', 'pin', 'unpin', 'delete'])
+            for (final id in ['share', 'pin', 'unpin', 'delete'])
               tester.getRect(find.byKey(ValueKey('history-bulk-$id'))),
           ];
-          expect(actions.map((rect) => rect.size).toSet(), hasLength(1));
+          // Close sits with the count, apart from the right-aligned actions.
+          final close = tester.getRect(
+            find.byKey(const ValueKey('history-bulk-close')),
+          );
+          expect(
+            [close, ...actions].map((rect) => rect.size).toSet(),
+            hasLength(1),
+          );
+          expect(close.left, closeTo(AppSpacing.lg, 0.01));
           for (final top in actions.map((rect) => rect.top).toSet()) {
             final rights = actions
                 .where((rect) => rect.top == top)

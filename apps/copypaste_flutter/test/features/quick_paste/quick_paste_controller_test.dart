@@ -2522,6 +2522,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('history-detail-copy')));
       await tester.pumpAndSettle();
       expect(repository.copied, ['recent']);
+      // The copy toast covers the inspector footer until it closes.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('history-copy-options')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -2530,6 +2533,8 @@ void main() {
       expect(repository.plainCopied, ['recent']);
       expect(host.closeCalls, 0);
       expect(host.pasteCalls, 0);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
 
       controller.focus(controller.history.selection.selectedClip!);
       final pin = find.byKey(const ValueKey('history-pin-recent'));
@@ -2609,6 +2614,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.saved, [('download', '/tmp/report.pdf')]);
     expect(downloader.presented, ['/tmp/report.pdf']);
+    // The saved toast covers the inspector footer until it closes.
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
     repository.saveGate = Completer<void>();
     await tester.tap(download);
     await tester.pump();

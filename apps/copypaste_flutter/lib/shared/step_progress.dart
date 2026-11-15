@@ -166,8 +166,8 @@ class _StepMarker extends StatelessWidget {
       ),
       _StepState.upcoming => null,
     };
-    return AnimatedContainer(
-      duration: AppMotion.resolve(context, AppMotion.standard),
+    return AppMotion.decoratedBox(
+      context,
       width: AppStepSize.marker,
       height: AppStepSize.marker,
       alignment: Alignment.center,
@@ -189,8 +189,8 @@ class _StepConnector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return AnimatedContainer(
-      duration: AppMotion.resolve(context, AppMotion.standard),
+    return AppMotion.decoratedBox(
+      context,
       height: AppStepSize.connector,
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
       decoration: BoxDecoration(

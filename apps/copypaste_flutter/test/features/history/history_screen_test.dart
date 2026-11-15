@@ -774,6 +774,9 @@ void main() {
         // A failed pin is a toast, not a block in the list.
         expect(find.text('Action failed'), findsOneWidget);
         expect(find.text('History needs attention'), findsNothing);
+        // The toast floats over the list until it expires.
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
           find.text('Clearance clip 29'),
           -200,
@@ -789,7 +792,6 @@ void main() {
         expect(find.text('Clearance clip 29').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump(const Duration(seconds: 10));
       }
     },
     variant: TargetPlatformVariant({
@@ -1445,7 +1447,7 @@ void main() {
   });
 
   testWidgets(
-    'keeps desktop metadata below actions and outside content scrolling',
+    'keeps desktop metadata above actions and outside content scrolling',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1400, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1509,9 +1511,10 @@ void main() {
         find.descendant(of: scrollContent, matching: metadata),
         findsNothing,
       );
+      // The actions close the card below the metadata.
       expect(
-        tester.getBottomLeft(actions).dy,
-        lessThan(tester.getTopLeft(metadata).dy),
+        tester.getBottomLeft(metadata).dy,
+        lessThan(tester.getTopLeft(actions).dy),
       );
       final table = tester.widget<Table>(metadata);
       final tableContext = tester.element(metadata);

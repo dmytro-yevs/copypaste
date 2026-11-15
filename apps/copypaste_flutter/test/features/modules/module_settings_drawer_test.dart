@@ -67,15 +67,14 @@ void main() {
       await tester.tap(find.widgetWithText(Button, 'Save'));
       await tester.pumpAndSettle();
       expect(repository.lastPreferences, {'uppercase': true});
+      // A successful save closes the drawer.
       expect(
         find.byKey(
           const ValueKey('module-settings-drawer-copypaste.text-tools'),
         ),
-        findsOneWidget,
+        findsNothing,
       );
 
-      await tester.tap(find.widgetWithText(Button, 'Done'));
-      await tester.pumpAndSettle();
       await tester.tap(settings);
       await tester.pumpAndSettle();
       // The in-memory repository retains its original values; reopening must
@@ -194,40 +193,45 @@ void main() {
           const ValueKey('module-settings-close-preview'),
         );
         final headerPosition = tester.getTopLeft(close);
-        final done = find.byKey(const ValueKey('module-settings-done-preview'));
-        expect(tester.getBottomRight(done).dy, lessThan(height));
+        // The footer holds one action: Save with preferences, Done without.
+        final action = find.byKey(
+          ValueKey(
+            many
+                ? 'module-preferences-save-preview'
+                : 'module-settings-done-preview',
+          ),
+        );
+        expect(tester.getBottomRight(action).dy, lessThan(height));
         expect(
-          tester.getCenter(find.text('Done')).dx,
-          closeTo(tester.getCenter(done).dx, 0.01),
+          tester.getCenter(find.text(many ? 'Save' : 'Done')).dx,
+          closeTo(tester.getCenter(action).dx, 0.01),
         );
         if (many) {
-          final save = find.widgetWithText(Button, 'Save');
-          final savePosition = tester.getRect(save);
-          final donePosition = tester.getRect(done);
-          expect(save.hitTestable(), findsOneWidget);
+          final actionPosition = tester.getRect(action);
+          expect(action.hitTestable(), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('module-settings-done-preview')),
+            findsNothing,
+          );
           expect(find.text('Uppercase'), findsOneWidget);
           expect(find.widgetWithText(Button, 'Preferences'), findsNothing);
           expect(find.byType(AlertDialog), findsNothing);
-          await tester.ensureVisible(find.widgetWithText(Button, 'Save'));
-          await tester.pumpAndSettle();
-          expect(tester.getBottomRight(done).dy, lessThan(height));
           await tester.ensureVisible(find.text('Module command 7'));
           await tester.pumpAndSettle();
-          expect(tester.getRect(save), savePosition);
-          expect(tester.getRect(done), donePosition);
+          expect(tester.getRect(action), actionPosition);
           expect(tester.getTopLeft(close), headerPosition);
-          expect(tester.getBottomRight(done).dy, lessThan(height));
+          expect(tester.getBottomRight(action).dy, lessThan(height));
           final command = find.widgetWithText(Button, 'Module command 7');
           final icon = find.descendant(
             of: command,
-            matching: find.byIcon(LucideIcons.play),
+            matching: find.byIcon(LucideIcons.chevronRight),
           );
           expect(
             tester.getCenter(icon).dy,
             closeTo(tester.getCenter(find.text('Module command 7')).dy, 0.01),
           );
         }
-        await tester.tap(many ? close : done);
+        await tester.tap(many ? close : action);
         await tester.pumpAndSettle();
         expect(
           find.byKey(const ValueKey('module-settings-drawer-preview')),

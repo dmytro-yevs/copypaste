@@ -385,6 +385,10 @@ void main() {
       await tester.pump(AppMotion.emphasized);
       expect(find.text('Replace local history?'), findsOneWidget);
       expect(find.text('Action failed'), findsOneWidget);
+      // The failure toast closes on its own before the retry.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Replace local history?'), findsOneWidget);
 
       repository.failRestore = false;
       repository.pending = Completer<void>();
@@ -1390,7 +1394,7 @@ void main() {
       await tester.pump();
       // No total yet: the label stays and the control reads as busy.
       expect(button('Export').onPressed, isNull);
-      expect(button('Create backup').onPressed, isNull);
+      expect(button('Backup').onPressed, isNull);
       final indicator = find.byType(FileOperationsButtonProgress);
       expect(
         tester.getSemantics(indicator),
@@ -1445,7 +1449,7 @@ void main() {
         ),
       );
       await tester.pump();
-      for (final label in ['Export', 'Create backup']) {
+      for (final label in ['Export', 'Backup']) {
         final button = find.widgetWithText(Button, label);
         final clickable = tester.widget<Clickable>(
           find.descendant(of: button, matching: find.byType(Clickable)).first,
@@ -1463,7 +1467,7 @@ void main() {
       expect(repository.exportCalls, 1);
       // Skipped non-text clips are expected and not mentioned.
       expect(find.text('Exported 4 text clips'), findsOneWidget);
-      await tester.tap(find.text('Create backup'));
+      await tester.tap(find.text('Backup'));
       await tester.pump();
       expect(repository.backupCalls, 1);
       expect(find.text('Encrypted backup saved · 2.0 KiB'), findsOneWidget);

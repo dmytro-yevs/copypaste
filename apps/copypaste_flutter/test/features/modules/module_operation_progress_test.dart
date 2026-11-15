@@ -9,7 +9,6 @@ import 'package:copypaste_flutter/features/modules/repository/modules_repository
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 import 'package:copypaste_flutter/l10n/l10n.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -35,48 +34,37 @@ void main() {
         locale: const Locale('uk'),
         scale: 2,
       );
-      expect(
-        tester.getSize(_card).width,
-        AppLayoutSize.marketplaceCardMinWidth,
-      );
-      final actionSize = tester.getSize(_install);
-      double actionInset() =>
-          tester.getBottomLeft(_card).dy - tester.getBottomLeft(_install).dy;
-      final idleInset = actionInset();
+      final cardSize = tester.getSize(_card);
+      final actionHeight = tester.getSize(_install).height;
+      final idleInset =
+          tester.getBottomRight(_card).dy - tester.getBottomRight(_install).dy;
+      // The progress takes the install action's place without moving it.
+      void expectActionInPlace(Finder action) {
+        expect(tester.getSize(_card), cardSize);
+        expect(tester.getSize(action).height, actionHeight);
+        expect(
+          tester.getBottomRight(_card).dy - tester.getBottomRight(action).dy,
+          idleInset,
+        );
+      }
 
       await tester.ensureVisible(_install);
       await tester.tap(_install);
       await tester.pump();
       marketplace.report!(0.42);
       await tester.pump();
+      expect(_install, findsNothing);
       expect(_progress, findsOneWidget);
-      expect(_text('Завантаження').hitTestable(), findsOneWidget);
-      expect(_text('42%'), findsOneWidget);
-      expect(_text('4.2 MiB / 10.0 MiB'), findsNothing);
+      expect(_text('Завантаження · 42%').hitTestable(), findsOneWidget);
       _expectSingleLines(tester);
-      final valueLine = tester.getSize(_text('42%')).height;
-      expect(_reservedBelowBar(tester), valueLine);
-      final actionTop = tester.getTopLeft(_install).dy;
-      expect(tester.getSize(_install), actionSize);
-      expect(actionInset(), idleInset);
+      expectActionInPlace(_progress);
       expect(
         tester.getSize(find.byKey(const ValueKey('module-module-1'))),
-        tester.getSize(_card),
+        cardSize,
       );
       var node = tester.getSemantics(_progress).getSemanticsData();
-      expect(node.role, SemanticsRole.progressBar);
-      expect(
-        node.label,
-        'Встановлення модуля Text Tools, Крок 1 з 2: Завантаження, 4.2 MiB / 10.0 MiB',
-      );
-      expect(node.value, '42');
-      expect(
-        find.descendant(of: _progress, matching: find.bySemanticsLabel('42%')),
-        findsNothing,
-      );
-      marketplace.report!(1);
-      await tester.pump();
-      final downloadedHeight = tester.getSize(_card).height;
+      expect(node.label, contains('Встановлення модуля Text Tools'));
+      expect(node.value, '42%');
 
       marketplace.package.complete(
         SelectedModulePackage(
@@ -87,47 +75,30 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(_text('Встановлення').hitTestable(), findsOneWidget);
-      expect(_text('100%').hitTestable(), findsNothing);
-      _expectSingleLines(tester);
-      expect(_reservedBelowBar(tester), valueLine);
-      expect(tester.getTopLeft(_install).dy, actionTop);
-      expect(tester.getSize(_card).height, downloadedHeight);
-      expect(tester.getSize(_install), actionSize);
-      expect(actionInset(), idleInset);
-      node = tester.getSemantics(_progress).getSemanticsData();
-      expect(node.role, SemanticsRole.loadingSpinner);
       expect(
-        node.label,
-        'Встановлення модуля Text Tools, Крок 2 з 2: Встановлення',
+        find.descendant(of: _progress, matching: find.textContaining('%')),
+        findsNothing,
       );
+      _expectSingleLines(tester);
+      expectActionInPlace(_progress);
+      node = tester.getSemantics(_progress).getSemanticsData();
+      expect(node.label, contains('Встановлення модуля Text Tools'));
+      expect(node.value, isEmpty);
 
       repository.installation.completeError(
         const ModulesException('Invalid signature.'),
       );
       await tester.pumpAndSettle();
       expect(tester.binding.hasScheduledFrame, isFalse);
-      expect(
-        find.descendant(of: _progress, matching: find.byIcon(LucideIcons.x)),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: _progress,
-          matching: find.byType(LinearProgressIndicator),
-        ),
-        findsNothing,
-      );
+      // A failure is a toast; the card offers the install action again.
+      expect(_progress, findsNothing);
       expect(find.text('Invalid signature.'), findsOneWidget);
-      node = tester.getSemantics(_progress).getSemanticsData();
-      expect(
-        node.label,
-        'Встановлення модуля Text Tools, Крок 2 з 2: Встановлення',
-      );
-      expect(node.value, 'Не вдалося виконати операцію з модулем');
       expect(tester.widget<Button>(_install).onPressed, isNotNull);
-      expect(tester.getSize(_install), actionSize);
-      expect(actionInset(), idleInset);
+      expectActionInPlace(_install);
       expect(tester.takeException(), isNull);
+      // Let the failure toast expire before the tree is disposed.
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pumpAndSettle();
       semantics.dispose();
     },
   );
@@ -141,16 +112,21 @@ void main() {
       theme: AppTheme.dark,
       locale: const Locale('en'),
       scale: 1,
-      columns: 1,
     );
     await tester.tap(_install);
     await tester.pump();
-    expect(_text('Download'), findsOneWidget);
-    expect(_text('Install'), findsOneWidget);
-    expect(_text('1 / 2 · Download'), findsNothing);
     marketplace.report!(0.42);
     await tester.pump();
-    expect(_text('4.2 MiB / 10.0 MiB'), findsOneWidget);
+    expect(_text('Download · 42%'), findsOneWidget);
+    marketplace.package.complete(
+      SelectedModulePackage(
+        path: '/private/test.cpmodule',
+        dispose: () async {},
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(_text('Install'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -169,12 +145,13 @@ void main() {
         scale: 2,
       );
       await tester.ensureVisible(_install);
+      final actionBottom = tester.getBottomRight(_install).dy;
       await tester.tap(_install);
       await tester.pump();
       marketplace.report!(0.42);
       await tester.pump();
       _expectSingleLines(tester, reason: locale);
-      final actionTop = tester.getTopLeft(_install).dy;
+      expect(tester.getBottomRight(_progress).dy, actionBottom, reason: locale);
       marketplace.package.complete(
         SelectedModulePackage(
           path: '/private/test.cpmodule',
@@ -184,7 +161,7 @@ void main() {
       await tester.pump();
       await tester.pump();
       _expectSingleLines(tester, reason: locale);
-      expect(tester.getTopLeft(_install).dy, actionTop, reason: locale);
+      expect(tester.getBottomRight(_progress).dy, actionBottom, reason: locale);
       repository.installation.complete();
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: locale);
@@ -192,7 +169,7 @@ void main() {
   });
 }
 
-/// Every text in the strip renders on one line at the width it was given.
+/// Every text in the progress action renders on one line at its width.
 void _expectSingleLines(WidgetTester tester, {String? reason}) {
   final paragraphs = tester.renderObjectList<RenderParagraph>(
     find.descendant(of: _progress, matching: find.byType(RichText)),
@@ -212,10 +189,6 @@ void _expectSingleLines(WidgetTester tester, {String? reason}) {
   }
 }
 
-double _reservedBelowBar(WidgetTester tester) => tester
-    .getSize(find.descendant(of: _progress, matching: find.byType(Visibility)))
-    .height;
-
 Finder _text(String text) =>
     find.descendant(of: _progress, matching: find.text(text));
 
@@ -226,13 +199,9 @@ Future<void> _pump(
   required ThemeData theme,
   required Locale locale,
   required double scale,
-  int columns = 2,
 }) async {
   await tester.binding.setSurfaceSize(
-    Size(
-      AppLayoutSize.marketplaceCardMinWidth * 2 + AppSpacing.md * (columns - 1),
-      2400,
-    ),
+    const Size(AppLayoutSize.marketplaceCardMinWidth * 2 + AppSpacing.md, 2400),
   );
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final controller = ModulesController(

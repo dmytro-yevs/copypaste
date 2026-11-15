@@ -147,7 +147,7 @@ void main() {
       final marketplaceSize = tester.getSize(card);
       expect(
         find.descendant(of: card, matching: find.byType(Button)),
-        findsNWidgets(2),
+        findsNWidgets(3),
       );
       expect(
         tester.widget<Button>(remove).child,
@@ -170,7 +170,7 @@ void main() {
       expect(tester.getSize(card), marketplaceSize);
       expect(
         find.descendant(of: card, matching: find.byType(Button)),
-        findsNWidgets(2),
+        findsNWidgets(3),
       );
       await tester.tap(settings);
       await tester.pumpAndSettle();
@@ -197,7 +197,7 @@ void main() {
       );
       final settingsIcon = find.descendant(
         of: drawer,
-        matching: find.byIcon(LucideIcons.settings),
+        matching: find.byIcon(LucideIcons.puzzle),
       );
       final title = find.text('OCR settings');
       final close = find.byKey(
@@ -306,58 +306,48 @@ void main() {
         expect(tester.getSize(update).height, tester.getSize(settings).height);
         expect(tester.getSize(update).height, tester.getSize(remove).height);
         expect(tester.getCenter(update).dy, tester.getCenter(settings).dy);
+        // Rows share one width; marketplace rows, whose controls match, also
+        // share one height and keep their actions on one line. An installed
+        // row's switch may keep a taller touch target.
         final ids = [testModule.id, 'module-1', 'module-2', 'module-3'];
-        final size = tester.getSize(
-          find.byKey(ValueKey('module-${ids.first}')),
-        );
+        final reference = find.byKey(const ValueKey('module-module-2'));
+        final size = tester.getSize(reference);
+        final actionInset =
+            tester.getBottomRight(reference).dy -
+            tester
+                .getBottomRight(
+                  find.byKey(const ValueKey('module-details-module-2')),
+                )
+                .dy;
         for (final id in ids) {
           final card = find.byKey(ValueKey('module-$id'));
+          final details = find.byKey(ValueKey('module-details-$id'));
+          expect(find.descendant(of: card, matching: details), findsOneWidget);
+          if (id == testModule.id) {
+            expect(tester.getSize(card).width, size.width);
+            continue;
+          }
           expect(tester.getSize(card), size);
+          expect(
+            tester.getBottomRight(card).dy - tester.getBottomRight(details).dy,
+            closeTo(actionInset, 0.01),
+          );
           if (id == 'module-1') {
             expect(find.byKey(ValueKey('module-install-$id')), findsNothing);
-            expect(
-              find.descendant(
-                of: card,
-                matching: find.text('Platforms: Android'),
-              ),
-              findsOneWidget,
-            );
             continue;
           }
           expect(
-            find.descendant(
-              of: card,
-              matching: find.text(
-                'Platforms: macOS · Windows · Android · Linux',
-              ),
-            ),
-            findsOneWidget,
-          );
-          final action = find.byKey(
-            ValueKey(
-              id == testModule.id
-                  ? 'module-settings-$id'
-                  : 'module-install-$id',
-            ),
-          );
-          expect(
-            tester.getBottomRight(card).dy - tester.getBottomRight(action).dy,
-            closeTo(
-              tester
-                      .getBottomRight(
-                        find.byKey(ValueKey('module-${ids.first}')),
-                      )
-                      .dy -
-                  tester
-                      .getBottomRight(
-                        find.byKey(ValueKey('module-settings-${ids.first}')),
-                      )
-                      .dy,
-              0.01,
-            ),
+            tester.getCenter(find.byKey(ValueKey('module-install-$id'))).dy,
+            closeTo(tester.getCenter(details).dy, 0.01),
           );
         }
-        expect(find.text('Not available for this device.'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('module-module-1')),
+            matching: find.textContaining('Not available for this device.'),
+          ),
+          findsOneWidget,
+        );
         expect(find.text('Unavailable'), findsNothing);
         expect(
           find.byKey(const ValueKey('module-install-module-1')),
@@ -571,9 +561,21 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools'), findsOneWidget);
-      expect(find.text('macOS 14 or newer'), findsOneWidget);
-      expect(find.text('Requires macOS 14 or newer.'), findsNothing);
-      expect(find.text('CopyPaste ≥1.0.6, <2.0.0'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Install'), findsNothing);
+      await tester.tap(
+        find.byKey(ValueKey('module-details-${testMarketplaceModule.id}')),
+      );
+      await tester.pumpAndSettle();
+      // Details lists every requirement; the unavailable reason repeats none.
+      expect(
+        find.text(
+          'Platforms: macOS · Windows · Android · Linux\n'
+          'CopyPaste ≥1.0.6, <2.0.0\n'
+          'macOS 14 or newer',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Requires macOS 14'), findsNothing);
       expect(find.text('Unavailable'), findsNothing);
       expect(find.text('Marketplace is unavailable'), findsNothing);
       expect(find.widgetWithText(Button, 'Install'), findsNothing);
@@ -621,12 +623,12 @@ void main() {
       final install = find.byKey(
         const ValueKey('module-install-copypaste.text-tools'),
       );
-      final card = tester.widget<Card>(
-        find.byKey(const ValueKey('module-copypaste.text-tools')),
-      );
       expect(
-        tester.getSize(install).width,
-        tester.getSize(find.byWidget(card.child)).width,
+        find.descendant(
+          of: find.byKey(const ValueKey('module-copypaste.text-tools')),
+          matching: install,
+        ),
+        findsOneWidget,
       );
       await tester.tap(find.widgetWithText(Button, 'Install'));
       await tester.pumpAndSettle();
@@ -685,10 +687,21 @@ void main() {
     await tester.tap(find.text('Installed'));
     await tester.pumpAndSettle();
     expect(find.text('Text Tools'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('module-details-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
     expect(
       find.text('Platforms: macOS · Windows · Android · Linux'),
       findsOneWidget,
     );
+    await tester.tap(find.widgetWithText(Button, 'Module settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Text Tools settings'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-close-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('module-enabled-copypaste.text-tools')),
     );
@@ -742,6 +755,12 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(repository.lastPreferences, {'uppercase': true});
+      // Saving closes the drawer; commands run from a reopened one.
+      expect(find.text('Text Tools settings'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Transform text'));
       await tester.pumpAndSettle();
       expect(
@@ -755,9 +774,13 @@ void main() {
       expect(repository.lastArguments, {'text': 'Україна'});
       expect(find.text('УКРАЇНА'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.widgetWithText(Button, 'Done').last);
-      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(Button, 'Done'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey('module-settings-close-copypaste.text-tools'),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('module-remove-copypaste.text-tools')),

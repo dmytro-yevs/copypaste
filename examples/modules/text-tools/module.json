@@ -5,7 +5,7 @@
   "title": "Text Tools",
   "description": "Trim text or convert it to uppercase.",
   "version": "1.0.0",
-  "app_versions": ">=1.0.0, <2.0.0",
+  "app_versions": ">=0.1.0, <2.0.0",
   "commands": [
     {
       "id": "transform",

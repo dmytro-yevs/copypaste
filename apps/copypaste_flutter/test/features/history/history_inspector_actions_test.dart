@@ -273,9 +273,14 @@ void main() {
 
     final plain = await threshold(_PlainRepository([image]));
     final featured = await threshold(_FeatureRepository([image]));
-    // The More capability icon joins the label budget.
+    // Capability buttons join the label budget.
     expect(featured - plain, greaterThan(AppControlSize.compact));
-    expect(find.byKey(const ValueKey('history-detail-more')), findsOneWidget);
+    expect(
+      find.byKey(
+        ValueKey('history-detail-action-${HistoryClipAction.sendTo.id}'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('keeping updates the selected clip', (tester) async {
@@ -355,9 +360,8 @@ void main() {
     await tester.tap(find.text(l10n.historySendAction));
     await _settle(tester);
     await sending;
-    expect(repository.sent, [
-      (['a'], ['tablet']),
-    ]);
+    expect(repository.sent.single.$1, ['a']);
+    expect(repository.sent.single.$2, ['tablet']);
     expect(find.text(l10n.historySentTo('Tablet')), findsOneWidget);
     await tester.pump(const Duration(seconds: 6));
   });
@@ -413,7 +417,6 @@ void main() {
       pinned: false,
     );
     final semantics = tester.ensureSemantics();
-    addTearDown(semantics.dispose);
     final share = _RecordingShare();
     final repository = _FeatureRepository([
       text('a', 'Alpha'),
@@ -423,6 +426,7 @@ void main() {
         preview: 'report.pdf',
         createdAt: now,
         pinned: false,
+        kind: HistoryClipKind.file,
         file: const HistoryFileDetails(name: 'report.pdf'),
       ),
       text('b', 'Beta'),
@@ -457,15 +461,15 @@ void main() {
     );
     files.finish('/staged/report.pdf');
     await _settle(tester);
-    expect(share.files, [
-      (['/staged/report.pdf'], 'Beta, Alpha'),
-    ]);
+    expect(share.files.single.$1, ['/staged/report.pdf']);
+    expect(share.files.single.$2, 'Beta, Alpha');
     // Where the sheet takes only the files, a toast says the text was left.
     expect(
       find.text(AppStrings.current.historyBulkShareFilesOnlyTitle),
       findsOneWidget,
     );
     await tester.pump(const Duration(seconds: 6));
+    semantics.dispose();
   });
 
   test('maps runtime annotations onto History clips', () {

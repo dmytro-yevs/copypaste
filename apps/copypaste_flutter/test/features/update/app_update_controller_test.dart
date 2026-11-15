@@ -238,14 +238,18 @@ void main() {
     'reports Linux host verification failures without claiming installation',
     () async {
       final completion = Completer<AppUpdateInstallResult>();
+      final platform = _FakeUpdatePlatform(installCompletion: completion);
       final controller = AppUpdateController(
         repository: _FakeUpdateRepository(release: _release()),
-        platform: _FakeUpdatePlatform(installCompletion: completion),
+        platform: platform,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
 
       final installation = controller.install();
+      // The host fails only after the download reaches it.
+      await Future<void>.delayed(Duration.zero);
+      expect(platform.installCalls, 1);
       completion.completeError(PlatformException(code: 'verification_failed'));
       await installation;
 

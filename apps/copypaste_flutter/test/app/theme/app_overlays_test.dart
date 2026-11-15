@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -646,6 +647,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Action failed'), findsOneWidget);
       expect(find.text('Please try again.'), findsOneWidget);
+      // The failure toast can cover the bottom-placed Android actions.
+      await tester.pump(AppMotion.toastHold);
+      await tester.pumpAndSettle();
+      expect(find.text('Action failed'), findsNothing);
       pending = Completer<bool?>();
       await tester.tap(find.text('Confirm'));
       await tester.pump();

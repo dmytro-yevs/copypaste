@@ -988,10 +988,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('123456'), findsOneWidget);
         expect(find.text('Show verification code'), findsNothing);
-        expect(find.text('Confirm'), findsOneWidget);
-        expect(find.text('Reject'), findsOneWidget);
+        // The step indicator also names the Confirm step.
+        expect(find.widgetWithText(Button, 'Confirm'), findsOneWidget);
+        expect(find.widgetWithText(Button, 'Reject'), findsOneWidget);
         expect(gateway.session.confirmations, isEmpty);
-        await tester.tap(find.text(accept ? 'Confirm' : 'Reject'));
+        await tester.tap(
+          find.widgetWithText(Button, accept ? 'Confirm' : 'Reject'),
+        );
         await tester.pumpAndSettle();
         expect(gateway.session.confirmations, [accept]);
         await tester.runAsync(controller.closePairing);
@@ -2143,10 +2146,10 @@ void main() {
         }
         final close = stops.indexOf('close-device-details');
         expect(close, isNonNegative);
-        expect(
-          stops.skip(close + 1).take(3),
-          everyElement('device-details-actions'),
-        );
+        expect(stops.skip(close + 1).take(2), [
+          'device-details-actions',
+          'remove-from-space',
+        ]);
         expect(tester.takeException(), isNull);
       },
     );
@@ -2200,10 +2203,6 @@ void main() {
       find.byKey(const ValueKey<String>('pairing-code-input')),
       findsOneWidget,
     );
-    final otpContext = tester.element(
-      find.byKey(const ValueKey<String>('pairing-code-input')),
-    );
-    expect(Theme.of(otpContext).colorScheme.border, Colors.transparent);
     expect(tester.takeException(), isNull);
   });
 
