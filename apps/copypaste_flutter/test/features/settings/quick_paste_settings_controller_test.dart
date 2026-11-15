@@ -231,8 +231,8 @@ void main() {
     await tester.pump();
     await tester.tap(
       find.descendant(
-        of: find.byKey(const ValueKey<String>('settings-section-quick-paste')),
-        matching: find.text('Quick Paste'),
+        of: find.byKey(const ValueKey<String>('settings-section-shortcuts')),
+        matching: find.text('Shortcuts'),
       ),
     );
     await tester.pump();
@@ -255,7 +255,7 @@ void main() {
       findsNothing,
     );
     expect(tester.takeException(), isNull);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   test('rejects modifier-only shortcuts', () {
     const shortcut = DesktopShortcut(
@@ -297,6 +297,16 @@ void main() {
 
     await tester.tap(
       find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-shortcuts')),
+        matching: find.text('Shortcuts'),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Open Quick Paste'), findsOneWidget);
+    expect(find.byType(KeyboardDisplay), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
         of: find.byKey(const ValueKey<String>('settings-section-quick-paste')),
         matching: find.text('Quick Paste'),
       ),
@@ -304,9 +314,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Quick Paste'), findsWidgets);
-    expect(find.text('Open Quick Paste'), findsOneWidget);
     expect(find.text('Paste automatically'), findsOneWidget);
-    expect(find.byType(KeyboardDisplay), findsOneWidget);
     expect(find.byType(Switch), findsWidgets);
 
     await tester.ensureVisible(find.text('Paste automatically'));
@@ -320,7 +328,7 @@ void main() {
     await tester.pump();
     expect(controller.autoPaste, isFalse);
     expect(tester.takeException(), isNull);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   test(
     'clears the shortcut when Linux capability is lost during initialization',

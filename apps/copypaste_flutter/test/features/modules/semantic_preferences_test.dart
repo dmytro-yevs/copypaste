@@ -154,11 +154,12 @@ void main() {
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
         expect(repository.lastPreferences?['languages'], ['en', 'uk']);
+        // A successful save closes the drawer.
         expect(
           find.byKey(
             const ValueKey('module-settings-drawer-copypaste.semantic-search'),
           ),
-          findsOneWidget,
+          findsNothing,
         );
         expect(find.byType(AlertDialog), findsNothing);
         expect(tester.takeException(), isNull);

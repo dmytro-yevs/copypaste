@@ -82,10 +82,15 @@ void main() {
     await settings.initialize();
     await tester.pumpWidget(_app(settings, null));
     await tester.pump(const Duration(milliseconds: 500));
+    // General holds cross-platform settings, without desktop entry points.
+    await tester.tap(find.text('General'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(
-      find.byKey(const ValueKey('settings-section-general')),
+      find.byKey(const ValueKey('settings-show-in-taskbar')),
       findsNothing,
     );
+    expect(find.byKey(const ValueKey('settings-show-in-tray')), findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('settings-search')),
       'Dock',

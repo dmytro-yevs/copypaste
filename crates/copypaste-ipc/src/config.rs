@@ -452,6 +452,7 @@ pub struct ConfigPatch {
     pub file_save_folder: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_download_files: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_clipboard_on_start: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogVerbosity>,

@@ -296,70 +296,92 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         ],
       ],
     );
+    final details = iconButton(
+      key: ValueKey('module-details-$id'),
+      label: context.l10n.modulesDetails,
+      icon: LucideIcons.info,
+      ghost: true,
+      onPressed: () => _details(context, installed, marketplace),
+    );
+    final Widget? primary = running
+        ? _operationButton(context, operation!, title)
+        : installed == null && marketplace!.canInstall
+        ? Button.primary(
+            key: ValueKey('module-install-$id'),
+            style: AppTheme.controlButtonStyle(const ButtonStyle.primary()),
+            onPressed: controller.busy
+                ? null
+                : () => controller.install(marketplace),
+            child: Text(
+              context.l10n.modulesInstall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          )
+        : null;
+    final managed = <Widget>[
+      if (!running && installed != null) ...[
+        if (update != null)
+          iconButton(
+            key: ValueKey('module-update-$id'),
+            label: context.l10n.modulesUpdateTo(update.version.toString()),
+            icon: LucideIcons.download,
+            onPressed: controller.busy || installed.restartRequired
+                ? null
+                : () => controller.install(update),
+          ),
+        iconButton(
+          key: ValueKey('module-settings-$id'),
+          label: context.l10n.modulesModuleSettings,
+          icon: LucideIcons.settings,
+          onPressed: controller.busy ? null : () => _settings(context, id),
+        ),
+        iconButton(
+          key: ValueKey('module-remove-$id'),
+          label: context.l10n.modulesRemoveModule,
+          icon: LucideIcons.trash2,
+          ghost: true,
+          onPressed: controller.busy || installed.restartRequired
+              ? null
+              : () => _remove(context, installed),
+        ),
+        Semantics(
+          label: context.l10n.modulesEnableModule(installed.title),
+          child: AppSwitchFrame(
+            child: Switch(
+              key: ValueKey('module-enabled-$id'),
+              value: installed.enabled,
+              enabled: toggleable,
+              onChanged: toggleable
+                  ? (value) => _setEnabled(context, installed, value)
+                  : null,
+            ),
+          ),
+        ),
+      ],
+    ];
     final actions = Row(
       mainAxisSize: MainAxisSize.min,
       spacing: AppSpacing.sm,
-      children: [
-        iconButton(
-          key: ValueKey('module-details-$id'),
-          label: context.l10n.modulesDetails,
-          icon: LucideIcons.info,
-          ghost: true,
-          onPressed: () => _details(context, installed, marketplace),
-        ),
-        if (running)
-          _operationButton(context, operation!, title)
-        else if (installed == null) ...[
-          if (marketplace!.canInstall)
-            Button.primary(
-              key: ValueKey('module-install-$id'),
-              style: AppTheme.controlButtonStyle(const ButtonStyle.primary()),
-              onPressed: controller.busy
-                  ? null
-                  : () => controller.install(marketplace),
-              child: Text(context.l10n.modulesInstall),
-            ),
-        ] else ...[
-          if (update != null)
-            iconButton(
-              key: ValueKey('module-update-$id'),
-              label: context.l10n.modulesUpdateTo(update.version.toString()),
-              icon: LucideIcons.download,
-              onPressed: controller.busy || installed.restartRequired
-                  ? null
-                  : () => controller.install(update),
-            ),
-          iconButton(
-            key: ValueKey('module-settings-$id'),
-            label: context.l10n.modulesModuleSettings,
-            icon: LucideIcons.settings,
-            onPressed: controller.busy ? null : () => _settings(context, id),
-          ),
-          iconButton(
-            key: ValueKey('module-remove-$id'),
-            label: context.l10n.modulesRemoveModule,
-            icon: LucideIcons.trash2,
-            ghost: true,
-            onPressed: controller.busy || installed.restartRequired
-                ? null
-                : () => _remove(context, installed),
-          ),
-          Semantics(
-            label: context.l10n.modulesEnableModule(installed.title),
-            child: AppSwitchFrame(
-              child: Switch(
-                key: ValueKey('module-enabled-$id'),
-                value: installed.enabled,
-                enabled: toggleable,
-                onChanged: toggleable
-                    ? (value) => _setEnabled(context, installed, value)
-                    : null,
-              ),
-            ),
-          ),
-        ],
-      ],
+      children: [details, ?primary, ...managed],
     );
+    // A narrow row lets the primary action take the free width and wraps
+    // management controls instead of overflowing the row.
+    final narrowActions = primary != null
+        ? Row(
+            spacing: AppSpacing.sm,
+            children: [
+              details,
+              Expanded(child: primary),
+            ],
+          )
+        : Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [details, ...managed],
+          );
     const icon = AppIconFrame(
       size: AppIconSize.lg,
       child: Icon(LucideIcons.puzzle, size: AppIconSize.lg),
@@ -390,7 +412,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                     ],
                   ),
                   const Gap(AppSpacing.sm),
-                  Align(alignment: Alignment.centerRight, child: actions),
+                  narrowActions,
                 ],
               ),
       ),

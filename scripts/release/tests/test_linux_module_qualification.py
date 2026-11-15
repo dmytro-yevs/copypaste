@@ -90,7 +90,7 @@ class LinuxModuleQualificationTest(unittest.TestCase):
                 def install(self, package):
                     module_id = next(module for module, item in packages.items() if item["package"] == package)
                     ui_calls.append(("install", module_id))
-                    state[module_id] = {"id": module_id, "enabled": False}
+                    state[module_id] = {"id": module_id, "enabled": module_id == "copypaste.ocr"}
                     return action("install")
 
                 def set_languages(self, title, languages):
@@ -126,14 +126,15 @@ class LinuxModuleQualificationTest(unittest.TestCase):
             self.assertIn(("set_preferences", "copypaste.semantic-search", ("English",)), ui_calls)
             for module_id in qualification.MODULES:
                 operations = [call[0] for call in ui_calls if call[1] == module_id]
+                toggles = 3 if module_id == "copypaste.ocr" else 2
                 self.assertEqual([item for item in operations if item != "set_preferences"],
-                                 ["install", "set_enabled", "set_enabled", "remove"])
+                                 ["install", *["set_enabled"] * toggles, "remove"])
             for record in records:
                 expected = "gui_owned_unix_socket" if record["operation"] in {"list", "invoke"} else "gui_atspi"
                 self.assertEqual(record["endpoint_category"], expected)
                 self.assertTrue(record["method"] == "modules" and record["success"] is True)
             enabled = [record["enabled"] for record in records if record["operation"] == "set_enabled"]
-            self.assertEqual(enabled, [True, False] * len(qualification.MODULES))
+            self.assertEqual(enabled, [False, True, False] + [True, False] * (len(qualification.MODULES) - 1))
             output = json.loads((evidence / "linux-module-qualification.json").read_text())
             self.assertEqual([module["id"] for module in output["modules"]], list(qualification.MODULES))
 

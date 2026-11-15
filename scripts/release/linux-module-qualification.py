@@ -289,7 +289,7 @@ def ui_action(emit, module_id, record):
 
 
 def await_module(socket_path, emit, module_id, condition, timeout_seconds=120):
-    """Poll the daemon inventory until ``condition`` holds for ``module_id``."""
+    """Poll the daemon inventory until ``condition`` holds for ``module_id``; return its entry."""
     deadline = time.monotonic() + timeout_seconds
     while True:
         records = []
@@ -297,10 +297,11 @@ def await_module(socket_path, emit, module_id, condition, timeout_seconds=120):
         if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
             raise RuntimeError("GUI-owned daemon returned an invalid module inventory")
         matches = [item for item in value if item.get("id") == module_id]
-        if condition(matches[0] if len(matches) == 1 else None):
+        item = matches[0] if len(matches) == 1 else None
+        if condition(item):
             for record in records:
                 emit(record)
-            return
+            return item
         if time.monotonic() > deadline:
             raise RuntimeError(f"GUI-owned daemon did not reach the expected state for {module_id}")
         time.sleep(0.5)
@@ -338,10 +339,13 @@ def qualify_modules(socket_path, artifacts, fixtures, application_data, architec
         package = packages[module_id]
         title = package["manifest"]["title"]
         ui_action(emit, module_id, ui.install(package["package"]))
-        await_module(socket_path, emit, module_id, lambda item: item is not None and item.get("enabled") is False)
+        installed = await_module(socket_path, emit, module_id, lambda item: item is not None)
         if module_id == "copypaste.semantic-search":
             seed_semantic_model(fixtures, application_data, semantic_model)
             ui_action(emit, module_id, ui.set_languages(title, ["English"]))
+        if installed.get("enabled") is True:
+            ui_action(emit, module_id, {**ui.set_enabled(title, False), "enabled": False})
+            await_module(socket_path, emit, module_id, lambda item: item is not None and item.get("enabled") is False)
         ui_action(emit, module_id, {**ui.set_enabled(title, True), "enabled": True})
         await_module(socket_path, emit, module_id, lambda item: item is not None and item.get("enabled") is True)
         command, arguments = module_arguments(module_id, ocr_image)

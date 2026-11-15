@@ -351,7 +351,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 35);
+    assert_eq!(variants.len(), 36);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

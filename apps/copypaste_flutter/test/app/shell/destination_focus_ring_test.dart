@@ -24,22 +24,23 @@ class _Repository extends Fake implements HistoryRepository {
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();
 
+  final _clip = HistoryClip(
+    id: 'clip',
+    contentType: 'text/plain',
+    preview: 'Clip',
+    createdAt: DateTime.now(),
+    pinned: false,
+  );
+
   @override
   Future<HistoryClipPage> query({
     required HistoryQuery query,
     required int limit,
     String? cursor,
-  }) async => HistoryClipPage(
-    items: [
-      HistoryClip(
-        id: 'clip',
-        contentType: 'text/plain',
-        preview: 'Clip',
-        createdAt: DateTime.now(),
-        pinned: false,
-      ),
-    ],
-  );
+  }) async => HistoryClipPage(items: [_clip]);
+
+  @override
+  Future<HistoryClip> get(String id) async => _clip;
 }
 
 /// The ring FocusOutline paints 3 px outside [control], in global coordinates,

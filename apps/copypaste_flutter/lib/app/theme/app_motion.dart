@@ -128,6 +128,26 @@ abstract final class AppMotion {
     child: child,
   );
 
+  /// Animates decoration and size changes with the shared motion policy.
+  static Widget decoratedBox(
+    BuildContext context, {
+    required Decoration decoration,
+    double? width,
+    double? height,
+    AlignmentGeometry? alignment,
+    EdgeInsetsGeometry? margin,
+    Widget? child,
+  }) => AnimatedContainer(
+    duration: resolve(context, standard),
+    curve: standardCurve,
+    width: width,
+    height: height,
+    alignment: alignment,
+    margin: margin,
+    decoration: decoration,
+    child: child,
+  );
+
   /// Keeps overlay content above the keyboard using the shared motion policy.
   static Widget keyboardInsets(BuildContext context, {required Widget child}) =>
       AnimatedPadding(

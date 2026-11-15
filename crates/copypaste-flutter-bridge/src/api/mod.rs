@@ -143,7 +143,6 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    #[cfg(not(target_os = "android"))]
     pub(crate) fn daemon_unreachable() -> Self {
         Self {
             code: "daemon_unreachable".into(),
